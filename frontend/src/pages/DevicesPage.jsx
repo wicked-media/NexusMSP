@@ -258,6 +258,19 @@ export default function DevicesPage() {
     setIsDialogOpen(true);
   };
 
+  const handleOpenChat = (deviceId) => {
+    navigate(`/devices/${deviceId}/chat`);
+  };
+
+  const handleRemoteConnect = (device) => {
+    // If device has a RustDesk ID, open the remote access page with context
+    // Otherwise, navigate to remote access page
+    if (device.rustdesk_id) {
+      toast.info(`Connect to ${device.name} using RustDesk ID: ${device.rustdesk_id}`);
+    }
+    navigate('/remote-access');
+  };
+
   const filteredDevices = devices.filter(device => {
     const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           device.client_name?.toLowerCase().includes(searchQuery.toLowerCase());
