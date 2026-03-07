@@ -309,6 +309,36 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/leads"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <LeadsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/acronis"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <AcronisPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/email"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <EmailPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
