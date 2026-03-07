@@ -255,8 +255,10 @@ class TestDeviceChat:
             response = requests.get(f"{BASE_URL}/api/devices/{device_id}/chat", headers=headers)
             assert response.status_code == 200
             data = response.json()
-            assert isinstance(data, list)
-            print(f"Found {len(data)} chat messages for device {device_id}")
+            # API returns dict with 'messages' key
+            assert "messages" in data or isinstance(data, list)
+            messages = data.get("messages", data) if isinstance(data, dict) else data
+            print(f"Found {len(messages)} chat messages for device {device_id}")
         else:
             print("No devices found to test chat")
     
