@@ -2097,6 +2097,533 @@ async def clear_device_chat(device_id: str, current_user: dict = Depends(get_cur
     result = await db.device_chat.delete_many({"device_id": device_id})
     return {"message": f"Cleared {result.deleted_count} messages"}
 
+# ============== OFFICE 365 / EMAIL ENDPOINTS ==============
+
+@api_router.get("/office365/status")
+async def get_office365_status(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "office365"}, {"_id": 0})
+    return {"configured": bool(settings and settings.get('tenant_id') and settings.get('client_id'))}
+
+@api_router.post("/office365/settings")
+async def save_office365_settings(settings: Office365Settings, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "office365"},
+        {"$set": {
+            "type": "office365",
+            "tenant_id": settings.tenant_id,
+            "client_id": settings.client_id,
+            "client_secret": settings.client_secret,
+            "redirect_uri": settings.redirect_uri,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    return {"message": "Office 365 settings saved"}
+
+@api_router.get("/office365/test-connection")
+async def test_office365_connection(current_user: dict = Depends(get_current_user)):
+    try:
+        await office365_service.authenticate()
+        return {"success": True, "message": "Successfully connected to Office 365"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@api_router.get("/emails")
+async def get_emails(
+    client_id: Optional[str] = None,
+    ticket_id: Optional[str] = None,
+    direction: Optional[str] = None,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if ticket_id:
+        query["ticket_id"] = ticket_id
+    if direction:
+        query["direction"] = direction
+    
+    emails = await db.emails.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    for e in emails:
+        if isinstance(e.get('created_at'), str):
+            e['created_at'] = datetime.fromisoformat(e['created_at'])
+    return emails
+
+@api_router.post("/emails")
+async def create_email(email_data: EmailMessageCreate, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if email_data.client_id:
+        client = await db.clients.find_one({"id": email_data.client_id}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    email = EmailMessage(
+        subject=email_data.subject,
+        body=email_data.body,
+        body_type=email_data.body_type,
+        from_address=current_user.get('email', ''),
+        from_name=current_user.get('name'),
+        to_addresses=email_data.to_addresses,
+        cc_addresses=email_data.cc_addresses,
+        client_id=email_data.client_id,
+        client_name=client_name,
+        ticket_id=email_data.ticket_id,
+        direction="outbound",
+        status="draft"
+    )
+    doc = email.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.emails.insert_one(doc)
+    return email
+
+@api_router.post("/emails/{email_id}/send")
+async def send_email(email_id: str, current_user: dict = Depends(get_current_user)):
+    email = await db.emails.find_one({"id": email_id}, {"_id": 0})
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    
+    try:
+        # Try to send via Office 365 if configured
+        status = await get_office365_status(current_user)
+        if status['configured']:
+            await office365_service.send_email(
+                from_address=email['from_address'],
+                to_addresses=email['to_addresses'],
+                subject=email['subject'],
+                body=email['body'],
+                body_type=email['body_type']
+            )
+        
+        await db.emails.update_one(
+            {"id": email_id},
+            {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        return {"message": "Email sent successfully"}
+    except Exception as e:
+        await db.emails.update_one({"id": email_id}, {"$set": {"status": "failed"}})
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============== ACRONIS ENDPOINTS ==============
+
+@api_router.get("/acronis/status")
+async def get_acronis_status(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "acronis"}, {"_id": 0})
+    return {"configured": bool(settings and settings.get('api_url') and settings.get('client_id'))}
+
+@api_router.post("/acronis/settings")
+async def save_acronis_settings(settings: AcronisSettings, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "acronis"},
+        {"$set": {
+            "type": "acronis",
+            "api_url": settings.api_url,
+            "client_id": settings.client_id,
+            "client_secret": settings.client_secret,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    return {"message": "Acronis settings saved"}
+
+@api_router.get("/acronis/test-connection")
+async def test_acronis_connection(current_user: dict = Depends(get_current_user)):
+    try:
+        await acronis_service.authenticate()
+        return {"success": True, "message": "Successfully connected to Acronis"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@api_router.get("/acronis/subscriptions")
+async def get_acronis_subscriptions(
+    client_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if device_id:
+        query["device_id"] = device_id
+    if status:
+        query["status"] = status
+    
+    subscriptions = await db.acronis_subscriptions.find(query, {"_id": 0}).to_list(1000)
+    for s in subscriptions:
+        if isinstance(s.get('created_at'), str):
+            s['created_at'] = datetime.fromisoformat(s['created_at'])
+    return subscriptions
+
+@api_router.post("/acronis/subscriptions")
+async def create_acronis_subscription(sub_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    device_name = None
+    
+    if sub_data.get('client_id'):
+        client = await db.clients.find_one({"id": sub_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    if sub_data.get('device_id'):
+        device = await db.devices.find_one({"id": sub_data['device_id']}, {"_id": 0})
+        device_name = device['name'] if device else None
+    
+    subscription = AcronisSubscription(
+        client_id=sub_data.get('client_id', ''),
+        client_name=client_name,
+        device_id=sub_data.get('device_id'),
+        device_name=device_name,
+        product_name=sub_data.get('product_name', 'Acronis Cyber Protect'),
+        edition=sub_data.get('edition', 'Standard'),
+        status=sub_data.get('status', 'active'),
+        license_type=sub_data.get('license_type', 'per_device'),
+        quantity=sub_data.get('quantity', 1),
+        storage_quota_gb=sub_data.get('storage_quota_gb'),
+        storage_used_gb=sub_data.get('storage_used_gb'),
+        expiry_date=sub_data.get('expiry_date')
+    )
+    doc = subscription.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    if doc.get('last_backup'):
+        doc['last_backup'] = doc['last_backup'].isoformat()
+    if doc.get('synced_at'):
+        doc['synced_at'] = doc['synced_at'].isoformat()
+    await db.acronis_subscriptions.insert_one(doc)
+    return subscription
+
+@api_router.put("/acronis/subscriptions/{subscription_id}")
+async def update_acronis_subscription(subscription_id: str, sub_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.acronis_subscriptions.update_one({"id": subscription_id}, {"$set": sub_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    return {"message": "Subscription updated"}
+
+@api_router.delete("/acronis/subscriptions/{subscription_id}")
+async def delete_acronis_subscription(subscription_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.acronis_subscriptions.delete_one({"id": subscription_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    return {"message": "Subscription deleted"}
+
+@api_router.get("/acronis/dashboard")
+async def get_acronis_dashboard(current_user: dict = Depends(get_current_user)):
+    """Get Acronis dashboard summary"""
+    total = await db.acronis_subscriptions.count_documents({})
+    active = await db.acronis_subscriptions.count_documents({"status": "active"})
+    expired = await db.acronis_subscriptions.count_documents({"status": "expired"})
+    
+    # Backup status summary
+    backup_success = await db.acronis_subscriptions.count_documents({"backup_status": "success"})
+    backup_warning = await db.acronis_subscriptions.count_documents({"backup_status": "warning"})
+    backup_failed = await db.acronis_subscriptions.count_documents({"backup_status": "failed"})
+    
+    return {
+        "total_subscriptions": total,
+        "active": active,
+        "expired": expired,
+        "backup_status": {
+            "success": backup_success,
+            "warning": backup_warning,
+            "failed": backup_failed
+        }
+    }
+
+# ============== LEADS / CRM ENDPOINTS ==============
+
+@api_router.get("/leads", response_model=List[Lead])
+async def get_leads(
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if status:
+        query["status"] = status
+    if source:
+        query["source"] = source
+    if assigned_to:
+        query["assigned_to"] = assigned_to
+    
+    leads = await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for l in leads:
+        for field in ['created_at', 'updated_at', 'last_contact', 'next_follow_up']:
+            if isinstance(l.get(field), str):
+                l[field] = datetime.fromisoformat(l[field])
+    return leads
+
+@api_router.get("/leads/{lead_id}")
+async def get_lead(lead_id: str, current_user: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+@api_router.post("/leads", response_model=Lead)
+async def create_lead(lead_data: LeadCreate, current_user: dict = Depends(get_current_user)):
+    assigned_name = None
+    if lead_data.assigned_to:
+        user = await db.users.find_one({"id": lead_data.assigned_to}, {"_id": 0})
+        assigned_name = user['name'] if user else None
+    
+    lead = Lead(**lead_data.model_dump(), assigned_name=assigned_name)
+    doc = lead.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    if doc.get('last_contact'):
+        doc['last_contact'] = doc['last_contact'].isoformat()
+    if doc.get('next_follow_up'):
+        doc['next_follow_up'] = doc['next_follow_up'].isoformat()
+    await db.leads.insert_one(doc)
+    return lead
+
+@api_router.put("/leads/{lead_id}")
+async def update_lead(lead_id: str, lead_data: dict, current_user: dict = Depends(get_current_user)):
+    lead_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    
+    # Update pipeline stage based on status
+    status_to_stage = {
+        "new": 1, "contacted": 2, "qualified": 3, 
+        "proposal": 4, "negotiation": 5, "won": 6, "lost": 0
+    }
+    if 'status' in lead_data:
+        lead_data['pipeline_stage'] = status_to_stage.get(lead_data['status'], 1)
+    
+    result = await db.leads.update_one({"id": lead_id}, {"$set": lead_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"message": "Lead updated"}
+
+@api_router.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.leads.delete_one({"id": lead_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"message": "Lead deleted"}
+
+@api_router.post("/leads/{lead_id}/convert")
+async def convert_lead_to_client(lead_id: str, current_user: dict = Depends(get_current_user)):
+    """Convert a lead to a client"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    if lead.get('converted_to_client'):
+        raise HTTPException(status_code=400, detail="Lead already converted")
+    
+    # Create new client from lead
+    client = Client(
+        name=lead['company_name'],
+        email=lead.get('email'),
+        phone=lead.get('phone'),
+        industry=lead.get('industry'),
+        mrr=lead.get('estimated_value', 0)
+    )
+    doc = client.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.clients.insert_one(doc)
+    
+    # Update lead status
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {
+            "status": "won",
+            "pipeline_stage": 6,
+            "converted_to_client": client.id,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {"message": "Lead converted to client", "client_id": client.id}
+
+# ============== LEAD ACTIVITIES ENDPOINTS ==============
+
+@api_router.get("/leads/{lead_id}/activities")
+async def get_lead_activities(lead_id: str, current_user: dict = Depends(get_current_user)):
+    activities = await db.lead_activities.find(
+        {"lead_id": lead_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return activities
+
+@api_router.post("/leads/{lead_id}/activities")
+async def create_lead_activity(lead_id: str, activity_data: dict, current_user: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    activity = LeadActivity(
+        lead_id=lead_id,
+        lead_name=lead['company_name'],
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        activity_type=activity_data.get('activity_type', 'note'),
+        subject=activity_data.get('subject', ''),
+        description=activity_data.get('description'),
+        outcome=activity_data.get('outcome')
+    )
+    doc = activity.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    if doc.get('scheduled_at'):
+        doc['scheduled_at'] = doc['scheduled_at'].isoformat()
+    if doc.get('completed_at'):
+        doc['completed_at'] = doc['completed_at'].isoformat()
+    await db.lead_activities.insert_one(doc)
+    
+    # Update last contact on lead
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {"last_contact": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return activity
+
+# ============== PROPOSALS ENDPOINTS ==============
+
+@api_router.get("/proposals")
+async def get_proposals(
+    lead_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if lead_id:
+        query["lead_id"] = lead_id
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        query["status"] = status
+    
+    proposals = await db.proposals.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return proposals
+
+@api_router.get("/proposals/{proposal_id}")
+async def get_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    proposal = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return proposal
+
+@api_router.post("/proposals")
+async def create_proposal(proposal_data: dict, current_user: dict = Depends(get_current_user)):
+    lead_name = None
+    client_name = None
+    
+    if proposal_data.get('lead_id'):
+        lead = await db.leads.find_one({"id": proposal_data['lead_id']}, {"_id": 0})
+        lead_name = lead['company_name'] if lead else None
+    
+    if proposal_data.get('client_id'):
+        client = await db.clients.find_one({"id": proposal_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    line_items = proposal_data.get('line_items', [])
+    subtotal = sum(item.get('total', item.get('quantity', 1) * item.get('unit_price', 0)) for item in line_items)
+    discount_amount = subtotal * (proposal_data.get('discount_percent', 0) / 100)
+    tax_amount = (subtotal - discount_amount) * (proposal_data.get('tax_percent', 0) / 100)
+    total = subtotal - discount_amount + tax_amount
+    
+    proposal = Proposal(
+        lead_id=proposal_data.get('lead_id'),
+        lead_name=lead_name,
+        client_id=proposal_data.get('client_id'),
+        client_name=client_name,
+        title=proposal_data.get('title', 'Service Proposal'),
+        description=proposal_data.get('description'),
+        valid_until=proposal_data.get('valid_until'),
+        line_items=line_items,
+        subtotal=subtotal,
+        discount_percent=proposal_data.get('discount_percent', 0),
+        discount_amount=discount_amount,
+        tax_percent=proposal_data.get('tax_percent', 0),
+        tax_amount=tax_amount,
+        total=total,
+        terms_and_conditions=proposal_data.get('terms_and_conditions'),
+        created_by=current_user['id']
+    )
+    doc = proposal.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.proposals.insert_one(doc)
+    return proposal
+
+@api_router.put("/proposals/{proposal_id}")
+async def update_proposal(proposal_id: str, proposal_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.proposals.update_one({"id": proposal_id}, {"$set": proposal_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return {"message": "Proposal updated"}
+
+@api_router.delete("/proposals/{proposal_id}")
+async def delete_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.proposals.delete_one({"id": proposal_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return {"message": "Proposal deleted"}
+
+@api_router.post("/proposals/{proposal_id}/send")
+async def send_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.proposals.update_one(
+        {"id": proposal_id},
+        {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return {"message": "Proposal sent"}
+
+# ============== CRM DASHBOARD ==============
+
+@api_router.get("/crm/dashboard")
+async def get_crm_dashboard(current_user: dict = Depends(get_current_user)):
+    """Get CRM dashboard stats"""
+    # Lead counts by status
+    total_leads = await db.leads.count_documents({})
+    new_leads = await db.leads.count_documents({"status": "new"})
+    qualified_leads = await db.leads.count_documents({"status": "qualified"})
+    won_leads = await db.leads.count_documents({"status": "won"})
+    lost_leads = await db.leads.count_documents({"status": "lost"})
+    
+    # Pipeline value
+    pipeline = await db.leads.aggregate([
+        {"$match": {"status": {"$nin": ["won", "lost"]}}},
+        {"$group": {"_id": None, "total_value": {"$sum": "$estimated_value"}}}
+    ]).to_list(1)
+    pipeline_value = pipeline[0]['total_value'] if pipeline else 0
+    
+    # Proposal stats
+    total_proposals = await db.proposals.count_documents({})
+    sent_proposals = await db.proposals.count_documents({"status": "sent"})
+    accepted_proposals = await db.proposals.count_documents({"status": "accepted"})
+    
+    # Revenue from proposals
+    revenue = await db.proposals.aggregate([
+        {"$match": {"status": "accepted"}},
+        {"$group": {"_id": None, "total": {"$sum": "$total"}}}
+    ]).to_list(1)
+    proposal_revenue = revenue[0]['total'] if revenue else 0
+    
+    # Lead sources
+    sources = await db.leads.aggregate([
+        {"$group": {"_id": "$source", "count": {"$sum": 1}}}
+    ]).to_list(10)
+    
+    return {
+        "leads": {
+            "total": total_leads,
+            "new": new_leads,
+            "qualified": qualified_leads,
+            "won": won_leads,
+            "lost": lost_leads,
+            "pipeline_value": pipeline_value
+        },
+        "proposals": {
+            "total": total_proposals,
+            "sent": sent_proposals,
+            "accepted": accepted_proposals,
+            "revenue": proposal_revenue
+        },
+        "lead_sources": [{"source": s['_id'], "count": s['count']} for s in sources],
+        "conversion_rate": round((won_leads / total_leads * 100) if total_leads > 0 else 0, 1)
+    }
+
 # ============== SEED DATA ==============
 
 @api_router.post("/seed")
