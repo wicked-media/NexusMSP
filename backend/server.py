@@ -310,6 +310,65 @@ class Pax8Settings(BaseModel):
     client_id: str
     client_secret: str
 
+# ============== DOMOTZ & REMOTE ACCESS MODELS ==============
+
+class DomotzSettings(BaseModel):
+    api_key: str
+    api_url: str
+
+class RustDeskSettings(BaseModel):
+    server_url: str
+    api_key: Optional[str] = None
+    relay_server: Optional[str] = None
+
+class RemoteAgent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    platform: str  # windows, macos, linux
+    version: str = "1.0.0"
+    download_url: str
+    checksum: Optional[str] = None
+    instructions: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DeviceChatMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    device_id: str
+    device_name: Optional[str] = None
+    client_id: str
+    client_name: Optional[str] = None
+    user_id: str
+    user_name: Optional[str] = None
+    message: str
+    message_type: str = "text"  # text, command, file, system
+    direction: str = "outbound"  # outbound (tech to device), inbound (device to tech)
+    status: str = "sent"  # sent, delivered, read, failed
+    metadata: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DeviceChatMessageCreate(BaseModel):
+    device_id: str
+    message: str
+    message_type: str = "text"
+
+class RemoteSession(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    device_id: str
+    device_name: Optional[str] = None
+    client_id: str
+    user_id: str
+    user_name: Optional[str] = None
+    session_type: str = "remote_desktop"  # remote_desktop, terminal, file_transfer
+    status: str = "active"  # active, ended, failed
+    rustdesk_id: Optional[str] = None
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: Optional[datetime] = None
+    duration_minutes: int = 0
+    notes: Optional[str] = None
+
 # ============== AUTH HELPERS ==============
 
 def hash_password(password: str) -> str:
