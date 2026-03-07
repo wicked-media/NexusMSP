@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 
 class NexusOpsAPITester:
-    def __init__(self, base_url="https://streamops-suite.preview.emergentagent.com"):
+    def __init__(self, base_url="https://syncro-alternative.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.token = None
