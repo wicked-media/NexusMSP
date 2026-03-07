@@ -165,6 +165,7 @@ const DeviceCard = ({ device, onEdit, onDelete, onChat, onRemote }) => {
 
 export default function DevicesPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
