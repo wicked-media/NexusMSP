@@ -478,6 +478,76 @@ class Pax8Service:
 
 pax8_service = Pax8Service()
 
+# ============== DOMOTZ SERVICE ==============
+
+class DomotzService:
+    def __init__(self):
+        self.api_key = None
+        self.api_url = None
+
+    async def get_credentials(self):
+        settings = await db.settings.find_one({"type": "domotz"}, {"_id": 0})
+        if not settings:
+            return None, None
+        return settings.get('api_key'), settings.get('api_url')
+
+    async def _request(self, endpoint: str, method: str = "GET", data: dict = None):
+        api_key, api_url = await self.get_credentials()
+        if not api_key or not api_url:
+            raise HTTPException(status_code=400, detail="Domotz credentials not configured")
+
+        headers = {
+            "X-Api-Key": api_key,
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
+            url = f"{api_url.rstrip('/')}{endpoint}"
+            if method == "GET":
+                response = await http_client.get(url, headers=headers)
+            elif method == "POST":
+                response = await http_client.post(url, headers=headers, json=data)
+            elif method == "PUT":
+                response = await http_client.put(url, headers=headers, json=data)
+            else:
+                response = await http_client.delete(url, headers=headers)
+            
+            if response.status_code >= 400:
+                raise HTTPException(status_code=response.status_code, detail=f"Domotz API error: {response.text}")
+            return response.json() if response.text else {}
+
+    async def get_agents(self, page: int = 0, page_size: int = 50):
+        return await self._request(f"/agent?page_number={page}&page_size={page_size}")
+
+    async def get_agent(self, agent_id: int):
+        return await self._request(f"/agent/{agent_id}")
+
+    async def get_agent_devices(self, agent_id: int, page: int = 0, page_size: int = 100):
+        return await self._request(f"/agent/{agent_id}/device?page_number={page}&page_size={page_size}")
+
+    async def get_device(self, agent_id: int, device_id: int):
+        return await self._request(f"/agent/{agent_id}/device/{device_id}")
+
+    async def get_device_details(self, agent_id: int, device_id: int):
+        return await self._request(f"/agent/{agent_id}/device/{device_id}/detail")
+
+    async def get_device_power_actions(self, agent_id: int, device_id: int):
+        return await self._request(f"/agent/{agent_id}/device/{device_id}/power")
+
+    async def execute_power_action(self, agent_id: int, device_id: int, action: str):
+        return await self._request(f"/agent/{agent_id}/device/{device_id}/power/{action}", method="POST")
+
+    async def get_network_stats(self, agent_id: int):
+        return await self._request(f"/agent/{agent_id}/network/speed")
+
+    async def get_alerts(self, agent_id: int = None):
+        if agent_id:
+            return await self._request(f"/agent/{agent_id}/alert")
+        return await self._request("/alert")
+
+domotz_service = DomotzService()
+
 # ============== AUTH ENDPOINTS ==============
 
 @api_router.post("/auth/register")
