@@ -12,6 +12,11 @@ import TicketsPage from "@/pages/TicketsPage";
 import DevicesPage from "@/pages/DevicesPage";
 import AssetsPage from "@/pages/AssetsPage";
 import ClientsPage from "@/pages/ClientsPage";
+import ContractsPage from "@/pages/ContractsPage";
+import InvoicesPage from "@/pages/InvoicesPage";
+import TimeTrackingPage from "@/pages/TimeTrackingPage";
+import KnowledgeBasePage from "@/pages/KnowledgeBasePage";
+import Pax8Page from "@/pages/Pax8Page";
 import ReportsPage from "@/pages/ReportsPage";
 import SettingsPage from "@/pages/SettingsPage";
 
@@ -194,6 +199,56 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <ClientsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/contracts"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ContractsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/invoices"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <InvoicesPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/time-tracking"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TimeTrackingPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/knowledge-base"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <KnowledgeBasePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pax8"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <Pax8Page />
                 </MainLayout>
               </ProtectedRoute>
             }
