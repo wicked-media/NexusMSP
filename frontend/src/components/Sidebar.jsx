@@ -18,7 +18,10 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Zap
+  Zap,
+  UserPlus,
+  Shield,
+  Mail
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
