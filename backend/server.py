@@ -3056,6 +3056,1159 @@ async def get_crm_dashboard(current_user: dict = Depends(get_current_user)):
         "conversion_rate": round((won_leads / total_leads * 100) if total_leads > 0 else 0, 1)
     }
 
+# ============== TICKET EMAIL ENDPOINTS ==============
+
+@api_router.get("/tickets/{ticket_id}/emails")
+async def get_ticket_emails(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all emails associated with a ticket"""
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    emails = await db.ticket_emails.find(
+        {"ticket_id": ticket_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return emails
+
+@api_router.post("/tickets/{ticket_id}/emails")
+async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, current_user: dict = Depends(get_current_user)):
+    """Send an email from a ticket"""
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    subject = email_data.subject or f"Re: [{ticket.get('ticket_number', '')}] {ticket.get('title', '')}"
+    
+    ticket_email = TicketEmail(
+        ticket_id=ticket_id,
+        ticket_title=ticket.get('title'),
+        from_address=current_user.get('email', ''),
+        from_name=current_user.get('name'),
+        to_addresses=email_data.to_addresses,
+        cc_addresses=email_data.cc_addresses,
+        subject=subject,
+        body=email_data.body,
+        body_type=email_data.body_type,
+        client_id=ticket.get('client_id'),
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        direction="outbound",
+        status="pending"
+    )
+    
+    # Try to send via Office 365 if configured
+    try:
+        status = await get_office365_status(current_user)
+        if status.get('configured'):
+            await office365_service.send_email(
+                from_address=ticket_email.from_address,
+                to_addresses=ticket_email.to_addresses,
+                subject=ticket_email.subject,
+                body=ticket_email.body,
+                body_type=ticket_email.body_type
+            )
+            ticket_email.status = "sent"
+            ticket_email.sent_at = datetime.now(timezone.utc)
+        else:
+            ticket_email.status = "sent"  # Mark as sent even in demo mode
+            ticket_email.sent_at = datetime.now(timezone.utc)
+    except Exception as e:
+        ticket_email.status = "failed"
+        logger.error(f"Failed to send ticket email: {e}")
+    
+    doc = ticket_email.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    if doc.get('sent_at'):
+        doc['sent_at'] = doc['sent_at'].isoformat()
+    await db.ticket_emails.insert_one(doc)
+    
+    # Add to ticket comments
+    await db.ticket_comments.insert_one({
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket_id,
+        "user_id": current_user['id'],
+        "user_name": current_user['name'],
+        "content": f"📧 Email sent to: {', '.join(email_data.to_addresses)}\n\nSubject: {subject}\n\n{email_data.body}",
+        "is_internal": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return ticket_email
+
+# ============== SCRIPTING ENDPOINTS ==============
+
+@api_router.get("/scripts")
+async def get_scripts(
+    category: Optional[str] = None,
+    os_target: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if category:
+        query["category"] = category
+    if os_target:
+        query["os_target"] = os_target
+    
+    scripts = await db.scripts.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return scripts
+
+@api_router.get("/scripts/{script_id}")
+async def get_script(script_id: str, current_user: dict = Depends(get_current_user)):
+    script = await db.scripts.find_one({"id": script_id}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script not found")
+    return script
+
+@api_router.post("/scripts")
+async def create_script(script_data: ScriptCreate, current_user: dict = Depends(get_current_user)):
+    script = Script(
+        **script_data.model_dump(),
+        created_by=current_user['id'],
+        created_by_name=current_user['name']
+    )
+    doc = script.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    await db.scripts.insert_one(doc)
+    return script
+
+@api_router.put("/scripts/{script_id}")
+async def update_script(script_id: str, script_data: dict, current_user: dict = Depends(get_current_user)):
+    script_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    result = await db.scripts.update_one({"id": script_id}, {"$set": script_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Script not found")
+    return {"message": "Script updated"}
+
+@api_router.delete("/scripts/{script_id}")
+async def delete_script(script_id: str, current_user: dict = Depends(get_current_user)):
+    script = await db.scripts.find_one({"id": script_id}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script not found")
+    if script.get('is_built_in'):
+        raise HTTPException(status_code=400, detail="Cannot delete built-in scripts")
+    
+    await db.scripts.delete_one({"id": script_id})
+    return {"message": "Script deleted"}
+
+@api_router.post("/scripts/{script_id}/execute")
+async def execute_script(script_id: str, device_ids: List[str], parameters: Dict[str, Any] = {}, current_user: dict = Depends(get_current_user)):
+    """Execute a script on one or more devices"""
+    script = await db.scripts.find_one({"id": script_id}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script not found")
+    
+    executions = []
+    for device_id in device_ids:
+        device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+        if not device:
+            continue
+        
+        execution = ScriptExecution(
+            script_id=script_id,
+            script_name=script['name'],
+            device_id=device_id,
+            device_name=device.get('name'),
+            client_id=device.get('client_id'),
+            user_id=current_user['id'],
+            user_name=current_user['name'],
+            parameters_used=parameters,
+            status="pending"
+        )
+        doc = execution.model_dump()
+        doc['created_at'] = doc['created_at'].isoformat()
+        await db.script_executions.insert_one(doc)
+        executions.append(execution)
+    
+    # Update script run count
+    await db.scripts.update_one(
+        {"id": script_id},
+        {"$inc": {"run_count": len(executions)}, "$set": {"last_run": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"message": f"Script queued for {len(executions)} devices", "executions": executions}
+
+@api_router.get("/script-executions")
+async def get_script_executions(
+    script_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if script_id:
+        query["script_id"] = script_id
+    if device_id:
+        query["device_id"] = device_id
+    if status:
+        query["status"] = status
+    
+    executions = await db.script_executions.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return executions
+
+# ============== SCHEDULED TASKS ENDPOINTS ==============
+
+@api_router.get("/scheduled-tasks")
+async def get_scheduled_tasks(current_user: dict = Depends(get_current_user)):
+    tasks = await db.scheduled_tasks.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    return tasks
+
+@api_router.post("/scheduled-tasks")
+async def create_scheduled_task(task_data: dict, current_user: dict = Depends(get_current_user)):
+    script = await db.scripts.find_one({"id": task_data.get('script_id')}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script not found")
+    
+    task = ScheduledTask(
+        name=task_data.get('name'),
+        script_id=task_data.get('script_id'),
+        script_name=script['name'],
+        target_type=task_data.get('target_type', 'device'),
+        target_ids=task_data.get('target_ids', []),
+        schedule_type=task_data.get('schedule_type', 'once'),
+        schedule_time=task_data.get('schedule_time', '09:00'),
+        schedule_days=task_data.get('schedule_days', []),
+        timezone=task_data.get('timezone', 'UTC'),
+        enabled=task_data.get('enabled', True),
+        created_by=current_user['id']
+    )
+    doc = task.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.scheduled_tasks.insert_one(doc)
+    return task
+
+@api_router.put("/scheduled-tasks/{task_id}")
+async def update_scheduled_task(task_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.scheduled_tasks.update_one({"id": task_id}, {"$set": task_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"message": "Task updated"}
+
+@api_router.delete("/scheduled-tasks/{task_id}")
+async def delete_scheduled_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.scheduled_tasks.delete_one({"id": task_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"message": "Task deleted"}
+
+# ============== PATCH MANAGEMENT ENDPOINTS ==============
+
+@api_router.get("/patch-policies")
+async def get_patch_policies(current_user: dict = Depends(get_current_user)):
+    policies = await db.patch_policies.find({}, {"_id": 0}).to_list(100)
+    return policies
+
+@api_router.post("/patch-policies")
+async def create_patch_policy(policy_data: dict, current_user: dict = Depends(get_current_user)):
+    policy = PatchPolicy(**policy_data)
+    doc = policy.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.patch_policies.insert_one(doc)
+    return policy
+
+@api_router.put("/patch-policies/{policy_id}")
+async def update_patch_policy(policy_id: str, policy_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.patch_policies.update_one({"id": policy_id}, {"$set": policy_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return {"message": "Policy updated"}
+
+@api_router.delete("/patch-policies/{policy_id}")
+async def delete_patch_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.patch_policies.delete_one({"id": policy_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return {"message": "Policy deleted"}
+
+@api_router.get("/patches")
+async def get_patches(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if device_id:
+        query["device_id"] = device_id
+    if status:
+        query["status"] = status
+    if severity:
+        query["severity"] = severity
+    
+    patches = await db.device_patches.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return patches
+
+@api_router.get("/patches/dashboard")
+async def get_patches_dashboard(current_user: dict = Depends(get_current_user)):
+    """Get patch management dashboard stats"""
+    total = await db.device_patches.count_documents({})
+    available = await db.device_patches.count_documents({"status": "available"})
+    approved = await db.device_patches.count_documents({"status": "approved"})
+    installed = await db.device_patches.count_documents({"status": "installed"})
+    failed = await db.device_patches.count_documents({"status": "failed"})
+    
+    critical = await db.device_patches.count_documents({"severity": "Critical", "status": {"$ne": "installed"}})
+    important = await db.device_patches.count_documents({"severity": "Important", "status": {"$ne": "installed"}})
+    
+    return {
+        "total": total,
+        "available": available,
+        "approved": approved,
+        "installed": installed,
+        "failed": failed,
+        "pending_critical": critical,
+        "pending_important": important
+    }
+
+@api_router.post("/patches/{patch_id}/approve")
+async def approve_patch(patch_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.device_patches.update_one({"id": patch_id}, {"$set": {"status": "approved"}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Patch not found")
+    return {"message": "Patch approved"}
+
+@api_router.post("/patches/{patch_id}/hide")
+async def hide_patch(patch_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.device_patches.update_one({"id": patch_id}, {"$set": {"status": "hidden"}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Patch not found")
+    return {"message": "Patch hidden"}
+
+# ============== DEVICE GROUPS ENDPOINTS ==============
+
+@api_router.get("/device-groups")
+async def get_device_groups(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    
+    groups = await db.device_groups.find(query, {"_id": 0}).sort("name", 1).to_list(100)
+    return groups
+
+@api_router.post("/device-groups")
+async def create_device_group(group_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if group_data.get('client_id'):
+        client = await db.clients.find_one({"id": group_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    group = DeviceGroup(
+        name=group_data.get('name'),
+        description=group_data.get('description'),
+        client_id=group_data.get('client_id'),
+        client_name=client_name,
+        auto_assign_rules=group_data.get('auto_assign_rules', [])
+    )
+    doc = group.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.device_groups.insert_one(doc)
+    return group
+
+@api_router.put("/device-groups/{group_id}")
+async def update_device_group(group_id: str, group_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.device_groups.update_one({"id": group_id}, {"$set": group_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"message": "Group updated"}
+
+@api_router.delete("/device-groups/{group_id}")
+async def delete_device_group(group_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.device_groups.delete_one({"id": group_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"message": "Group deleted"}
+
+@api_router.post("/device-groups/{group_id}/devices")
+async def add_devices_to_group(group_id: str, device_ids: List[str], current_user: dict = Depends(get_current_user)):
+    """Add devices to a group"""
+    group = await db.device_groups.find_one({"id": group_id}, {"_id": 0})
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    await db.devices.update_many(
+        {"id": {"$in": device_ids}},
+        {"$addToSet": {"groups": group_id}}
+    )
+    
+    await db.device_groups.update_one({"id": group_id}, {"$inc": {"device_count": len(device_ids)}})
+    return {"message": f"Added {len(device_ids)} devices to group"}
+
+# ============== POLICIES ENDPOINTS ==============
+
+@api_router.get("/policies")
+async def get_policies(policy_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if policy_type:
+        query["policy_type"] = policy_type
+    
+    policies = await db.policies.find(query, {"_id": 0}).sort("priority", 1).to_list(100)
+    return policies
+
+@api_router.post("/policies")
+async def create_policy(policy_data: dict, current_user: dict = Depends(get_current_user)):
+    policy = Policy(
+        name=policy_data.get('name'),
+        description=policy_data.get('description'),
+        policy_type=policy_data.get('policy_type', 'monitoring'),
+        enabled=policy_data.get('enabled', True),
+        priority=policy_data.get('priority', 100),
+        settings=policy_data.get('settings', {}),
+        scripts_to_run=policy_data.get('scripts_to_run', []),
+        alert_thresholds=policy_data.get('alert_thresholds', {}),
+        target_groups=policy_data.get('target_groups', []),
+        target_os=policy_data.get('target_os', ['windows', 'macos', 'linux']),
+        created_by=current_user['id']
+    )
+    doc = policy.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.policies.insert_one(doc)
+    return policy
+
+@api_router.put("/policies/{policy_id}")
+async def update_policy(policy_id: str, policy_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.policies.update_one({"id": policy_id}, {"$set": policy_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return {"message": "Policy updated"}
+
+@api_router.delete("/policies/{policy_id}")
+async def delete_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.policies.delete_one({"id": policy_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return {"message": "Policy deleted"}
+
+# ============== IT DOCUMENTATION ENDPOINTS ==============
+
+@api_router.get("/passwords")
+async def get_passwords(client_id: Optional[str] = None, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if category:
+        query["category"] = category
+    
+    passwords = await db.passwords.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    # Mask passwords in list view
+    for p in passwords:
+        p['password'] = '••••••••'
+    return passwords
+
+@api_router.get("/passwords/{password_id}")
+async def get_password(password_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a password entry (reveals actual password)"""
+    password = await db.passwords.find_one({"id": password_id}, {"_id": 0})
+    if not password:
+        raise HTTPException(status_code=404, detail="Password not found")
+    
+    # Update access tracking
+    await db.passwords.update_one(
+        {"id": password_id},
+        {"$set": {"last_accessed": datetime.now(timezone.utc).isoformat()}, "$inc": {"access_count": 1}}
+    )
+    
+    # Log access for audit
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user['id'],
+        "user_name": current_user['name'],
+        "user_email": current_user['email'],
+        "action": "view",
+        "entity_type": "password",
+        "entity_id": password_id,
+        "entity_name": password.get('name'),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return password
+
+@api_router.post("/passwords")
+async def create_password(password_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if password_data.get('client_id'):
+        client = await db.clients.find_one({"id": password_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    password = PasswordEntry(
+        client_id=password_data.get('client_id'),
+        client_name=client_name,
+        name=password_data.get('name'),
+        category=password_data.get('category', 'general'),
+        username=password_data.get('username'),
+        password=password_data.get('password'),
+        url=password_data.get('url'),
+        notes=password_data.get('notes'),
+        tags=password_data.get('tags', []),
+        created_by=current_user['id']
+    )
+    doc = password.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    await db.passwords.insert_one(doc)
+    return {"id": password.id, "name": password.name, "message": "Password created"}
+
+@api_router.put("/passwords/{password_id}")
+async def update_password(password_id: str, password_data: dict, current_user: dict = Depends(get_current_user)):
+    password_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    result = await db.passwords.update_one({"id": password_id}, {"$set": password_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Password not found")
+    return {"message": "Password updated"}
+
+@api_router.delete("/passwords/{password_id}")
+async def delete_password(password_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.passwords.delete_one({"id": password_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Password not found")
+    return {"message": "Password deleted"}
+
+# ============== DOCUMENTATION PAGES ENDPOINTS ==============
+
+@api_router.get("/documentation")
+async def get_documentation_pages(
+    client_id: Optional[str] = None,
+    category: Optional[str] = None,
+    is_template: bool = False,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {"is_template": is_template}
+    if client_id:
+        query["client_id"] = client_id
+    if category:
+        query["category"] = category
+    
+    pages = await db.documentation.find(query, {"_id": 0}).sort("title", 1).to_list(1000)
+    return pages
+
+@api_router.get("/documentation/{doc_id}")
+async def get_documentation_page(doc_id: str, current_user: dict = Depends(get_current_user)):
+    doc = await db.documentation.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documentation not found")
+    
+    await db.documentation.update_one({"id": doc_id}, {"$inc": {"view_count": 1}})
+    return doc
+
+@api_router.post("/documentation")
+async def create_documentation_page(doc_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if doc_data.get('client_id'):
+        client = await db.clients.find_one({"id": doc_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    doc = DocumentationPage(
+        client_id=doc_data.get('client_id'),
+        client_name=client_name,
+        title=doc_data.get('title'),
+        content=doc_data.get('content', ''),
+        category=doc_data.get('category', 'general'),
+        parent_id=doc_data.get('parent_id'),
+        is_template=doc_data.get('is_template', False),
+        tags=doc_data.get('tags', []),
+        last_edited_by=current_user['id'],
+        last_edited_by_name=current_user['name']
+    )
+    doc_dict = doc.model_dump()
+    doc_dict['created_at'] = doc_dict['created_at'].isoformat()
+    doc_dict['updated_at'] = doc_dict['updated_at'].isoformat()
+    await db.documentation.insert_one(doc_dict)
+    return doc
+
+@api_router.put("/documentation/{doc_id}")
+async def update_documentation_page(doc_id: str, doc_data: dict, current_user: dict = Depends(get_current_user)):
+    doc_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    doc_data['last_edited_by'] = current_user['id']
+    doc_data['last_edited_by_name'] = current_user['name']
+    result = await db.documentation.update_one({"id": doc_id}, {"$set": doc_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Documentation not found")
+    return {"message": "Documentation updated"}
+
+@api_router.delete("/documentation/{doc_id}")
+async def delete_documentation_page(doc_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.documentation.delete_one({"id": doc_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Documentation not found")
+    return {"message": "Documentation deleted"}
+
+# ============== RUNBOOK ENDPOINTS ==============
+
+@api_router.get("/runbooks")
+async def get_runbooks(category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if category:
+        query["category"] = category
+    
+    runbooks = await db.runbooks.find(query, {"_id": 0}).sort("name", 1).to_list(100)
+    return runbooks
+
+@api_router.get("/runbooks/{runbook_id}")
+async def get_runbook(runbook_id: str, current_user: dict = Depends(get_current_user)):
+    runbook = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0})
+    if not runbook:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+    return runbook
+
+@api_router.post("/runbooks")
+async def create_runbook(runbook_data: dict, current_user: dict = Depends(get_current_user)):
+    runbook = Runbook(
+        name=runbook_data.get('name'),
+        description=runbook_data.get('description'),
+        category=runbook_data.get('category', 'remediation'),
+        trigger_type=runbook_data.get('trigger_type', 'manual'),
+        trigger_conditions=runbook_data.get('trigger_conditions', {}),
+        steps=runbook_data.get('steps', []),
+        enabled=runbook_data.get('enabled', True),
+        created_by=current_user['id']
+    )
+    doc = runbook.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.runbooks.insert_one(doc)
+    return runbook
+
+@api_router.put("/runbooks/{runbook_id}")
+async def update_runbook(runbook_id: str, runbook_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.runbooks.update_one({"id": runbook_id}, {"$set": runbook_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+    return {"message": "Runbook updated"}
+
+@api_router.delete("/runbooks/{runbook_id}")
+async def delete_runbook(runbook_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.runbooks.delete_one({"id": runbook_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+    return {"message": "Runbook deleted"}
+
+@api_router.post("/runbooks/{runbook_id}/execute")
+async def execute_runbook(runbook_id: str, context: Dict[str, Any] = {}, current_user: dict = Depends(get_current_user)):
+    """Execute a runbook manually"""
+    runbook = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0})
+    if not runbook:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+    
+    execution = RunbookExecution(
+        runbook_id=runbook_id,
+        runbook_name=runbook['name'],
+        triggered_by="manual",
+        trigger_context=context,
+        device_id=context.get('device_id'),
+        client_id=context.get('client_id'),
+        user_id=current_user['id'],
+        status="running"
+    )
+    doc = execution.model_dump()
+    doc['started_at'] = doc['started_at'].isoformat()
+    await db.runbook_executions.insert_one(doc)
+    
+    # Update runbook stats
+    await db.runbooks.update_one(
+        {"id": runbook_id},
+        {"$inc": {"run_count": 1}, "$set": {"last_run": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return execution
+
+@api_router.get("/runbook-executions")
+async def get_runbook_executions(runbook_id: Optional[str] = None, limit: int = 50, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if runbook_id:
+        query["runbook_id"] = runbook_id
+    
+    executions = await db.runbook_executions.find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    return executions
+
+# ============== CUSTOMER PORTAL ENDPOINTS ==============
+
+@api_router.get("/portal/users")
+async def get_portal_users(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    
+    users = await db.portal_users.find(query, {"_id": 0, "password_hash": 0}).to_list(1000)
+    return users
+
+@api_router.post("/portal/users")
+async def create_portal_user(user_data: dict, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": user_data.get('client_id')}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Check if email already exists
+    existing = await db.portal_users.find_one({"email": user_data.get('email')})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    portal_user = PortalUser(
+        client_id=client['id'],
+        client_name=client['name'],
+        email=user_data.get('email'),
+        password_hash=hash_password(user_data.get('password', 'welcome123')),
+        name=user_data.get('name'),
+        phone=user_data.get('phone'),
+        role=user_data.get('role', 'user'),
+        is_primary_contact=user_data.get('is_primary_contact', False),
+        can_view_all_tickets=user_data.get('can_view_all_tickets', False),
+        can_create_tickets=user_data.get('can_create_tickets', True),
+        can_view_assets=user_data.get('can_view_assets', True),
+        can_view_invoices=user_data.get('can_view_invoices', False)
+    )
+    doc = portal_user.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.portal_users.insert_one(doc)
+    
+    return {"id": portal_user.id, "email": portal_user.email, "message": "Portal user created"}
+
+@api_router.put("/portal/users/{user_id}")
+async def update_portal_user(user_id: str, user_data: dict, current_user: dict = Depends(get_current_user)):
+    if 'password' in user_data:
+        user_data['password_hash'] = hash_password(user_data.pop('password'))
+    
+    result = await db.portal_users.update_one({"id": user_id}, {"$set": user_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Portal user not found")
+    return {"message": "Portal user updated"}
+
+@api_router.delete("/portal/users/{user_id}")
+async def delete_portal_user(user_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.portal_users.delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Portal user not found")
+    return {"message": "Portal user deleted"}
+
+# Portal login (separate from main app login)
+@api_router.post("/portal/login")
+async def portal_login(email: str, password: str):
+    user = await db.portal_users.find_one({"email": email}, {"_id": 0})
+    if not user or not verify_password(password, user['password_hash']):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    if not user.get('is_active', True):
+        raise HTTPException(status_code=401, detail="Account is disabled")
+    
+    token = create_token(user['id'], user['email'], 'portal_user')
+    
+    await db.portal_users.update_one(
+        {"id": user['id']},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"token": token, "user": {k: v for k, v in user.items() if k != 'password_hash'}}
+
+# ============== PROJECT MANAGEMENT ENDPOINTS ==============
+
+@api_router.get("/projects")
+async def get_projects(
+    client_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        query["status"] = status
+    
+    projects = await db.projects.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return projects
+
+@api_router.get("/projects/{project_id}")
+async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(1000)
+    project['tasks'] = tasks
+    return project
+
+@api_router.post("/projects")
+async def create_project(project_data: dict, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": project_data.get('client_id')}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    pm_name = None
+    if project_data.get('project_manager'):
+        pm = await db.users.find_one({"id": project_data['project_manager']}, {"_id": 0})
+        pm_name = pm['name'] if pm else None
+    
+    project = Project(
+        name=project_data.get('name'),
+        description=project_data.get('description'),
+        client_id=client['id'],
+        client_name=client['name'],
+        status=project_data.get('status', 'planning'),
+        priority=project_data.get('priority', 'medium'),
+        start_date=project_data.get('start_date'),
+        target_end_date=project_data.get('target_end_date'),
+        budget_hours=project_data.get('budget_hours'),
+        project_manager=project_data.get('project_manager'),
+        project_manager_name=pm_name,
+        team_members=project_data.get('team_members', []),
+        tags=project_data.get('tags', [])
+    )
+    doc = project.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    await db.projects.insert_one(doc)
+    return project
+
+@api_router.put("/projects/{project_id}")
+async def update_project(project_id: str, project_data: dict, current_user: dict = Depends(get_current_user)):
+    project_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    result = await db.projects.update_one({"id": project_id}, {"$set": project_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"message": "Project updated"}
+
+@api_router.delete("/projects/{project_id}")
+async def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.projects.delete_one({"id": project_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Also delete tasks
+    await db.project_tasks.delete_many({"project_id": project_id})
+    return {"message": "Project deleted"}
+
+# ============== PROJECT TASKS ENDPOINTS ==============
+
+@api_router.get("/projects/{project_id}/tasks")
+async def get_project_tasks(project_id: str, current_user: dict = Depends(get_current_user)):
+    tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(1000)
+    return tasks
+
+@api_router.post("/projects/{project_id}/tasks")
+async def create_project_task(project_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    assigned_name = None
+    if task_data.get('assigned_to'):
+        user = await db.users.find_one({"id": task_data['assigned_to']}, {"_id": 0})
+        assigned_name = user['name'] if user else None
+    
+    task = ProjectTask(
+        project_id=project_id,
+        project_name=project['name'],
+        title=task_data.get('title'),
+        description=task_data.get('description'),
+        status=task_data.get('status', 'todo'),
+        priority=task_data.get('priority', 'medium'),
+        assigned_to=task_data.get('assigned_to'),
+        assigned_name=assigned_name,
+        estimated_hours=task_data.get('estimated_hours'),
+        due_date=task_data.get('due_date'),
+        dependencies=task_data.get('dependencies', []),
+        order=task_data.get('order', 0)
+    )
+    doc = task.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.project_tasks.insert_one(doc)
+    return task
+
+@api_router.put("/projects/{project_id}/tasks/{task_id}")
+async def update_project_task(project_id: str, task_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
+    if task_data.get('status') == 'completed':
+        task_data['completed_at'] = datetime.now(timezone.utc).isoformat()
+    
+    result = await db.project_tasks.update_one({"id": task_id, "project_id": project_id}, {"$set": task_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"message": "Task updated"}
+
+@api_router.delete("/projects/{project_id}/tasks/{task_id}")
+async def delete_project_task(project_id: str, task_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.project_tasks.delete_one({"id": task_id, "project_id": project_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"message": "Task deleted"}
+
+# ============== AUDIT LOG ENDPOINTS ==============
+
+@api_router.get("/audit-logs")
+async def get_audit_logs(
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if entity_id:
+        query["entity_id"] = entity_id
+    if user_id:
+        query["user_id"] = user_id
+    if action:
+        query["action"] = action
+    
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return logs
+
+# ============== TECHNICIAN SCHEDULING ENDPOINTS ==============
+
+@api_router.get("/schedule")
+async def get_schedules(
+    user_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if user_id:
+        query["user_id"] = user_id
+    if date_from:
+        query["date"] = {"$gte": date_from}
+    if date_to:
+        if "date" in query:
+            query["date"]["$lte"] = date_to
+        else:
+            query["date"] = {"$lte": date_to}
+    
+    schedules = await db.schedules.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
+    return schedules
+
+@api_router.post("/schedule")
+async def create_schedule_entry(schedule_data: dict, current_user: dict = Depends(get_current_user)):
+    user_name = None
+    user = await db.users.find_one({"id": schedule_data.get('user_id')}, {"_id": 0})
+    user_name = user['name'] if user else None
+    
+    client_name = None
+    if schedule_data.get('client_id'):
+        client = await db.clients.find_one({"id": schedule_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    schedule = TechnicianSchedule(
+        user_id=schedule_data.get('user_id'),
+        user_name=user_name,
+        date=schedule_data.get('date'),
+        start_time=schedule_data.get('start_time'),
+        end_time=schedule_data.get('end_time'),
+        event_type=schedule_data.get('event_type', 'available'),
+        title=schedule_data.get('title'),
+        description=schedule_data.get('description'),
+        client_id=schedule_data.get('client_id'),
+        client_name=client_name,
+        ticket_id=schedule_data.get('ticket_id'),
+        location=schedule_data.get('location')
+    )
+    doc = schedule.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.schedules.insert_one(doc)
+    return schedule
+
+@api_router.put("/schedule/{schedule_id}")
+async def update_schedule_entry(schedule_id: str, schedule_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.schedules.update_one({"id": schedule_id}, {"$set": schedule_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Schedule entry not found")
+    return {"message": "Schedule updated"}
+
+@api_router.delete("/schedule/{schedule_id}")
+async def delete_schedule_entry(schedule_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.schedules.delete_one({"id": schedule_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Schedule entry not found")
+    return {"message": "Schedule deleted"}
+
+# ============== ON-CALL ROTATION ENDPOINTS ==============
+
+@api_router.get("/on-call")
+async def get_on_call_rotations(current_user: dict = Depends(get_current_user)):
+    rotations = await db.on_call_rotations.find({}, {"_id": 0}).to_list(100)
+    return rotations
+
+@api_router.post("/on-call")
+async def create_on_call_rotation(rotation_data: dict, current_user: dict = Depends(get_current_user)):
+    rotation = OnCallRotation(
+        name=rotation_data.get('name'),
+        description=rotation_data.get('description'),
+        rotation_type=rotation_data.get('rotation_type', 'weekly'),
+        team_members=rotation_data.get('team_members', []),
+        rotation_start_day=rotation_data.get('rotation_start_day', 0),
+        rotation_start_time=rotation_data.get('rotation_start_time', '08:00'),
+        escalation_timeout_minutes=rotation_data.get('escalation_timeout_minutes', 30),
+        enabled=rotation_data.get('enabled', True)
+    )
+    doc = rotation.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.on_call_rotations.insert_one(doc)
+    return rotation
+
+@api_router.get("/on-call/current")
+async def get_current_on_call(current_user: dict = Depends(get_current_user)):
+    """Get currently on-call technician"""
+    rotations = await db.on_call_rotations.find({"enabled": True}, {"_id": 0}).to_list(10)
+    on_call = []
+    for r in rotations:
+        if r['team_members']:
+            current_tech_id = r['team_members'][r['current_index'] % len(r['team_members'])]
+            tech = await db.users.find_one({"id": current_tech_id}, {"_id": 0})
+            on_call.append({
+                "rotation_name": r['name'],
+                "technician_id": current_tech_id,
+                "technician_name": tech['name'] if tech else None,
+                "technician_email": tech['email'] if tech else None
+            })
+    return on_call
+
+# ============== CUSTOM FIELDS ENDPOINTS ==============
+
+@api_router.get("/custom-fields")
+async def get_custom_fields(entity_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    
+    fields = await db.custom_fields.find(query, {"_id": 0}).sort("order", 1).to_list(100)
+    return fields
+
+@api_router.post("/custom-fields")
+async def create_custom_field(field_data: dict, current_user: dict = Depends(get_current_user)):
+    field = CustomFieldDefinition(
+        entity_type=field_data.get('entity_type'),
+        field_name=field_data.get('field_name'),
+        field_label=field_data.get('field_label'),
+        field_type=field_data.get('field_type', 'text'),
+        dropdown_options=field_data.get('dropdown_options', []),
+        is_required=field_data.get('is_required', False),
+        is_visible_portal=field_data.get('is_visible_portal', False),
+        default_value=field_data.get('default_value'),
+        order=field_data.get('order', 0)
+    )
+    doc = field.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.custom_fields.insert_one(doc)
+    return field
+
+@api_router.delete("/custom-fields/{field_id}")
+async def delete_custom_field(field_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.custom_fields.delete_one({"id": field_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Custom field not found")
+    return {"message": "Custom field deleted"}
+
+# ============== WEBHOOKS ENDPOINTS ==============
+
+@api_router.get("/webhooks")
+async def get_webhooks(current_user: dict = Depends(get_current_user)):
+    webhooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
+    return webhooks
+
+@api_router.post("/webhooks")
+async def create_webhook(webhook_data: dict, current_user: dict = Depends(get_current_user)):
+    webhook = Webhook(
+        name=webhook_data.get('name'),
+        url=webhook_data.get('url'),
+        secret=webhook_data.get('secret'),
+        events=webhook_data.get('events', []),
+        is_active=webhook_data.get('is_active', True),
+        headers=webhook_data.get('headers', {})
+    )
+    doc = webhook.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.webhooks.insert_one(doc)
+    return webhook
+
+@api_router.put("/webhooks/{webhook_id}")
+async def update_webhook(webhook_id: str, webhook_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.webhooks.update_one({"id": webhook_id}, {"$set": webhook_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {"message": "Webhook updated"}
+
+@api_router.delete("/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.webhooks.delete_one({"id": webhook_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {"message": "Webhook deleted"}
+
+@api_router.post("/webhooks/{webhook_id}/test")
+async def test_webhook(webhook_id: str, current_user: dict = Depends(get_current_user)):
+    webhook = await db.webhooks.find_one({"id": webhook_id}, {"_id": 0})
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    
+    try:
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                webhook['url'],
+                json={"event": "test", "message": "Webhook test from NexusOps"},
+                headers=webhook.get('headers', {}),
+                timeout=10
+            )
+        
+        await db.webhooks.update_one(
+            {"id": webhook_id},
+            {"$set": {"last_triggered": datetime.now(timezone.utc).isoformat(), "last_status": response.status_code}}
+        )
+        return {"success": response.status_code < 400, "status_code": response.status_code}
+    except Exception as e:
+        await db.webhooks.update_one(
+            {"id": webhook_id},
+            {"$inc": {"failure_count": 1}}
+        )
+        return {"success": False, "error": str(e)}
+
+# ============== SITES / LOCATIONS ENDPOINTS ==============
+
+@api_router.get("/sites")
+async def get_sites(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    
+    sites = await db.sites.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return sites
+
+@api_router.post("/sites")
+async def create_site(site_data: dict, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": site_data.get('client_id')}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    site = Site(
+        client_id=client['id'],
+        client_name=client['name'],
+        name=site_data.get('name'),
+        address=site_data.get('address'),
+        city=site_data.get('city'),
+        state=site_data.get('state'),
+        postal_code=site_data.get('postal_code'),
+        country=site_data.get('country', 'USA'),
+        phone=site_data.get('phone'),
+        is_primary=site_data.get('is_primary', False),
+        timezone=site_data.get('timezone', 'America/New_York'),
+        notes=site_data.get('notes')
+    )
+    doc = site.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.sites.insert_one(doc)
+    return site
+
+@api_router.put("/sites/{site_id}")
+async def update_site(site_id: str, site_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.sites.update_one({"id": site_id}, {"$set": site_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Site not found")
+    return {"message": "Site updated"}
+
+@api_router.delete("/sites/{site_id}")
+async def delete_site(site_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.sites.delete_one({"id": site_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Site not found")
+    return {"message": "Site deleted"}
+
 # ============== SEED DATA ==============
 
 @api_router.post("/seed")
