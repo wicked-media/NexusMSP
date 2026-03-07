@@ -278,14 +278,14 @@ export default function TicketsPage() {
                 <div className="space-y-2">
                   <Label>Assign To</Label>
                   <Select
-                    value={formData.assigned_to}
-                    onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+                    value={formData.assigned_to || "unassigned"}
+                    onValueChange={(value) => setFormData({ ...formData, assigned_to: value === "unassigned" ? "" : value })}
                   >
                     <SelectTrigger data-testid="ticket-assignee-select">
                       <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Unassigned</SelectItem>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
                       {users.map(user => (
                         <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                       ))}

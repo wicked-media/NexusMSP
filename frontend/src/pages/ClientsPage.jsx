@@ -190,7 +190,7 @@ export default function ClientsPage() {
                 <div className="space-y-2">
                   <Label>Industry</Label>
                   <Select
-                    value={formData.industry}
+                    value={formData.industry || undefined}
                     onValueChange={(value) => setFormData({ ...formData, industry: value })}
                   >
                     <SelectTrigger data-testid="client-industry-select">
