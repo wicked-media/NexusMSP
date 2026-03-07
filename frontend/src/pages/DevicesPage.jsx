@@ -45,7 +45,7 @@ const statusConfig = {
   warning: { label: "Warning", class: "status-warning", icon: AlertTriangle, color: "text-yellow-500" }
 };
 
-const DeviceCard = ({ device, onEdit, onDelete }) => {
+const DeviceCard = ({ device, onEdit, onDelete, onChat, onRemote }) => {
   const Icon = deviceIcons[device.device_type] || Monitor;
   const StatusIcon = statusConfig[device.status].icon;
 
@@ -72,6 +72,14 @@ const DeviceCard = ({ device, onEdit, onDelete }) => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onChat(device.id)}>
+                <MessageSquare className="w-4 h-4 mr-2" />
+                Device Chat
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onRemote(device)}>
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Remote Connect
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEdit(device)}>Edit</DropdownMenuItem>
               <DropdownMenuItem className="text-destructive" onClick={() => onDelete(device.id)}>
                 Delete
@@ -120,7 +128,31 @@ const DeviceCard = ({ device, onEdit, onDelete }) => {
             </div>
           </div>
 
-          <div className="pt-2 border-t border-border">
+          {/* Quick Actions */}
+          <div className="pt-3 border-t border-border flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex-1 text-xs"
+              onClick={() => onChat(device.id)}
+              data-testid={`device-chat-btn-${device.id}`}
+            >
+              <MessageSquare className="w-3 h-3 mr-1" />
+              Chat
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex-1 text-xs"
+              onClick={() => onRemote(device)}
+              data-testid={`device-remote-btn-${device.id}`}
+            >
+              <ExternalLink className="w-3 h-3 mr-1" />
+              Remote
+            </Button>
+          </div>
+
+          <div className="pt-2">
             <p className="text-xs text-muted-foreground">
               Last seen: {device.last_seen ? formatDistanceToNow(new Date(device.last_seen), { addSuffix: true }) : "Never"}
             </p>
