@@ -516,6 +516,438 @@ class Proposal(BaseModel):
     responded_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# ============== TICKET EMAIL MODELS ==============
+
+class TicketEmailCreate(BaseModel):
+    ticket_id: str
+    to_addresses: List[str]
+    cc_addresses: List[str] = []
+    subject: Optional[str] = None  # If None, uses ticket title
+    body: str
+    body_type: str = "html"
+
+class TicketEmail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    ticket_id: str
+    ticket_title: Optional[str] = None
+    message_id: Optional[str] = None  # External email message ID
+    conversation_id: Optional[str] = None  # For email threading
+    direction: str = "outbound"  # inbound, outbound
+    from_address: str
+    from_name: Optional[str] = None
+    to_addresses: List[str] = []
+    cc_addresses: List[str] = []
+    subject: str
+    body: str
+    body_type: str = "html"
+    status: str = "sent"  # draft, sent, failed, received
+    client_id: Optional[str] = None
+    user_id: Optional[str] = None  # Technician who sent
+    user_name: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    received_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== SCRIPTING / AUTOMATION MODELS ==============
+
+class ScriptCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    script_type: str = "powershell"  # powershell, bash, python, batch
+    content: str
+    category: str = "general"  # general, maintenance, security, monitoring, remediation
+    os_target: str = "windows"  # windows, macos, linux, cross_platform
+    run_as_admin: bool = True
+    timeout_seconds: int = 300
+    parameters: List[Dict[str, Any]] = []  # Script parameters
+
+class Script(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    script_type: str = "powershell"
+    content: str
+    category: str = "general"
+    os_target: str = "windows"
+    run_as_admin: bool = True
+    timeout_seconds: int = 300
+    parameters: List[Dict[str, Any]] = []
+    is_built_in: bool = False
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+    run_count: int = 0
+    last_run: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ScriptExecution(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    script_id: str
+    script_name: Optional[str] = None
+    device_id: str
+    device_name: Optional[str] = None
+    client_id: Optional[str] = None
+    user_id: str
+    user_name: Optional[str] = None
+    status: str = "pending"  # pending, running, completed, failed, timeout
+    exit_code: Optional[int] = None
+    output: Optional[str] = None
+    error_output: Optional[str] = None
+    parameters_used: Dict[str, Any] = {}
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ScheduledTask(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    script_id: str
+    script_name: Optional[str] = None
+    target_type: str = "device"  # device, device_group, policy, all
+    target_ids: List[str] = []
+    schedule_type: str = "once"  # once, daily, weekly, monthly
+    schedule_time: str = "09:00"
+    schedule_days: List[int] = []  # For weekly: 0-6 (Mon-Sun), for monthly: 1-31
+    timezone: str = "UTC"
+    enabled: bool = True
+    next_run: Optional[datetime] = None
+    last_run: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== PATCH MANAGEMENT MODELS ==============
+
+class PatchPolicy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    auto_approve: bool = False
+    approval_delay_days: int = 7
+    include_categories: List[str] = ["Security", "Critical"]  # Security, Critical, Definition, Feature, Service
+    exclude_kbs: List[str] = []
+    maintenance_window_start: str = "02:00"
+    maintenance_window_end: str = "06:00"
+    reboot_behavior: str = "schedule"  # immediate, schedule, user_choice, suppress
+    schedule_reboot_time: str = "03:00"
+    enabled: bool = True
+    target_device_groups: List[str] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DevicePatch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    device_id: str
+    device_name: Optional[str] = None
+    client_id: Optional[str] = None
+    kb_number: str
+    title: str
+    description: Optional[str] = None
+    category: str = "Security"
+    severity: str = "Important"  # Critical, Important, Moderate, Low
+    size_mb: Optional[float] = None
+    status: str = "available"  # available, approved, downloading, installing, installed, failed, hidden
+    release_date: Optional[str] = None
+    installed_date: Optional[datetime] = None
+    error_message: Optional[str] = None
+    reboot_required: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== POLICY MANAGEMENT MODELS ==============
+
+class DeviceGroup(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    client_id: Optional[str] = None  # None = global group
+    client_name: Optional[str] = None
+    auto_assign_rules: List[Dict[str, Any]] = []  # e.g., {"field": "os", "operator": "contains", "value": "Windows"}
+    device_count: int = 0
+    policies_applied: List[str] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Policy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    policy_type: str = "monitoring"  # monitoring, security, maintenance, backup, custom
+    enabled: bool = True
+    priority: int = 100  # Lower = higher priority
+    settings: Dict[str, Any] = {}  # Policy-specific settings
+    scripts_to_run: List[str] = []  # Script IDs to execute
+    alert_thresholds: Dict[str, Any] = {}  # e.g., {"cpu_percent": 90, "disk_percent": 85}
+    target_groups: List[str] = []  # DeviceGroup IDs
+    target_os: List[str] = ["windows", "macos", "linux"]
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== IT DOCUMENTATION MODELS ==============
+
+class PasswordEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    name: str
+    category: str = "general"  # general, server, network, cloud, application, other
+    username: Optional[str] = None
+    password: str  # Should be encrypted in production
+    url: Optional[str] = None
+    notes: Optional[str] = None
+    otp_secret: Optional[str] = None  # For TOTP
+    tags: List[str] = []
+    last_accessed: Optional[datetime] = None
+    access_count: int = 0
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class DocumentationPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: Optional[str] = None  # None = global documentation
+    client_name: Optional[str] = None
+    title: str
+    content: str  # Markdown content
+    category: str = "general"  # general, network, procedures, contacts, licenses, other
+    parent_id: Optional[str] = None  # For hierarchical docs
+    is_template: bool = False
+    tags: List[str] = []
+    last_edited_by: Optional[str] = None
+    last_edited_by_name: Optional[str] = None
+    view_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class NetworkDiagram(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    diagram_type: str = "network"  # network, rack, floor_plan, topology
+    diagram_data: Dict[str, Any] = {}  # JSON data for rendering
+    thumbnail_url: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== RUNBOOK / WORKFLOW MODELS ==============
+
+class Runbook(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    category: str = "remediation"  # remediation, maintenance, onboarding, offboarding, security
+    trigger_type: str = "manual"  # manual, alert, schedule, webhook
+    trigger_conditions: Dict[str, Any] = {}  # Conditions for auto-trigger
+    steps: List[Dict[str, Any]] = []  # Ordered steps with actions
+    enabled: bool = True
+    created_by: Optional[str] = None
+    run_count: int = 0
+    last_run: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class RunbookExecution(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    runbook_id: str
+    runbook_name: Optional[str] = None
+    triggered_by: str = "manual"  # manual, alert, schedule
+    trigger_context: Dict[str, Any] = {}  # e.g., alert details
+    device_id: Optional[str] = None
+    client_id: Optional[str] = None
+    user_id: Optional[str] = None
+    status: str = "running"  # running, completed, failed, cancelled
+    current_step: int = 0
+    step_results: List[Dict[str, Any]] = []
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: Optional[datetime] = None
+
+# ============== CUSTOMER PORTAL MODELS ==============
+
+class PortalUser(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    email: str
+    password_hash: str
+    name: str
+    phone: Optional[str] = None
+    role: str = "user"  # user, admin (client admin)
+    is_primary_contact: bool = False
+    can_view_all_tickets: bool = False
+    can_create_tickets: bool = True
+    can_view_assets: bool = True
+    can_view_invoices: bool = False
+    last_login: Optional[datetime] = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class PortalSession(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    portal_user_id: str
+    client_id: str
+    token: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+
+# ============== PROJECT MANAGEMENT MODELS ==============
+
+class Project(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    client_id: str
+    client_name: Optional[str] = None
+    status: str = "planning"  # planning, in_progress, on_hold, completed, cancelled
+    priority: str = "medium"
+    start_date: Optional[str] = None
+    target_end_date: Optional[str] = None
+    actual_end_date: Optional[str] = None
+    budget_hours: Optional[float] = None
+    spent_hours: float = 0.0
+    project_manager: Optional[str] = None
+    project_manager_name: Optional[str] = None
+    team_members: List[str] = []
+    tags: List[str] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ProjectTask(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project_id: str
+    project_name: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    status: str = "todo"  # todo, in_progress, review, completed
+    priority: str = "medium"
+    assigned_to: Optional[str] = None
+    assigned_name: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    actual_hours: float = 0.0
+    due_date: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    dependencies: List[str] = []  # Task IDs this depends on
+    order: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== AUDIT LOG MODEL ==============
+
+class AuditLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    action: str  # create, update, delete, login, logout, view, export, etc.
+    entity_type: str  # ticket, device, client, user, etc.
+    entity_id: Optional[str] = None
+    entity_name: Optional[str] = None
+    changes: Dict[str, Any] = {}  # {"field": {"old": x, "new": y}}
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== TECHNICIAN SCHEDULING MODELS ==============
+
+class TechnicianSchedule(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    user_name: Optional[str] = None
+    date: str  # YYYY-MM-DD
+    start_time: str  # HH:MM
+    end_time: str  # HH:MM
+    event_type: str = "available"  # available, appointment, pto, on_call, blocked
+    title: Optional[str] = None
+    description: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    ticket_id: Optional[str] = None
+    location: Optional[str] = None
+    is_recurring: bool = False
+    recurrence_rule: Optional[str] = None  # RRULE format
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class OnCallRotation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    rotation_type: str = "weekly"  # daily, weekly, custom
+    team_members: List[str] = []  # User IDs in rotation order
+    current_index: int = 0
+    rotation_start_day: int = 0  # 0 = Monday
+    rotation_start_time: str = "08:00"
+    escalation_timeout_minutes: int = 30
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== CUSTOM FIELDS MODEL ==============
+
+class CustomFieldDefinition(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    entity_type: str  # ticket, device, client, asset, etc.
+    field_name: str
+    field_label: str
+    field_type: str = "text"  # text, number, date, dropdown, checkbox, url, email
+    dropdown_options: List[str] = []
+    is_required: bool = False
+    is_visible_portal: bool = False
+    default_value: Optional[str] = None
+    order: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== WEBHOOK MODEL ==============
+
+class Webhook(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    url: str
+    secret: Optional[str] = None  # For signature verification
+    events: List[str] = []  # ticket.created, device.alert, etc.
+    is_active: bool = True
+    headers: Dict[str, str] = {}
+    last_triggered: Optional[datetime] = None
+    last_status: Optional[int] = None
+    failure_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== SITE / LOCATION MODEL ==============
+
+class Site(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: str = "USA"
+    phone: Optional[str] = None
+    is_primary: bool = False
+    timezone: str = "America/New_York"
+    notes: Optional[str] = None
+    device_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 # ============== AUTH HELPERS ==============
 
 def hash_password(password: str) -> str:
