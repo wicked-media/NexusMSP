@@ -369,6 +369,153 @@ class RemoteSession(BaseModel):
     duration_minutes: int = 0
     notes: Optional[str] = None
 
+# ============== OFFICE 365 / EMAIL MODELS ==============
+
+class Office365Settings(BaseModel):
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    redirect_uri: Optional[str] = None
+
+class EmailMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    external_id: Optional[str] = None  # Microsoft Graph message ID
+    subject: str
+    body: str
+    body_type: str = "html"  # html, text
+    from_address: str
+    from_name: Optional[str] = None
+    to_addresses: List[str] = []
+    cc_addresses: List[str] = []
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    ticket_id: Optional[str] = None
+    direction: str = "outbound"  # inbound, outbound
+    status: str = "draft"  # draft, sent, failed, received
+    read: bool = False
+    has_attachments: bool = False
+    attachments: List[Dict[str, Any]] = []
+    sent_at: Optional[datetime] = None
+    received_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class EmailMessageCreate(BaseModel):
+    subject: str
+    body: str
+    body_type: str = "html"
+    to_addresses: List[str]
+    cc_addresses: List[str] = []
+    client_id: Optional[str] = None
+    ticket_id: Optional[str] = None
+
+# ============== ACRONIS MODELS ==============
+
+class AcronisSettings(BaseModel):
+    api_url: str
+    client_id: str
+    client_secret: str
+
+class AcronisSubscription(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    external_id: Optional[str] = None  # Acronis subscription ID
+    client_id: str
+    client_name: Optional[str] = None
+    device_id: Optional[str] = None
+    device_name: Optional[str] = None
+    product_name: str
+    edition: str = "Standard"  # Standard, Advanced, etc.
+    status: str = "active"  # active, expired, suspended
+    license_type: str = "per_device"  # per_device, per_gb, per_user
+    quantity: int = 1
+    storage_quota_gb: Optional[float] = None
+    storage_used_gb: Optional[float] = None
+    expiry_date: Optional[str] = None
+    last_backup: Optional[datetime] = None
+    backup_status: str = "unknown"  # success, warning, failed, unknown
+    synced_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== LEADS / CRM MODELS ==============
+
+class LeadCreate(BaseModel):
+    company_name: str
+    contact_name: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    source: str = "website"  # website, referral, cold_call, marketing, other
+    industry: Optional[str] = None
+    employee_count: Optional[str] = None
+    estimated_value: float = 0.0
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+
+class Lead(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_name: str
+    contact_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    source: str = "website"
+    industry: Optional[str] = None
+    employee_count: Optional[str] = None
+    estimated_value: float = 0.0
+    status: str = "new"  # new, contacted, qualified, proposal, negotiation, won, lost
+    pipeline_stage: int = 1  # 1-6 corresponding to status
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    assigned_name: Optional[str] = None
+    converted_to_client: Optional[str] = None  # client_id if converted
+    last_contact: Optional[datetime] = None
+    next_follow_up: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class LeadActivity(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    lead_id: str
+    lead_name: Optional[str] = None
+    user_id: str
+    user_name: Optional[str] = None
+    activity_type: str = "note"  # note, call, email, meeting, task
+    subject: str
+    description: Optional[str] = None
+    outcome: Optional[str] = None  # positive, negative, neutral, pending
+    scheduled_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Proposal(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    proposal_number: str = Field(default_factory=lambda: f"PROP-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}")
+    lead_id: Optional[str] = None
+    lead_name: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    status: str = "draft"  # draft, sent, viewed, accepted, rejected, expired
+    valid_until: Optional[str] = None
+    line_items: List[Dict[str, Any]] = []
+    subtotal: float = 0.0
+    discount_percent: float = 0.0
+    discount_amount: float = 0.0
+    tax_percent: float = 0.0
+    tax_amount: float = 0.0
+    total: float = 0.0
+    terms_and_conditions: Optional[str] = None
+    created_by: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    viewed_at: Optional[datetime] = None
+    responded_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 # ============== AUTH HELPERS ==============
 
 def hash_password(password: str) -> str:
