@@ -22,6 +22,9 @@ import RemoteAccessPage from "@/pages/RemoteAccessPage";
 import DeviceChatPage from "@/pages/DeviceChatPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SettingsPage from "@/pages/SettingsPage";
+import LeadsPage from "@/pages/LeadsPage";
+import AcronisPage from "@/pages/AcronisPage";
+import EmailPage from "@/pages/EmailPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
