@@ -24,7 +24,10 @@ import {
   MemoryStick,
   MoreVertical,
   RefreshCw,
-  Loader2
+  Loader2,
+  MessageSquare,
+  ExternalLink,
+  Activity
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
