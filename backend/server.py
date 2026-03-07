@@ -695,6 +695,187 @@ class DomotzService:
 
 domotz_service = DomotzService()
 
+# ============== OFFICE 365 SERVICE ==============
+
+class Office365Service:
+    def __init__(self):
+        self.access_token = None
+        self.token_expiry = None
+
+    async def get_credentials(self):
+        settings = await db.settings.find_one({"type": "office365"}, {"_id": 0})
+        if not settings:
+            return None, None, None, None
+        return (
+            settings.get('tenant_id'),
+            settings.get('client_id'),
+            settings.get('client_secret'),
+            settings.get('redirect_uri')
+        )
+
+    async def authenticate(self):
+        tenant_id, client_id, client_secret, _ = await self.get_credentials()
+        if not all([tenant_id, client_id, client_secret]):
+            raise HTTPException(status_code=400, detail="Office 365 credentials not configured")
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials"
+                }
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Office 365 authentication failed")
+            
+            data = response.json()
+            self.access_token = data['access_token']
+            self.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data.get('expires_in', 3600))
+            return self.access_token
+
+    async def get_token(self):
+        if not self.access_token or (self.token_expiry and datetime.now(timezone.utc) >= self.token_expiry):
+            await self.authenticate()
+        return self.access_token
+
+    async def send_email(self, from_address: str, to_addresses: List[str], subject: str, body: str, body_type: str = "html"):
+        token = await self.get_token()
+        
+        email_payload = {
+            "message": {
+                "subject": subject,
+                "body": {
+                    "contentType": body_type.capitalize(),
+                    "content": body
+                },
+                "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_addresses]
+            },
+            "saveToSentItems": True
+        }
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                f"https://graph.microsoft.com/v1.0/users/{from_address}/sendMail",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=email_payload
+            )
+            if response.status_code not in [200, 202]:
+                raise HTTPException(status_code=response.status_code, detail=f"Failed to send email: {response.text}")
+            return {"success": True}
+
+    async def get_messages(self, user_email: str, folder: str = "inbox", top: int = 50):
+        token = await self.get_token()
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(
+                f"https://graph.microsoft.com/v1.0/users/{user_email}/mailFolders/{folder}/messages?$top={top}&$orderby=receivedDateTime desc",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch messages")
+            return response.json()
+
+office365_service = Office365Service()
+
+# ============== ACRONIS SERVICE ==============
+
+class AcronisService:
+    def __init__(self):
+        self.access_token = None
+        self.token_expiry = None
+
+    async def get_credentials(self):
+        settings = await db.settings.find_one({"type": "acronis"}, {"_id": 0})
+        if not settings:
+            return None, None, None
+        return settings.get('api_url'), settings.get('client_id'), settings.get('client_secret')
+
+    async def authenticate(self):
+        api_url, client_id, client_secret = await self.get_credentials()
+        if not all([api_url, client_id, client_secret]):
+            raise HTTPException(status_code=400, detail="Acronis credentials not configured")
+
+        import base64
+        credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                f"{api_url}/api/2/idp/token",
+                headers={"Authorization": f"Basic {credentials}"},
+                data={"grant_type": "client_credentials"}
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Acronis authentication failed")
+            
+            data = response.json()
+            self.access_token = data['access_token']
+            self.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data.get('expires_in', 7200))
+            return self.access_token
+
+    async def get_token(self):
+        if not self.access_token or (self.token_expiry and datetime.now(timezone.utc) >= self.token_expiry):
+            await self.authenticate()
+        return self.access_token
+
+    async def get_tenants(self):
+        token = await self.get_token()
+        api_url, _, _ = await self.get_credentials()
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(
+                f"{api_url}/api/2/tenants",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch tenants")
+            return response.json()
+
+    async def get_clients(self, tenant_id: str = None):
+        token = await self.get_token()
+        api_url, _, _ = await self.get_credentials()
+        
+        url = f"{api_url}/api/2/clients"
+        if tenant_id:
+            url += f"?tenant_id={tenant_id}"
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch clients")
+            return response.json()
+
+    async def get_resources(self, client_id: str = None):
+        token = await self.get_token()
+        api_url, _, _ = await self.get_credentials()
+        
+        url = f"{api_url}/api/resource_management/v4/resources"
+        if client_id:
+            url += f"?client_id={client_id}"
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch resources")
+            return response.json()
+
+    async def get_backup_status(self, resource_id: str):
+        token = await self.get_token()
+        api_url, _, _ = await self.get_credentials()
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(
+                f"{api_url}/api/resource_management/v4/resources/{resource_id}/status",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if response.status_code != 200:
+                return {"status": "unknown"}
+            return response.json()
+
+acronis_service = AcronisService()
+
 # ============== AUTH ENDPOINTS ==============
 
 @api_router.post("/auth/register")
