@@ -491,6 +491,8 @@ export default function DevicesPage() {
               device={device}
               onEdit={openEditDialog}
               onDelete={handleDelete}
+              onChat={handleOpenChat}
+              onRemote={handleRemoteConnect}
             />
           ))}
         </div>
