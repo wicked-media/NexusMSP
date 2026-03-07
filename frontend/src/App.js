@@ -342,6 +342,36 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/scripting"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ScriptingPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/documentation"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ITDocumentationPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ProjectsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
