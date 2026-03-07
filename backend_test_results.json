@@ -1,0 +1,232 @@
+{
+  "summary": {
+    "total_tests": 37,
+    "passed_tests": 37,
+    "success_rate": 100.0,
+    "timestamp": "2026-03-07T11:41:48.667221"
+  },
+  "results": [
+    {
+      "test": "Seed Demo Data",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:44.574732"
+    },
+    {
+      "test": "Login with Demo Credentials",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:44.953234"
+    },
+    {
+      "test": "Get Current User",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.051150"
+    },
+    {
+      "test": "Get Dashboard Stats",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.149451"
+    },
+    {
+      "test": "Get Ticket Trends",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.271667"
+    },
+    {
+      "test": "Get Device Health",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.389443"
+    },
+    {
+      "test": "Get All Clients",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.498679"
+    },
+    {
+      "test": "Create New Client",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.651576"
+    },
+    {
+      "test": "Get Specific Client",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.808598"
+    },
+    {
+      "test": "Update Client",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:45.896388"
+    },
+    {
+      "test": "Delete Client",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.024893"
+    },
+    {
+      "test": "Get All Tickets",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.152013"
+    },
+    {
+      "test": "Get Open Tickets",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.258554"
+    },
+    {
+      "test": "Get Critical Tickets",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.353804"
+    },
+    {
+      "test": "Get Clients for Ticket",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.447449"
+    },
+    {
+      "test": "Create New Ticket",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.565276"
+    },
+    {
+      "test": "Get Specific Ticket",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.647799"
+    },
+    {
+      "test": "Update Ticket Status",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.766724"
+    },
+    {
+      "test": "Delete Ticket",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:46.867481"
+    },
+    {
+      "test": "Get All Devices",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.019874"
+    },
+    {
+      "test": "Get Online Devices",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.118546"
+    },
+    {
+      "test": "Get Clients for Device",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.205057"
+    },
+    {
+      "test": "Create New Device",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.294430"
+    },
+    {
+      "test": "Get Specific Device",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.411867"
+    },
+    {
+      "test": "Update Device",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.496587"
+    },
+    {
+      "test": "Delete Device",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.610231"
+    },
+    {
+      "test": "Get All Assets",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.708949"
+    },
+    {
+      "test": "Get Hardware Assets",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.803830"
+    },
+    {
+      "test": "Get Clients for Asset",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:47.895837"
+    },
+    {
+      "test": "Create New Asset",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.003776"
+    },
+    {
+      "test": "Get Specific Asset",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.091541"
+    },
+    {
+      "test": "Update Asset",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.198314"
+    },
+    {
+      "test": "Delete Asset",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.287499"
+    },
+    {
+      "test": "Get All Alerts",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.389921"
+    },
+    {
+      "test": "Get Active Alerts",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.486454"
+    },
+    {
+      "test": "Get Critical Alerts",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.572615"
+    },
+    {
+      "test": "Get All Users",
+      "success": true,
+      "details": "",
+      "timestamp": "2026-03-07T11:41:48.666339"
+    }
+  ]
+}
