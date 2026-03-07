@@ -1416,6 +1416,359 @@ async def get_users(current_user: dict = Depends(get_current_user)):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
     return users
 
+# ============== DOMOTZ ENDPOINTS ==============
+
+@api_router.get("/domotz/status")
+async def get_domotz_status(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "domotz"}, {"_id": 0})
+    return {"configured": bool(settings and settings.get('api_key'))}
+
+@api_router.post("/domotz/settings")
+async def save_domotz_settings(settings: DomotzSettings, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "domotz"},
+        {"$set": {
+            "type": "domotz",
+            "api_key": settings.api_key,
+            "api_url": settings.api_url,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    return {"message": "Domotz settings saved"}
+
+@api_router.get("/domotz/test-connection")
+async def test_domotz_connection(current_user: dict = Depends(get_current_user)):
+    try:
+        agents = await domotz_service.get_agents()
+        return {"success": True, "message": f"Connected! Found {len(agents) if isinstance(agents, list) else 0} agents"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@api_router.get("/domotz/agents")
+async def get_domotz_agents(page: int = 0, page_size: int = 50, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_agents(page, page_size)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/domotz/agents/{agent_id}")
+async def get_domotz_agent(agent_id: int, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_agent(agent_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/domotz/agents/{agent_id}/devices")
+async def get_domotz_agent_devices(agent_id: int, page: int = 0, page_size: int = 100, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_agent_devices(agent_id, page, page_size)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/domotz/agents/{agent_id}/devices/{device_id}")
+async def get_domotz_device(agent_id: int, device_id: int, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_device(agent_id, device_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/domotz/agents/{agent_id}/devices/{device_id}/details")
+async def get_domotz_device_details(agent_id: int, device_id: int, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_device_details(agent_id, device_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/domotz/agents/{agent_id}/devices/{device_id}/power/{action}")
+async def execute_domotz_power_action(agent_id: int, device_id: int, action: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.execute_power_action(agent_id, device_id, action)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/domotz/alerts")
+async def get_domotz_alerts(agent_id: Optional[int] = None, current_user: dict = Depends(get_current_user)):
+    try:
+        return await domotz_service.get_alerts(agent_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============== RUSTDESK / REMOTE ACCESS ENDPOINTS ==============
+
+@api_router.get("/remote/status")
+async def get_remote_status(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
+    return {"configured": bool(settings and settings.get('server_url'))}
+
+@api_router.post("/remote/settings")
+async def save_remote_settings(settings: RustDeskSettings, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "rustdesk"},
+        {"$set": {
+            "type": "rustdesk",
+            "server_url": settings.server_url,
+            "api_key": settings.api_key,
+            "relay_server": settings.relay_server,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    return {"message": "RustDesk settings saved"}
+
+@api_router.get("/remote/settings")
+async def get_remote_settings(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
+    if not settings:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "server_url": settings.get('server_url'),
+        "relay_server": settings.get('relay_server')
+    }
+
+@api_router.get("/remote/agents")
+async def get_remote_agents(current_user: dict = Depends(get_current_user)):
+    """Get available remote agent downloads"""
+    agents = [
+        {
+            "id": "windows-x64",
+            "name": "NexusOps Agent for Windows",
+            "platform": "windows",
+            "arch": "x64",
+            "version": "1.3.2",
+            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86_64.exe",
+            "size": "18.5 MB",
+            "instructions": "1. Download and run the installer\n2. Enter your RustDesk ID server address\n3. Note your device ID for remote access"
+        },
+        {
+            "id": "windows-x86",
+            "name": "NexusOps Agent for Windows (32-bit)",
+            "platform": "windows",
+            "arch": "x86",
+            "version": "1.3.2",
+            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86-sciter.exe",
+            "size": "12.3 MB",
+            "instructions": "1. Download and run the installer\n2. Enter your RustDesk ID server address\n3. Note your device ID for remote access"
+        },
+        {
+            "id": "macos-universal",
+            "name": "NexusOps Agent for macOS",
+            "platform": "macos",
+            "arch": "universal",
+            "version": "1.3.2",
+            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2.dmg",
+            "size": "22.1 MB",
+            "instructions": "1. Download and open the DMG file\n2. Drag RustDesk to Applications\n3. Open and configure server settings\n4. Grant accessibility permissions when prompted"
+        },
+        {
+            "id": "linux-x64",
+            "name": "NexusOps Agent for Linux (Debian/Ubuntu)",
+            "platform": "linux",
+            "arch": "x64",
+            "version": "1.3.2",
+            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86_64.deb",
+            "size": "15.8 MB",
+            "instructions": "1. Download the .deb package\n2. Install: sudo dpkg -i rustdesk-*.deb\n3. Run: rustdesk\n4. Configure server settings"
+        },
+        {
+            "id": "linux-rpm",
+            "name": "NexusOps Agent for Linux (RHEL/Fedora)",
+            "platform": "linux",
+            "arch": "x64",
+            "version": "1.3.2",
+            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-0.x86_64.rpm",
+            "size": "16.2 MB",
+            "instructions": "1. Download the .rpm package\n2. Install: sudo rpm -i rustdesk-*.rpm\n3. Run: rustdesk\n4. Configure server settings"
+        }
+    ]
+    return agents
+
+@api_router.post("/remote/sessions")
+async def create_remote_session(device_id: str, session_type: str = "remote_desktop", current_user: dict = Depends(get_current_user)):
+    """Create a new remote session record"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    session = RemoteSession(
+        device_id=device_id,
+        device_name=device.get('name'),
+        client_id=device.get('client_id'),
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        session_type=session_type,
+        rustdesk_id=device.get('rustdesk_id')
+    )
+    doc = session.model_dump()
+    doc['started_at'] = doc['started_at'].isoformat()
+    await db.remote_sessions.insert_one(doc)
+    
+    return session
+
+@api_router.get("/remote/sessions")
+async def get_remote_sessions(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if device_id:
+        query["device_id"] = device_id
+    if status:
+        query["status"] = status
+    
+    sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(100)
+    return sessions
+
+@api_router.put("/remote/sessions/{session_id}/end")
+async def end_remote_session(session_id: str, notes: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    started_at = datetime.fromisoformat(session['started_at']) if isinstance(session['started_at'], str) else session['started_at']
+    duration = int((datetime.now(timezone.utc) - started_at).total_seconds() / 60)
+    
+    await db.remote_sessions.update_one(
+        {"id": session_id},
+        {"$set": {
+            "status": "ended",
+            "ended_at": datetime.now(timezone.utc).isoformat(),
+            "duration_minutes": duration,
+            "notes": notes
+        }}
+    )
+    return {"message": "Session ended", "duration_minutes": duration}
+
+# ============== DEVICE CHAT ENDPOINTS ==============
+
+@api_router.get("/devices/{device_id}/chat")
+async def get_device_chat(device_id: str, limit: int = 100, current_user: dict = Depends(get_current_user)):
+    """Get chat messages for a device"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    messages = await db.device_chat.find(
+        {"device_id": device_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+    
+    return {"device": device, "messages": list(reversed(messages))}
+
+@api_router.post("/devices/{device_id}/chat")
+async def send_device_chat_message(device_id: str, message_data: DeviceChatMessageCreate, current_user: dict = Depends(get_current_user)):
+    """Send a chat message to a device"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    chat_message = DeviceChatMessage(
+        device_id=device_id,
+        device_name=device.get('name'),
+        client_id=device.get('client_id'),
+        client_name=device.get('client_name'),
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        message=message_data.message,
+        message_type=message_data.message_type,
+        direction="outbound"
+    )
+    doc = chat_message.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.device_chat.insert_one(doc)
+    
+    return chat_message
+
+@api_router.post("/devices/{device_id}/chat/command")
+async def send_device_command(device_id: str, command: str, current_user: dict = Depends(get_current_user)):
+    """Send a remote command to a device"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    # Create command message
+    chat_message = DeviceChatMessage(
+        device_id=device_id,
+        device_name=device.get('name'),
+        client_id=device.get('client_id'),
+        client_name=device.get('client_name'),
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        message=command,
+        message_type="command",
+        direction="outbound",
+        metadata={"command": command, "executed": False}
+    )
+    doc = chat_message.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.device_chat.insert_one(doc)
+    
+    # Simulate command execution response (in real implementation, this would be handled by the agent)
+    response_message = DeviceChatMessage(
+        device_id=device_id,
+        device_name=device.get('name'),
+        client_id=device.get('client_id'),
+        client_name=device.get('client_name'),
+        user_id="system",
+        user_name="System",
+        message=f"Command '{command}' queued for execution. Awaiting agent response.",
+        message_type="system",
+        direction="inbound",
+        metadata={"command": command, "status": "queued"}
+    )
+    resp_doc = response_message.model_dump()
+    resp_doc['created_at'] = resp_doc['created_at'].isoformat()
+    await db.device_chat.insert_one(resp_doc)
+    
+    return {"message": "Command sent", "command_id": chat_message.id}
+
+@api_router.post("/devices/{device_id}/chat/file")
+async def send_device_file(device_id: str, filename: str, file_url: str, current_user: dict = Depends(get_current_user)):
+    """Send a file to a device"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    chat_message = DeviceChatMessage(
+        device_id=device_id,
+        device_name=device.get('name'),
+        client_id=device.get('client_id'),
+        client_name=device.get('client_name'),
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        message=f"File sent: {filename}",
+        message_type="file",
+        direction="outbound",
+        metadata={"filename": filename, "file_url": file_url}
+    )
+    doc = chat_message.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.device_chat.insert_one(doc)
+    
+    return chat_message
+
+@api_router.delete("/devices/{device_id}/chat")
+async def clear_device_chat(device_id: str, current_user: dict = Depends(get_current_user)):
+    """Clear chat history for a device"""
+    result = await db.device_chat.delete_many({"device_id": device_id})
+    return {"message": f"Cleared {result.deleted_count} messages"}
+
 # ============== SEED DATA ==============
 
 @api_router.post("/seed")
