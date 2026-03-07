@@ -1,34 +1,190 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* NexusOps Custom Styles */
+
+/* Sidebar styles */
+.sidebar {
+    transition: width 0.3s ease;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.sidebar-collapsed {
+    width: 72px;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
+.sidebar-expanded {
+    width: 260px;
+}
+
+/* Table row hover effect */
+.table-row-hover {
+    transition: background-color 0.15s ease;
+}
+
+.table-row-hover:hover {
+    background-color: hsl(var(--muted) / 0.5);
+}
+
+/* Card hover lift effect */
+.card-hover {
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--primary) / 0.5);
+}
+
+/* Status badge styles */
+.status-badge {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
 }
 
-.App-link {
-    color: #61dafb;
+.status-online {
+    background-color: hsl(142 71% 45% / 0.15);
+    color: hsl(142 71% 45%);
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.status-offline {
+    background-color: hsl(0 84% 60% / 0.15);
+    color: hsl(0 84% 60%);
+}
+
+.status-warning {
+    background-color: hsl(48 96% 53% / 0.15);
+    color: hsl(48 96% 53%);
+}
+
+/* Priority badge styles */
+.priority-critical {
+    background-color: hsl(0 84% 60% / 0.15);
+    color: hsl(0 84% 60%);
+    border: 1px solid hsl(0 84% 60% / 0.3);
+}
+
+.priority-high {
+    background-color: hsl(25 95% 53% / 0.15);
+    color: hsl(25 95% 53%);
+    border: 1px solid hsl(25 95% 53% / 0.3);
+}
+
+.priority-medium {
+    background-color: hsl(48 96% 53% / 0.15);
+    color: hsl(48 96% 53%);
+    border: 1px solid hsl(48 96% 53% / 0.3);
+}
+
+.priority-low {
+    background-color: hsl(142 71% 45% / 0.15);
+    color: hsl(142 71% 45%);
+    border: 1px solid hsl(142 71% 45% / 0.3);
+}
+
+/* SLA countdown styles */
+.sla-critical {
+    color: hsl(0 84% 60%);
+}
+
+.sla-warning {
+    color: hsl(48 96% 53%);
+}
+
+.sla-safe {
+    color: hsl(142 71% 45%);
+}
+
+/* Metric card icon backgrounds */
+.metric-icon-blue {
+    background: linear-gradient(135deg, hsl(217 91% 60% / 0.2), hsl(217 91% 60% / 0.05));
+}
+
+.metric-icon-green {
+    background: linear-gradient(135deg, hsl(142 71% 45% / 0.2), hsl(142 71% 45% / 0.05));
+}
+
+.metric-icon-red {
+    background: linear-gradient(135deg, hsl(0 84% 60% / 0.2), hsl(0 84% 60% / 0.05));
+}
+
+.metric-icon-yellow {
+    background: linear-gradient(135deg, hsl(48 96% 53% / 0.2), hsl(48 96% 53% / 0.05));
+}
+
+/* Login page styles */
+.login-bg {
+    background-image: url('https://images.unsplash.com/photo-1680992046626-418f7e910589?crop=entropy&cs=srgb&fm=jpg&q=85');
+    background-size: cover;
+    background-position: center;
+}
+
+.login-overlay {
+    background: linear-gradient(to bottom right, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.85));
+}
+
+/* Animated gradient border */
+@keyframes gradient-rotate {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+.animated-border {
+    background: linear-gradient(90deg, hsl(217 91% 60%), hsl(187 100% 42%), hsl(217 91% 60%));
+    background-size: 200% 200%;
+    animation: gradient-rotate 3s ease infinite;
+}
+
+/* Chart tooltip */
+.recharts-tooltip-wrapper {
+    outline: none !important;
+}
+
+.recharts-default-tooltip {
+    background-color: hsl(217 33% 17%) !important;
+    border: 1px solid hsl(217 33% 25%) !important;
+    border-radius: 0.5rem !important;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3) !important;
+}
+
+/* Scrollbar for data tables */
+.data-table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.data-table-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.data-table-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.data-table-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 4px;
+}
+
+.data-table-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground));
+}
+
+/* Loading skeleton animation */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+    background: linear-gradient(90deg, 
+        hsl(var(--muted)) 0%, 
+        hsl(var(--muted) / 0.5) 50%, 
+        hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
 }
