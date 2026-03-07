@@ -25,6 +25,9 @@ import SettingsPage from "@/pages/SettingsPage";
 import LeadsPage from "@/pages/LeadsPage";
 import AcronisPage from "@/pages/AcronisPage";
 import EmailPage from "@/pages/EmailPage";
+import ScriptingPage from "@/pages/ScriptingPage";
+import ITDocumentationPage from "@/pages/ITDocumentationPage";
+import ProjectsPage from "@/pages/ProjectsPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
