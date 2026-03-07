@@ -17,6 +17,9 @@ import InvoicesPage from "@/pages/InvoicesPage";
 import TimeTrackingPage from "@/pages/TimeTrackingPage";
 import KnowledgeBasePage from "@/pages/KnowledgeBasePage";
 import Pax8Page from "@/pages/Pax8Page";
+import DomotzPage from "@/pages/DomotzPage";
+import RemoteAccessPage from "@/pages/RemoteAccessPage";
+import DeviceChatPage from "@/pages/DeviceChatPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SettingsPage from "@/pages/SettingsPage";
 
@@ -249,6 +252,36 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <Pax8Page />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/domotz"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DomotzPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/remote-access"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RemoteAccessPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/devices/:deviceId/chat"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DeviceChatPage />
                 </MainLayout>
               </ProtectedRoute>
             }
