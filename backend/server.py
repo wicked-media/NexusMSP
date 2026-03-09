@@ -516,6 +516,168 @@ class Proposal(BaseModel):
     responded_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# ============== PROXMOX INTEGRATION MODELS ==============
+
+class ProxmoxServer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    host: str
+    port: int = 8006
+    username: str
+    token_name: Optional[str] = None
+    token_value: Optional[str] = None  # API token
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    node_name: Optional[str] = None
+    status: str = "unknown"  # online, offline, unknown
+    last_check: Optional[datetime] = None
+    ssl_verify: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ProxmoxVM(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    server_id: str
+    server_name: Optional[str] = None
+    vmid: int
+    name: str
+    vm_type: str = "qemu"  # qemu, lxc
+    status: str = "unknown"  # running, stopped, paused, unknown
+    node: str
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0
+    memory_total: int = 0
+    disk_usage: float = 0.0
+    uptime: int = 0
+    ip_address: Optional[str] = None
+    os_type: Optional[str] = None
+    last_backup: Optional[datetime] = None
+    backup_status: str = "unknown"
+    client_id: Optional[str] = None
+    last_sync: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== WARRANTY & LICENSE TRACKING ==============
+
+class WarrantyEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    device_id: Optional[str] = None
+    device_name: Optional[str] = None
+    asset_id: Optional[str] = None
+    asset_name: Optional[str] = None
+    vendor: str
+    product_name: str
+    serial_number: Optional[str] = None
+    purchase_date: Optional[str] = None
+    warranty_start: str
+    warranty_end: str
+    warranty_type: str = "standard"  # standard, extended, premium
+    coverage_details: Optional[str] = None
+    support_phone: Optional[str] = None
+    support_url: Optional[str] = None
+    status: str = "active"  # active, expiring_soon, expired
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class SoftwareLicense(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    software_name: str
+    vendor: str
+    license_key: Optional[str] = None
+    license_type: str = "perpetual"  # perpetual, subscription, volume, oem
+    seats: int = 1
+    seats_used: int = 0
+    purchase_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    renewal_cost: float = 0.0
+    assigned_devices: List[str] = []
+    assigned_users: List[str] = []
+    status: str = "active"  # active, expiring_soon, expired
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== DOMAIN & SSL MONITORING ==============
+
+class DomainEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    domain_name: str
+    registrar: Optional[str] = None
+    registration_date: Optional[str] = None
+    expiry_date: str
+    auto_renew: bool = True
+    dns_provider: Optional[str] = None
+    nameservers: List[str] = []
+    status: str = "active"  # active, expiring_soon, expired
+    notes: Optional[str] = None
+    last_check: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class SSLCertificate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    domain: str
+    issuer: Optional[str] = None
+    issued_date: Optional[str] = None
+    expiry_date: str
+    certificate_type: str = "DV"  # DV, OV, EV, Wildcard
+    auto_renew: bool = False
+    provider: Optional[str] = None
+    status: str = "valid"  # valid, expiring_soon, expired, invalid
+    last_check: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== VENDOR MANAGEMENT ==============
+
+class Vendor(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    category: str = "general"  # hardware, software, cloud, telecom, security, other
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    address: Optional[str] = None
+    account_number: Optional[str] = None
+    account_manager: Optional[str] = None
+    support_phone: Optional[str] = None
+    support_email: Optional[str] = None
+    support_portal: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== NETWORK MONITORING ==============
+
+class NetworkScan(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: Optional[str] = None
+    site_id: Optional[str] = None
+    site_name: Optional[str] = None
+    subnet: str
+    scan_type: str = "ping"  # ping, port, full
+    discovered_hosts: int = 0
+    new_devices: int = 0
+    status: str = "completed"  # pending, running, completed, failed
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    results: List[Dict[str, Any]] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 # ============== TICKET EMAIL MODELS ==============
 
 class TicketEmailCreate(BaseModel):
