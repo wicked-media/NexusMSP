@@ -27,7 +27,9 @@ import {
   FolderKanban,
   Server,
   CalendarClock,
-  Phone
+  Phone,
+  UserCog,
+  CalendarDays
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -41,6 +43,8 @@ const navGroups = [
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
+      { path: "/technicians", icon: UserCog, label: "Technicians" },
+      { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
     ]
   },
   {

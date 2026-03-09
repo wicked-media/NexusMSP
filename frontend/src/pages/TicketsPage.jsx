@@ -74,22 +74,25 @@ export default function TicketsPage() {
   const [mergeIds, setMergeIds] = useState([]);
   const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true });
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
+  const [noteCounts, setNoteCounts] = useState({});
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
         axios.get(`${API}/canned-responses`, { headers }),
+        axios.get(`${API}/tickets/note-counts`, { headers }),
       ]);
       setTickets(tRes.data);
       setClients(cRes.data);
       setUsers(uRes.data);
       setCannedResponses(crRes.data);
+      setNoteCounts(ncRes.data);
     } catch { toast.error("Failed to fetch tickets"); }
     finally { setLoading(false); }
   }, [token]);
@@ -647,11 +650,12 @@ export default function TicketsPage() {
             </TableHeader>
             <TableBody>
               {filteredTickets.map(ticket => (
-                <TableRow key={ticket.id} className="cursor-pointer hover:bg-muted/50" onClick={() => fetchTicketDetail(ticket)} data-testid={`ticket-row-${ticket.id}`}>
+                <TableRow key={ticket.id} className={`cursor-pointer hover:bg-muted/50 ${noteCounts[ticket.id] === 0 && ticket.status !== 'closed' && ticket.status !== 'resolved' ? 'bg-red-500/5' : ''}`} onClick={() => fetchTicketDetail(ticket)} data-testid={`ticket-row-${ticket.id}`}>
                   <TableCell className="font-mono text-sm">
                     <div className="flex items-center gap-1">
                       {ticket.parent_id && <GitBranch className="w-3 h-3 text-indigo-400" />}
                       {ticket.merged_into && <Merge className="w-3 h-3 text-red-400" />}
+                      {noteCounts[ticket.id] === 0 && ticket.status !== 'closed' && ticket.status !== 'resolved' && <AlertCircle className="w-3 h-3 text-red-500" />}
                       {ticket.ticket_number}
                     </div>
                   </TableCell>

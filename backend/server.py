@@ -59,6 +59,9 @@ class User(BaseModel):
     avatar: Optional[str] = None
     hourly_rate: float = 75.0
     email_signature: Optional[str] = None
+    phone: Optional[str] = None
+    specialties: List[str] = []
+    is_active: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ClientCreate(BaseModel):
@@ -2898,6 +2901,178 @@ async def get_device_analytics(current_user: dict = Depends(get_current_user)):
 async def get_users(current_user: dict = Depends(get_current_user)):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
     return users
+
+# ============== TECHNICIAN MANAGEMENT ENDPOINTS ==============
+
+@api_router.post("/technicians")
+async def create_technician(tech_data: dict, current_user: dict = Depends(get_current_user)):
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"])
+    user = User(
+        email=tech_data["email"],
+        name=tech_data["name"],
+        role=tech_data.get("role", "technician"),
+        hourly_rate=float(tech_data.get("hourly_rate", 75)),
+        phone=tech_data.get("phone", ""),
+        specialties=tech_data.get("specialties", []),
+        is_active=tech_data.get("is_active", True),
+    )
+    user_dict = user.model_dump()
+    user_dict["password_hash"] = pwd_context.hash(tech_data.get("password", "nexusops123"))
+    user_dict["created_at"] = user_dict["created_at"].isoformat()
+    await db.users.insert_one(user_dict)
+    user_dict.pop("_id", None)
+    user_dict.pop("password_hash", None)
+    return user_dict
+
+@api_router.put("/technicians/{tech_id}")
+async def update_technician(tech_id: str, tech_data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "is_active", "email_signature", "avatar"}
+    update = {k: v for k, v in tech_data.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields")
+    await db.users.update_one({"id": tech_id}, {"$set": update})
+    return {"message": "Technician updated"}
+
+@api_router.delete("/technicians/{tech_id}")
+async def delete_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
+    await db.users.update_one({"id": tech_id}, {"$set": {"is_active": False}})
+    return {"message": "Technician deactivated"}
+
+@api_router.get("/technicians/{tech_id}/dashboard")
+async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(get_current_user)):
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    all_tickets = await db.tickets.find({"assigned_to": tech_id}, {"_id": 0}).to_list(5000)
+    open_tickets = [t for t in all_tickets if t.get("status") in ("open", "in_progress")]
+    overdue_tickets = []
+    no_notes_tickets = []
+
+    for t in open_tickets:
+        sla = t.get("sla_due")
+        if sla:
+            if isinstance(sla, str):
+                try:
+                    sla_dt = datetime.fromisoformat(sla.replace("Z", "+00:00"))
+                except:
+                    sla_dt = None
+            else:
+                sla_dt = sla
+            if sla_dt and sla_dt < datetime.now(timezone.utc):
+                overdue_tickets.append(t)
+
+        note_count = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+        if note_count == 0:
+            no_notes_tickets.append(t)
+
+    time_entries = await db.ticket_time_entries.find({"user_id": tech_id}, {"_id": 0}).to_list(5000)
+    total_min = sum(e.get("minutes", 0) for e in time_entries)
+    billable_min = sum(e.get("minutes", 0) for e in time_entries if e.get("billable"))
+
+    week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = week_start - timedelta(days=week_start.weekday())
+    week_entries = [e for e in time_entries if e.get("created_at", "") >= week_start.isoformat()]
+    week_min = sum(e.get("minutes", 0) for e in week_entries)
+
+    resolved = len([t for t in all_tickets if t.get("status") in ("resolved", "closed")])
+
+    return {
+        "technician": user,
+        "stats": {
+            "total_assigned": len(all_tickets),
+            "open_tickets": len(open_tickets),
+            "overdue_tickets": len(overdue_tickets),
+            "no_notes_tickets": len(no_notes_tickets),
+            "resolved_tickets": resolved,
+            "total_hours": round(total_min / 60, 1),
+            "billable_hours": round(billable_min / 60, 1),
+            "hours_this_week": round(week_min / 60, 1),
+        },
+        "open_tickets": open_tickets,
+        "overdue_tickets": overdue_tickets,
+        "no_notes_tickets": no_notes_tickets,
+    }
+
+@api_router.get("/technicians/overview")
+async def get_technicians_overview(current_user: dict = Depends(get_current_user)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    tickets = await db.tickets.find({}, {"_id": 0}).to_list(10000)
+    result = []
+    for u in users:
+        uid = u["id"]
+        assigned = [t for t in tickets if t.get("assigned_to") == uid]
+        open_t = [t for t in assigned if t.get("status") in ("open", "in_progress")]
+        note_counts = {}
+        for t in open_t:
+            nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+            note_counts[t["id"]] = nc
+        no_notes = sum(1 for tid, nc in note_counts.items() if nc == 0)
+        overdue = 0
+        for t in open_t:
+            sla = t.get("sla_due")
+            if sla:
+                try:
+                    sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
+                    if sla_dt and sla_dt < datetime.now(timezone.utc):
+                        overdue += 1
+                except:
+                    pass
+        week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = week_start - timedelta(days=week_start.weekday())
+        time_entries = await db.ticket_time_entries.find({"user_id": uid, "created_at": {"$gte": week_start.isoformat()}}, {"_id": 0}).to_list(5000)
+        week_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
+
+        result.append({
+            **{k: v for k, v in u.items() if k != "password_hash"},
+            "assigned_count": len(assigned),
+            "open_count": len(open_t),
+            "no_notes_count": no_notes,
+            "overdue_count": overdue,
+            "resolved_count": len([t for t in assigned if t.get("status") in ("resolved", "closed")]),
+            "hours_this_week": week_hours,
+        })
+    return result
+
+# ============== SCHEDULING ENDPOINTS ==============
+
+@api_router.get("/schedule")
+async def get_schedule(current_user: dict = Depends(get_current_user)):
+    entries = await db.schedule_entries.find({}, {"_id": 0}).to_list(5000)
+    return entries
+
+@api_router.post("/schedule")
+async def create_schedule_entry(entry_data: dict, current_user: dict = Depends(get_current_user)):
+    entry = {
+        "id": str(uuid.uuid4()),
+        "ticket_id": entry_data.get("ticket_id"),
+        "ticket_number": entry_data.get("ticket_number", ""),
+        "ticket_title": entry_data.get("ticket_title", ""),
+        "technician_id": entry_data.get("technician_id"),
+        "technician_name": entry_data.get("technician_name", ""),
+        "start": entry_data.get("start"),
+        "end": entry_data.get("end"),
+        "notes": entry_data.get("notes", ""),
+        "color": entry_data.get("color", "#3B82F6"),
+        "created_by": current_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.schedule_entries.insert_one(entry)
+    entry.pop("_id", None)
+    return entry
+
+@api_router.put("/schedule/{entry_id}")
+async def update_schedule_entry(entry_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"start", "end", "technician_id", "technician_name", "notes", "color"}
+    update = {k: v for k, v in entry_data.items() if k in allowed}
+    await db.schedule_entries.update_one({"id": entry_id}, {"$set": update})
+    return {"message": "Schedule entry updated"}
+
+@api_router.delete("/schedule/{entry_id}")
+async def delete_schedule_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
+    await db.schedule_entries.delete_one({"id": entry_id})
+    return {"message": "Schedule entry deleted"}
 
 # ============== DOMOTZ ENDPOINTS ==============
 

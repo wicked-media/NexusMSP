@@ -31,6 +31,8 @@ import ProjectsPage from "@/pages/ProjectsPage";
 import ProxmoxPage from "@/pages/ProxmoxPage";
 import ExpiryTrackerPage from "@/pages/ExpiryTrackerPage";
 import YeastarPage from "@/pages/YeastarPage";
+import TechniciansPage from "@/pages/TechniciansPage";
+import SchedulingPage from "@/pages/SchedulingPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -401,6 +403,26 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <YeastarPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/technicians"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TechniciansPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/scheduling"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SchedulingPage />
                 </MainLayout>
               </ProtectedRoute>
             }
