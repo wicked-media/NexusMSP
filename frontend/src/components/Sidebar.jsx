@@ -132,11 +132,11 @@ export const Sidebar = ({ collapsed, onToggle }) => {
         <ScrollArea className="flex-1">
           <nav className="py-3 px-3">
             {navGroups.map((group, groupIndex) => (
-              <div key={group.title} className={groupIndex > 0 ? 'mt-4' : ''}>
+              <div key={group.title} className={groupIndex > 0 ? 'mt-5' : ''}>
                 {/* Group Title */}
                 {!collapsed && (
                   <div className="px-3 mb-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-blue-400/90">
                       {group.title}
                     </span>
                   </div>
@@ -146,7 +146,7 @@ export const Sidebar = ({ collapsed, onToggle }) => {
                 )}
                 
                 {/* Group Items */}
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   {group.items.map((item) => (
                     <Tooltip key={item.path}>
                       <TooltipTrigger asChild>
@@ -154,15 +154,15 @@ export const Sidebar = ({ collapsed, onToggle }) => {
                           to={item.path}
                           end={item.path === "/"}
                           className={({ isActive }) =>
-                            `flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-150 ${
+                            `group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
                               isActive
-                                ? 'bg-primary text-primary-foreground shadow-sm'
-                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
+                                : 'text-slate-400 hover:bg-slate-700/50 hover:text-white hover:translate-x-1'
                             } ${collapsed ? 'justify-center' : ''}`
                           }
                           data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                         >
-                          <item.icon className={`h-[18px] w-[18px] flex-shrink-0`} strokeWidth={1.75} />
+                          <item.icon className={`h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 group-hover:scale-110`} strokeWidth={1.75} />
                           {!collapsed && (
                             <span className="text-[13px] font-medium">{item.label}</span>
                           )}
