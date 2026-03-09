@@ -28,6 +28,8 @@ import EmailPage from "@/pages/EmailPage";
 import ScriptingPage from "@/pages/ScriptingPage";
 import ITDocumentationPage from "@/pages/ITDocumentationPage";
 import ProjectsPage from "@/pages/ProjectsPage";
+import ProxmoxPage from "@/pages/ProxmoxPage";
+import ExpiryTrackerPage from "@/pages/ExpiryTrackerPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
