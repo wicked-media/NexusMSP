@@ -29,28 +29,60 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
-const navItems = [
-  { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { path: "/tickets", icon: Ticket, label: "Tickets" },
-  { path: "/devices", icon: Monitor, label: "Devices" },
-  { path: "/assets", icon: Package, label: "Assets" },
-  { path: "/clients", icon: Users, label: "Clients" },
-  { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
-  { path: "/projects", icon: FolderKanban, label: "Projects" },
-  { path: "/contracts", icon: FileText, label: "Contracts" },
-  { path: "/invoices", icon: Receipt, label: "Invoices" },
-  { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
-  { path: "/email", icon: Mail, label: "Email" },
-  { path: "/scripting", icon: Terminal, label: "Scripting" },
-  { path: "/documentation", icon: Key, label: "IT Docs" },
-  { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
-  { path: "/domotz", icon: Network, label: "Domotz" },
-  { path: "/acronis", icon: Shield, label: "Acronis" },
-  { path: "/remote-access", icon: Laptop, label: "Remote Access" },
-  { path: "/pax8", icon: Cloud, label: "Pax8" },
-  { path: "/reports", icon: BarChart3, label: "Reports" },
-  { path: "/settings", icon: Settings, label: "Settings" },
+// Grouped navigation for better organization
+const navGroups = [
+  {
+    title: "Main",
+    items: [
+      { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+      { path: "/tickets", icon: Ticket, label: "Tickets" },
+    ]
+  },
+  {
+    title: "Infrastructure",
+    items: [
+      { path: "/devices", icon: Monitor, label: "Devices" },
+      { path: "/assets", icon: Package, label: "Assets" },
+      { path: "/scripting", icon: Terminal, label: "Scripting" },
+      { path: "/remote-access", icon: Laptop, label: "Remote Access" },
+    ]
+  },
+  {
+    title: "Business",
+    items: [
+      { path: "/clients", icon: Users, label: "Clients" },
+      { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
+      { path: "/projects", icon: FolderKanban, label: "Projects" },
+      { path: "/contracts", icon: FileText, label: "Contracts" },
+      { path: "/invoices", icon: Receipt, label: "Invoices" },
+      { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
+    ]
+  },
+  {
+    title: "Communication",
+    items: [
+      { path: "/email", icon: Mail, label: "Email" },
+      { path: "/documentation", icon: Key, label: "IT Docs" },
+      { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
+    ]
+  },
+  {
+    title: "Integrations",
+    items: [
+      { path: "/domotz", icon: Network, label: "Domotz" },
+      { path: "/acronis", icon: Shield, label: "Acronis" },
+      { path: "/pax8", icon: Cloud, label: "Pax8" },
+    ]
+  },
+  {
+    title: "System",
+    items: [
+      { path: "/reports", icon: BarChart3, label: "Reports" },
+      { path: "/settings", icon: Settings, label: "Settings" },
+    ]
+  },
 ];
 
 export const Sidebar = ({ collapsed, onToggle }) => {
