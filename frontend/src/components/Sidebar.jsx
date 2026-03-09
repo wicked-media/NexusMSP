@@ -73,6 +73,7 @@ const navGroups = [
   {
     title: "Integrations",
     items: [
+      { path: "/proxmox", icon: Server, label: "Proxmox" },
       { path: "/domotz", icon: Network, label: "Domotz" },
       { path: "/acronis", icon: Shield, label: "Acronis" },
       { path: "/pax8", icon: Cloud, label: "Pax8" },
@@ -81,6 +82,7 @@ const navGroups = [
   {
     title: "System",
     items: [
+      { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
       { path: "/settings", icon: Settings, label: "Settings" },
     ]
