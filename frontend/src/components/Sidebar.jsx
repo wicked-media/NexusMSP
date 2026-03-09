@@ -24,7 +24,9 @@ import {
   Mail,
   Terminal,
   Key,
-  FolderKanban
+  FolderKanban,
+  Server,
+  CalendarClock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
