@@ -17,7 +17,12 @@ import {
   ArrowDownRight,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  MessageSquare,
+  Mail,
+  Phone,
+  PhoneMissed,
+  Activity
 } from "lucide-react";
 import { 
   AreaChart, 
@@ -31,6 +36,24 @@ import {
   Pie,
   Cell
 } from "recharts";
+import { formatDistanceToNow } from "date-fns";
+
+const activityIcons = {
+  ticket_note: MessageSquare,
+  ticket_email: Mail,
+  ticket_created: Ticket,
+  alert: AlertTriangle,
+  call: Phone,
+  "phone-missed": PhoneMissed,
+};
+
+const activityColors = {
+  ticket_note: "text-indigo-400 bg-indigo-500/10",
+  ticket_email: "text-blue-400 bg-blue-500/10",
+  ticket_created: "text-cyan-400 bg-cyan-500/10",
+  alert: "text-yellow-400 bg-yellow-500/10",
+  call: "text-green-400 bg-green-500/10",
+};
 
 const StatCard = ({ title, value, icon: Icon, trend, trendValue, iconBg, iconColor }) => (
   <Card className="card-hover">
@@ -114,6 +137,7 @@ export default function DashboardPage() {
   const [deviceHealth, setDeviceHealth] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [activityFeed, setActivityFeed] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -121,12 +145,13 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes] = await Promise.all([
+      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
         axios.get(`${API}/dashboard/ticket-trends`, { headers }),
         axios.get(`${API}/dashboard/device-health`, { headers }),
         axios.get(`${API}/alerts?status=active`, { headers }),
-        axios.get(`${API}/tickets?status=open`, { headers })
+        axios.get(`${API}/tickets?status=open`, { headers }),
+        axios.get(`${API}/dashboard/activity-feed?limit=20`, { headers })
       ]);
       
       setStats(statsRes.data);
@@ -134,6 +159,7 @@ export default function DashboardPage() {
       setDeviceHealth(healthRes.data);
       setAlerts(alertsRes.data);
       setTickets(ticketsRes.data.slice(0, 5));
+      setActivityFeed(activityRes.data);
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
     } finally {
@@ -390,6 +416,51 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Activity Timeline */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-lg font-semibold flex items-center gap-2">
+            <Activity className="w-5 h-5 text-cyan-500" />
+            Activity Timeline
+          </CardTitle>
+          <Badge variant="outline" className="text-muted-foreground">Live Feed</Badge>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[360px]">
+            <div className="space-y-1">
+              {activityFeed.length > 0 ? activityFeed.map((item) => {
+                const IconComp = activityIcons[item.type] || activityIcons[item.icon] || Activity;
+                const colorClass = activityColors[item.type] || "text-gray-400 bg-gray-500/10";
+                return (
+                  <div key={item.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 transition-all border border-transparent hover:border-border" data-testid={`activity-${item.id}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${colorClass}`}>
+                      <IconComp className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-tight">{item.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.description}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-xs text-muted-foreground">{item.user}</p>
+                      {item.timestamp && (
+                        <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                          {formatDistanceToNow(new Date(item.timestamp), { addSuffix: true })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>No recent activity</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
     </div>
   );
 }

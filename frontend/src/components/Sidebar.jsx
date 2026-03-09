@@ -142,7 +142,7 @@ export const Sidebar = ({ collapsed, onToggle }) => {
                 {/* Group Title */}
                 {!collapsed && (
                   <div className="px-3 mb-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-widest text-blue-400/90">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-cyan-400">
                       {group.title}
                     </span>
                   </div>
@@ -163,7 +163,7 @@ export const Sidebar = ({ collapsed, onToggle }) => {
                             `group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
                               isActive
                                 ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
-                                : 'text-slate-400 hover:bg-slate-700/50 hover:text-white hover:translate-x-1'
+                                : 'text-slate-200 hover:bg-slate-700/60 hover:text-white hover:translate-x-1'
                             } ${collapsed ? 'justify-center' : ''}`
                           }
                           data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
