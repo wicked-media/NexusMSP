@@ -678,6 +678,64 @@ class NetworkScan(BaseModel):
     results: List[Dict[str, Any]] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+# ============== YEASTAR PBX MODELS ==============
+
+class YeastarServer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    host: str
+    port: int = 443
+    api_key: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    model: Optional[str] = None  # P550, P560, P570, S20, S50, S100, etc.
+    firmware_version: Optional[str] = None
+    status: str = "unknown"  # online, offline, unknown
+    last_check: Optional[datetime] = None
+    extensions_count: int = 0
+    trunks_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class YeastarExtension(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    server_id: str
+    server_name: Optional[str] = None
+    extension_number: str
+    name: str
+    email: Optional[str] = None
+    status: str = "unknown"  # registered, unregistered, ringing, in_call, dnd
+    device_type: Optional[str] = None  # IP Phone, Softphone, WebRTC
+    ip_address: Optional[str] = None
+    last_call: Optional[datetime] = None
+    call_duration_today: int = 0  # seconds
+    client_id: Optional[str] = None
+    last_sync: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class YeastarCallLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    server_id: str
+    call_id: Optional[str] = None
+    caller: str
+    caller_name: Optional[str] = None
+    callee: str
+    callee_name: Optional[str] = None
+    direction: str = "inbound"  # inbound, outbound, internal
+    status: str = "answered"  # answered, missed, voicemail, busy, failed
+    start_time: datetime
+    answer_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    duration: int = 0  # seconds
+    recording_url: Optional[str] = None
+    trunk_name: Optional[str] = None
+    client_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 # ============== TICKET EMAIL MODELS ==============
 
 class TicketEmailCreate(BaseModel):
