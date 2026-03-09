@@ -169,6 +169,8 @@ export default function ProjectsPage() {
       await axios.put(`${API}/projects/${selectedProject.id}/tasks/${taskId}`, { status: newStatus }, { headers });
       toast.success("Task updated");
       fetchProjectTasks(selectedProject.id);
+      // Also refresh projects to update task counts in the list
+      fetchData();
     } catch (error) {
       toast.error("Failed to update task");
     }
