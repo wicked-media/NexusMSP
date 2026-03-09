@@ -27,9 +27,9 @@ import {
   FolderKanban,
   Server,
   CalendarClock,
-  Phone,
   UserCog,
-  CalendarDays
+  CalendarDays,
+  ShoppingCart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -61,6 +61,8 @@ const navGroups = [
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
+      { path: "/products", icon: Package, label: "Products" },
+      { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
@@ -78,7 +80,6 @@ const navGroups = [
   {
     title: "Integrations",
     items: [
-      { path: "/yeastar", icon: Phone, label: "Yeastar PBX" },
       { path: "/proxmox", icon: Server, label: "Proxmox" },
       { path: "/domotz", icon: Network, label: "Domotz" },
       { path: "/acronis", icon: Shield, label: "Acronis" },

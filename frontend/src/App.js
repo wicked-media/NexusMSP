@@ -30,9 +30,10 @@ import ITDocumentationPage from "@/pages/ITDocumentationPage";
 import ProjectsPage from "@/pages/ProjectsPage";
 import ProxmoxPage from "@/pages/ProxmoxPage";
 import ExpiryTrackerPage from "@/pages/ExpiryTrackerPage";
-import YeastarPage from "@/pages/YeastarPage";
 import TechniciansPage from "@/pages/TechniciansPage";
 import SchedulingPage from "@/pages/SchedulingPage";
+import ProductsPage from "@/pages/ProductsPage";
+import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -398,11 +399,21 @@ function App() {
             }
           />
           <Route
-            path="/yeastar"
+            path="/products"
             element={
               <ProtectedRoute>
                 <MainLayout>
-                  <YeastarPage />
+                  <ProductsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchase-orders"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <PurchaseOrdersPage />
                 </MainLayout>
               </ProtectedRoute>
             }

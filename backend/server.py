@@ -2904,6 +2904,46 @@ async def get_users(current_user: dict = Depends(get_current_user)):
 
 # ============== TECHNICIAN MANAGEMENT ENDPOINTS ==============
 
+@api_router.get("/technicians/overview")
+async def get_technicians_overview(current_user: dict = Depends(get_current_user)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    tickets = await db.tickets.find({}, {"_id": 0}).to_list(10000)
+    result = []
+    for u in users:
+        uid = u["id"]
+        assigned = [t for t in tickets if t.get("assigned_to") == uid]
+        open_t = [t for t in assigned if t.get("status") in ("open", "in_progress")]
+        note_counts = {}
+        for t in open_t:
+            nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+            note_counts[t["id"]] = nc
+        no_notes = sum(1 for tid, nc in note_counts.items() if nc == 0)
+        overdue = 0
+        for t in open_t:
+            sla = t.get("sla_due")
+            if sla:
+                try:
+                    sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
+                    if sla_dt and sla_dt < datetime.now(timezone.utc):
+                        overdue += 1
+                except:
+                    pass
+        week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = week_start - timedelta(days=week_start.weekday())
+        time_entries = await db.ticket_time_entries.find({"user_id": uid, "created_at": {"$gte": week_start.isoformat()}}, {"_id": 0}).to_list(5000)
+        week_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
+
+        result.append({
+            **{k: v for k, v in u.items() if k != "password_hash"},
+            "assigned_count": len(assigned),
+            "open_count": len(open_t),
+            "no_notes_count": no_notes,
+            "overdue_count": overdue,
+            "resolved_count": len([t for t in assigned if t.get("status") in ("resolved", "closed")]),
+            "hours_this_week": week_hours,
+        })
+    return result
+
 @api_router.post("/technicians")
 async def create_technician(tech_data: dict, current_user: dict = Depends(get_current_user)):
     from passlib.context import CryptContext
@@ -2995,46 +3035,6 @@ async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(ge
         "no_notes_tickets": no_notes_tickets,
     }
 
-@api_router.get("/technicians/overview")
-async def get_technicians_overview(current_user: dict = Depends(get_current_user)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(10000)
-    result = []
-    for u in users:
-        uid = u["id"]
-        assigned = [t for t in tickets if t.get("assigned_to") == uid]
-        open_t = [t for t in assigned if t.get("status") in ("open", "in_progress")]
-        note_counts = {}
-        for t in open_t:
-            nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
-            note_counts[t["id"]] = nc
-        no_notes = sum(1 for tid, nc in note_counts.items() if nc == 0)
-        overdue = 0
-        for t in open_t:
-            sla = t.get("sla_due")
-            if sla:
-                try:
-                    sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
-                    if sla_dt and sla_dt < datetime.now(timezone.utc):
-                        overdue += 1
-                except:
-                    pass
-        week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = week_start - timedelta(days=week_start.weekday())
-        time_entries = await db.ticket_time_entries.find({"user_id": uid, "created_at": {"$gte": week_start.isoformat()}}, {"_id": 0}).to_list(5000)
-        week_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
-
-        result.append({
-            **{k: v for k, v in u.items() if k != "password_hash"},
-            "assigned_count": len(assigned),
-            "open_count": len(open_t),
-            "no_notes_count": no_notes,
-            "overdue_count": overdue,
-            "resolved_count": len([t for t in assigned if t.get("status") in ("resolved", "closed")]),
-            "hours_this_week": week_hours,
-        })
-    return result
-
 # ============== SCHEDULING ENDPOINTS ==============
 
 @api_router.get("/schedule")
@@ -3073,6 +3073,169 @@ async def update_schedule_entry(entry_id: str, entry_data: dict, current_user: d
 async def delete_schedule_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
     await db.schedule_entries.delete_one({"id": entry_id})
     return {"message": "Schedule entry deleted"}
+
+# ============== PRODUCTS ENDPOINTS ==============
+
+@api_router.get("/products/categories")
+async def get_product_categories(current_user: dict = Depends(get_current_user)):
+    products = await db.products.find({}, {"_id": 0, "category": 1}).to_list(10000)
+    cats = list(set(p.get("category", "General") for p in products))
+    return sorted(cats) if cats else ["Hardware", "Software", "Licensing", "Services", "Accessories"]
+
+@api_router.get("/products")
+async def get_products(category: Optional[str] = None, search: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if category:
+        query["category"] = category
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"sku": {"$regex": search, "$options": "i"}},
+            {"vendor": {"$regex": search, "$options": "i"}},
+        ]
+    products = await db.products.find(query, {"_id": 0}).to_list(5000)
+    return products
+
+@api_router.post("/products")
+async def create_product(data: dict, current_user: dict = Depends(get_current_user)):
+    product = {
+        "id": str(uuid.uuid4()),
+        "name": data.get("name", ""),
+        "sku": data.get("sku", ""),
+        "description": data.get("description", ""),
+        "category": data.get("category", "General"),
+        "vendor": data.get("vendor", ""),
+        "cost_price": float(data.get("cost_price", 0)),
+        "retail_price": float(data.get("retail_price", 0)),
+        "tax_rate": float(data.get("tax_rate", 0)),
+        "quantity_in_stock": int(data.get("quantity_in_stock", 0)),
+        "reorder_level": int(data.get("reorder_level", 5)),
+        "unit": data.get("unit", "each"),
+        "is_active": data.get("is_active", True),
+        "is_taxable": data.get("is_taxable", True),
+        "is_recurring": data.get("is_recurring", False),
+        "billing_cycle": data.get("billing_cycle", "monthly"),
+        "created_by": current_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.products.insert_one(product)
+    product.pop("_id", None)
+    return product
+
+@api_router.get("/products/{product_id}")
+async def get_product(product_id: str, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+@api_router.put("/products/{product_id}")
+async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "sku", "description", "category", "vendor", "cost_price", "retail_price",
+               "tax_rate", "quantity_in_stock", "reorder_level", "unit", "is_active", "is_taxable",
+               "is_recurring", "billing_cycle"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    if "cost_price" in update:
+        update["cost_price"] = float(update["cost_price"])
+    if "retail_price" in update:
+        update["retail_price"] = float(update["retail_price"])
+    if "tax_rate" in update:
+        update["tax_rate"] = float(update["tax_rate"])
+    if "quantity_in_stock" in update:
+        update["quantity_in_stock"] = int(update["quantity_in_stock"])
+    if "reorder_level" in update:
+        update["reorder_level"] = int(update["reorder_level"])
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.products.update_one({"id": product_id}, {"$set": update})
+    return {"message": "Product updated"}
+
+@api_router.delete("/products/{product_id}")
+async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
+    await db.products.delete_one({"id": product_id})
+    return {"message": "Product deleted"}
+
+# ============== PURCHASE ORDER ENDPOINTS ==============
+
+@api_router.get("/purchase-orders/stats")
+async def get_po_stats(current_user: dict = Depends(get_current_user)):
+    all_pos = await db.purchase_orders.find({}, {"_id": 0}).to_list(10000)
+    total = len(all_pos)
+    draft = len([p for p in all_pos if p.get("status") == "draft"])
+    submitted = len([p for p in all_pos if p.get("status") == "submitted"])
+    received = len([p for p in all_pos if p.get("status") == "received"])
+    total_value = sum(p.get("total", 0) for p in all_pos)
+    pending_value = sum(p.get("total", 0) for p in all_pos if p.get("status") in ("draft", "submitted"))
+    return {
+        "total": total, "draft": draft, "submitted": submitted, "received": received,
+        "total_value": round(total_value, 2), "pending_value": round(pending_value, 2)
+    }
+
+@api_router.get("/purchase-orders")
+async def get_purchase_orders(status: Optional[str] = None, search: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if status:
+        query["status"] = status
+    if search:
+        query["$or"] = [
+            {"po_number": {"$regex": search, "$options": "i"}},
+            {"vendor": {"$regex": search, "$options": "i"}},
+        ]
+    pos = await db.purchase_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    return pos
+
+@api_router.post("/purchase-orders")
+async def create_purchase_order(data: dict, current_user: dict = Depends(get_current_user)):
+    count = await db.purchase_orders.count_documents({})
+    po = {
+        "id": str(uuid.uuid4()),
+        "po_number": f"PO-{count + 1001:04d}",
+        "vendor": data.get("vendor", ""),
+        "vendor_contact": data.get("vendor_contact", ""),
+        "vendor_email": data.get("vendor_email", ""),
+        "status": data.get("status", "draft"),
+        "line_items": data.get("line_items", []),
+        "subtotal": float(data.get("subtotal", 0)),
+        "tax": float(data.get("tax", 0)),
+        "shipping": float(data.get("shipping", 0)),
+        "total": float(data.get("total", 0)),
+        "notes": data.get("notes", ""),
+        "ship_to": data.get("ship_to", ""),
+        "expected_delivery": data.get("expected_delivery", ""),
+        "client_id": data.get("client_id", ""),
+        "client_name": data.get("client_name", ""),
+        "created_by": current_user["id"],
+        "created_by_name": current_user.get("name", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.purchase_orders.insert_one(po)
+    po.pop("_id", None)
+    return po
+
+@api_router.get("/purchase-orders/{po_id}")
+async def get_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    return po
+
+@api_router.put("/purchase-orders/{po_id}")
+async def update_purchase_order(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"vendor", "vendor_contact", "vendor_email", "status", "line_items", "subtotal",
+               "tax", "shipping", "total", "notes", "ship_to", "expected_delivery", "client_id", "client_name"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    for f in ("subtotal", "tax", "shipping", "total"):
+        if f in update:
+            update[f] = float(update[f])
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": update})
+    return {"message": "Purchase order updated"}
+
+@api_router.delete("/purchase-orders/{po_id}")
+async def delete_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
+    await db.purchase_orders.delete_one({"id": po_id})
+    return {"message": "Purchase order deleted"}
 
 # ============== DOMOTZ ENDPOINTS ==============
 

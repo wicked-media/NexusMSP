@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,7 @@ import { toast } from "sonner";
 import {
   Plus, Search, Loader2, User, ArrowLeft, Ticket, Clock, AlertTriangle,
   MessageSquare, CheckCircle, XCircle, Mail, Phone, Edit, Wrench, DollarSign,
-  UserCheck, AlertCircle
+  UserCheck, AlertCircle, ExternalLink
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -35,6 +36,7 @@ const statusConfig = {
 
 export default function TechniciansPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [techs, setTechs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -164,7 +166,7 @@ export default function TechniciansPage() {
           </TabsList>
 
           <TabsContent value="open">
-            <TicketTable tickets={open_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} />
+            <TicketTable tickets={open_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} onTicketClick={(t) => navigate(`/tickets?highlight=${t.id}`)} />
           </TabsContent>
           <TabsContent value="no-notes">
             {no_notes_tickets.length > 0 ? (
@@ -173,14 +175,14 @@ export default function TechniciansPage() {
                   <AlertCircle className="w-5 h-5 text-red-500" />
                   <p className="text-sm text-red-400">These tickets have <strong>zero notes</strong>. Staff should add updates to keep clients informed.</p>
                 </div>
-                <TicketTable tickets={no_notes_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} />
+                <TicketTable tickets={no_notes_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} onTicketClick={(t) => navigate(`/tickets?highlight=${t.id}`)} />
               </>
             ) : (
               <div className="text-center py-12"><CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" /><p className="text-green-500 font-medium">All open tickets have notes</p></div>
             )}
           </TabsContent>
           <TabsContent value="overdue">
-            {overdue_tickets.length > 0 ? <TicketTable tickets={overdue_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} /> :
+            {overdue_tickets.length > 0 ? <TicketTable tickets={overdue_tickets} noNotesIds={no_notes_tickets.map(t => t.id)} onTicketClick={(t) => navigate(`/tickets?highlight=${t.id}`)} /> :
               <div className="text-center py-12"><CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" /><p className="text-green-500 font-medium">No overdue tickets</p></div>}
           </TabsContent>
         </Tabs>
@@ -296,7 +298,7 @@ export default function TechniciansPage() {
   );
 }
 
-function TicketTable({ tickets, noNotesIds = [] }) {
+function TicketTable({ tickets, noNotesIds = [], onTicketClick }) {
   if (!tickets.length) return <p className="text-center py-8 text-muted-foreground">No tickets</p>;
   return (
     <Card>
@@ -305,12 +307,13 @@ function TicketTable({ tickets, noNotesIds = [] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead>
-              <TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead><TableHead>Created</TableHead>
+              <TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead>Notes</TableHead><TableHead>Created</TableHead><TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {tickets.map(t => (
-              <TableRow key={t.id} className={noNotesIds.includes(t.id) ? "bg-red-500/5" : ""}>
+              <TableRow key={t.id} className={`cursor-pointer hover:bg-muted/70 transition-colors ${noNotesIds.includes(t.id) ? "bg-red-500/5" : ""}`}
+                onClick={() => onTicketClick?.(t)} data-testid={`ticket-row-${t.id}`}>
                 <TableCell className="font-mono text-sm">{t.ticket_number}</TableCell>
                 <TableCell className="max-w-[200px] truncate">{t.title}</TableCell>
                 <TableCell className="text-sm">{t.client_name}</TableCell>
@@ -324,6 +327,11 @@ function TicketTable({ tickets, noNotesIds = [] }) {
                   )}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{t.created_at && formatDistanceToNow(new Date(t.created_at), { addSuffix: true })}</TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" data-testid={`open-ticket-${t.id}`}>
+                    <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
