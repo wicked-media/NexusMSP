@@ -18,6 +18,7 @@ Build the ultimate RMM/PSA platform with all features MSPs need:
 - Customer Portal
 - Runbooks/Workflows
 - Technician Scheduling
+- Yeastar PBX phone system integration
 - And more...
 
 ## What's Been Implemented
@@ -25,38 +26,41 @@ Build the ultimate RMM/PSA platform with all features MSPs need:
 ### Core Modules (100% Complete)
 | Module | Status | Features |
 |--------|--------|----------|
-| Authentication | ✅ | JWT-based login, registration, roles |
-| Dashboard | ✅ | Stats cards, charts, alerts, recent tickets |
-| Ticketing | ✅ | CRUD, SLA tracking, priorities, email integration |
-| Devices/RMM | ✅ | Monitoring cards, CPU/RAM/Disk metrics, Chat & Remote buttons |
-| Assets | ✅ | Hardware/software inventory tracking |
-| Clients | ✅ | Organization management, MRR tracking |
-| Contracts | ✅ | Service agreements, recurring billing |
-| Line Items | ✅ | Recurring billing items, Pax8 sync |
-| Invoices | ✅ | Invoice generation, status management |
-| Time Tracking | ✅ | Quick timer, billable hours, hourly rates |
-| Knowledge Base | ✅ | Articles, categories, tags, search |
-| Reports | ✅ | Charts, analytics, KPIs |
+| Authentication | Done | JWT-based login, registration, roles |
+| Dashboard | Done | Stats cards, charts, alerts, recent tickets |
+| Ticketing | Done | CRUD, SLA tracking, priorities, **click-into detail view, notes, email compose, email signatures** |
+| Devices/RMM | Done | Monitoring cards, CPU/RAM/Disk metrics, Chat & Remote buttons |
+| Assets | Done | Hardware/software inventory tracking |
+| Clients | Done | Organization management, MRR tracking |
+| Contracts | Done | Service agreements, recurring billing |
+| Line Items | Done | Recurring billing items, Pax8 sync |
+| Invoices | Done | Invoice generation, status management |
+| Time Tracking | Done | Quick timer, billable hours, hourly rates |
+| Knowledge Base | Done | Articles, categories, tags, search |
+| Reports | Done | Charts, analytics, KPIs |
 
 ### New Features (December 2025)
 | Module | Status | Features |
 |--------|--------|----------|
-| Leads/CRM | ✅ | Pipeline, lead tracking, conversion, proposals |
-| Acronis | ✅ | Backup subscription tracking (MOCKED) |
-| Office 365 Email | ✅ | Email composition, ticket emails (MOCKED) |
-| **Scripting** | ✅ | Script library, execution on devices, scheduling |
-| **IT Documentation** | ✅ | Password vault with reveal, documentation pages |
-| **Project Management** | ✅ | Projects, tasks, progress tracking |
-| **Patch Management** | ✅ | Policies, patch approval, dashboard |
-| **Device Groups** | ✅ | Group devices, auto-assign rules |
-| **Policies** | ✅ | Monitoring, security, maintenance policies |
-| **Runbooks** | ✅ | Workflow automation, step execution |
-| **Customer Portal** | ✅ | Portal users, permissions, login |
-| **Audit Logs** | ✅ | Full activity tracking |
-| **Technician Scheduling** | ✅ | Calendar, appointments, on-call rotation |
-| **Custom Fields** | ✅ | Add fields to any entity |
-| **Webhooks** | ✅ | Event notifications to external systems |
-| **Sites/Locations** | ✅ | Multi-site support per client |
+| Leads/CRM | Done | Pipeline, lead tracking, conversion, proposals |
+| Acronis | Done | Backup subscription tracking (MOCKED) |
+| Office 365 Email | Done | Email composition, ticket emails (MOCKED) |
+| Scripting | Done | Script library, execution on devices, scheduling |
+| IT Documentation | Done | Password vault with reveal, documentation pages |
+| Project Management | Done | Projects, tasks, progress tracking |
+| Patch Management | Done | Policies, patch approval, dashboard |
+| Device Groups | Done | Group devices, auto-assign rules |
+| Policies | Done | Monitoring, security, maintenance policies |
+| Runbooks | Done | Workflow automation, step execution |
+| Customer Portal | Done | Portal users, permissions, login |
+| Audit Logs | Done | Full activity tracking |
+| Technician Scheduling | Done | Calendar, appointments, on-call rotation |
+| Custom Fields | Done | Add fields to any entity |
+| Webhooks | Done | Event notifications to external systems |
+| Sites/Locations | Done | Multi-site support per client |
+| **Yeastar PBX** | Done | Extensions, active calls, call logs, system info (MOCKED) |
+| **Ticket Detail View** | Done | Click into tickets, notes, email sending, signatures |
+| **User Email Signatures** | Done | Save/load per-user signatures |
 
 ### Integrations (All MOCKED - Settings pages available)
 | Integration | Settings Page | Features |
@@ -66,6 +70,8 @@ Build the ultimate RMM/PSA platform with all features MSPs need:
 | RustDesk | `/remote-access` | Self-hosted server, API key |
 | Domotz | `/domotz` | API credentials, network monitoring |
 | Pax8 | `/pax8` | OAuth2, subscription sync |
+| Proxmox | `/proxmox` | Server management |
+| **Yeastar PBX** | `/yeastar` | PBX URL, Client ID/Secret, extensions, calls, CDR |
 
 ## Navigation Structure (Grouped Sidebar)
 
@@ -94,74 +100,61 @@ COMMUNICATION
 └── Knowledge Base
 
 INTEGRATIONS
+├── Yeastar PBX
+├── Proxmox
 ├── Domotz
 ├── Acronis
 └── Pax8
 
 SYSTEM
+├── Expiry Tracker
 ├── Reports
 └── Settings
 ```
 
-## API Endpoints (70+ endpoints)
+## API Endpoints (80+ endpoints)
 
 ### Core APIs
 - `/api/auth/*` - Authentication
 - `/api/dashboard/*` - Dashboard stats
 - `/api/clients/*` - Client management
 - `/api/tickets/*` - Ticketing
+- `/api/tickets/{id}/comments` - Ticket notes/comments
+- `/api/tickets/{id}/emails` - Ticket email integration
 - `/api/devices/*` - Device management
 - `/api/assets/*` - Asset inventory
-- `/api/alerts/*` - Alert management
+- `/api/users/{id}` - User update (email signature)
 - `/api/contracts/*` - Contracts
-- `/api/line-items/*` - Billing items
 - `/api/invoices/*` - Invoicing
 - `/api/time-entries/*` - Time tracking
 - `/api/kb-articles/*` - Knowledge base
 
-### New APIs
-- `/api/scripts/*` - Script library and execution
-- `/api/script-executions` - Execution history
-- `/api/scheduled-tasks/*` - Scheduled scripts
-- `/api/patches/*` - Patch management
-- `/api/patch-policies/*` - Patch policies
-- `/api/device-groups/*` - Device grouping
-- `/api/policies/*` - Policies
-- `/api/passwords/*` - Password vault
-- `/api/documentation/*` - IT documentation
-- `/api/runbooks/*` - Runbooks
-- `/api/runbook-executions` - Runbook history
-- `/api/projects/*` - Project management
-- `/api/projects/{id}/tasks/*` - Project tasks
-- `/api/portal/users/*` - Customer portal
-- `/api/portal/login` - Portal authentication
-- `/api/audit-logs` - Audit logs
-- `/api/schedule/*` - Technician scheduling
-- `/api/on-call/*` - On-call rotation
-- `/api/custom-fields/*` - Custom fields
-- `/api/webhooks/*` - Webhooks
-- `/api/sites/*` - Sites/locations
-- `/api/tickets/{id}/emails` - Ticket email integration
-- `/api/leads/*` - CRM leads
-- `/api/proposals/*` - Proposals
-- `/api/crm/dashboard` - CRM analytics
-- `/api/acronis/*` - Acronis integration
-- `/api/office365/*` - Office 365 settings
-- `/api/emails/*` - Email management
+### Yeastar PBX APIs
+- `/api/yeastar/status` - Connection status
+- `/api/yeastar/settings` - Configuration
+- `/api/yeastar/test-connection` - Test PBX connection
+- `/api/yeastar/system-info` - PBX system info
+- `/api/yeastar/extensions` - Extension list & status
+- `/api/yeastar/active-calls` - Live call monitoring
+- `/api/yeastar/call-logs` - Call history/CDR
+- `/api/yeastar/dashboard` - Phone system dashboard
 
 ## Technical Architecture
 
 ```
 /app/
 ├── backend/
-│   └── server.py          # FastAPI (~4000 lines)
+│   └── server.py          # FastAPI (~4900 lines)
 ├── frontend/
 │   └── src/
-│       ├── App.js         # Router with 22 routes
+│       ├── App.js         # Router with 23+ routes
 │       ├── components/
 │       │   ├── Sidebar.jsx  # Grouped navigation
 │       │   └── ui/          # Shadcn components
-│       └── pages/           # 22 pages total
+│       └── pages/           # 25 pages total
+│           ├── TicketsPage.jsx   # Full detail view with notes/emails
+│           ├── YeastarPage.jsx   # NEW - PBX management
+│           └── ...
 └── memory/
     └── PRD.md
 ```
@@ -173,21 +166,23 @@ SYSTEM
 ## Prioritized Backlog
 
 ### P0 - Critical (Next)
+- Refactor server.py into /routers, /models, /services directories
 - Real-time device agent for actual monitoring data
 - Connect actual RustDesk server when credentials provided
-- Implement real Office 365 email send/receive
 
 ### P1 - High Priority
+- Implement real Office 365 email send/receive (requires Azure AD OAuth)
+- Implement real Yeastar PBX connection (requires PBX credentials)
+- Implement real Pax8, Domotz, Acronis integrations
 - Client self-service portal frontend
 - PDF export for invoices and proposals
-- Scheduled invoice generation
-- Multi-tenant support
 
 ### P2 - Medium Priority
 - Custom dashboard widgets
 - API rate limiting
 - Role-based access control (RBAC)
 - SSO/SAML authentication
+- Fix chart console warnings on Reports page
 
 ### P3 - Nice to Have
 - Mobile responsive improvements
@@ -197,6 +192,8 @@ SYSTEM
 - Slack/Teams notifications
 
 ## Test Results
-- Backend: All endpoints working (70+ endpoints)
-- Frontend: All pages functional (22 pages)
-- Last tested: December 2025
+- Backend: All endpoints working (80+ endpoints)
+- Frontend: All pages functional (25 pages)
+- Ticket detail view: Fully tested (notes, emails, signatures)
+- Yeastar PBX: Fully tested (all tabs, settings, MOCKED)
+- Last tested: March 2026, iteration_4
