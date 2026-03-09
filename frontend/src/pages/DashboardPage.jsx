@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +23,15 @@ import {
   Mail,
   Phone,
   PhoneMissed,
-  Activity
+  Activity,
+  Package,
+  ShoppingCart,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  FileText,
+  CreditCard,
+  Zap
 } from "lucide-react";
 import { 
   AreaChart, 
@@ -132,7 +141,9 @@ const RecentTicket = ({ ticket }) => {
 
 export default function DashboardPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
+  const [enhancedStats, setEnhancedStats] = useState(null);
   const [ticketTrends, setTicketTrends] = useState([]);
   const [deviceHealth, setDeviceHealth] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -145,16 +156,18 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes] = await Promise.all([
+      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes, enhancedRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
         axios.get(`${API}/dashboard/ticket-trends`, { headers }),
         axios.get(`${API}/dashboard/device-health`, { headers }),
         axios.get(`${API}/alerts?status=active`, { headers }),
         axios.get(`${API}/tickets?status=open`, { headers }),
-        axios.get(`${API}/dashboard/activity-feed?limit=20`, { headers })
+        axios.get(`${API}/dashboard/activity-feed?limit=20`, { headers }),
+        axios.get(`${API}/dashboard/enhanced-stats`, { headers }),
       ]);
       
       setStats(statsRes.data);
+      setEnhancedStats(enhancedRes.data);
       setTicketTrends(trendsRes.data);
       setDeviceHealth(healthRes.data);
       setAlerts(alertsRes.data);
@@ -244,6 +257,42 @@ export default function DashboardPage() {
           trendValue="+12% vs last month"
         />
       </div>
+
+      {/* Operational Alerts Row */}
+      {enhancedStats && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="p-3 rounded-lg border bg-muted/30 cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate("/invoices")} data-testid="dash-revenue">
+            <div className="flex items-center gap-2 mb-1"><CreditCard className="w-4 h-4 text-green-500" /><span className="text-xs text-muted-foreground">Revenue</span></div>
+            <p className="text-lg font-bold">${(enhancedStats.total_revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}</p>
+            <p className="text-xs text-green-500">${(enhancedStats.total_collected || 0).toLocaleString()} collected</p>
+          </div>
+          <div className="p-3 rounded-lg border bg-muted/30 cursor-pointer hover:border-red-500/50 transition-colors" onClick={() => navigate("/invoices")} data-testid="dash-outstanding">
+            <div className="flex items-center gap-2 mb-1"><XCircle className="w-4 h-4 text-red-500" /><span className="text-xs text-muted-foreground">Outstanding</span></div>
+            <p className="text-lg font-bold text-red-500">${(enhancedStats.outstanding || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}</p>
+            <p className="text-xs text-muted-foreground">{enhancedStats.unpaid_invoices} unpaid</p>
+          </div>
+          <div className={`p-3 rounded-lg border cursor-pointer hover:border-yellow-500/50 transition-colors ${enhancedStats.no_notes_tickets > 0 ? "bg-red-500/5 border-red-500/20" : "bg-muted/30"}`} onClick={() => navigate("/technicians")} data-testid="dash-no-notes">
+            <div className="flex items-center gap-2 mb-1"><MessageSquare className="w-4 h-4 text-red-500" /><span className="text-xs text-muted-foreground">No Notes</span></div>
+            <p className={`text-lg font-bold ${enhancedStats.no_notes_tickets > 0 ? "text-red-500" : "text-green-500"}`}>{enhancedStats.no_notes_tickets}</p>
+            <p className="text-xs text-muted-foreground">tickets without notes</p>
+          </div>
+          <div className={`p-3 rounded-lg border cursor-pointer hover:border-orange-500/50 transition-colors ${enhancedStats.sla_breaches > 0 ? "bg-orange-500/5 border-orange-500/20" : "bg-muted/30"}`} onClick={() => navigate("/tickets")} data-testid="dash-sla">
+            <div className="flex items-center gap-2 mb-1"><AlertCircle className="w-4 h-4 text-orange-500" /><span className="text-xs text-muted-foreground">SLA Breaches</span></div>
+            <p className={`text-lg font-bold ${enhancedStats.sla_breaches > 0 ? "text-orange-500" : "text-green-500"}`}>{enhancedStats.sla_breaches}</p>
+            <p className="text-xs text-muted-foreground">overdue tickets</p>
+          </div>
+          <div className={`p-3 rounded-lg border cursor-pointer hover:border-yellow-500/50 transition-colors ${enhancedStats.low_stock_products > 0 ? "bg-yellow-500/5 border-yellow-500/20" : "bg-muted/30"}`} onClick={() => navigate("/products")} data-testid="dash-low-stock">
+            <div className="flex items-center gap-2 mb-1"><Package className="w-4 h-4 text-yellow-500" /><span className="text-xs text-muted-foreground">Low Stock</span></div>
+            <p className={`text-lg font-bold ${enhancedStats.low_stock_products > 0 ? "text-yellow-500" : "text-green-500"}`}>{enhancedStats.low_stock_products}</p>
+            <p className="text-xs text-muted-foreground">products need reorder</p>
+          </div>
+          <div className="p-3 rounded-lg border bg-muted/30 cursor-pointer hover:border-blue-500/50 transition-colors" onClick={() => navigate("/purchase-orders")} data-testid="dash-pending-po">
+            <div className="flex items-center gap-2 mb-1"><ShoppingCart className="w-4 h-4 text-blue-500" /><span className="text-xs text-muted-foreground">Pending POs</span></div>
+            <p className="text-lg font-bold">{enhancedStats.pending_purchase_orders}</p>
+            <p className="text-xs text-muted-foreground">awaiting delivery</p>
+          </div>
+        </div>
+      )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

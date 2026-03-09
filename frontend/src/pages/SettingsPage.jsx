@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { 
@@ -18,7 +19,13 @@ import {
   Mail,
   Building,
   Save,
-  Loader2
+  Loader2,
+  MessageSquare,
+  Clock,
+  Zap,
+  CreditCard,
+  FileText,
+  AlertTriangle
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -35,19 +42,25 @@ export default function SettingsPage() {
     device_offline: true,
     sla_warnings: true
   });
+  const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
+  const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    const fetchData = async () => {
       try {
-        const response = await axios.get(`${API}/users`, { headers });
-        setUsers(response.data);
-      } catch (error) {
-        console.error("Failed to fetch users");
-      }
+        const [usersRes, thresholdRes, xeroRes] = await Promise.all([
+          axios.get(`${API}/users`, { headers }),
+          axios.get(`${API}/settings/no-notes-threshold`, { headers }),
+          axios.get(`${API}/settings/xero`, { headers }),
+        ]);
+        setUsers(usersRes.data);
+        setThreshold(thresholdRes.data);
+        setXero(xeroRes.data);
+      } catch (error) { console.error("Failed to fetch settings"); }
     };
-    fetchUsers();
+    fetchData();
   }, []);
 
   const handleProfileSave = async () => {
@@ -252,6 +265,136 @@ export default function SettingsPage() {
               <p className="text-sm text-muted-foreground">Currently using dark theme for optimal visibility</p>
             </div>
             <Badge>Dark Mode</Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* No-Notes Escalation Threshold */}
+      <Card className="border-orange-500/20">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <CardTitle>No-Notes Escalation Threshold</CardTitle>
+          </div>
+          <CardDescription>Automatically escalate tickets to senior staff when technicians don't add notes within a specified time period</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Enable Auto-Escalation</Label>
+              <p className="text-sm text-muted-foreground">Tickets with zero notes will be reassigned after the threshold</p>
+            </div>
+            <Switch
+              checked={threshold.enabled}
+              onCheckedChange={(checked) => setThreshold({ ...threshold, enabled: checked })}
+              data-testid="escalation-enabled-switch"
+            />
+          </div>
+          {threshold.enabled && (
+            <>
+              <Separator />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2"><Clock className="w-4 h-4" />Threshold (hours)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={threshold.threshold_hours}
+                    onChange={(e) => setThreshold({ ...threshold, threshold_hours: parseInt(e.target.value) || 24 })}
+                    data-testid="threshold-hours-input"
+                  />
+                  <p className="text-xs text-muted-foreground">After this many hours without notes, the ticket will be escalated</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2"><Zap className="w-4 h-4" />Escalate To (Senior Member)</Label>
+                  <Select 
+                    value={threshold.escalate_to} 
+                    onValueChange={(v) => { 
+                      const u = users.find(u => u.id === v); 
+                      setThreshold({ ...threshold, escalate_to: v, escalate_to_name: u?.name || "" }); 
+                    }}
+                  >
+                    <SelectTrigger data-testid="escalate-to-select"><SelectValue placeholder="Select senior member" /></SelectTrigger>
+                    <SelectContent>
+                      {users.filter(u => u.role === "admin" || u.role === "Admin").map(u => (
+                        <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>
+                      ))}
+                      {users.filter(u => u.role !== "admin" && u.role !== "Admin").map(u => (
+                        <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">This person will receive escalated tickets and can follow up with the original tech</p>
+                </div>
+              </div>
+              <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-sm text-orange-400">
+                <strong>How it works:</strong> When enabled, tickets that have been open for more than {threshold.threshold_hours} hours with zero technician notes will be automatically reassigned to {threshold.escalate_to_name || "the selected senior member"} and marked as high priority. An audit log entry will be created.
+              </div>
+            </>
+          )}
+          <Button onClick={async () => {
+            try {
+              await axios.put(`${API}/settings/no-notes-threshold`, threshold, { headers });
+              toast.success("Escalation threshold saved");
+            } catch { toast.error("Failed to save"); }
+          }} data-testid="save-threshold-btn">
+            <Save className="w-4 h-4 mr-2" />Save Threshold Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Xero Integration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-500" />
+            <CardTitle>Xero Accounting Integration</CardTitle>
+          </div>
+          <CardDescription>Connect Xero to sync invoices and billing data for unified accounting</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Badge variant={xero.connected ? "default" : "secondary"}>{xero.connected ? "Connected" : "Not Connected"}</Badge>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Xero Client ID</Label>
+              <Input value={xero.client_id} onChange={(e) => setXero({ ...xero, client_id: e.target.value })} placeholder="Enter Xero Client ID" data-testid="xero-client-id" />
+            </div>
+            <div className="space-y-2">
+              <Label>Xero Client Secret</Label>
+              <Input type="password" value={xero.client_secret} onChange={(e) => setXero({ ...xero, client_secret: e.target.value })} placeholder="Enter Xero Client Secret" data-testid="xero-client-secret" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Redirect URI</Label>
+            <Input value={xero.redirect_uri} onChange={(e) => setXero({ ...xero, redirect_uri: e.target.value })} placeholder="https://your-domain.com/api/xero/callback" />
+          </div>
+          <p className="text-xs text-muted-foreground">Get your Xero API credentials from <a href="https://developer.xero.com/app/manage" target="_blank" rel="noreferrer" className="text-primary underline">developer.xero.com</a></p>
+          <Button onClick={async () => {
+            try {
+              await axios.put(`${API}/settings/xero`, xero, { headers });
+              toast.success("Xero settings saved");
+            } catch { toast.error("Failed to save"); }
+          }} data-testid="save-xero-btn">
+            <Save className="w-4 h-4 mr-2" />Save Xero Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Stripe Integration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-green-500" />
+            <CardTitle>Stripe Payments</CardTitle>
+          </div>
+          <CardDescription>Accept online payments through Stripe Checkout</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2">
+            <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Configured</Badge>
+            <span className="text-sm text-muted-foreground">Stripe is connected and ready to accept payments on invoices</span>
           </div>
         </CardContent>
       </Card>

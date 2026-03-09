@@ -259,6 +259,7 @@ class InvoiceCreate(BaseModel):
     due_date: str
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
+    tax_rate: float = 0.0
 
 class Invoice(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -268,13 +269,19 @@ class Invoice(BaseModel):
     client_name: Optional[str] = None
     contract_id: Optional[str] = None
     status: str = "draft"
+    payment_status: str = "unpaid"
     subtotal: float = 0.0
     tax: float = 0.0
+    tax_rate: float = 0.0
     total: float = 0.0
+    amount_paid: float = 0.0
     due_date: str
     paid_date: Optional[str] = None
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
+    payments: List[Dict[str, Any]] = []
+    stripe_session_id: Optional[str] = None
+    xero_invoice_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TimeEntryCreate(BaseModel):
@@ -2241,7 +2248,8 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
     client_name = client['name'] if client else None
     
     subtotal = sum(item.get('total', item.get('quantity', 1) * item.get('unit_price', 0)) for item in invoice_data.line_items)
-    tax = subtotal * 0.0  # Configure tax rate as needed
+    tax_rate = invoice_data.tax_rate or 0.0
+    tax = subtotal * (tax_rate / 100)
     total = subtotal + tax
     
     invoice = Invoice(
@@ -2253,11 +2261,14 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
         line_items=invoice_data.line_items,
         subtotal=subtotal,
         tax=tax,
-        total=total
+        tax_rate=tax_rate,
+        total=total,
+        payment_status="unpaid",
     )
     doc = invoice.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.invoices.insert_one(doc)
+    doc.pop("_id", None)
     return invoice
 
 @api_router.put("/invoices/{invoice_id}")
@@ -2309,6 +2320,286 @@ async def generate_invoice_from_contract(invoice_id: str, contract_id: str, curr
     doc['created_at'] = doc['created_at'].isoformat()
     await db.invoices.insert_one(doc)
     return invoice
+
+# ============== STRIPE PAYMENT ENDPOINTS ==============
+
+@api_router.post("/invoices/{invoice_id}/pay")
+async def create_invoice_payment(invoice_id: str, request_data: dict, current_user: dict = Depends(get_current_user)):
+    from fastapi import Request
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Invoice already paid")
+
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    origin_url = request_data.get("origin_url", "")
+    webhook_url = f"{origin_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
+
+    success_url = f"{origin_url}/invoices?payment_success=true&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin_url}/invoices?payment_cancelled=true"
+
+    amount = float(invoice.get("total", 0)) - float(invoice.get("amount_paid", 0))
+    checkout_req = CheckoutSessionRequest(
+        amount=round(amount, 2),
+        currency="usd",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"invoice_id": invoice_id, "invoice_number": invoice.get("invoice_number", "")}
+    )
+    session = await stripe_checkout.create_checkout_session(checkout_req)
+
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "invoice_id": invoice_id,
+        "session_id": session.session_id,
+        "amount": amount,
+        "currency": "usd",
+        "payment_status": "initiated",
+        "user_id": current_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {"stripe_session_id": session.session_id}})
+
+    return {"url": session.url, "session_id": session.session_id}
+
+@api_router.get("/invoices/{invoice_id}/payment-status")
+async def check_payment_status(invoice_id: str, session_id: str, current_user: dict = Depends(get_current_user)):
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
+    status = await stripe_checkout.get_checkout_status(session_id)
+
+    existing = await db.payment_transactions.find_one({"session_id": session_id, "payment_status": "paid"})
+    if existing:
+        return {"payment_status": "paid", "already_processed": True}
+
+    if status.payment_status == "paid":
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"payment_status": "paid", "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+        new_paid = float(invoice.get("amount_paid", 0)) + float(status.amount_total / 100)
+        new_payment_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
+        payment_record = {
+            "amount": status.amount_total / 100,
+            "method": "stripe",
+            "date": datetime.now(timezone.utc).isoformat(),
+            "session_id": session_id,
+        }
+        await db.invoices.update_one({"id": invoice_id}, {
+            "$set": {
+                "payment_status": new_payment_status,
+                "amount_paid": new_paid,
+                "status": "paid" if new_payment_status == "paid" else invoice.get("status"),
+                "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if new_payment_status == "paid" else None,
+            },
+            "$push": {"payments": payment_record}
+        })
+
+    return {"payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
+
+@api_router.post("/invoices/{invoice_id}/record-payment")
+async def record_manual_payment(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    amount = float(data.get("amount", 0))
+    method = data.get("method", "manual")
+    new_paid = float(invoice.get("amount_paid", 0)) + amount
+    new_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
+    payment_record = {
+        "amount": amount, "method": method, "date": datetime.now(timezone.utc).isoformat(),
+        "reference": data.get("reference", ""), "recorded_by": current_user.get("name", ""),
+    }
+    await db.invoices.update_one({"id": invoice_id}, {
+        "$set": {"payment_status": new_status, "amount_paid": new_paid,
+                 "status": "paid" if new_status == "paid" else invoice.get("status"),
+                 "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if new_status == "paid" else invoice.get("paid_date")},
+        "$push": {"payments": payment_record}
+    })
+    return {"message": "Payment recorded", "new_balance": float(invoice.get("total", 0)) - new_paid}
+
+@api_router.get("/invoices/stats/summary")
+async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
+    all_inv = await db.invoices.find({}, {"_id": 0}).to_list(10000)
+    total = len(all_inv)
+    paid = len([i for i in all_inv if i.get("payment_status") == "paid"])
+    unpaid = len([i for i in all_inv if i.get("payment_status") in ("unpaid", None)])
+    overdue_count = 0
+    for i in all_inv:
+        if i.get("payment_status") not in ("paid",) and i.get("due_date"):
+            try:
+                due = datetime.strptime(i["due_date"], "%Y-%m-%d")
+                if due < datetime.now():
+                    overdue_count += 1
+            except:
+                pass
+    total_revenue = sum(i.get("total", 0) for i in all_inv)
+    total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
+    total_outstanding = total_revenue - total_collected
+    return {
+        "total": total, "paid": paid, "unpaid": unpaid, "overdue": overdue_count,
+        "total_revenue": round(total_revenue, 2), "total_collected": round(total_collected, 2),
+        "total_outstanding": round(total_outstanding, 2)
+    }
+
+# ============== NO-NOTES ESCALATION SETTINGS ==============
+
+@api_router.get("/settings/no-notes-threshold")
+async def get_no_notes_threshold(current_user: dict = Depends(get_current_user)):
+    setting = await db.settings.find_one({"type": "no_notes_threshold"}, {"_id": 0})
+    if not setting:
+        return {"enabled": False, "threshold_hours": 24, "escalate_to": "", "escalate_to_name": ""}
+    return setting
+
+@api_router.put("/settings/no-notes-threshold")
+async def update_no_notes_threshold(data: dict, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "no_notes_threshold"},
+        {"$set": {
+            "type": "no_notes_threshold",
+            "enabled": data.get("enabled", False),
+            "threshold_hours": int(data.get("threshold_hours", 24)),
+            "escalate_to": data.get("escalate_to", ""),
+            "escalate_to_name": data.get("escalate_to_name", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    return {"message": "No-notes threshold updated"}
+
+@api_router.post("/tickets/check-escalation")
+async def check_no_notes_escalation(current_user: dict = Depends(get_current_user)):
+    setting = await db.settings.find_one({"type": "no_notes_threshold"}, {"_id": 0})
+    if not setting or not setting.get("enabled"):
+        return {"escalated": 0}
+    threshold_hours = setting.get("threshold_hours", 24)
+    escalate_to = setting.get("escalate_to", "")
+    if not escalate_to:
+        return {"escalated": 0}
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=threshold_hours)).isoformat()
+    open_tickets = await db.tickets.find(
+        {"status": {"$in": ["open", "in_progress"]}, "created_at": {"$lte": cutoff}},
+        {"_id": 0}
+    ).to_list(10000)
+    escalated = 0
+    for t in open_tickets:
+        if t.get("assigned_to") == escalate_to:
+            continue
+        nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+        if nc == 0:
+            old_assigned = t.get("assigned_to", "")
+            await db.tickets.update_one({"id": t["id"]}, {
+                "$set": {"assigned_to": escalate_to, "priority": "high"},
+                "$push": {"audit_log": {
+                    "action": "auto_escalated",
+                    "from_value": old_assigned,
+                    "to_value": escalate_to,
+                    "reason": f"No notes after {threshold_hours}h threshold",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "user": "System"
+                }}
+            })
+            escalated += 1
+    return {"escalated": escalated, "threshold_hours": threshold_hours}
+
+# ============== XERO INTEGRATION SETTINGS ==============
+
+@api_router.get("/settings/xero")
+async def get_xero_settings(current_user: dict = Depends(get_current_user)):
+    setting = await db.settings.find_one({"type": "xero"}, {"_id": 0})
+    if not setting:
+        return {"configured": False, "client_id": "", "connected": False}
+    return {**setting, "client_secret": "***" if setting.get("client_secret") else ""}
+
+@api_router.put("/settings/xero")
+async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "xero"},
+        {"$set": {
+            "type": "xero",
+            "client_id": data.get("client_id", ""),
+            "client_secret": data.get("client_secret", ""),
+            "redirect_uri": data.get("redirect_uri", ""),
+            "connected": data.get("connected", False),
+            "configured": bool(data.get("client_id")),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    return {"message": "Xero settings saved"}
+
+# ============== ENHANCED DASHBOARD ==============
+
+@api_router.get("/dashboard/enhanced-stats")
+async def get_enhanced_dashboard(current_user: dict = Depends(get_current_user)):
+    open_tickets = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
+    total_devices = await db.devices.count_documents({})
+    online_devices = await db.devices.count_documents({"status": "online"})
+    total_clients = await db.clients.count_documents({})
+
+    all_inv = await db.invoices.find({}, {"_id": 0, "total": 1, "amount_paid": 1, "payment_status": 1, "due_date": 1}).to_list(10000)
+    total_revenue = sum(i.get("total", 0) for i in all_inv)
+    total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
+    unpaid_inv = [i for i in all_inv if i.get("payment_status") in ("unpaid", None)]
+    overdue_inv = 0
+    for i in unpaid_inv:
+        try:
+            if datetime.strptime(i.get("due_date", "2099-01-01"), "%Y-%m-%d") < datetime.now():
+                overdue_inv += 1
+        except:
+            pass
+
+    # No-notes tickets
+    open_t = await db.tickets.find({"status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1}).to_list(10000)
+    no_notes_count = 0
+    for t in open_t:
+        nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+        if nc == 0:
+            no_notes_count += 1
+
+    # Low stock products
+    products = await db.products.find({"is_active": True}, {"_id": 0, "quantity_in_stock": 1, "reorder_level": 1}).to_list(10000)
+    low_stock = sum(1 for p in products if p.get("quantity_in_stock", 0) <= p.get("reorder_level", 5))
+
+    # Pending POs
+    pending_pos = await db.purchase_orders.count_documents({"status": {"$in": ["draft", "submitted"]}})
+
+    # SLA breaches
+    sla_breaches = 0
+    for t in open_t:
+        full_t = await db.tickets.find_one({"id": t["id"]}, {"_id": 0, "sla_due": 1})
+        sla = full_t.get("sla_due") if full_t else None
+        if sla:
+            try:
+                sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
+                if sla_dt and sla_dt < datetime.now(timezone.utc):
+                    sla_breaches += 1
+            except:
+                pass
+
+    mrr_result = await db.clients.aggregate([{"$group": {"_id": None, "total_mrr": {"$sum": "$mrr"}}}]).to_list(1)
+    total_mrr = mrr_result[0]['total_mrr'] if mrr_result else 0
+
+    return {
+        "open_tickets": open_tickets, "total_devices": total_devices, "online_devices": online_devices,
+        "total_clients": total_clients, "total_revenue": round(total_revenue, 2),
+        "total_collected": round(total_collected, 2), "outstanding": round(total_revenue - total_collected, 2),
+        "unpaid_invoices": len(unpaid_inv), "overdue_invoices": overdue_inv,
+        "no_notes_tickets": no_notes_count, "low_stock_products": low_stock,
+        "pending_purchase_orders": pending_pos, "sla_breaches": sla_breaches,
+        "total_mrr": round(total_mrr, 2),
+    }
 
 # ============== TIME ENTRIES ENDPOINTS ==============
 
@@ -5939,6 +6230,45 @@ async def get_yeastar_dashboard(current_user: dict = Depends(get_current_user)):
 @api_router.get("/")
 async def root():
     return {"message": "NexusOps API v2.0.0", "status": "operational"}
+
+# Stripe webhook - outside api_router since it needs raw body
+from fastapi import Request as FastAPIRequest
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(request: FastAPIRequest):
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        return {"status": "stripe not configured"}
+    try:
+        from emergentintegrations.payments.stripe.checkout import StripeCheckout
+        stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
+        webhook_response = await stripe_checkout.handle_webhook(body, sig)
+        if webhook_response.payment_status == "paid" and webhook_response.session_id:
+            existing = await db.payment_transactions.find_one({"session_id": webhook_response.session_id, "payment_status": "paid"})
+            if not existing:
+                await db.payment_transactions.update_one(
+                    {"session_id": webhook_response.session_id},
+                    {"$set": {"payment_status": "paid", "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                inv_id = webhook_response.metadata.get("invoice_id")
+                if inv_id:
+                    invoice = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+                    if invoice:
+                        new_paid = float(invoice.get("amount_paid", 0)) + float(webhook_response.amount_total / 100)
+                        p_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
+                        await db.invoices.update_one({"id": inv_id}, {
+                            "$set": {"payment_status": p_status, "amount_paid": new_paid,
+                                     "status": "paid" if p_status == "paid" else invoice.get("status"),
+                                     "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if p_status == "paid" else None},
+                            "$push": {"payments": {"amount": webhook_response.amount_total / 100, "method": "stripe",
+                                                   "date": datetime.now(timezone.utc).isoformat(), "session_id": webhook_response.session_id}}
+                        })
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return {"status": "error", "detail": str(e)}
 
 app.include_router(api_router)
 

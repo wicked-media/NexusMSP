@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,440 +9,488 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { 
-  Plus, 
-  Search, 
-  FileText,
-  MoreVertical,
-  Loader2,
-  DollarSign,
-  Send,
-  Check,
-  Download
+import {
+  Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
+  CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
+  Receipt, TrendingUp, Eye, Banknote
 } from "lucide-react";
+import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 
-const statusConfig = {
-  draft: { label: "Draft", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" },
-  sent: { label: "Sent", class: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
-  paid: { label: "Paid", class: "bg-green-500/10 text-green-500 border-green-500/20" },
-  overdue: { label: "Overdue", class: "bg-red-500/10 text-red-500 border-red-500/20" },
-  cancelled: { label: "Cancelled", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" }
+const PAYMENT_STATUS = {
+  unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
+  partial: { label: "Partial", class: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30", icon: Clock },
+  paid: { label: "Paid", class: "bg-green-500/20 text-green-400 border-green-500/30", icon: CheckCircle },
+};
+
+const STATUS_CONFIG = {
+  draft: { label: "Draft", class: "bg-gray-500/10 text-gray-400 border-gray-500/20" },
+  sent: { label: "Sent", class: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
+  paid: { label: "Paid", class: "bg-green-500/10 text-green-400 border-green-500/20" },
+  overdue: { label: "Overdue", class: "bg-red-500/10 text-red-400 border-red-500/20" },
+  cancelled: { label: "Cancelled", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" },
 };
 
 export default function InvoicesPage() {
   const { token } = useAuth();
+  const [searchParams] = useSearchParams();
   const [invoices, setInvoices] = useState([]);
   const [clients, setClients] = useState([]);
-  const [contracts, setContracts] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    client_id: "",
-    contract_id: "",
-    due_date: "",
-    notes: "",
-    line_items: []
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPayment, setFilterPayment] = useState("all");
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [viewInvoice, setViewInvoice] = useState(null);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "" });
+  const [payingInvoice, setPayingInvoice] = useState(null);
+  const [form, setForm] = useState({
+    client_id: "", contract_id: "", due_date: "", notes: "",
+    line_items: [], tax_rate: "0"
   });
-  const [newLineItem, setNewLineItem] = useState({ name: "", quantity: "1", unit_price: "" });
 
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchData = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [invoicesRes, clientsRes, contractsRes] = await Promise.all([
+      const [invRes, clientRes, prodRes, statsRes] = await Promise.all([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/contracts`, { headers })
+        axios.get(`${API}/products`, { headers }),
+        axios.get(`${API}/invoices/stats/summary`, { headers }),
       ]);
-      setInvoices(invoicesRes.data);
-      setClients(clientsRes.data);
-      setContracts(contractsRes.data);
-    } catch (error) {
-      toast.error("Failed to fetch invoices");
-    } finally {
-      setLoading(false);
-    }
-  };
+      setInvoices(invRes.data);
+      setClients(clientRes.data);
+      setProducts(prodRes.data);
+      setStats(statsRes.data);
+    } catch { toast.error("Failed to load invoices"); }
+    finally { setLoading(false); }
+  }, [token]);
 
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Check for Stripe payment callback
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      await axios.post(`${API}/invoices`, formData, { headers });
-      toast.success("Invoice created");
-      setIsDialogOpen(false);
-      resetForm();
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to create invoice");
+    const success = searchParams.get("payment_success");
+    const sessionId = searchParams.get("session_id");
+    if (success === "true" && sessionId) {
+      // Verify payment status
+      const checkPayment = async () => {
+        try {
+          const inv = invoices.find(i => i.stripe_session_id === sessionId);
+          if (inv) {
+            await axios.get(`${API}/invoices/${inv.id}/payment-status?session_id=${sessionId}`, { headers });
+            toast.success("Payment processed successfully!");
+            fetchAll();
+          }
+        } catch (e) { console.error(e); }
+      };
+      if (invoices.length > 0) checkPayment();
     }
+  }, [searchParams, invoices.length]);
+
+  const resetForm = () => setForm({ client_id: "", contract_id: "", due_date: "", notes: "", line_items: [], tax_rate: "0" });
+
+  const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
+  const openEdit = (inv) => {
+    setEditing(inv);
+    setForm({
+      client_id: inv.client_id, contract_id: inv.contract_id || "", due_date: inv.due_date,
+      notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0)
+    });
+    setIsFormOpen(true);
   };
 
-  const handleStatusChange = async (id, newStatus) => {
-    try {
-      const updateData = { status: newStatus };
-      if (newStatus === 'paid') {
-        updateData.paid_date = new Date().toISOString().split('T')[0];
+  const addLineItem = () => setForm(f => ({ ...f, line_items: [...f.line_items, { name: "", description: "", quantity: 1, unit_price: 0, product_id: "" }] }));
+
+  const updateLineItem = (idx, field, value) => {
+    setForm(f => {
+      const items = [...f.line_items];
+      items[idx] = { ...items[idx], [field]: value };
+      if (field === "product_id" && value) {
+        const prod = products.find(p => p.id === value);
+        if (prod) {
+          items[idx].name = prod.name;
+          items[idx].unit_price = prod.retail_price;
+          items[idx].description = prod.sku || "";
+        }
       }
-      await axios.put(`${API}/invoices/${id}`, updateData, { headers });
-      toast.success("Invoice updated");
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to update invoice");
-    }
+      items[idx].total = (items[idx].quantity || 0) * (items[idx].unit_price || 0);
+      return { ...f, line_items: items };
+    });
+  };
+
+  const removeLineItem = (idx) => setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
+
+  const calcSubtotal = () => form.line_items.reduce((s, li) => s + ((li.quantity || 0) * (li.unit_price || 0)), 0);
+
+  const handleSave = async () => {
+    if (!form.client_id) { toast.error("Client is required"); return; }
+    if (!form.due_date) { toast.error("Due date is required"); return; }
+    const payload = {
+      ...form,
+      tax_rate: parseFloat(form.tax_rate) || 0,
+      line_items: form.line_items.map(li => ({ ...li, total: (li.quantity || 0) * (li.unit_price || 0) }))
+    };
+    try {
+      if (editing) {
+        const subtotal = payload.line_items.reduce((s, li) => s + li.total, 0);
+        const tax = subtotal * (payload.tax_rate / 100);
+        await axios.put(`${API}/invoices/${editing.id}`, { ...payload, subtotal, tax, total: subtotal + tax }, { headers });
+        toast.success("Invoice updated");
+      } else {
+        await axios.post(`${API}/invoices`, payload, { headers });
+        toast.success("Invoice created");
+      }
+      setIsFormOpen(false); fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this invoice?")) return;
+    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); fetchAll(); if (viewInvoice?.id === id) setViewInvoice(null); }
+    catch { toast.error("Failed"); }
+  };
+
+  const handleStatusChange = async (inv, status) => {
+    try { await axios.put(`${API}/invoices/${inv.id}`, { status }, { headers }); toast.success(`Status: ${status}`); fetchAll(); if (viewInvoice?.id === inv.id) setViewInvoice({ ...viewInvoice, status }); }
+    catch { toast.error("Failed"); }
+  };
+
+  const handleStripePayment = async (inv) => {
     try {
-      await axios.delete(`${API}/invoices/${id}`, { headers });
-      toast.success("Invoice deleted");
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to delete invoice");
-    }
+      const res = await axios.post(`${API}/invoices/${inv.id}/pay`, { origin_url: window.location.origin }, { headers });
+      if (res.data.url) window.location.href = res.data.url;
+    } catch (e) { toast.error(e.response?.data?.detail || "Payment failed"); }
   };
 
-  const generateFromContract = async (contractId) => {
+  const handleManualPayment = async () => {
+    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) { toast.error("Enter valid amount"); return; }
     try {
-      await axios.post(`${API}/invoices/generate/generate-from-contract?contract_id=${contractId}`, {}, { headers });
-      toast.success("Invoice generated from contract");
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to generate invoice");
-    }
+      await axios.post(`${API}/invoices/${payingInvoice.id}/record-payment`, paymentForm, { headers });
+      toast.success("Payment recorded");
+      setIsPaymentOpen(false);
+      fetchAll();
+      if (viewInvoice?.id === payingInvoice.id) {
+        const updated = await axios.get(`${API}/invoices/${payingInvoice.id}`, { headers });
+        setViewInvoice(updated.data);
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const addLineItem = () => {
-    if (!newLineItem.name || !newLineItem.unit_price) return;
-    const quantity = parseInt(newLineItem.quantity) || 1;
-    const unitPrice = parseFloat(newLineItem.unit_price) || 0;
-    setFormData({
-      ...formData,
-      line_items: [...formData.line_items, {
-        name: newLineItem.name,
-        quantity,
-        unit_price: unitPrice,
-        total: quantity * unitPrice
-      }]
-    });
-    setNewLineItem({ name: "", quantity: "1", unit_price: "" });
+  const filtered = invoices
+    .filter(i => filterStatus === "all" || i.status === filterStatus)
+    .filter(i => filterPayment === "all" || (i.payment_status || "unpaid") === filterPayment)
+    .filter(i => !search || i.invoice_number?.toLowerCase().includes(search.toLowerCase()) || i.client_name?.toLowerCase().includes(search.toLowerCase()));
+
+  const getEffectiveStatus = (inv) => {
+    if (inv.payment_status === "paid") return "paid";
+    if (inv.due_date && isPast(parseISO(inv.due_date)) && inv.payment_status !== "paid") return "overdue";
+    return inv.status;
   };
 
-  const removeLineItem = (index) => {
-    setFormData({
-      ...formData,
-      line_items: formData.line_items.filter((_, i) => i !== index)
-    });
-  };
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
-  const resetForm = () => {
-    setFormData({
-      client_id: "",
-      contract_id: "",
-      due_date: "",
-      notes: "",
-      line_items: []
-    });
-  };
+  // ========== DETAIL VIEW ==========
+  if (viewInvoice) {
+    const inv = viewInvoice;
+    const pStatus = inv.payment_status || "unpaid";
+    const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
+    const balance = (inv.total || 0) - (inv.amount_paid || 0);
+    return (
+      <div className="space-y-6" data-testid="invoice-detail">
+        <Button variant="ghost" size="sm" onClick={() => setViewInvoice(null)} data-testid="back-to-invoices"><ArrowLeft className="w-4 h-4 mr-1" />Back to Invoices</Button>
+        <div className="grid grid-cols-12 gap-6">
+          <div className="col-span-8 space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-2xl font-mono">{inv.invoice_number}</CardTitle>
+                    <p className="text-muted-foreground mt-1">Client: <span className="font-medium text-foreground">{inv.client_name}</span></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge className={PAYMENT_STATUS[pStatus]?.class}><PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}</Badge>
+                    <Badge className={STATUS_CONFIG[inv.status]?.class}>{STATUS_CONFIG[inv.status]?.label}</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {(inv.line_items || []).map((li, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-medium">{li.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{li.description || "-"}</TableCell>
+                        <TableCell className="text-right">{li.quantity}</TableCell>
+                        <TableCell className="text-right font-mono">${(li.unit_price || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono font-medium">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <Separator className="my-3" />
+                <div className="flex flex-col items-end gap-1 text-sm">
+                  <div className="flex gap-12"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${(inv.subtotal || 0).toFixed(2)}</span></div>
+                  <div className="flex gap-12"><span className="text-muted-foreground">Tax ({inv.tax_rate || 0}%)</span><span className="font-mono">${(inv.tax || 0).toFixed(2)}</span></div>
+                  <Separator className="w-48 my-1" />
+                  <div className="flex gap-12 text-base"><span className="font-semibold">Total</span><span className="font-mono font-bold">${(inv.total || 0).toFixed(2)}</span></div>
+                  {(inv.amount_paid || 0) > 0 && <div className="flex gap-12"><span className="text-green-500">Amount Paid</span><span className="font-mono text-green-500">-${(inv.amount_paid || 0).toFixed(2)}</span></div>}
+                  {balance > 0 && <div className="flex gap-12 text-lg"><span className="font-bold text-red-500">Balance Due</span><span className="font-mono font-bold text-red-500">${balance.toFixed(2)}</span></div>}
+                </div>
+              </CardContent>
+            </Card>
 
-  const filteredInvoices = invoices.filter(invoice => {
-    const matchesSearch = invoice.invoice_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          invoice.client_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || invoice.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+            {/* Payment History */}
+            {(inv.payments || []).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4" />Payment History</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {(inv.payments || []).map((p, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-sm">{p.date ? format(new Date(p.date), "MMM d, yyyy h:mm a") : "-"}</TableCell>
+                          <TableCell><Badge variant="outline" className="capitalize text-xs">{p.method}</Badge></TableCell>
+                          <TableCell className="text-sm">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
+                          <TableCell className="text-right font-mono font-medium text-green-500">${(p.amount || 0).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+            {inv.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{inv.notes}</p></CardContent></Card>}
+          </div>
 
-  const totalOutstanding = invoices
-    .filter(i => i.status === 'sent' || i.status === 'overdue')
-    .reduce((sum, i) => sum + (i.total || 0), 0);
+          <div className="col-span-4 space-y-4">
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div><span className="text-muted-foreground block">Due Date</span><span className={`font-medium ${inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid" ? "text-red-500" : ""}`}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "N/A"}</span></div>
+                <Separator />
+                <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{inv.created_at ? format(new Date(inv.created_at), "MMM d, yyyy") : "N/A"}</span></div>
+                {inv.paid_date && <><Separator /><div><span className="text-muted-foreground block">Paid Date</span><span className="font-medium text-green-500">{format(parseISO(inv.paid_date), "MMM d, yyyy")}</span></div></>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {pStatus !== "paid" && (
+                  <>
+                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleStripePayment(inv)} data-testid="stripe-pay-btn">
+                      <CreditCard className="w-4 h-4 mr-1" />Pay with Stripe
+                    </Button>
+                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "manual", reference: "" }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
+                      <Banknote className="w-4 h-4 mr-1" />Record Manual Payment
+                    </Button>
+                  </>
+                )}
+                {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
+                <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
+                <Button variant="destructive" className="w-full" onClick={() => handleDelete(inv.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const totalPaid = invoices
-    .filter(i => i.status === 'paid')
-    .reduce((sum, i) => sum + (i.total || 0), 0);
-
+  // ========== LIST VIEW ==========
   return (
     <div className="space-y-6" data-testid="invoices-page">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-          <p className="text-muted-foreground">Create and manage client invoices</p>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button data-testid="create-invoice-button">
-              <Plus className="w-4 h-4 mr-2" />
-              New Invoice
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Create New Invoice</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Client</Label>
-                  <Select
-                    value={formData.client_id}
-                    onValueChange={(value) => setFormData({ ...formData, client_id: value })}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select client" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clients.map(client => (
-                        <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Due Date</Label>
-                  <Input
-                    type="date"
-                    value={formData.due_date}
-                    onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Line Items */}
-              <div className="space-y-2">
-                <Label>Line Items</Label>
-                <div className="border rounded-lg p-4 space-y-3">
-                  <div className="grid grid-cols-12 gap-2">
-                    <Input
-                      className="col-span-5"
-                      placeholder="Item name"
-                      value={newLineItem.name}
-                      onChange={(e) => setNewLineItem({ ...newLineItem, name: e.target.value })}
-                    />
-                    <Input
-                      className="col-span-2"
-                      type="number"
-                      placeholder="Qty"
-                      value={newLineItem.quantity}
-                      onChange={(e) => setNewLineItem({ ...newLineItem, quantity: e.target.value })}
-                    />
-                    <Input
-                      className="col-span-3"
-                      type="number"
-                      step="0.01"
-                      placeholder="Price"
-                      value={newLineItem.unit_price}
-                      onChange={(e) => setNewLineItem({ ...newLineItem, unit_price: e.target.value })}
-                    />
-                    <Button type="button" className="col-span-2" onClick={addLineItem}>Add</Button>
-                  </div>
-                  
-                  {formData.line_items.length > 0 && (
-                    <div className="space-y-2 mt-3">
-                      {formData.line_items.map((item, index) => (
-                        <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                          <span className="text-sm">{item.name}</span>
-                          <div className="flex items-center gap-4">
-                            <span className="text-sm text-muted-foreground">{item.quantity} x ${item.unit_price}</span>
-                            <span className="font-medium">${item.total.toFixed(2)}</span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeLineItem(index)}
-                              className="text-destructive h-6 px-2"
-                            >
-                              ×
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                      <div className="flex justify-end pt-2 border-t">
-                        <span className="font-semibold">
-                          Total: ${formData.line_items.reduce((sum, i) => sum + i.total, 0).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Additional notes for the invoice..."
-                  rows={2}
-                />
-              </div>
-              <DialogFooter>
-                <Button type="submit">Create Invoice</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Invoices</h1><p className="text-muted-foreground">{invoices.length} invoices</p></div>
+        <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{invoices.length}</p>
-              <p className="text-xs text-muted-foreground">Total Invoices</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-yellow-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">${totalOutstanding.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Outstanding</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <Check className="w-5 h-5 text-green-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">${totalPaid.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Paid This Month</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Paid</p><p className="text-xl font-bold text-green-500">{stats.paid || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Unpaid</p><p className="text-xl font-bold text-red-500">{stats.unpaid || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Collected</p><p className="text-xl font-bold">${(stats.total_collected || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-orange-500" /></div><div><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-orange-500">${(stats.total_outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
       </div>
 
       {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-9" placeholder="Search invoice #, client..." value={search} onChange={e => setSearch(e.target.value)} data-testid="invoice-search" />
+        </div>
+        <Select value={filterPayment} onValueChange={setFilterPayment}>
+          <SelectTrigger className="w-[140px]" data-testid="payment-filter"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Payments</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="unpaid">Not Paid</SelectItem>
+            <SelectItem value="partial">Partial</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="sent">Sent</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Invoice Table */}
       <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search invoices..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="sent">Sent</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead>
+                <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Paid</TableHead>
+                <TableHead className="text-right">Balance</TableHead><TableHead>Payment</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
+              ) : filtered.map(inv => {
+                const pStatus = inv.payment_status || "unpaid";
+                const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
+                const effectiveStatus = getEffectiveStatus(inv);
+                const balance = (inv.total || 0) - (inv.amount_paid || 0);
+                const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+                return (
+                  <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewInvoice(inv)} data-testid={`invoice-row-${inv.id}`}>
+                    <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
+                    <TableCell>{inv.client_name}</TableCell>
+                    <TableCell className={isOverdue ? "text-red-500 font-medium" : ""}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "-"}{isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}</TableCell>
+                    <TableCell className="text-right font-mono">${(inv.total || 0).toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-mono text-green-500">${(inv.amount_paid || 0).toFixed(2)}</TableCell>
+                    <TableCell className={`text-right font-mono font-medium ${balance > 0 ? 'text-red-500' : 'text-green-500'}`}>${balance.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Badge className={PAYMENT_STATUS[pStatus]?.class + " text-[10px]"}>
+                        <PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                        {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Invoices Table */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      {/* CREATE/EDIT DIALOG */}
+      <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader><DialogTitle>{editing ? `Edit ${editing.invoice_number}` : "New Invoice"}</DialogTitle></DialogHeader>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Client *</Label>
+                <Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}>
+                  <SelectTrigger data-testid="invoice-client"><SelectValue placeholder="Select client" /></SelectTrigger>
+                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Due Date *</Label><Input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="invoice-due-date" /></div>
+              <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
             </div>
-          ) : (
-            <ScrollArea className="h-[500px]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Invoice #</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Due Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredInvoices.length > 0 ? filteredInvoices.map(invoice => (
-                    <TableRow key={invoice.id} className="table-row-hover">
-                      <TableCell>
-                        <span className="font-mono text-sm">{invoice.invoice_number}</span>
-                      </TableCell>
-                      <TableCell className="text-sm">{invoice.client_name}</TableCell>
-                      <TableCell>
-                        <span className="font-semibold">${invoice.total?.toLocaleString()}</span>
-                      </TableCell>
-                      <TableCell className="text-sm">{invoice.due_date}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={statusConfig[invoice.status]?.class}>
-                          {statusConfig[invoice.status]?.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {invoice.status === 'draft' && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(invoice.id, 'sent')}>
-                                <Send className="w-4 h-4 mr-2" />
-                                Mark as Sent
-                              </DropdownMenuItem>
-                            )}
-                            {(invoice.status === 'sent' || invoice.status === 'overdue') && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(invoice.id, 'paid')}>
-                                <Check className="w-4 h-4 mr-2" />
-                                Mark as Paid
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem 
-                              className="text-destructive"
-                              onClick={() => handleDelete(invoice.id)}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  )) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-12">
-                        <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-muted-foreground">No invoices found</p>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
+            <Separator />
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-base font-semibold">Line Items</Label>
+                <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-inv-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+              </div>
+              {form.line_items.length === 0 ? (
+                <div className="text-center py-6 border rounded-lg border-dashed text-muted-foreground text-sm"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No items. Add from product catalog or manually.</div>
+              ) : (
+                <div className="space-y-2">
+                  {form.line_items.map((li, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
+                      <div className="col-span-4">
+                        {idx === 0 && <Label className="text-xs">Product / Item</Label>}
+                        <Select value={li.product_id || ""} onValueChange={v => updateLineItem(idx, "product_id", v)}>
+                          <SelectTrigger><SelectValue placeholder="Select or type below" /></SelectTrigger>
+                          <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price.toFixed(2)}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-2">
+                        {idx === 0 && <Label className="text-xs">Name</Label>}
+                        <Input value={li.name} onChange={e => updateLineItem(idx, "name", e.target.value)} placeholder="Item name" />
+                      </div>
+                      <div className="col-span-1">
+                        {idx === 0 && <Label className="text-xs">Qty</Label>}
+                        <Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} />
+                      </div>
+                      <div className="col-span-2">
+                        {idx === 0 && <Label className="text-xs">Unit Price</Label>}
+                        <Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} />
+                      </div>
+                      <div className="col-span-2 text-right">
+                        {idx === 0 && <Label className="text-xs block">Total</Label>}
+                        <p className="font-mono text-sm font-medium py-2">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</p>
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex flex-col items-end gap-1 text-sm mt-2">
+                    <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${calcSubtotal().toFixed(2)}</span></div>
+                    <div className="flex gap-8"><span className="text-muted-foreground">Tax ({form.tax_rate || 0}%)</span><span className="font-mono">${(calcSubtotal() * (parseFloat(form.tax_rate) || 0) / 100).toFixed(2)}</span></div>
+                    <div className="flex gap-8 text-base font-semibold"><span>Total</span><span className="font-mono text-green-500">${(calcSubtotal() * (1 + (parseFloat(form.tax_rate) || 0) / 100)).toFixed(2)}</span></div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Invoice notes..." rows={2} /></div>
+          </div>
+          <DialogFooter><Button onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Update" : "Create"} Invoice</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MANUAL PAYMENT DIALOG */}
+      <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Amount ($)</Label><Input type="number" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div>
+            <div><Label>Method</Label>
+              <Select value={paymentForm.method} onValueChange={v => setPaymentForm({ ...paymentForm, method: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Manual / Cash</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="check">Check</SelectItem>
+                  <SelectItem value="credit_card">Credit Card (offline)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Reference / Check #</Label><Input value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder="Optional reference" /></div>
+          </div>
+          <DialogFooter><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="w-4 h-4 mr-1" />Confirm Payment</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
