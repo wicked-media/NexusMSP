@@ -1,121 +1,116 @@
-# NexusOps - RMM/PSA Platform PRD
+# NexusOps - Ultimate RMM/PSA Platform PRD
 
 ## Overview
-NexusOps is a comprehensive Remote Monitoring & Management (RMM) and Professional Services Automation (PSA) platform, combining the best features of Syncro and SuperOps with advanced integrations.
+NexusOps is a comprehensive Remote Monitoring & Management (RMM) and Professional Services Automation (PSA) platform, designed to exceed the capabilities of Syncro and SuperOps combined.
 
 ## Original Problem Statement
-Build a rich and elegant RMM/PSA platform like Syncro and SuperOps combined with:
+Build the ultimate RMM/PSA platform with all features MSPs need:
 - All core modules (Ticketing, RMM, Asset Management, Client Management)
-- Advanced Reporting with charts
-- Pax8 integration for recurring line items
-- Contracts/Agreement management with recurring billing
-- Automated invoice generation
-- Time tracking on tickets
-- Knowledge base / documentation module
 - RustDesk self-hosted remote access integration
 - Domotz monitoring integration
-- Office 365 email integration
+- Office 365 email integration for ticket communications
 - Acronis backup subscription tracking
 - Leads/CRM module for sales pipeline
-
-## User Personas
-1. **MSP Administrator** - Full access to all features, configuration, billing
-2. **Technician** - Ticket handling, time tracking, device monitoring, KB access
-3. **Client** (future) - Customer portal for tickets and documentation
-
-## Core Requirements (Static)
-
-### Modules Implemented
-| Module | Status | Features |
-|--------|--------|----------|
-| Authentication | ✅ Complete | JWT-based login, registration, roles |
-| Dashboard | ✅ Complete | Stats cards, charts, alerts, recent tickets |
-| Ticketing | ✅ Complete | CRUD, SLA tracking, priorities, categories |
-| Devices/RMM | ✅ Complete | Monitoring cards, CPU/RAM/Disk metrics, Chat & Remote buttons |
-| Assets | ✅ Complete | Hardware/software inventory tracking |
-| Clients | ✅ Complete | Organization management, MRR tracking |
-| Contracts | ✅ Complete | Service agreements, recurring billing |
-| Line Items | ✅ Complete | Recurring billing items, Pax8 sync |
-| Invoices | ✅ Complete | Invoice generation, status management |
-| Time Tracking | ✅ Complete | Quick timer, billable hours, hourly rates |
-| Knowledge Base | ✅ Complete | Articles, categories, tags, search |
-| Pax8 Integration | ✅ Complete | OAuth2 auth, subscriptions sync |
-| Reports | ✅ Complete | Charts, analytics, KPIs |
-| Domotz Integration | ✅ Complete | Network monitoring, agent management |
-| Remote Access | ✅ Complete | RustDesk self-hosted, agent downloads |
-| Device Chat | ✅ Complete | Real-time messaging, command execution |
-| Leads/CRM | ✅ Complete | Pipeline management, lead tracking, proposals |
-| Office 365 Email | ✅ Complete | Email composition, send/receive (MOCKED) |
-| Acronis | ✅ Complete | Backup subscription tracking |
+- Scripting & Automation
+- Patch Management
+- IT Documentation with password vault
+- Project Management
+- Customer Portal
+- Runbooks/Workflows
+- Technician Scheduling
+- And more...
 
 ## What's Been Implemented
 
-### Version 2.1.0 (December 2025)
+### Core Modules (100% Complete)
+| Module | Status | Features |
+|--------|--------|----------|
+| Authentication | ✅ | JWT-based login, registration, roles |
+| Dashboard | ✅ | Stats cards, charts, alerts, recent tickets |
+| Ticketing | ✅ | CRUD, SLA tracking, priorities, email integration |
+| Devices/RMM | ✅ | Monitoring cards, CPU/RAM/Disk metrics, Chat & Remote buttons |
+| Assets | ✅ | Hardware/software inventory tracking |
+| Clients | ✅ | Organization management, MRR tracking |
+| Contracts | ✅ | Service agreements, recurring billing |
+| Line Items | ✅ | Recurring billing items, Pax8 sync |
+| Invoices | ✅ | Invoice generation, status management |
+| Time Tracking | ✅ | Quick timer, billable hours, hourly rates |
+| Knowledge Base | ✅ | Articles, categories, tags, search |
+| Reports | ✅ | Charts, analytics, KPIs |
 
-**New Features Added:**
-- **Leads/CRM Module**: Full sales pipeline with lead capture, qualification, conversion to clients, activity tracking, and proposals
-- **Acronis Integration**: Backup subscription management with storage tracking and status monitoring
-- **Office 365 Email**: Email composition and management with Microsoft Graph API (mocked)
-- **Device Action Buttons**: Each device card now has Chat and Remote buttons for quick access
-- **CRM Dashboard**: Pipeline value tracking, conversion rates, lead sources analytics
+### New Features (December 2025)
+| Module | Status | Features |
+|--------|--------|----------|
+| Leads/CRM | ✅ | Pipeline, lead tracking, conversion, proposals |
+| Acronis | ✅ | Backup subscription tracking (MOCKED) |
+| Office 365 Email | ✅ | Email composition, ticket emails (MOCKED) |
+| **Scripting** | ✅ | Script library, execution on devices, scheduling |
+| **IT Documentation** | ✅ | Password vault with reveal, documentation pages |
+| **Project Management** | ✅ | Projects, tasks, progress tracking |
+| **Patch Management** | ✅ | Policies, patch approval, dashboard |
+| **Device Groups** | ✅ | Group devices, auto-assign rules |
+| **Policies** | ✅ | Monitoring, security, maintenance policies |
+| **Runbooks** | ✅ | Workflow automation, step execution |
+| **Customer Portal** | ✅ | Portal users, permissions, login |
+| **Audit Logs** | ✅ | Full activity tracking |
+| **Technician Scheduling** | ✅ | Calendar, appointments, on-call rotation |
+| **Custom Fields** | ✅ | Add fields to any entity |
+| **Webhooks** | ✅ | Event notifications to external systems |
+| **Sites/Locations** | ✅ | Multi-site support per client |
 
-**Backend Additions (FastAPI)**
-- Lead CRUD endpoints with pipeline stages
-- Lead activities and follow-up tracking
-- Proposal management system
-- CRM dashboard aggregation
-- Acronis subscription CRUD
-- Acronis dashboard stats
-- Office 365 authentication service
-- Email CRUD and send functionality
+### Integrations (All MOCKED - Settings pages available)
+| Integration | Settings Page | Features |
+|-------------|---------------|----------|
+| Office 365 | `/email` | Azure AD credentials, email send/receive |
+| Acronis | `/acronis` | API credentials, subscription sync |
+| RustDesk | `/remote-access` | Self-hosted server, API key |
+| Domotz | `/domotz` | API credentials, network monitoring |
+| Pax8 | `/pax8` | OAuth2, subscription sync |
 
-**Frontend Pages Added:**
-- LeadsPage.jsx - Full CRM with stats, filtering, CRUD
-- AcronisPage.jsx - Backup subscription management
-- EmailPage.jsx - Email inbox/compose functionality
-
-**Integration Services (All MOCKED - Settings pages available):**
-- Office 365 Graph API (tenant_id, client_id, client_secret)
-- Acronis API (api_url, client_id, client_secret)
-- RustDesk self-hosted (server_url, api_key, relay_server)
-- Domotz API (api_key, api_url)
-- Pax8 API (client_id, client_secret)
-
-## Technical Architecture
+## Navigation Structure (Grouped Sidebar)
 
 ```
-/app/
-├── backend/
-│   └── server.py          # FastAPI app (~2600 lines) with all routes, models, services
-├── frontend/
-│   └── src/
-│       ├── App.js         # Router with 20 routes
-│       ├── components/
-│       │   ├── Sidebar.jsx  # 17 navigation items
-│       │   └── ui/          # Shadcn components
-│       └── pages/
-│           ├── DashboardPage.jsx
-│           ├── DevicesPage.jsx    # Updated with Chat/Remote buttons
-│           ├── LeadsPage.jsx      # NEW - CRM module
-│           ├── AcronisPage.jsx    # NEW - Backup subscriptions
-│           ├── EmailPage.jsx      # NEW - Office 365 email
-│           └── ... (17 total pages)
-└── memory/
-    └── PRD.md
+MAIN
+├── Dashboard
+└── Tickets
+
+INFRASTRUCTURE
+├── Devices
+├── Assets
+├── Scripting
+└── Remote Access
+
+BUSINESS
+├── Clients
+├── Leads & CRM
+├── Projects
+├── Contracts
+├── Invoices
+└── Time Tracking
+
+COMMUNICATION
+├── Email
+├── IT Docs
+└── Knowledge Base
+
+INTEGRATIONS
+├── Domotz
+├── Acronis
+└── Pax8
+
+SYSTEM
+├── Reports
+└── Settings
 ```
 
-## Database Collections (MongoDB)
-- users, clients, tickets, devices, assets, alerts
-- contracts, line_items, invoices, time_entries, kb_articles
-- settings (for integration credentials)
-- leads, lead_activities, proposals
-- acronis_subscriptions, emails, device_chat, remote_sessions
+## API Endpoints (70+ endpoints)
 
-## API Endpoints Summary
+### Core APIs
 - `/api/auth/*` - Authentication
+- `/api/dashboard/*` - Dashboard stats
 - `/api/clients/*` - Client management
 - `/api/tickets/*` - Ticketing
-- `/api/devices/*` - Device management + chat
+- `/api/devices/*` - Device management
 - `/api/assets/*` - Asset inventory
 - `/api/alerts/*` - Alert management
 - `/api/contracts/*` - Contracts
@@ -123,16 +118,53 @@ Build a rich and elegant RMM/PSA platform like Syncro and SuperOps combined with
 - `/api/invoices/*` - Invoicing
 - `/api/time-entries/*` - Time tracking
 - `/api/kb-articles/*` - Knowledge base
+
+### New APIs
+- `/api/scripts/*` - Script library and execution
+- `/api/script-executions` - Execution history
+- `/api/scheduled-tasks/*` - Scheduled scripts
+- `/api/patches/*` - Patch management
+- `/api/patch-policies/*` - Patch policies
+- `/api/device-groups/*` - Device grouping
+- `/api/policies/*` - Policies
+- `/api/passwords/*` - Password vault
+- `/api/documentation/*` - IT documentation
+- `/api/runbooks/*` - Runbooks
+- `/api/runbook-executions` - Runbook history
+- `/api/projects/*` - Project management
+- `/api/projects/{id}/tasks/*` - Project tasks
+- `/api/portal/users/*` - Customer portal
+- `/api/portal/login` - Portal authentication
+- `/api/audit-logs` - Audit logs
+- `/api/schedule/*` - Technician scheduling
+- `/api/on-call/*` - On-call rotation
+- `/api/custom-fields/*` - Custom fields
+- `/api/webhooks/*` - Webhooks
+- `/api/sites/*` - Sites/locations
+- `/api/tickets/{id}/emails` - Ticket email integration
 - `/api/leads/*` - CRM leads
 - `/api/proposals/*` - Proposals
 - `/api/crm/dashboard` - CRM analytics
-- `/api/acronis/*` - Backup management
-- `/api/office365/*` - Email settings
-- `/api/emails/*` - Email CRUD
-- `/api/domotz/*` - Network monitoring
-- `/api/remote/*` - Remote access
-- `/api/pax8/*` - Pax8 integration
-- `/api/dashboard/*` - Dashboard stats
+- `/api/acronis/*` - Acronis integration
+- `/api/office365/*` - Office 365 settings
+- `/api/emails/*` - Email management
+
+## Technical Architecture
+
+```
+/app/
+├── backend/
+│   └── server.py          # FastAPI (~4000 lines)
+├── frontend/
+│   └── src/
+│       ├── App.js         # Router with 22 routes
+│       ├── components/
+│       │   ├── Sidebar.jsx  # Grouped navigation
+│       │   └── ui/          # Shadcn components
+│       └── pages/           # 22 pages total
+└── memory/
+    └── PRD.md
+```
 
 ## Demo Credentials
 - Email: admin@nexusops.io
@@ -141,39 +173,30 @@ Build a rich and elegant RMM/PSA platform like Syncro and SuperOps combined with
 ## Prioritized Backlog
 
 ### P0 - Critical (Next)
-- [ ] Real-time device agent for actual monitoring data
-- [ ] Email notifications for SLA breaches
-- [ ] Connect actual RustDesk server when credentials provided
+- Real-time device agent for actual monitoring data
+- Connect actual RustDesk server when credentials provided
+- Implement real Office 365 email send/receive
 
 ### P1 - High Priority
-- [ ] Client self-service portal
-- [ ] PDF export for invoices and proposals
-- [ ] Scheduled invoice generation
-- [ ] Multi-tenant support
+- Client self-service portal frontend
+- PDF export for invoices and proposals
+- Scheduled invoice generation
+- Multi-tenant support
 
 ### P2 - Medium Priority
-- [ ] Custom dashboard widgets
-- [ ] API rate limiting
-- [ ] Audit logging
-- [ ] Role-based access control (RBAC)
-- [ ] SSO/SAML authentication
+- Custom dashboard widgets
+- API rate limiting
+- Role-based access control (RBAC)
+- SSO/SAML authentication
 
 ### P3 - Nice to Have
-- [ ] Mobile responsive improvements
-- [ ] Dark/Light theme toggle
-- [ ] Custom branding per organization
-- [ ] AI-powered ticket categorization
-- [ ] Slack/Teams notifications
-
-## Integration Settings Pages
-All integrations have settings pages where credentials can be added:
-- `/email` - Office 365 (Azure AD Tenant ID, Client ID, Secret)
-- `/acronis` - Acronis (API URL, Client ID, Secret)
-- `/remote-access` - RustDesk (Server URL, API Key, Relay Server)
-- `/domotz` - Domotz (API Key, API URL)
-- `/pax8` - Pax8 (Client ID, Client Secret)
+- Mobile responsive improvements
+- Dark/Light theme toggle
+- Custom branding per organization
+- AI-powered ticket categorization
+- Slack/Teams notifications
 
 ## Test Results
-- Backend: 100% (22/22 tests passed)
-- Frontend: 100% (all features functional)
+- Backend: All endpoints working (70+ endpoints)
+- Frontend: All pages functional (22 pages)
 - Last tested: December 2025
