@@ -374,6 +374,26 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/proxmox"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ProxmoxPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/expiry-tracker"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ExpiryTrackerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
