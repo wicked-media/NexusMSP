@@ -69,6 +69,7 @@ class ClientCreate(BaseModel):
     industry: Optional[str] = None
     contract_type: str = "monthly"
     mrr: float = 0.0
+    contacts: List[Dict[str, Any]] = []
 
 class Client(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -83,6 +84,7 @@ class Client(BaseModel):
     device_count: int = 0
     ticket_count: int = 0
     pax8_company_id: Optional[str] = None
+    contacts: List[Dict[str, Any]] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TicketCreate(BaseModel):
@@ -92,6 +94,11 @@ class TicketCreate(BaseModel):
     priority: str = "medium"
     category: str = "support"
     assigned_to: Optional[str] = None
+    parent_id: Optional[str] = None
+    tags: List[str] = []
+    cc: List[str] = []
+    watchers: List[str] = []
+    contact_id: Optional[str] = None
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -108,6 +115,13 @@ class Ticket(BaseModel):
     assigned_name: Optional[str] = None
     sla_due: Optional[datetime] = None
     total_time_minutes: int = 0
+    parent_id: Optional[str] = None
+    tags: List[str] = []
+    cc: List[str] = []
+    watchers: List[str] = []
+    merged_into: Optional[str] = None
+    contact_id: Optional[str] = None
+    custom_fields: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -1669,10 +1683,18 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
 
 @api_router.put("/tickets/{ticket_id}")
 async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
+    old_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     ticket_data['updated_at'] = datetime.now(timezone.utc).isoformat()
     result = await db.tickets.update_one({"id": ticket_id}, {"$set": ticket_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if old_ticket:
+        changes = []
+        for k, v in ticket_data.items():
+            if k != "updated_at" and old_ticket.get(k) != v:
+                changes.append(f"{k}: {old_ticket.get(k)} -> {v}")
+        if changes:
+            await _ticket_audit(ticket_id, current_user, "updated", "; ".join(changes))
     return {"message": "Ticket updated"}
 
 @api_router.delete("/tickets/{ticket_id}")
@@ -1714,6 +1736,199 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
     await db.ticket_comments.insert_one(comment)
     comment.pop("_id", None)
     return comment
+
+# ============== TICKET CHILD/PARENT ENDPOINTS ==============
+
+@api_router.get("/tickets/{ticket_id}/children")
+async def get_child_tickets(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    children = await db.tickets.find({"parent_id": ticket_id}, {"_id": 0}).to_list(100)
+    return children
+
+@api_router.post("/tickets/{ticket_id}/children")
+async def create_child_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
+    parent = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent ticket not found")
+    count = await db.tickets.count_documents({})
+    child = Ticket(
+        ticket_number=f"TKT-{count + 1:03d}",
+        title=ticket_data.get("title", ""),
+        description=ticket_data.get("description", ""),
+        client_id=parent["client_id"],
+        client_name=parent.get("client_name"),
+        priority=ticket_data.get("priority", parent.get("priority", "medium")),
+        category=parent.get("category", "support"),
+        assigned_to=ticket_data.get("assigned_to", parent.get("assigned_to")),
+        parent_id=ticket_id,
+        tags=ticket_data.get("tags", []),
+    )
+    child_dict = child.model_dump()
+    child_dict["created_at"] = child_dict["created_at"].isoformat()
+    child_dict["updated_at"] = child_dict["updated_at"].isoformat()
+    if child_dict.get("sla_due"):
+        child_dict["sla_due"] = child_dict["sla_due"].isoformat()
+    await db.tickets.insert_one(child_dict)
+    child_dict.pop("_id", None)
+    await _ticket_audit(ticket_id, current_user, "child_created", f"Child ticket {child_dict['ticket_number']} created")
+    return child_dict
+
+@api_router.post("/tickets/{ticket_id}/link")
+async def link_ticket(ticket_id: str, link_data: dict, current_user: dict = Depends(get_current_user)):
+    child_id = link_data.get("child_id")
+    if not child_id:
+        raise HTTPException(status_code=400, detail="child_id required")
+    result = await db.tickets.update_one({"id": child_id}, {"$set": {"parent_id": ticket_id}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Child ticket not found")
+    await _ticket_audit(ticket_id, current_user, "ticket_linked", f"Linked ticket {child_id}")
+    return {"message": "Tickets linked"}
+
+# ============== TICKET MERGE ENDPOINT ==============
+
+@api_router.post("/tickets/{ticket_id}/merge")
+async def merge_tickets(ticket_id: str, merge_data: dict, current_user: dict = Depends(get_current_user)):
+    merge_ids = merge_data.get("merge_ids", [])
+    if not merge_ids:
+        raise HTTPException(status_code=400, detail="merge_ids required")
+    target = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Target ticket not found")
+    for mid in merge_ids:
+        source = await db.tickets.find_one({"id": mid}, {"_id": 0})
+        if source:
+            await db.tickets.update_one({"id": mid}, {"$set": {"status": "closed", "merged_into": ticket_id}})
+            src_comments = await db.ticket_comments.find({"ticket_id": mid}, {"_id": 0}).to_list(500)
+            for c in src_comments:
+                c["ticket_id"] = ticket_id
+                c["content"] = f"[Merged from {source.get('ticket_number', mid)}] {c.get('content', '')}"
+                c["id"] = str(uuid.uuid4())
+                await db.ticket_comments.insert_one(c)
+            await _ticket_audit(ticket_id, current_user, "ticket_merged", f"Merged {source.get('ticket_number', mid)} into this ticket")
+    return {"message": f"Merged {len(merge_ids)} tickets"}
+
+# ============== TICKET TIME TRACKING ==============
+
+@api_router.get("/tickets/{ticket_id}/time-entries")
+async def get_ticket_time_entries(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    entries = await db.ticket_time_entries.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return entries
+
+@api_router.post("/tickets/{ticket_id}/time-entries")
+async def add_ticket_time_entry(ticket_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
+    entry = {
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket_id,
+        "user_id": current_user["id"],
+        "user_name": current_user["name"],
+        "minutes": entry_data.get("minutes", 0),
+        "description": entry_data.get("description", ""),
+        "billable": entry_data.get("billable", True),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ticket_time_entries.insert_one(entry)
+    entry.pop("_id", None)
+    total_min = entry["minutes"]
+    existing = await db.ticket_time_entries.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(5000)
+    total_min = sum(e.get("minutes", 0) for e in existing)
+    await db.tickets.update_one({"id": ticket_id}, {"$set": {"total_time_minutes": total_min}})
+    await _ticket_audit(ticket_id, current_user, "time_logged", f"Logged {entry_data.get('minutes',0)} minutes")
+    return entry
+
+# ============== TICKET AUDIT LOG ==============
+
+async def _ticket_audit(ticket_id: str, user: dict, action: str, details: str):
+    entry = {
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket_id,
+        "user_id": user.get("id", "system"),
+        "user_name": user.get("name", "System"),
+        "action": action,
+        "details": details,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ticket_audit_log.insert_one(entry)
+
+@api_router.get("/tickets/{ticket_id}/audit-log")
+async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    entries = await db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return entries
+
+# ============== CANNED RESPONSES ==============
+
+@api_router.get("/canned-responses")
+async def get_canned_responses(current_user: dict = Depends(get_current_user)):
+    responses = await db.canned_responses.find({}, {"_id": 0}).to_list(500)
+    return responses
+
+@api_router.post("/canned-responses")
+async def create_canned_response(data: dict, current_user: dict = Depends(get_current_user)):
+    response = {
+        "id": str(uuid.uuid4()),
+        "title": data.get("title", ""),
+        "content": data.get("content", ""),
+        "category": data.get("category", "general"),
+        "created_by": current_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.canned_responses.insert_one(response)
+    response.pop("_id", None)
+    return response
+
+@api_router.delete("/canned-responses/{response_id}")
+async def delete_canned_response(response_id: str, current_user: dict = Depends(get_current_user)):
+    await db.canned_responses.delete_one({"id": response_id})
+    return {"message": "Deleted"}
+
+# ============== CLIENT CONTACTS ==============
+
+@api_router.get("/clients/{client_id}/contacts")
+async def get_client_contacts(client_id: str, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client.get("contacts", [])
+
+@api_router.post("/clients/{client_id}/contacts")
+async def add_client_contact(client_id: str, contact_data: dict, current_user: dict = Depends(get_current_user)):
+    contact = {
+        "id": str(uuid.uuid4()),
+        "name": contact_data.get("name", ""),
+        "email": contact_data.get("email", ""),
+        "phone": contact_data.get("phone", ""),
+        "role": contact_data.get("role", "general"),
+        "is_primary": contact_data.get("is_primary", False),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.clients.update_one({"id": client_id}, {"$push": {"contacts": contact}})
+    return contact
+
+@api_router.put("/clients/{client_id}/contacts/{contact_id}")
+async def update_client_contact(client_id: str, contact_id: str, contact_data: dict, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    contacts = client.get("contacts", [])
+    for c in contacts:
+        if c["id"] == contact_id:
+            c.update({k: v for k, v in contact_data.items() if k in ("name", "email", "phone", "role", "is_primary")})
+            break
+    await db.clients.update_one({"id": client_id}, {"$set": {"contacts": contacts}})
+    return {"message": "Contact updated"}
+
+@api_router.delete("/clients/{client_id}/contacts/{contact_id}")
+async def delete_client_contact(client_id: str, contact_id: str, current_user: dict = Depends(get_current_user)):
+    await db.clients.update_one({"id": client_id}, {"$pull": {"contacts": {"id": contact_id}}})
+    return {"message": "Contact deleted"}
+
+@api_router.get("/clients/{client_id}/detail")
+async def get_client_detail(client_id: str, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    tickets = await db.tickets.find({"client_id": client_id}, {"_id": 0}).to_list(500)
+    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(500)
+    contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(100)
+    return {"client": client, "tickets": tickets, "devices": devices, "contracts": contracts}
 
 # ============== USER UPDATE ENDPOINT ==============
 
@@ -2497,14 +2712,31 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "meta": {"severity": a.get("severity")}
         })
 
-    # Mock call log entries (Yeastar)
-    from datetime import timezone as tz
-    call_activities = [
-        {"id": "call-feed-1", "type": "call", "icon": "phone", "title": "Inbound call answered", "description": "+1-555-0123 (Acme Corp) -> Ext 1002 Sarah Chen", "user": "Sarah Chen", "timestamp": (datetime.now(tz.utc) - timedelta(minutes=15)).isoformat(), "meta": {"direction": "inbound", "duration": 245}},
-        {"id": "call-feed-2", "type": "call", "icon": "phone-missed", "title": "Missed call", "description": "+1-555-0789 -> Ext 1005 James Wilson", "user": "System", "timestamp": (datetime.now(tz.utc) - timedelta(minutes=45)).isoformat(), "meta": {"direction": "inbound", "duration": 0}},
-        {"id": "call-feed-3", "type": "call", "icon": "phone", "title": "Outbound call completed", "description": "Ext 1001 Alex Thompson -> +1-555-0456 (TechStart Inc)", "user": "Alex Thompson", "timestamp": (datetime.now(tz.utc) - timedelta(hours=1)).isoformat(), "meta": {"direction": "outbound", "duration": 312}},
-    ]
-    activities.extend(call_activities)
+    # Yeastar call log entries (live from PBX if configured)
+    try:
+        from datetime import timezone as tz
+        yeastar_settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+        if yeastar_settings and yeastar_settings.get("client_id"):
+            yeastar_token = await _yeastar_get_token(yeastar_settings)
+            if yeastar_token:
+                cdr_data = await _yeastar_api_get("cdr/list", {"page": 1, "page_size": 10})
+                if cdr_data and cdr_data.get("errcode") == 0:
+                    for cdr in (cdr_data.get("data", []) or [])[:10]:
+                        call_from = cdr.get("call_from", "")
+                        call_to = cdr.get("call_to", "")
+                        disp = cdr.get("disposition", "").upper()
+                        icon = "phone-missed" if disp in ("NO ANSWER", "FAILED") else "phone"
+                        title_prefix = "Missed call" if disp in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
+                        activities.append({
+                            "id": f"cdr-{cdr.get('id','')}", "type": "call", "icon": icon,
+                            "title": f"{title_prefix}: {call_from} -> {call_to}",
+                            "description": f"Duration: {cdr.get('duration', 0)}s | {disp}",
+                            "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
+                            "timestamp": cdr.get("time", datetime.now(tz.utc).isoformat()),
+                            "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)}
+                        })
+    except Exception as e:
+        logger.debug(f"Activity feed Yeastar CDR fetch skipped: {e}")
 
     # Sort by timestamp descending
     def sort_key(a):
@@ -5109,6 +5341,9 @@ async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get
         }},
         upsert=True
     )
+    _yeastar_token_cache["token"] = None
+    _yeastar_token_cache["expires"] = 0
+    _yeastar_token_cache["refresh_token"] = None
     return {"message": "Yeastar settings saved"}
 
 @api_router.get("/yeastar/settings")
@@ -5123,41 +5358,162 @@ async def test_yeastar_connection(current_user: dict = Depends(get_current_user)
     settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
     if not settings or not settings.get("client_id"):
         return {"success": False, "message": "Yeastar not configured. Please add PBX URL, Client ID and Client Secret."}
-    return {"success": True, "message": "Connection test passed (demo mode). Configure real PBX credentials to connect."}
+    try:
+        token = await _yeastar_get_token(settings)
+        if token:
+            return {"success": True, "message": "Successfully connected to Yeastar PBX."}
+        return {"success": False, "message": "Authentication failed. This may be due to max token limit (8) — tokens auto-expire after 30 minutes. Try again shortly."}
+    except Exception as e:
+        return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+import asyncio
+
+_yeastar_token_lock = asyncio.Lock()
+_yeastar_token_cache = {"token": None, "expires": 0, "client_id": None}
+
+async def _yeastar_get_token(settings: dict) -> str | None:
+    """Get access token from Yeastar PBX with caching and lock"""
+    pbx_url = settings.get("pbx_url", "").rstrip("/")
+    client_id = settings.get("client_id", "")
+    client_secret = settings.get("client_secret", "")
+    if not pbx_url or not client_id or not client_secret:
+        return None
+    
+    async with _yeastar_token_lock:
+        now = datetime.now(timezone.utc).timestamp()
+        if (_yeastar_token_cache["token"] and 
+            _yeastar_token_cache["client_id"] == client_id and 
+            now < _yeastar_token_cache["expires"]):
+            return _yeastar_token_cache["token"]
+        
+        url = f"{pbx_url}/openapi/v1.0/get_token"
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=15) as http:
+                resp = await http.post(url, json={"username": client_id, "password": client_secret}, headers={"User-Agent": "OpenAPI", "Content-Type": "application/json"})
+                data = resp.json()
+                if data.get("errcode") == 0:
+                    token = data.get("access_token")
+                    _yeastar_token_cache["token"] = token
+                    _yeastar_token_cache["expires"] = now + data.get("access_token_expire_time", 1800) - 60
+                    _yeastar_token_cache["client_id"] = client_id
+                    _yeastar_token_cache["refresh_token"] = data.get("refresh_token")
+                    return token
+                if data.get("errcode") == 60002:
+                    logger.warning("Yeastar max tokens exceeded, waiting for auto-expiry")
+                logger.error(f"Yeastar auth: {data.get('errmsg', 'Unknown error')}")
+                return None
+        except Exception as e:
+            logger.error(f"Yeastar auth error: {e}")
+            return None
+
+async def _yeastar_api_get(path: str, params: dict = None) -> dict | list | None:
+    """Make authenticated GET request to Yeastar PBX"""
+    settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+    if not settings:
+        return None
+    token = await _yeastar_get_token(settings)
+    if not token:
+        return None
+    pbx_url = settings.get("pbx_url", "").rstrip("/")
+    url = f"{pbx_url}/openapi/v1.0/{path}"
+    query = {"access_token": token}
+    if params:
+        query.update(params)
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=15) as http:
+            resp = await http.get(url, params=query, headers={"User-Agent": "OpenAPI"})
+            if resp.status_code == 200 and resp.text:
+                return resp.json()
+            logger.error(f"Yeastar API {path}: status={resp.status_code}, body={resp.text[:200]}")
+            return None
+    except Exception as e:
+        logger.error(f"Yeastar API {path} error: {e}")
+        return None
 
 @api_router.get("/yeastar/system-info")
 async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)):
-    """Get PBX system info - returns mock data until real credentials configured"""
+    data = await _yeastar_api_get("system/information")
+    if data and data.get("errcode") == 0:
+        info = data.get("data", {})
+        uptime_sec = info.get("up_time", 0)
+        days = uptime_sec // 86400
+        hours = (uptime_sec % 86400) // 3600
+        return {
+            "hostname": info.get("device_name", "Unknown"),
+            "firmware_version": info.get("firmware_version", "Unknown"),
+            "model": info.get("model_name", ""),
+            "serial_number": info.get("sn", ""),
+            "system_time": info.get("system_time", ""),
+            "uptime": f"{days} days, {hours} hours",
+            "source": "live"
+        }
     return {
-        "hostname": "nexusops-pbx.local",
-        "firmware_version": "84.21.0.117",
-        "total_extensions": 24,
-        "total_trunks": 4,
-        "max_concurrent_calls": 100,
-        "active_calls": 3,
-        "uptime": "45 days, 12 hours"
+        "hostname": "Not available", "firmware_version": "N/A",
+        "model": "", "serial_number": "", "system_time": "",
+        "uptime": "N/A", "source": "error",
+        "error": data.get("errmsg", "Failed to connect") if data else "No credentials configured"
     }
 
 @api_router.get("/yeastar/extensions")
 async def get_yeastar_extensions(current_user: dict = Depends(get_current_user)):
-    """Get PBX extensions list - mock data"""
-    return [
-        {"id": 1, "number": "1001", "name": "Alex Thompson", "status": "available", "device": "SIP Phone", "registered": True, "ip": "192.168.1.101"},
-        {"id": 2, "number": "1002", "name": "Sarah Chen", "status": "on_call", "device": "Softphone", "registered": True, "ip": "192.168.1.102"},
-        {"id": 3, "number": "1003", "name": "Mike Rodriguez", "status": "away", "device": "SIP Phone", "registered": True, "ip": "192.168.1.103"},
-        {"id": 4, "number": "1004", "name": "Lisa Park", "status": "available", "device": "Mobile App", "registered": True, "ip": "192.168.1.104"},
-        {"id": 5, "number": "1005", "name": "James Wilson", "status": "dnd", "device": "SIP Phone", "registered": False, "ip": None},
-        {"id": 6, "number": "1006", "name": "Emily Davis", "status": "available", "device": "Softphone", "registered": True, "ip": "192.168.1.106"},
-    ]
+    data = await _yeastar_api_get("extension/list")
+    if data and data.get("errcode") == 0:
+        raw = data.get("data", [])
+        result = []
+        for i, ext in enumerate(raw if isinstance(raw, list) else []):
+            # Determine registration status from online_status
+            online = ext.get("online_status", {})
+            registered = False
+            ip_addr = None
+            device_type = "Unknown"
+            for dev_key in ["sip_phone", "linkus_desktop", "linkus_mobile", "linkus_web", "fxs_phone"]:
+                dev = online.get(dev_key, {})
+                if dev.get("status") == 1 or (isinstance(dev.get("status_list", []), list) and any(s.get("status") == 1 for s in dev.get("status_list", []))):
+                    registered = True
+                    device_type = dev_key.replace("_", " ").title()
+                    # Get IP from status_list
+                    for s in dev.get("status_list", []):
+                        if s.get("ip"):
+                            ip_addr = s["ip"].split(":")[0]
+                    if not ip_addr and dev.get("ip"):
+                        ip_addr = dev["ip"]
+                    break
+            result.append({
+                "id": ext.get("id", i + 1),
+                "number": str(ext.get("number", "")),
+                "name": ext.get("caller_id_name", f"Ext {ext.get('number', i)}"),
+                "status": ext.get("presence_status", ext.get("custom_presence_status", "unknown")),
+                "device": device_type,
+                "registered": registered,
+                "ip": ip_addr,
+            })
+        return result
+    return []
 
 @api_router.get("/yeastar/active-calls")
 async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user)):
-    """Get active calls - mock data"""
-    return [
-        {"call_id": "call-001", "caller": "1002", "caller_name": "Sarah Chen", "callee": "+1-555-0123", "callee_name": "Acme Corp", "direction": "outbound", "duration": 245, "status": "answered", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat()},
-        {"call_id": "call-002", "caller": "+1-555-0456", "caller_name": "TechStart Inc", "callee": "1001", "callee_name": "Alex Thompson", "direction": "inbound", "duration": 67, "status": "ringing", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
-        {"call_id": "call-003", "caller": "1003", "caller_name": "Mike Rodriguez", "callee": "1004", "callee_name": "Lisa Park", "direction": "internal", "duration": 120, "status": "answered", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()},
-    ]
+    data = await _yeastar_api_get("call/query")
+    if data and data.get("errcode") == 0:
+        raw = data.get("data", [])
+        if not raw or raw is None:
+            return []
+        result = []
+        for call in (raw if isinstance(raw, list) else []):
+            caller = str(call.get("caller", call.get("call_from", "")))
+            callee = str(call.get("callee", call.get("call_to", "")))
+            result.append({
+                "call_id": str(call.get("id", call.get("call_id", uuid.uuid4()))),
+                "caller": caller,
+                "caller_name": call.get("caller_name", call.get("caller_id_name", caller)),
+                "callee": callee,
+                "callee_name": call.get("callee_name", call.get("callee_id_name", callee)),
+                "direction": call.get("direction", "internal"),
+                "duration": call.get("duration", call.get("talk_duration", 0)),
+                "status": call.get("status", call.get("call_status", "answered")).lower(),
+                "started_at": call.get("started_at", call.get("time_start", datetime.now(timezone.utc).isoformat())),
+            })
+        return result
+    return []
 
 @api_router.get("/yeastar/call-logs")
 async def get_yeastar_call_logs(
@@ -5165,31 +5521,81 @@ async def get_yeastar_call_logs(
     page_size: int = 20,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get call log history - mock data"""
-    logs = [
-        {"id": "cdr-001", "caller": "1001", "caller_name": "Alex Thompson", "callee": "+1-555-0123", "callee_name": "Acme Corp", "direction": "outbound", "duration": 312, "talking_time": 290, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()},
-        {"id": "cdr-002", "caller": "+1-555-0789", "caller_name": "Unknown", "callee": "1002", "callee_name": "Sarah Chen", "direction": "inbound", "duration": 0, "talking_time": 0, "status": "missed", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()},
-        {"id": "cdr-003", "caller": "1003", "caller_name": "Mike Rodriguez", "callee": "+1-555-0456", "callee_name": "TechStart Inc", "direction": "outbound", "duration": 187, "talking_time": 165, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
-        {"id": "cdr-004", "caller": "+1-555-0321", "caller_name": "Global Finance", "callee": "1004", "callee_name": "Lisa Park", "direction": "inbound", "duration": 420, "talking_time": 398, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()},
-        {"id": "cdr-005", "caller": "1001", "caller_name": "Alex Thompson", "callee": "1003", "callee_name": "Mike Rodriguez", "direction": "internal", "duration": 45, "talking_time": 30, "status": "answered", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()},
-        {"id": "cdr-006", "caller": "+1-555-0654", "caller_name": "Healthcare Plus", "callee": "1005", "callee_name": "James Wilson", "direction": "inbound", "duration": 0, "talking_time": 0, "status": "missed", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
-        {"id": "cdr-007", "caller": "1006", "caller_name": "Emily Davis", "callee": "+1-555-0987", "callee_name": "Unknown", "direction": "outbound", "duration": 156, "talking_time": 140, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()},
-        {"id": "cdr-008", "caller": "+1-555-0111", "caller_name": "Acme Corp", "callee": "1002", "callee_name": "Sarah Chen", "direction": "inbound", "duration": 275, "talking_time": 260, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()},
-    ]
-    return {"total": len(logs), "page": page, "page_size": page_size, "data": logs}
+    data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size})
+    if data and data.get("errcode") == 0:
+        raw = data.get("data", [])
+        total = data.get("total_number", len(raw) if isinstance(raw, list) else 0)
+        result = []
+        for cdr in (raw if isinstance(raw, list) else []):
+            call_from = cdr.get("call_from", "")
+            call_to = cdr.get("call_to", "")
+            call_type = cdr.get("call_type", "").lower()
+            if call_type == "inbound":
+                direction = "inbound"
+            elif call_type == "outbound":
+                direction = "outbound"
+            else:
+                direction = "internal"
+            disposition = cdr.get("disposition", "").upper()
+            status = "answered" if disposition == "ANSWERED" else "missed" if disposition in ("NO ANSWER", "NOANSWER") else "failed" if disposition == "FAILED" else disposition.lower()
+            # Parse caller name from "Name<ext>" format
+            caller_name = call_from
+            caller_num = call_from
+            if "<" in call_from and ">" in call_from:
+                parts = call_from.split("<")
+                caller_name = parts[0].strip()
+                caller_num = parts[1].rstrip(">")
+            callee_name = call_to
+            callee_num = call_to
+            if "<" in call_to and ">" in call_to:
+                parts = call_to.split("<")
+                callee_name = parts[0].strip()
+                callee_num = parts[1].rstrip(">")
+            dur = int(cdr.get("duration", 0))
+            talk = int(cdr.get("billsec", cdr.get("talk_duration", dur)))
+            result.append({
+                "id": str(cdr.get("id", cdr.get("uid", ""))),
+                "caller": caller_num,
+                "caller_name": caller_name if caller_name != caller_num else caller_num,
+                "callee": callee_num,
+                "callee_name": callee_name if callee_name != callee_num else callee_num,
+                "direction": direction,
+                "duration": dur,
+                "talking_time": talk,
+                "status": status,
+                "recording": bool(cdr.get("recording", "")),
+                "timestamp": cdr.get("time", datetime.now(timezone.utc).isoformat()),
+            })
+        return {"total": total, "page": page, "page_size": page_size, "data": result}
+    return {"total": 0, "page": page, "page_size": page_size, "data": []}
 
 @api_router.get("/yeastar/dashboard")
 async def get_yeastar_dashboard(current_user: dict = Depends(get_current_user)):
-    """Get Yeastar dashboard summary"""
+    extensions = await get_yeastar_extensions(current_user)
+    active_calls = await get_yeastar_active_calls(current_user)
+    call_logs_resp = await get_yeastar_call_logs(page=1, page_size=200, current_user=current_user)
+    call_logs = call_logs_resp.get("data", [])
+
+    total_ext = len(extensions)
+    online_ext = len([e for e in extensions if e.get("registered")])
+    num_active = len(active_calls)
+    answered = [c for c in call_logs if c.get("status") == "answered"]
+    missed = [c for c in call_logs if c.get("status") in ("missed", "no answer")]
+    total_talk = sum(c.get("talking_time", 0) for c in answered)
+    avg_dur = (total_talk // len(answered)) if answered else 0
+    avg_m, avg_s = divmod(avg_dur, 60)
+    tot_m, tot_s = divmod(total_talk, 60)
+    tot_h, tot_m = divmod(tot_m, 60)
+
     return {
-        "total_extensions": 24,
-        "online_extensions": 18,
-        "active_calls": 3,
-        "calls_today": 47,
-        "missed_calls_today": 5,
-        "avg_call_duration": "3m 24s",
-        "total_talk_time_today": "2h 38m",
-        "trunks": {"total": 4, "active": 3},
+        "total_extensions": total_ext,
+        "online_extensions": online_ext,
+        "active_calls": num_active,
+        "calls_today": len(call_logs),
+        "missed_calls_today": len(missed),
+        "avg_call_duration": f"{avg_m}m {avg_s}s",
+        "total_talk_time_today": f"{tot_h}h {tot_m}m",
+        "trunks": {"total": 0, "active": 0},
     }
 
 @api_router.get("/")

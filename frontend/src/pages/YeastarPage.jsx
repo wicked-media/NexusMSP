@@ -384,18 +384,23 @@ export default function YeastarPage() {
               <Card>
                 <CardHeader><CardTitle className="text-lg">PBX Information</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Hostname</span><span className="font-mono">{systemInfo.hostname}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Device Name</span><span className="font-mono">{systemInfo.hostname}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Model</span><span className="font-mono">{systemInfo.model || "N/A"}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Firmware</span><span className="font-mono">{systemInfo.firmware_version}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Serial Number</span><span className="font-mono">{systemInfo.serial_number || "N/A"}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">System Time</span><span>{systemInfo.system_time || "N/A"}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-muted-foreground">Uptime</span><span>{systemInfo.uptime}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Max Concurrent Calls</span><span>{systemInfo.max_concurrent_calls}</span></div>
+                  {systemInfo.source === "live" && <Badge className="bg-green-600 mt-2">Live Data</Badge>}
+                  {systemInfo.source === "error" && <Badge variant="destructive" className="mt-2">Connection Error: {systemInfo.error}</Badge>}
                 </CardContent>
               </Card>
               <Card>
-                <CardHeader><CardTitle className="text-lg">Capacity</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-lg">Live Summary</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Extensions</span><span className="font-bold">{systemInfo.total_extensions}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Trunks</span><span className="font-bold">{systemInfo.total_trunks}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Active Calls</span><span className="font-bold text-blue-500">{systemInfo.active_calls}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Extensions</span><span className="font-bold">{extensions.length}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Registered</span><span className="font-bold text-green-500">{extensions.filter(e => e.registered).length}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Active Calls</span><span className="font-bold text-blue-500">{activeCalls.length}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total CDR Records</span><span className="font-bold">{callLogs.length > 0 ? "Available" : "None"}</span></div>
                 </CardContent>
               </Card>
             </div>

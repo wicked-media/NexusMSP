@@ -445,7 +445,26 @@ export default function DashboardPage() {
                       <p className="text-xs text-muted-foreground">{item.user}</p>
                       {item.timestamp && (
                         <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                          {formatDistanceToNow(new Date(item.timestamp), { addSuffix: true })}
+                          {(() => {
+                            try {
+                              // Handle ISO format timestamps
+                              let date = new Date(item.timestamp);
+                              // If invalid, try parsing DD/MM/YYYY HH:MM:SS AM/PM format
+                              if (isNaN(date.getTime())) {
+                                const parts = item.timestamp.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s*(AM|PM)/i);
+                                if (parts) {
+                                  let hours = parseInt(parts[4]);
+                                  const isPM = parts[7].toUpperCase() === 'PM';
+                                  if (isPM && hours < 12) hours += 12;
+                                  if (!isPM && hours === 12) hours = 0;
+                                  date = new Date(parts[3], parts[2] - 1, parts[1], hours, parts[5], parts[6]);
+                                }
+                              }
+                              return isNaN(date.getTime()) ? item.timestamp : formatDistanceToNow(date, { addSuffix: true });
+                            } catch {
+                              return item.timestamp;
+                            }
+                          })()}
                         </p>
                       )}
                     </div>
