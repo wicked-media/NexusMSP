@@ -4371,6 +4371,245 @@ async def delete_site(site_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Site not found")
     return {"message": "Site deleted"}
 
+# ============== PROXMOX ENDPOINTS ==============
+
+@api_router.get("/proxmox/servers")
+async def get_proxmox_servers(current_user: dict = Depends(get_current_user)):
+    servers = await db.proxmox_servers.find({}, {"_id": 0, "token_value": 0}).to_list(100)
+    return servers
+
+@api_router.post("/proxmox/servers")
+async def create_proxmox_server(server_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if server_data.get('client_id'):
+        client = await db.clients.find_one({"id": server_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    server = ProxmoxServer(
+        name=server_data.get('name'),
+        host=server_data.get('host'),
+        port=server_data.get('port', 8006),
+        username=server_data.get('username'),
+        token_name=server_data.get('token_name'),
+        token_value=server_data.get('token_value'),
+        client_id=server_data.get('client_id'),
+        client_name=client_name,
+        node_name=server_data.get('node_name'),
+        ssl_verify=server_data.get('ssl_verify', False)
+    )
+    doc = server.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.proxmox_servers.insert_one(doc)
+    return {"id": server.id, "name": server.name}
+
+@api_router.delete("/proxmox/servers/{server_id}")
+async def delete_proxmox_server(server_id: str, current_user: dict = Depends(get_current_user)):
+    await db.proxmox_servers.delete_one({"id": server_id})
+    await db.proxmox_vms.delete_many({"server_id": server_id})
+    return {"message": "Server deleted"}
+
+@api_router.get("/proxmox/vms")
+async def get_proxmox_vms(server_id: Optional[str] = None, status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if server_id:
+        query["server_id"] = server_id
+    if status:
+        query["status"] = status
+    vms = await db.proxmox_vms.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return vms
+
+@api_router.get("/proxmox/dashboard")
+async def get_proxmox_dashboard(current_user: dict = Depends(get_current_user)):
+    total_servers = await db.proxmox_servers.count_documents({})
+    online_servers = await db.proxmox_servers.count_documents({"status": "online"})
+    total_vms = await db.proxmox_vms.count_documents({})
+    running_vms = await db.proxmox_vms.count_documents({"status": "running"})
+    stopped_vms = await db.proxmox_vms.count_documents({"status": "stopped"})
+    return {
+        "servers": {"total": total_servers, "online": online_servers},
+        "vms": {"total": total_vms, "running": running_vms, "stopped": stopped_vms}
+    }
+
+# ============== WARRANTY ENDPOINTS ==============
+
+@api_router.get("/warranties")
+async def get_warranties(client_id: Optional[str] = None, status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        query["status"] = status
+    warranties = await db.warranties.find(query, {"_id": 0}).sort("warranty_end", 1).to_list(1000)
+    return warranties
+
+@api_router.post("/warranties")
+async def create_warranty(warranty_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if warranty_data.get('client_id'):
+        client = await db.clients.find_one({"id": warranty_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    warranty = WarrantyEntry(client_name=client_name, **warranty_data)
+    doc = warranty.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.warranties.insert_one(doc)
+    return warranty
+
+@api_router.put("/warranties/{warranty_id}")
+async def update_warranty(warranty_id: str, warranty_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.warranties.update_one({"id": warranty_id}, {"$set": warranty_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Warranty not found")
+    return {"message": "Warranty updated"}
+
+@api_router.delete("/warranties/{warranty_id}")
+async def delete_warranty(warranty_id: str, current_user: dict = Depends(get_current_user)):
+    await db.warranties.delete_one({"id": warranty_id})
+    return {"message": "Warranty deleted"}
+
+# ============== LICENSE ENDPOINTS ==============
+
+@api_router.get("/licenses")
+async def get_licenses(client_id: Optional[str] = None, status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        query["status"] = status
+    licenses = await db.software_licenses.find(query, {"_id": 0}).sort("software_name", 1).to_list(1000)
+    return licenses
+
+@api_router.post("/licenses")
+async def create_license(license_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if license_data.get('client_id'):
+        client = await db.clients.find_one({"id": license_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    license_entry = SoftwareLicense(client_name=client_name, **license_data)
+    doc = license_entry.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.software_licenses.insert_one(doc)
+    return license_entry
+
+@api_router.put("/licenses/{license_id}")
+async def update_license(license_id: str, license_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.software_licenses.update_one({"id": license_id}, {"$set": license_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="License not found")
+    return {"message": "License updated"}
+
+@api_router.delete("/licenses/{license_id}")
+async def delete_license(license_id: str, current_user: dict = Depends(get_current_user)):
+    await db.software_licenses.delete_one({"id": license_id})
+    return {"message": "License deleted"}
+
+# ============== DOMAIN & SSL ENDPOINTS ==============
+
+@api_router.get("/domains")
+async def get_domains(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    domains = await db.domains.find(query, {"_id": 0}).sort("expiry_date", 1).to_list(1000)
+    return domains
+
+@api_router.post("/domains")
+async def create_domain(domain_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if domain_data.get('client_id'):
+        client = await db.clients.find_one({"id": domain_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    domain = DomainEntry(client_name=client_name, **domain_data)
+    doc = domain.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.domains.insert_one(doc)
+    return domain
+
+@api_router.delete("/domains/{domain_id}")
+async def delete_domain(domain_id: str, current_user: dict = Depends(get_current_user)):
+    await db.domains.delete_one({"id": domain_id})
+    return {"message": "Domain deleted"}
+
+@api_router.get("/ssl-certificates")
+async def get_ssl_certificates(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    certs = await db.ssl_certificates.find(query, {"_id": 0}).sort("expiry_date", 1).to_list(1000)
+    return certs
+
+@api_router.post("/ssl-certificates")
+async def create_ssl_certificate(cert_data: dict, current_user: dict = Depends(get_current_user)):
+    client_name = None
+    if cert_data.get('client_id'):
+        client = await db.clients.find_one({"id": cert_data['client_id']}, {"_id": 0})
+        client_name = client['name'] if client else None
+    
+    cert = SSLCertificate(client_name=client_name, **cert_data)
+    doc = cert.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.ssl_certificates.insert_one(doc)
+    return cert
+
+@api_router.delete("/ssl-certificates/{cert_id}")
+async def delete_ssl_certificate(cert_id: str, current_user: dict = Depends(get_current_user)):
+    await db.ssl_certificates.delete_one({"id": cert_id})
+    return {"message": "Certificate deleted"}
+
+# ============== VENDOR ENDPOINTS ==============
+
+@api_router.get("/vendors")
+async def get_vendors(category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if category:
+        query["category"] = category
+    vendors = await db.vendors.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    return vendors
+
+@api_router.post("/vendors")
+async def create_vendor(vendor_data: dict, current_user: dict = Depends(get_current_user)):
+    vendor = Vendor(**vendor_data)
+    doc = vendor.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.vendors.insert_one(doc)
+    return vendor
+
+@api_router.put("/vendors/{vendor_id}")
+async def update_vendor(vendor_id: str, vendor_data: dict, current_user: dict = Depends(get_current_user)):
+    result = await db.vendors.update_one({"id": vendor_id}, {"$set": vendor_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"message": "Vendor updated"}
+
+@api_router.delete("/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str, current_user: dict = Depends(get_current_user)):
+    await db.vendors.delete_one({"id": vendor_id})
+    return {"message": "Vendor deleted"}
+
+# ============== EXPIRY DASHBOARD ==============
+
+@api_router.get("/expiry-dashboard")
+async def get_expiry_dashboard(current_user: dict = Depends(get_current_user)):
+    """Get all expiring items across warranties, licenses, domains, SSL certs"""
+    from datetime import timedelta
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    soon = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    
+    expiring_warranties = await db.warranties.count_documents({"warranty_end": {"$lte": soon, "$gte": today}})
+    expiring_licenses = await db.software_licenses.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
+    expiring_domains = await db.domains.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
+    expiring_ssl = await db.ssl_certificates.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
+    
+    return {
+        "warranties": {"expiring_soon": expiring_warranties},
+        "licenses": {"expiring_soon": expiring_licenses},
+        "domains": {"expiring_soon": expiring_domains},
+        "ssl_certificates": {"expiring_soon": expiring_ssl},
+        "total_expiring": expiring_warranties + expiring_licenses + expiring_domains + expiring_ssl
+    }
+
 # ============== SEED DATA ==============
 
 @api_router.post("/seed")
