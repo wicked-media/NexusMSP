@@ -26,7 +26,8 @@ import {
   Key,
   FolderKanban,
   Server,
-  CalendarClock
+  CalendarClock,
+  Phone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -73,6 +74,7 @@ const navGroups = [
   {
     title: "Integrations",
     items: [
+      { path: "/yeastar", icon: Phone, label: "Yeastar PBX" },
       { path: "/proxmox", icon: Server, label: "Proxmox" },
       { path: "/domotz", icon: Network, label: "Domotz" },
       { path: "/acronis", icon: Shield, label: "Acronis" },

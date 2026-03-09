@@ -58,6 +58,7 @@ class User(BaseModel):
     role: str = "technician"
     avatar: Optional[str] = None
     hourly_rate: float = 75.0
+    email_signature: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ClientCreate(BaseModel):
@@ -95,6 +96,7 @@ class TicketCreate(BaseModel):
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    ticket_number: Optional[str] = None
     title: str
     description: str
     client_id: str
@@ -739,7 +741,6 @@ class YeastarCallLog(BaseModel):
 # ============== TICKET EMAIL MODELS ==============
 
 class TicketEmailCreate(BaseModel):
-    ticket_id: str
     to_addresses: List[str]
     cc_addresses: List[str] = []
     subject: Optional[str] = None  # If None, uses ticket title
@@ -1647,8 +1648,13 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}
     sla_due = datetime.now(timezone.utc) + timedelta(hours=sla_hours.get(ticket_data.priority, 8))
     
+    # Generate ticket number
+    ticket_count = await db.tickets.count_documents({})
+    ticket_number = f"TKT-{str(ticket_count + 1).zfill(3)}"
+    
     ticket = Ticket(
         **ticket_data.model_dump(),
+        ticket_number=ticket_number,
         client_name=client_name,
         assigned_name=assigned_name,
         sla_due=sla_due
@@ -1678,6 +1684,50 @@ async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"message": "Ticket deleted"}
+
+# ============== TICKET COMMENTS/NOTES ENDPOINTS ==============
+
+@api_router.get("/tickets/{ticket_id}/comments")
+async def get_ticket_comments(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    comments = await db.ticket_comments.find(
+        {"ticket_id": ticket_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return comments
+
+@api_router.post("/tickets/{ticket_id}/comments")
+async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    comment = {
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket_id,
+        "user_id": current_user['id'],
+        "user_name": current_user['name'],
+        "content": comment_data.get("content", ""),
+        "is_internal": comment_data.get("is_internal", False),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ticket_comments.insert_one(comment)
+    comment.pop("_id", None)
+    return comment
+
+# ============== USER UPDATE ENDPOINT ==============
+
+@api_router.put("/users/{user_id}")
+async def update_user(user_id: str, user_data: dict, current_user: dict = Depends(get_current_user)):
+    allowed_fields = {"name", "email_signature", "hourly_rate", "avatar"}
+    update = {k: v for k, v in user_data.items() if k in allowed_fields}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.users.update_one({"id": user_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User updated"}
 
 # ============== DEVICES ENDPOINTS ==============
 
@@ -4817,6 +4867,109 @@ async def seed_data():
         await db.time_entries.insert_one(doc)
     
     return {"message": "Demo data seeded successfully"}
+
+# ============== YEASTAR PBX ENDPOINTS ==============
+
+@api_router.get("/yeastar/status")
+async def get_yeastar_status(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+    return {"configured": bool(settings and settings.get("client_id") and settings.get("pbx_url"))}
+
+@api_router.post("/yeastar/settings")
+async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "yeastar"},
+        {"$set": {
+            "type": "yeastar",
+            "pbx_url": settings.get("pbx_url", ""),
+            "client_id": settings.get("client_id", ""),
+            "client_secret": settings.get("client_secret", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    return {"message": "Yeastar settings saved"}
+
+@api_router.get("/yeastar/settings")
+async def get_yeastar_settings(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+    if settings:
+        settings.pop("client_secret", None)
+    return settings or {"type": "yeastar", "pbx_url": "", "client_id": ""}
+
+@api_router.get("/yeastar/test-connection")
+async def test_yeastar_connection(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+    if not settings or not settings.get("client_id"):
+        return {"success": False, "message": "Yeastar not configured. Please add PBX URL, Client ID and Client Secret."}
+    return {"success": True, "message": "Connection test passed (demo mode). Configure real PBX credentials to connect."}
+
+@api_router.get("/yeastar/system-info")
+async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)):
+    """Get PBX system info - returns mock data until real credentials configured"""
+    return {
+        "hostname": "nexusops-pbx.local",
+        "firmware_version": "84.21.0.117",
+        "total_extensions": 24,
+        "total_trunks": 4,
+        "max_concurrent_calls": 100,
+        "active_calls": 3,
+        "uptime": "45 days, 12 hours"
+    }
+
+@api_router.get("/yeastar/extensions")
+async def get_yeastar_extensions(current_user: dict = Depends(get_current_user)):
+    """Get PBX extensions list - mock data"""
+    return [
+        {"id": 1, "number": "1001", "name": "Alex Thompson", "status": "available", "device": "SIP Phone", "registered": True, "ip": "192.168.1.101"},
+        {"id": 2, "number": "1002", "name": "Sarah Chen", "status": "on_call", "device": "Softphone", "registered": True, "ip": "192.168.1.102"},
+        {"id": 3, "number": "1003", "name": "Mike Rodriguez", "status": "away", "device": "SIP Phone", "registered": True, "ip": "192.168.1.103"},
+        {"id": 4, "number": "1004", "name": "Lisa Park", "status": "available", "device": "Mobile App", "registered": True, "ip": "192.168.1.104"},
+        {"id": 5, "number": "1005", "name": "James Wilson", "status": "dnd", "device": "SIP Phone", "registered": False, "ip": None},
+        {"id": 6, "number": "1006", "name": "Emily Davis", "status": "available", "device": "Softphone", "registered": True, "ip": "192.168.1.106"},
+    ]
+
+@api_router.get("/yeastar/active-calls")
+async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user)):
+    """Get active calls - mock data"""
+    return [
+        {"call_id": "call-001", "caller": "1002", "caller_name": "Sarah Chen", "callee": "+1-555-0123", "callee_name": "Acme Corp", "direction": "outbound", "duration": 245, "status": "answered", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat()},
+        {"call_id": "call-002", "caller": "+1-555-0456", "caller_name": "TechStart Inc", "callee": "1001", "callee_name": "Alex Thompson", "direction": "inbound", "duration": 67, "status": "ringing", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
+        {"call_id": "call-003", "caller": "1003", "caller_name": "Mike Rodriguez", "callee": "1004", "callee_name": "Lisa Park", "direction": "internal", "duration": 120, "status": "answered", "started_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()},
+    ]
+
+@api_router.get("/yeastar/call-logs")
+async def get_yeastar_call_logs(
+    page: int = 1,
+    page_size: int = 20,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get call log history - mock data"""
+    logs = [
+        {"id": "cdr-001", "caller": "1001", "caller_name": "Alex Thompson", "callee": "+1-555-0123", "callee_name": "Acme Corp", "direction": "outbound", "duration": 312, "talking_time": 290, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()},
+        {"id": "cdr-002", "caller": "+1-555-0789", "caller_name": "Unknown", "callee": "1002", "callee_name": "Sarah Chen", "direction": "inbound", "duration": 0, "talking_time": 0, "status": "missed", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()},
+        {"id": "cdr-003", "caller": "1003", "caller_name": "Mike Rodriguez", "callee": "+1-555-0456", "callee_name": "TechStart Inc", "direction": "outbound", "duration": 187, "talking_time": 165, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
+        {"id": "cdr-004", "caller": "+1-555-0321", "caller_name": "Global Finance", "callee": "1004", "callee_name": "Lisa Park", "direction": "inbound", "duration": 420, "talking_time": 398, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()},
+        {"id": "cdr-005", "caller": "1001", "caller_name": "Alex Thompson", "callee": "1003", "callee_name": "Mike Rodriguez", "direction": "internal", "duration": 45, "talking_time": 30, "status": "answered", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()},
+        {"id": "cdr-006", "caller": "+1-555-0654", "caller_name": "Healthcare Plus", "callee": "1005", "callee_name": "James Wilson", "direction": "inbound", "duration": 0, "talking_time": 0, "status": "missed", "recording": False, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
+        {"id": "cdr-007", "caller": "1006", "caller_name": "Emily Davis", "callee": "+1-555-0987", "callee_name": "Unknown", "direction": "outbound", "duration": 156, "talking_time": 140, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()},
+        {"id": "cdr-008", "caller": "+1-555-0111", "caller_name": "Acme Corp", "callee": "1002", "callee_name": "Sarah Chen", "direction": "inbound", "duration": 275, "talking_time": 260, "status": "answered", "recording": True, "timestamp": (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()},
+    ]
+    return {"total": len(logs), "page": page, "page_size": page_size, "data": logs}
+
+@api_router.get("/yeastar/dashboard")
+async def get_yeastar_dashboard(current_user: dict = Depends(get_current_user)):
+    """Get Yeastar dashboard summary"""
+    return {
+        "total_extensions": 24,
+        "online_extensions": 18,
+        "active_calls": 3,
+        "calls_today": 47,
+        "missed_calls_today": 5,
+        "avg_call_duration": "3m 24s",
+        "total_talk_time_today": "2h 38m",
+        "trunks": {"total": 4, "active": 3},
+    }
 
 @api_router.get("/")
 async def root():

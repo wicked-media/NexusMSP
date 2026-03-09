@@ -30,6 +30,7 @@ import ITDocumentationPage from "@/pages/ITDocumentationPage";
 import ProjectsPage from "@/pages/ProjectsPage";
 import ProxmoxPage from "@/pages/ProxmoxPage";
 import ExpiryTrackerPage from "@/pages/ExpiryTrackerPage";
+import YeastarPage from "@/pages/YeastarPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -390,6 +391,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <ExpiryTrackerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/yeastar"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <YeastarPage />
                 </MainLayout>
               </ProtectedRoute>
             }
