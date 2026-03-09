@@ -129,34 +129,57 @@ export const Sidebar = ({ collapsed, onToggle }) => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto scrollbar-thin">
-          {navItems.map((item) => (
-            <Tooltip key={item.path}>
-              <TooltipTrigger asChild>
-                <NavLink
-                  to={item.path}
-                  end={item.path === "/"}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-smooth ${
-                      isActive
-                        ? 'bg-primary/10 text-primary border border-primary/20'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    } ${collapsed ? 'justify-center' : ''}`
-                  }
-                  data-testid={`nav-${item.label.toLowerCase()}`}
-                >
-                  <item.icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />
-                  {!collapsed && <span className="font-medium text-sm">{item.label}</span>}
-                </NavLink>
-              </TooltipTrigger>
-              {collapsed && (
-                <TooltipContent side="right" className="font-medium">
-                  {item.label}
-                </TooltipContent>
-              )}
-            </Tooltip>
-          ))}
-        </nav>
+        <ScrollArea className="flex-1">
+          <nav className="py-3 px-3">
+            {navGroups.map((group, groupIndex) => (
+              <div key={group.title} className={groupIndex > 0 ? 'mt-4' : ''}>
+                {/* Group Title */}
+                {!collapsed && (
+                  <div className="px-3 mb-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                      {group.title}
+                    </span>
+                  </div>
+                )}
+                {collapsed && groupIndex > 0 && (
+                  <div className="mx-3 mb-2 border-t border-border/50" />
+                )}
+                
+                {/* Group Items */}
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <Tooltip key={item.path}>
+                      <TooltipTrigger asChild>
+                        <NavLink
+                          to={item.path}
+                          end={item.path === "/"}
+                          className={({ isActive }) =>
+                            `flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-150 ${
+                              isActive
+                                ? 'bg-primary text-primary-foreground shadow-sm'
+                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                            } ${collapsed ? 'justify-center' : ''}`
+                          }
+                          data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                        >
+                          <item.icon className={`h-[18px] w-[18px] flex-shrink-0`} strokeWidth={1.75} />
+                          {!collapsed && (
+                            <span className="text-[13px] font-medium">{item.label}</span>
+                          )}
+                        </NavLink>
+                      </TooltipTrigger>
+                      {collapsed && (
+                        <TooltipContent side="right" className="font-medium">
+                          {item.label}
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </ScrollArea>
 
         {/* Expand button when collapsed */}
         {collapsed && (
@@ -178,7 +201,7 @@ export const Sidebar = ({ collapsed, onToggle }) => {
           <Tooltip>
             <TooltipTrigger asChild>
               <div 
-                className={`flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-smooth cursor-pointer ${
+                className={`flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-all duration-150 cursor-pointer ${
                   collapsed ? 'justify-center' : ''
                 }`}
               >
