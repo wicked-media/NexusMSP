@@ -12,12 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
-  Receipt, TrendingUp, Eye, Banknote
+  Receipt, TrendingUp, Eye, Banknote, RefreshCw
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 
@@ -54,7 +55,9 @@ export default function InvoicesPage() {
   const [payingInvoice, setPayingInvoice] = useState(null);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", due_date: "", notes: "",
-    line_items: [], tax_rate: "0"
+    line_items: [], tax_rate: "0",
+    is_recurring: false, recurring_interval: "monthly",
+    recurring_start_date: "", recurring_end_date: ""
   });
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -98,14 +101,21 @@ export default function InvoicesPage() {
     }
   }, [searchParams, invoices.length]);
 
-  const resetForm = () => setForm({ client_id: "", contract_id: "", due_date: "", notes: "", line_items: [], tax_rate: "0" });
+  const resetForm = () => setForm({
+    client_id: "", contract_id: "", due_date: "", notes: "",
+    line_items: [], tax_rate: "0",
+    is_recurring: false, recurring_interval: "monthly",
+    recurring_start_date: "", recurring_end_date: ""
+  });
 
   const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
   const openEdit = (inv) => {
     setEditing(inv);
     setForm({
       client_id: inv.client_id, contract_id: inv.contract_id || "", due_date: inv.due_date,
-      notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0)
+      notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0),
+      is_recurring: inv.is_recurring || false, recurring_interval: inv.recurring_interval || "monthly",
+      recurring_start_date: inv.recurring_start_date || "", recurring_end_date: inv.recurring_end_date || ""
     });
     setIsFormOpen(true);
   };
@@ -374,7 +384,11 @@ export default function InvoicesPage() {
                 return (
                   <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewInvoice(inv)} data-testid={`invoice-row-${inv.id}`}>
                     <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
-                    <TableCell>{inv.client_name}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">{inv.client_name}
+                        {inv.is_recurring && <RefreshCw className="w-3 h-3 text-purple-500" />}
+                      </div>
+                    </TableCell>
                     <TableCell className={isOverdue ? "text-red-500 font-medium" : ""}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "-"}{isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}</TableCell>
                     <TableCell className="text-right font-mono">${(inv.total || 0).toFixed(2)}</TableCell>
                     <TableCell className="text-right font-mono text-green-500">${(inv.amount_paid || 0).toFixed(2)}</TableCell>
@@ -464,6 +478,37 @@ export default function InvoicesPage() {
               )}
             </div>
             <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Invoice notes..." rows={2} /></div>
+
+            {/* Recurring Billing */}
+            <Separator />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-base font-semibold flex items-center gap-2"><RefreshCw className="w-4 h-4" />Recurring Invoice</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Auto-generate this invoice on a schedule</p>
+                </div>
+                <Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} data-testid="recurring-toggle" />
+              </div>
+              {form.is_recurring && (
+                <div className="grid grid-cols-3 gap-3 p-3 rounded-lg border bg-muted/20">
+                  <div><Label className="text-xs">Frequency</Label>
+                    <Select value={form.recurring_interval} onValueChange={v => setForm({ ...form, recurring_interval: v })}>
+                      <SelectTrigger data-testid="recurring-interval"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="biweekly">Bi-Weekly</SelectItem>
+                        <SelectItem value="monthly">Monthly</SelectItem>
+                        <SelectItem value="quarterly">Quarterly</SelectItem>
+                        <SelectItem value="semi-annual">Semi-Annual</SelectItem>
+                        <SelectItem value="annually">Annually</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label className="text-xs">Start Date</Label><Input type="date" value={form.recurring_start_date} onChange={e => setForm({ ...form, recurring_start_date: e.target.value })} data-testid="recurring-start" /></div>
+                  <div><Label className="text-xs">End Date (optional)</Label><Input type="date" value={form.recurring_end_date} onChange={e => setForm({ ...form, recurring_end_date: e.target.value })} data-testid="recurring-end" /></div>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter><Button onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Update" : "Create"} Invoice</Button></DialogFooter>
         </DialogContent>

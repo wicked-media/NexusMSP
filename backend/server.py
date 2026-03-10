@@ -102,6 +102,12 @@ class TicketCreate(BaseModel):
     cc: List[str] = []
     watchers: List[str] = []
     contact_id: Optional[str] = None
+    due_date: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    ticket_type: str = "incident"
+    impact: str = "medium"
+    source: str = "portal"
+    asset_id: Optional[str] = None
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -114,11 +120,17 @@ class Ticket(BaseModel):
     priority: str = "medium"
     status: str = "open"
     category: str = "support"
+    ticket_type: str = "incident"
+    impact: str = "medium"
+    source: str = "portal"
     assigned_to: Optional[str] = None
     assigned_name: Optional[str] = None
     sla_due: Optional[datetime] = None
+    due_date: Optional[str] = None
+    estimated_hours: Optional[float] = None
     total_time_minutes: int = 0
     parent_id: Optional[str] = None
+    asset_id: Optional[str] = None
     tags: List[str] = []
     cc: List[str] = []
     watchers: List[str] = []
@@ -269,6 +281,10 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
     tax_rate: float = 0.0
+    is_recurring: bool = False
+    recurring_interval: str = "monthly"
+    recurring_start_date: Optional[str] = None
+    recurring_end_date: Optional[str] = None
 
 class Invoice(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -291,6 +307,12 @@ class Invoice(BaseModel):
     payments: List[Dict[str, Any]] = []
     stripe_session_id: Optional[str] = None
     xero_invoice_id: Optional[str] = None
+    is_recurring: bool = False
+    recurring_interval: str = "monthly"
+    recurring_start_date: Optional[str] = None
+    recurring_end_date: Optional[str] = None
+    recurring_next_date: Optional[str] = None
+    recurring_parent_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TimeEntryCreate(BaseModel):
@@ -1661,6 +1683,15 @@ async def get_tickets(
                 t[field] = datetime.fromisoformat(t[field])
     return tickets
 
+@api_router.get("/tickets/note-counts")
+async def get_ticket_note_counts(current_user: dict = Depends(get_current_user)):
+    open_tickets = await db.tickets.find({"status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1}).to_list(10000)
+    result = {}
+    for t in open_tickets:
+        nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+        result[t["id"]] = nc
+    return result
+
 @api_router.get("/tickets/{ticket_id}")
 async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
@@ -2346,6 +2377,11 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
         tax_rate=tax_rate,
         total=total,
         payment_status="unpaid",
+        is_recurring=invoice_data.is_recurring,
+        recurring_interval=invoice_data.recurring_interval,
+        recurring_start_date=invoice_data.recurring_start_date,
+        recurring_end_date=invoice_data.recurring_end_date,
+        recurring_next_date=invoice_data.recurring_start_date,
     )
     doc = invoice.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()

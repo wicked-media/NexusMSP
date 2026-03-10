@@ -68,7 +68,10 @@ export default function TicketsPage() {
   const [timerElapsed, setTimerElapsed] = useState(0);
   const [tagInput, setTagInput] = useState("");
   const [formData, setFormData] = useState({
-    title: "", description: "", client_id: "", priority: "medium", category: "support", assigned_to: "", parent_id: "", tags: []
+    title: "", description: "", client_id: "", priority: "medium", category: "support",
+    assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
+    source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+    cc: [], watchers: []
   });
   const [childForm, setChildForm] = useState({ title: "", description: "", priority: "medium" });
   const [mergeIds, setMergeIds] = useState([]);
@@ -130,11 +133,22 @@ export default function TicketsPage() {
   };
 
   const handleCreateTicket = async () => {
+    if (!formData.title || !formData.client_id) { toast.error("Title and client are required"); return; }
+    const payload = {
+      ...formData,
+      estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
+      due_date: formData.due_date || null,
+    };
     try {
-      await axios.post(`${API}/tickets`, formData, { headers });
+      await axios.post(`${API}/tickets`, payload, { headers });
       toast.success("Ticket created");
       setIsCreateOpen(false);
-      setFormData({ title: "", description: "", client_id: "", priority: "medium", category: "support", assigned_to: "", parent_id: "", tags: [] });
+      setFormData({
+        title: "", description: "", client_id: "", priority: "medium", category: "support",
+        assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
+        source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+        cc: [], watchers: []
+      });
       fetchTickets();
     } catch { toast.error("Failed to create ticket"); }
   };
@@ -674,53 +688,150 @@ export default function TicketsPage() {
         </CardContent>
       </Card>
 
-      {/* CREATE TICKET DIALOG */}
+      {/* CREATE TICKET DIALOG - Syncro/SuperOps Style */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[90vh]">
           <DialogHeader><DialogTitle>Create New Ticket</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2"><Label>Title</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} data-testid="create-title" /></div>
-            <div className="col-span-2"><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} data-testid="create-desc" /></div>
-            <div><Label>Client</Label>
-              <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v })}>
-                <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
-                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+          <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-1">
+            {/* Core Info */}
+            <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
+            <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
+
+            {/* Row 1: Client, Contact, Asset */}
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Client *</Label>
+                <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "" })}>
+                  <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
+                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Contact</Label>
+                <Select value={formData.contact_id || "none"} onValueChange={v => setFormData({ ...formData, contact_id: v === "none" ? "" : v })}>
+                  <SelectTrigger data-testid="create-contact"><SelectValue placeholder="Select contact" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- No specific contact --</SelectItem>
+                    {formData.client_id && clients.find(c => c.id === formData.client_id)?.contacts?.map((ct, i) => (
+                      <SelectItem key={i} value={ct.name}>{ct.name} ({ct.role || "General"})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Linked Asset</Label>
+                <Input value={formData.asset_id || ""} onChange={e => setFormData({ ...formData, asset_id: e.target.value })} placeholder="Asset ID (optional)" data-testid="create-asset" />
+              </div>
             </div>
-            <div><Label>Priority</Label>
-              <Select value={formData.priority} onValueChange={v => setFormData({ ...formData, priority: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-              </Select>
+
+            <Separator />
+
+            {/* Row 2: Type, Category, Source */}
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Ticket Type</Label>
+                <Select value={formData.ticket_type} onValueChange={v => setFormData({ ...formData, ticket_type: v })}>
+                  <SelectTrigger data-testid="create-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="incident">Incident</SelectItem>
+                    <SelectItem value="service_request">Service Request</SelectItem>
+                    <SelectItem value="problem">Problem</SelectItem>
+                    <SelectItem value="change_request">Change Request</SelectItem>
+                    <SelectItem value="alert">Alert / Monitoring</SelectItem>
+                    <SelectItem value="task">Task</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Category</Label>
+                <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="support">General Support</SelectItem>
+                    <SelectItem value="hardware">Hardware</SelectItem>
+                    <SelectItem value="software">Software</SelectItem>
+                    <SelectItem value="network">Network</SelectItem>
+                    <SelectItem value="security">Security</SelectItem>
+                    <SelectItem value="email">Email / O365</SelectItem>
+                    <SelectItem value="backup">Backup / DR</SelectItem>
+                    <SelectItem value="onboarding">Onboarding / Offboarding</SelectItem>
+                    <SelectItem value="project">Project Work</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Source</Label>
+                <Select value={formData.source} onValueChange={v => setFormData({ ...formData, source: v })}>
+                  <SelectTrigger data-testid="create-source"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="portal">Client Portal</SelectItem>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="phone">Phone Call</SelectItem>
+                    <SelectItem value="chat">Live Chat</SelectItem>
+                    <SelectItem value="monitoring">Monitoring Alert</SelectItem>
+                    <SelectItem value="walk_in">Walk-in</SelectItem>
+                    <SelectItem value="internal">Internal</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div><Label>Category</Label>
-              <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="support">Support</SelectItem><SelectItem value="incident">Incident</SelectItem>
-                  <SelectItem value="request">Request</SelectItem><SelectItem value="problem">Problem</SelectItem>
-                  <SelectItem value="change">Change</SelectItem>
-                </SelectContent>
-              </Select>
+
+            {/* Row 3: Priority, Impact, Assigned To */}
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Priority</Label>
+                <Select value={formData.priority} onValueChange={v => setFormData({ ...formData, priority: v })}>
+                  <SelectTrigger data-testid="create-priority"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Impact</Label>
+                <Select value={formData.impact} onValueChange={v => setFormData({ ...formData, impact: v })}>
+                  <SelectTrigger data-testid="create-impact"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low - Single user</SelectItem>
+                    <SelectItem value="medium">Medium - Department</SelectItem>
+                    <SelectItem value="high">High - Organization-wide</SelectItem>
+                    <SelectItem value="critical">Critical - Business down</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Assign To</Label>
+                <Select value={formData.assigned_to || "none"} onValueChange={v => setFormData({ ...formData, assigned_to: v === "none" ? "" : v })}>
+                  <SelectTrigger data-testid="create-assigned"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- Unassigned --</SelectItem>
+                    {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div><Label>Assign To</Label>
-              <Select value={formData.assigned_to} onValueChange={v => setFormData({ ...formData, assigned_to: v })}>
-                <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-              </Select>
+
+            {/* Row 4: Due Date, Estimated Hours */}
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Due Date</Label>
+                <Input type="date" value={formData.due_date || ""} onChange={e => setFormData({ ...formData, due_date: e.target.value })} data-testid="create-due-date" />
+              </div>
+              <div><Label>Estimated Hours</Label>
+                <Input type="number" step="0.5" value={formData.estimated_hours || ""} onChange={e => setFormData({ ...formData, estimated_hours: e.target.value })} placeholder="e.g. 2.5" data-testid="create-est-hours" />
+              </div>
+              <div><Label>Parent Ticket</Label>
+                <Select value={formData.parent_id || "none"} onValueChange={v => setFormData({ ...formData, parent_id: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="None (standalone)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None (standalone ticket)</SelectItem>
+                    {tickets.filter(t => !t.parent_id).slice(0, 30).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title?.slice(0, 30)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            {/* Parent ticket linking */}
-            <div className="col-span-2"><Label>Parent Ticket (optional)</Label>
-              <Select value={formData.parent_id || "none"} onValueChange={v => setFormData({ ...formData, parent_id: v === "none" ? "" : v })}>
-                <SelectTrigger><SelectValue placeholder="None (standalone ticket)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None (standalone ticket)</SelectItem>
-                  {tickets.filter(t => !t.parent_id).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title}</SelectItem>)}
-                </SelectContent>
-              </Select>
+
+            {/* Tags */}
+            <div><Label>Tags</Label>
+              <div className="flex gap-2 flex-wrap mb-2">{(formData.tags || []).map(t => (
+                <Badge key={t} variant="secondary" className="gap-1">{t}
+                  <button className="ml-1 text-xs hover:text-destructive" onClick={() => setFormData({ ...formData, tags: formData.tags.filter(tag => tag !== t) })}>x</button>
+                </Badge>
+              ))}</div>
+              <Input placeholder="Type a tag and press Enter" data-testid="create-tags"
+                onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) { e.preventDefault(); setFormData({ ...formData, tags: [...(formData.tags || []), e.target.value.trim()] }); e.target.value = ""; } }} />
             </div>
           </div>
-          <DialogFooter><Button onClick={handleCreateTicket} data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1" />Create</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleCreateTicket} data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1" />Create Ticket</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
