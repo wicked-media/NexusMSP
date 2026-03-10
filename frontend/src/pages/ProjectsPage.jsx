@@ -593,33 +593,43 @@ export default function ProjectsPage() {
                   </Dialog>
                 </div>
 
-                <ScrollArea className="h-[300px]">
+                <ScrollArea className="h-[350px]">
                   {projectTasks.length > 0 ? (
-                    <div className="space-y-2">
-                      {projectTasks.map(task => (
-                        <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div className="flex-1">
-                            <p className="font-medium">{task.title}</p>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              {task.assigned_name && <span>{task.assigned_name}</span>}
-                              {task.estimated_hours && <span>• {task.estimated_hours}h</span>}
-                              {task.due_date && <span>• Due: {task.due_date}</span>}
+                    <div className="grid grid-cols-4 gap-3">
+                      {["todo", "in_progress", "review", "completed"].map(status => {
+                        const statusTasks = projectTasks.filter(t => t.status === status);
+                        return (
+                          <div key={status} className="space-y-2">
+                            <div className="flex items-center gap-2 px-1 mb-1">
+                              <div className={`w-2 h-2 rounded-full ${taskStatusConfig[status]?.color}`} />
+                              <span className="text-xs font-medium">{taskStatusConfig[status]?.label}</span>
+                              <Badge variant="secondary" className="text-[9px] h-4 ml-auto">{statusTasks.length}</Badge>
+                            </div>
+                            <div className="space-y-1.5 min-h-[100px]">
+                              {statusTasks.map(task => (
+                                <div key={task.id} className="p-2.5 border rounded-lg bg-muted/30 hover:border-primary/40 transition-colors">
+                                  <p className="text-sm font-medium mb-1 leading-tight">{task.title}</p>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-muted-foreground">{task.assigned_name || "Unassigned"}</span>
+                                    <Select value={task.status} onValueChange={(v) => updateTaskStatus(task.id, v)}>
+                                      <SelectTrigger className="h-5 w-[80px] text-[10px] border-none bg-transparent p-0">
+                                        <Badge className={`${taskStatusConfig[task.status]?.color} text-white text-[9px] h-4`}>Move</Badge>
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {Object.entries(taskStatusConfig).map(([k, v]) => (
+                                          <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  {task.due_date && <p className="text-[10px] text-muted-foreground mt-0.5">Due: {task.due_date}</p>}
+                                </div>
+                              ))}
+                              {statusTasks.length === 0 && <div className="border border-dashed rounded-lg p-3 text-center text-[10px] text-muted-foreground">Empty</div>}
                             </div>
                           </div>
-                          <Select value={task.status} onValueChange={(v) => updateTaskStatus(task.id, v)}>
-                            <SelectTrigger className="w-[130px]">
-                              <Badge className={`${taskStatusConfig[task.status]?.color} text-white text-xs`}>
-                                {taskStatusConfig[task.status]?.label}
-                              </Badge>
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(taskStatusConfig).map(([k, v]) => (
-                                <SelectItem key={k} value={k}>{v.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-[200px]">

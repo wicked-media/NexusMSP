@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,41 +8,40 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { 
-  Plus, 
-  Clock,
-  MoreVertical,
-  Loader2,
-  DollarSign,
-  Timer,
-  Play,
-  Pause
+import {
+  Plus, Clock, Loader2, DollarSign, Timer, Play, Pause, Square,
+  BarChart3, Calendar, User, Trash2, Edit, Search
 } from "lucide-react";
+import { format } from "date-fns";
 
 export default function TimeTrackingPage() {
   const { token, user } = useAuth();
   const [timeEntries, setTimeEntries] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [users, setUsers] = useState([]);
+  const [weeklySummary, setWeeklySummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterUser, setFilterUser] = useState("all");
+  const [filterBillable, setFilterBillable] = useState("all");
+  // Timer state
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerStart, setTimerStart] = useState(null);
   const [timerTicket, setTimerTicket] = useState(null);
+  const [timerDescription, setTimerDescription] = useState("");
   const [elapsedTime, setElapsedTime] = useState(0);
+  const timerRef = useRef(null);
+
   const [formData, setFormData] = useState({
-    ticket_id: "",
-    user_id: "",
-    description: "",
-    minutes: "",
-    billable: true,
-    date: new Date().toISOString().split('T')[0]
+    ticket_id: "", user_id: "", description: "", minutes: "",
+    billable: true, date: new Date().toISOString().split("T")[0]
   });
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -50,371 +49,222 @@ export default function TimeTrackingPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [entriesRes, ticketsRes, usersRes] = await Promise.all([
+      const [entriesRes, ticketsRes, usersRes, weeklyRes] = await Promise.all([
         axios.get(`${API}/time-entries`, { headers }),
         axios.get(`${API}/tickets`, { headers }),
-        axios.get(`${API}/users`, { headers })
+        axios.get(`${API}/users`, { headers }),
+        axios.get(`${API}/time-entries/weekly-summary`, { headers }),
       ]);
       setTimeEntries(entriesRes.data);
       setTickets(ticketsRes.data);
       setUsers(usersRes.data);
-    } catch (error) {
-      toast.error("Failed to fetch time entries");
-    } finally {
-      setLoading(false);
-    }
+      setWeeklySummary(weeklyRes.data);
+    } catch { toast.error("Failed to load"); }
+    finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchData();
-    if (user) {
-      setFormData(prev => ({ ...prev, user_id: user.id }));
-    }
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
-  // Timer effect
+  // Timer
   useEffect(() => {
-    let interval;
-    if (isTimerRunning && timerStart) {
-      interval = setInterval(() => {
+    if (isTimerRunning) {
+      timerRef.current = setInterval(() => {
         setElapsedTime(Math.floor((Date.now() - timerStart) / 1000));
       }, 1000);
     }
-    return () => clearInterval(interval);
+    return () => clearInterval(timerRef.current);
   }, [isTimerRunning, timerStart]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      await axios.post(`${API}/time-entries`, {
-        ...formData,
-        minutes: parseInt(formData.minutes) || 0
-      }, { headers });
-      toast.success("Time entry added");
-      setIsDialogOpen(false);
-      resetForm();
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to add time entry");
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm("Delete this time entry?")) return;
-    try {
-      await axios.delete(`${API}/time-entries/${id}`, { headers });
-      toast.success("Time entry deleted");
-      fetchData();
-    } catch (error) {
-      toast.error("Failed to delete time entry");
-    }
-  };
-
-  const startTimer = (ticketId) => {
-    setTimerTicket(ticketId);
+  const startTimer = () => {
+    if (!timerTicket) { toast.error("Select a ticket first"); return; }
     setTimerStart(Date.now());
     setIsTimerRunning(true);
     setElapsedTime(0);
-    toast.success("Timer started");
   };
 
   const stopTimer = async () => {
-    if (!timerTicket || elapsedTime < 60) {
-      toast.error("Timer must run for at least 1 minute");
-      setIsTimerRunning(false);
-      return;
-    }
-
-    const minutes = Math.round(elapsedTime / 60);
+    setIsTimerRunning(false);
+    clearInterval(timerRef.current);
+    const minutes = Math.max(1, Math.round(elapsedTime / 60));
     try {
       await axios.post(`${API}/time-entries`, {
-        ticket_id: timerTicket,
-        user_id: user.id,
-        description: "Time tracked via timer",
-        minutes,
-        billable: true,
-        date: new Date().toISOString().split('T')[0]
+        ticket_id: timerTicket, user_id: user?.id || "",
+        description: timerDescription || "Timer entry", minutes, billable: true,
+        date: new Date().toISOString().split("T")[0]
       }, { headers });
       toast.success(`Logged ${minutes} minutes`);
-      setIsTimerRunning(false);
-      setTimerTicket(null);
-      setTimerStart(null);
-      setElapsedTime(0);
+      setTimerTicket(null); setTimerDescription(""); setElapsedTime(0);
       fetchData();
-    } catch (error) {
-      toast.error("Failed to log time");
-    }
+    } catch { toast.error("Failed to save"); }
   };
 
-  const resetForm = () => {
-    setFormData({
-      ticket_id: "",
-      user_id: user?.id || "",
-      description: "",
-      minutes: "",
-      billable: true,
-      date: new Date().toISOString().split('T')[0]
-    });
+  const formatTimer = (secs) => {
+    const h = Math.floor(secs / 3600); const m = Math.floor((secs % 3600) / 60); const s = secs % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
-  const formatTime = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const handleCreate = async () => {
+    if (!formData.ticket_id || !formData.minutes) { toast.error("Ticket and minutes required"); return; }
+    try {
+      await axios.post(`${API}/time-entries`, { ...formData, minutes: parseInt(formData.minutes), user_id: formData.user_id || user?.id || "" }, { headers });
+      toast.success("Time entry added");
+      setIsDialogOpen(false);
+      setFormData({ ticket_id: "", user_id: "", description: "", minutes: "", billable: true, date: new Date().toISOString().split("T")[0] });
+      fetchData();
+    } catch { toast.error("Failed to save"); }
   };
 
-  const totalMinutes = timeEntries.reduce((sum, e) => sum + (e.minutes || 0), 0);
-  const totalBillable = timeEntries.filter(e => e.billable).reduce((sum, e) => sum + (e.total_amount || 0), 0);
+  const handleDelete = async (id) => {
+    try { await axios.delete(`${API}/time-entries/${id}`, { headers }); toast.success("Deleted"); fetchData(); }
+    catch { toast.error("Failed"); }
+  };
+
+  const filtered = timeEntries
+    .filter(e => filterUser === "all" || e.user_id === filterUser)
+    .filter(e => filterBillable === "all" || (filterBillable === "billable" ? e.billable : !e.billable))
+    .filter(e => !search || e.description?.toLowerCase().includes(search.toLowerCase()) || e.ticket_id?.toLowerCase().includes(search.toLowerCase()));
+
+  const totalMins = timeEntries.reduce((s, e) => s + (e.minutes || 0), 0);
+  const billableMins = timeEntries.filter(e => e.billable).reduce((s, e) => s + (e.minutes || 0), 0);
+  const totalAmount = timeEntries.reduce((s, e) => s + (e.total_amount || 0), 0);
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   return (
     <div className="space-y-6" data-testid="time-tracking-page">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Time Tracking</h1>
-          <p className="text-muted-foreground">Track billable hours on tickets</p>
-        </div>
-        <div className="flex gap-2">
-          {isTimerRunning ? (
-            <Button variant="destructive" onClick={stopTimer}>
-              <Pause className="w-4 h-4 mr-2" />
-              Stop ({formatTime(elapsedTime)})
-            </Button>
-          ) : null}
-          <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild>
-              <Button data-testid="add-time-entry-button">
-                <Plus className="w-4 h-4 mr-2" />
-                Log Time
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Log Time Entry</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Ticket</Label>
-                  <Select
-                    value={formData.ticket_id}
-                    onValueChange={(value) => setFormData({ ...formData, ticket_id: value })}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select ticket" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tickets.filter(t => t.status !== 'resolved').map(ticket => (
-                        <SelectItem key={ticket.id} value={ticket.id}>
-                          {ticket.title} ({ticket.client_name})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Minutes</Label>
-                    <Input
-                      type="number"
-                      value={formData.minutes}
-                      onChange={(e) => setFormData({ ...formData, minutes: e.target.value })}
-                      placeholder="30"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Date</Label>
-                    <Input
-                      type="date"
-                      value={formData.date}
-                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="What did you work on?"
-                    rows={2}
-                    required
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label>Billable</Label>
-                  <Switch
-                    checked={formData.billable}
-                    onCheckedChange={(checked) => setFormData({ ...formData, billable: checked })}
-                  />
-                </div>
-                <DialogFooter>
-                  <Button type="submit">Log Time</Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Time Tracking</h1><p className="text-muted-foreground">{timeEntries.length} entries logged</p></div>
+        <Button onClick={() => setIsDialogOpen(true)} data-testid="add-time-entry-btn"><Plus className="w-4 h-4 mr-1" />Log Time</Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-primary" />
+      {/* Live Timer */}
+      <Card className={isTimerRunning ? "border-green-500/50 bg-green-500/5" : ""}>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <Timer className="w-6 h-6 text-primary" />
             </div>
-            <div>
-              <p className="text-2xl font-bold">{Math.round(totalMinutes / 60)}h {totalMinutes % 60}m</p>
-              <p className="text-xs text-muted-foreground">Total Time Logged</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-green-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">${totalBillable.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Billable Amount</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Timer className="w-5 h-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{timeEntries.length}</p>
-              <p className="text-xs text-muted-foreground">Time Entries</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Timer Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Quick Timer</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {tickets.filter(t => t.status !== 'resolved').slice(0, 6).map(ticket => (
-              <div 
-                key={ticket.id} 
-                className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-smooth"
-              >
-                <div className="flex-1 min-w-0 mr-3">
-                  <p className="text-sm font-medium truncate">{ticket.title}</p>
-                  <p className="text-xs text-muted-foreground">{ticket.client_name}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant={timerTicket === ticket.id && isTimerRunning ? "destructive" : "outline"}
-                  onClick={() => {
-                    if (timerTicket === ticket.id && isTimerRunning) {
-                      stopTimer();
-                    } else {
-                      startTimer(ticket.id);
-                    }
-                  }}
-                >
-                  {timerTicket === ticket.id && isTimerRunning ? (
-                    <Pause className="w-4 h-4" />
-                  ) : (
-                    <Play className="w-4 h-4" />
-                  )}
-                </Button>
+            <div className="flex-1 grid grid-cols-3 gap-3">
+              <Select value={timerTicket || ""} onValueChange={setTimerTicket}>
+                <SelectTrigger data-testid="timer-ticket"><SelectValue placeholder="Select ticket..." /></SelectTrigger>
+                <SelectContent>{tickets.slice(0, 30).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title?.slice(0, 30)}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input placeholder="What are you working on?" value={timerDescription} onChange={e => setTimerDescription(e.target.value)} data-testid="timer-description" />
+              <div className="flex items-center gap-2">
+                <span className={`font-mono text-2xl font-bold tabular-nums ${isTimerRunning ? "text-green-500" : ""}`} data-testid="timer-display">{formatTimer(elapsedTime)}</span>
+                {!isTimerRunning ? (
+                  <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={startTimer} data-testid="start-timer"><Play className="w-4 h-4" /></Button>
+                ) : (
+                  <Button size="sm" variant="destructive" onClick={stopTimer} data-testid="stop-timer"><Square className="w-4 h-4" /></Button>
+                )}
               </div>
-            ))}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Time Entries Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Recent Time Entries</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <ScrollArea className="h-[400px]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Ticket</TableHead>
-                    <TableHead>User</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
+      {/* Stats + Weekly */}
+      <Tabs defaultValue="entries">
+        <TabsList><TabsTrigger value="entries">Entries</TabsTrigger><TabsTrigger value="weekly">Weekly Summary</TabsTrigger></TabsList>
+
+        <TabsContent value="entries" className="space-y-4">
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total Hours</p><p className="text-xl font-bold">{(totalMins / 60).toFixed(1)}h</p></div></div></CardContent></Card>
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Billable</p><p className="text-xl font-bold text-green-500">{(billableMins / 60).toFixed(1)}h</p></div></div></CardContent></Card>
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-yellow-500" /></div><div><p className="text-xs text-muted-foreground">Non-Billable</p><p className="text-xl font-bold">{((totalMins - billableMins) / 60).toFixed(1)}h</p></div></div></CardContent></Card>
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-cyan-500" /></div><div><p className="text-xs text-muted-foreground">Revenue</p><p className="text-xl font-bold">${totalAmount.toFixed(0)}</p></div></div></CardContent></Card>
+          </div>
+
+          {/* Filters */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search entries..." value={search} onChange={e => setSearch(e.target.value)} data-testid="time-search" /></div>
+            <Select value={filterUser} onValueChange={setFilterUser}><SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Users</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select>
+            <Select value={filterBillable} onValueChange={setFilterBillable}><SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All</SelectItem><SelectItem value="billable">Billable</SelectItem><SelectItem value="non-billable">Non-Billable</SelectItem></SelectContent></Select>
+          </div>
+
+          {/* Table */}
+          <Card><CardContent className="p-0">
+            <Table>
+              <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Ticket</TableHead><TableHead>User</TableHead><TableHead>Description</TableHead><TableHead className="text-right">Duration</TableHead><TableHead>Billable</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+              <TableBody>
+                {filtered.length === 0 ? (
+                  <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No time entries found. Use the timer or log time manually.</TableCell></TableRow>
+                ) : filtered.map(e => (
+                  <TableRow key={e.id} data-testid={`time-entry-${e.id}`}>
+                    <TableCell className="font-mono text-sm">{e.date || "-"}</TableCell>
+                    <TableCell className="text-sm">{e.ticket_id?.slice(0, 8)}...</TableCell>
+                    <TableCell className="text-sm">{e.user_name || users.find(u => u.id === e.user_id)?.name || "-"}</TableCell>
+                    <TableCell className="max-w-[200px] truncate text-sm">{e.description}</TableCell>
+                    <TableCell className="text-right font-mono">{e.minutes >= 60 ? `${Math.floor(e.minutes/60)}h ${e.minutes%60}m` : `${e.minutes}m`}</TableCell>
+                    <TableCell>{e.billable ? <Badge className="bg-green-500/20 text-green-400 text-[10px]">Billable</Badge> : <Badge variant="secondary" className="text-[10px]">Non-Billable</Badge>}</TableCell>
+                    <TableCell className="text-right font-mono">${(e.total_amount || 0).toFixed(2)}</TableCell>
+                    <TableCell><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(e.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {timeEntries.length > 0 ? timeEntries.map(entry => (
-                    <TableRow key={entry.id} className="table-row-hover">
-                      <TableCell>
-                        <div>
-                          <p className="text-sm font-medium">{entry.ticket_title}</p>
-                          <p className="text-xs text-muted-foreground">{entry.client_name}</p>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="weekly" className="space-y-4">
+          {weeklySummary && (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground mb-1">This Week Total</p><p className="text-3xl font-bold">{weeklySummary.total_hours}h</p></CardContent></Card>
+                <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground mb-1">Billable</p><p className="text-3xl font-bold text-green-500">{weeklySummary.billable_hours}h</p></CardContent></Card>
+                <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground mb-1">Non-Billable</p><p className="text-3xl font-bold text-yellow-500">{weeklySummary.non_billable_hours}h</p></CardContent></Card>
+              </div>
+              {weeklySummary.by_user?.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><User className="w-4 h-4" />By Technician</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table><TableHeader><TableRow><TableHead>Technician</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Billable</TableHead><TableHead className="text-right">Entries</TableHead></TableRow></TableHeader>
+                      <TableBody>{weeklySummary.by_user.map((u, i) => (
+                        <TableRow key={i}><TableCell className="font-medium">{u.user_name || u.user_id.slice(0,8)}</TableCell><TableCell className="text-right font-mono">{(u.total_minutes/60).toFixed(1)}h</TableCell><TableCell className="text-right font-mono text-green-500">{(u.billable_minutes/60).toFixed(1)}h</TableCell><TableCell className="text-right">{u.entries}</TableCell></TableRow>
+                      ))}</TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+              {weeklySummary.by_day?.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Calendar className="w-4 h-4" />By Day</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-7 gap-2">
+                      {weeklySummary.by_day.map((d, i) => (
+                        <div key={i} className="p-3 rounded-lg border bg-muted/30 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">{d.date}</p>
+                          <p className="text-lg font-bold">{(d.total_minutes/60).toFixed(1)}h</p>
+                          <p className="text-xs text-green-500">{(d.billable_minutes/60).toFixed(1)}h billable</p>
                         </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{entry.user_name}</TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">{entry.description}</TableCell>
-                      <TableCell>
-                        <span className="font-mono text-sm">
-                          {Math.floor(entry.minutes / 60)}h {entry.minutes % 60}m
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {entry.billable ? (
-                          <span className="font-semibold text-green-500">${entry.total_amount?.toFixed(2)}</span>
-                        ) : (
-                          <Badge variant="outline">Non-billable</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm">{entry.date}</TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem 
-                              className="text-destructive"
-                              onClick={() => handleDelete(entry.id)}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  )) : (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12">
-                        <Clock className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-muted-foreground">No time entries yet</p>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Create Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Log Time Entry</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Ticket *</Label><Select value={formData.ticket_id} onValueChange={v => setFormData({ ...formData, ticket_id: v })}><SelectTrigger data-testid="entry-ticket"><SelectValue placeholder="Select ticket" /></SelectTrigger><SelectContent>{tickets.slice(0, 50).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title?.slice(0, 30)}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Technician</Label><Select value={formData.user_id || user?.id || ""} onValueChange={v => setFormData({ ...formData, user_id: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Minutes *</Label><Input type="number" value={formData.minutes} onChange={e => setFormData({ ...formData, minutes: e.target.value })} data-testid="entry-minutes" /></div>
+              <div><Label>Date</Label><Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} /></div>
+            </div>
+            <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="What did you work on?" rows={2} /></div>
+            <div className="flex items-center gap-2"><Switch checked={formData.billable} onCheckedChange={v => setFormData({ ...formData, billable: v })} /><Label>Billable</Label></div>
+          </div>
+          <DialogFooter><Button onClick={handleCreate} data-testid="save-time-entry-btn">Save Entry</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

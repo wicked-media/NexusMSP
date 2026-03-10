@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { 
   Plus, 
@@ -30,6 +30,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
 
 const statusConfig = {
@@ -428,6 +429,55 @@ export default function LeadsPage() {
         </Select>
       </div>
 
+      {/* Pipeline + Table Views */}
+      <Tabs defaultValue="pipeline">
+        <TabsList><TabsTrigger value="pipeline">Pipeline</TabsTrigger><TabsTrigger value="table">Table</TabsTrigger></TabsList>
+
+        <TabsContent value="pipeline">
+          <div className="grid grid-cols-5 gap-3 overflow-x-auto" data-testid="leads-pipeline">
+            {["new", "contacted", "qualified", "proposal", "negotiation"].map(stage => {
+              const stageLeads = leads.filter(l => l.status === stage);
+              const stageValue = stageLeads.reduce((s, l) => s + (l.estimated_value || 0), 0);
+              return (
+                <div key={stage} className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2.5 h-2.5 rounded-full ${statusConfig[stage]?.color}`} />
+                      <span className="text-sm font-medium">{statusConfig[stage]?.label}</span>
+                      <Badge variant="secondary" className="text-[10px] h-5">{stageLeads.length}</Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground font-mono">${stageValue.toLocaleString()}</span>
+                  </div>
+                  <div className="space-y-2 min-h-[200px]">
+                    {stageLeads.map(lead => (
+                      <Card key={lead.id} className="cursor-pointer hover:border-primary/50 transition-all hover:shadow-md" onClick={() => openEditDialog(lead)} data-testid={`pipeline-card-${lead.id}`}>
+                        <CardContent className="p-3">
+                          <p className="font-medium text-sm mb-1 truncate">{lead.company_name}</p>
+                          <p className="text-xs text-muted-foreground mb-2">{lead.contact_name}</p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-mono font-medium">${(lead.estimated_value || 0).toLocaleString()}</span>
+                            <Badge variant="outline" className="text-[9px] h-4">{sourceConfig[lead.source]?.label || lead.source}</Badge>
+                          </div>
+                          {lead.assigned_name && <p className="text-[10px] text-muted-foreground mt-1">{lead.assigned_name}</p>}
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {stageLeads.length === 0 && (
+                      <div className="border border-dashed rounded-lg p-4 text-center text-xs text-muted-foreground">No leads</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Won/Lost summary */}
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <Card className="border-green-500/20"><CardContent className="py-3 flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-green-500" /><span className="text-sm font-medium">Won</span><Badge variant="secondary" className="text-[10px] h-5">{leads.filter(l => l.status === "won").length}</Badge></div><span className="font-mono text-sm text-green-500">${leads.filter(l => l.status === "won").reduce((s, l) => s + (l.estimated_value || 0), 0).toLocaleString()}</span></CardContent></Card>
+            <Card className="border-red-500/20"><CardContent className="py-3 flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span className="text-sm font-medium">Lost</span><Badge variant="secondary" className="text-[10px] h-5">{leads.filter(l => l.status === "lost").length}</Badge></div><span className="font-mono text-sm text-red-500">${leads.filter(l => l.status === "lost").reduce((s, l) => s + (l.estimated_value || 0), 0).toLocaleString()}</span></CardContent></Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="table">
       {/* Leads Table */}
       <Card>
         <CardContent className="p-0">
@@ -513,6 +563,8 @@ export default function LeadsPage() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

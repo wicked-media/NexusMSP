@@ -165,6 +165,10 @@ class AssetCreate(BaseModel):
     purchase_date: Optional[str] = None
     warranty_expiry: Optional[str] = None
     cost: float = 0.0
+    location: Optional[str] = None
+    assigned_to: Optional[str] = None
+    depreciation_rate: float = 0.0
+    notes: Optional[str] = None
 
 class Asset(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -181,6 +185,11 @@ class Asset(BaseModel):
     warranty_expiry: Optional[str] = None
     cost: float = 0.0
     status: str = "active"
+    location: Optional[str] = None
+    assigned_to: Optional[str] = None
+    depreciation_rate: float = 0.0
+    current_value: float = 0.0
+    notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Alert(BaseModel):
@@ -2032,6 +2041,55 @@ async def get_assets(
             a['created_at'] = datetime.fromisoformat(a['created_at'])
     return assets
 
+@api_router.get("/assets/stats")
+async def get_asset_stats(current_user: dict = Depends(get_current_user)):
+    assets = await db.assets.find({}, {"_id": 0}).to_list(10000)
+    total = len(assets)
+    active = len([a for a in assets if a.get("status") == "active"])
+    total_value = sum(a.get("cost", 0) for a in assets)
+    expiring_soon = 0
+    expired = 0
+    now = datetime.now()
+    for a in assets:
+        we = a.get("warranty_expiry")
+        if we:
+            try:
+                exp_dt = datetime.strptime(we, "%Y-%m-%d")
+                if exp_dt < now:
+                    expired += 1
+                elif exp_dt < now + timedelta(days=90):
+                    expiring_soon += 1
+            except:
+                pass
+    by_type = {}
+    for a in assets:
+        t = a.get("asset_type", "other")
+        by_type[t] = by_type.get(t, 0) + 1
+    return {
+        "total": total, "active": active, "total_value": round(total_value, 2),
+        "warranty_expiring_soon": expiring_soon, "warranty_expired": expired,
+        "by_type": by_type
+    }
+
+@api_router.get("/assets/expiring")
+async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
+    assets = await db.assets.find({}, {"_id": 0}).to_list(10000)
+    now = datetime.now()
+    cutoff = now + timedelta(days=90)
+    expiring = []
+    for a in assets:
+        we = a.get("warranty_expiry")
+        if we:
+            try:
+                exp_dt = datetime.strptime(we, "%Y-%m-%d")
+                if exp_dt < cutoff:
+                    a["days_remaining"] = (exp_dt - now).days
+                    a["is_expired"] = exp_dt < now
+                    expiring.append(a)
+            except:
+                pass
+    return sorted(expiring, key=lambda x: x.get("days_remaining", 999))
+
 @api_router.get("/assets/{asset_id}")
 async def get_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
     asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
@@ -2235,6 +2293,30 @@ async def get_invoices(
             i['created_at'] = datetime.fromisoformat(i['created_at'])
     return invoices
 
+@api_router.get("/invoices/stats/summary")
+async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
+    all_inv = await db.invoices.find({}, {"_id": 0}).to_list(10000)
+    total = len(all_inv)
+    paid = len([i for i in all_inv if i.get("payment_status") == "paid"])
+    unpaid = len([i for i in all_inv if i.get("payment_status") in ("unpaid", None)])
+    overdue_count = 0
+    for i in all_inv:
+        if i.get("payment_status") not in ("paid",) and i.get("due_date"):
+            try:
+                due = datetime.strptime(i["due_date"], "%Y-%m-%d")
+                if due < datetime.now():
+                    overdue_count += 1
+            except:
+                pass
+    total_revenue = sum(i.get("total", 0) for i in all_inv)
+    total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
+    total_outstanding = total_revenue - total_collected
+    return {
+        "total": total, "paid": paid, "unpaid": unpaid, "overdue": overdue_count,
+        "total_revenue": round(total_revenue, 2), "total_collected": round(total_collected, 2),
+        "total_outstanding": round(total_outstanding, 2)
+    }
+
 @api_router.get("/invoices/{invoice_id}")
 async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
@@ -2428,30 +2510,6 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
         "$push": {"payments": payment_record}
     })
     return {"message": "Payment recorded", "new_balance": float(invoice.get("total", 0)) - new_paid}
-
-@api_router.get("/invoices/stats/summary")
-async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
-    all_inv = await db.invoices.find({}, {"_id": 0}).to_list(10000)
-    total = len(all_inv)
-    paid = len([i for i in all_inv if i.get("payment_status") == "paid"])
-    unpaid = len([i for i in all_inv if i.get("payment_status") in ("unpaid", None)])
-    overdue_count = 0
-    for i in all_inv:
-        if i.get("payment_status") not in ("paid",) and i.get("due_date"):
-            try:
-                due = datetime.strptime(i["due_date"], "%Y-%m-%d")
-                if due < datetime.now():
-                    overdue_count += 1
-            except:
-                pass
-    total_revenue = sum(i.get("total", 0) for i in all_inv)
-    total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
-    total_outstanding = total_revenue - total_collected
-    return {
-        "total": total, "paid": paid, "unpaid": unpaid, "overdue": overdue_count,
-        "total_revenue": round(total_revenue, 2), "total_collected": round(total_collected, 2),
-        "total_outstanding": round(total_outstanding, 2)
-    }
 
 # ============== NO-NOTES ESCALATION SETTINGS ==============
 
@@ -2676,6 +2734,43 @@ async def delete_time_entry(entry_id: str, current_user: dict = Depends(get_curr
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
     return {"message": "Time entry deleted"}
+
+# ============== TIME TRACKING ENHANCED ==============
+
+@api_router.get("/time-entries/weekly-summary")
+async def get_weekly_time_summary(current_user: dict = Depends(get_current_user)):
+    week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = week_start - timedelta(days=week_start.weekday())
+    entries = await db.time_entries.find({"date": {"$gte": week_start.strftime('%Y-%m-%d')}}, {"_id": 0}).to_list(10000)
+    by_user = {}
+    for e in entries:
+        uid = e.get("user_id", "unknown")
+        if uid not in by_user:
+            by_user[uid] = {"user_id": uid, "user_name": e.get("user_name", ""), "total_minutes": 0, "billable_minutes": 0, "entries": 0}
+        by_user[uid]["total_minutes"] += e.get("minutes", 0)
+        if e.get("billable"):
+            by_user[uid]["billable_minutes"] += e.get("minutes", 0)
+        by_user[uid]["entries"] += 1
+    by_day = {}
+    for e in entries:
+        d = e.get("date", "")[:10]
+        if d not in by_day:
+            by_day[d] = {"date": d, "total_minutes": 0, "billable_minutes": 0, "entries": 0}
+        by_day[d]["total_minutes"] += e.get("minutes", 0)
+        if e.get("billable"):
+            by_day[d]["billable_minutes"] += e.get("minutes", 0)
+        by_day[d]["entries"] += 1
+    total = sum(e.get("minutes", 0) for e in entries)
+    billable = sum(e.get("minutes", 0) for e in entries if e.get("billable"))
+    return {
+        "week_start": week_start.strftime('%Y-%m-%d'),
+        "total_hours": round(total / 60, 1),
+        "billable_hours": round(billable / 60, 1),
+        "non_billable_hours": round((total - billable) / 60, 1),
+        "by_user": list(by_user.values()),
+        "by_day": sorted(by_day.values(), key=lambda x: x["date"]),
+        "total_entries": len(entries),
+    }
 
 # ============== KNOWLEDGE BASE ENDPOINTS ==============
 
