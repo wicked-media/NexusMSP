@@ -44,20 +44,23 @@ export default function SettingsPage() {
   });
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
+  const [stripe, setStripe] = useState({ api_key: "", configured: false });
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
+          axios.get(`${API}/settings/stripe`, { headers }),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
         setXero(xeroRes.data);
+        setStripe(stripeRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -389,13 +392,38 @@ export default function SettingsPage() {
             <CreditCard className="w-5 h-5 text-green-500" />
             <CardTitle>Stripe Payments</CardTitle>
           </div>
-          <CardDescription>Accept online payments through Stripe Checkout</CardDescription>
+          <CardDescription>Accept online payments through Stripe Checkout on your invoices</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2">
-            <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Configured</Badge>
-            <span className="text-sm text-muted-foreground">Stripe is connected and ready to accept payments on invoices</span>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Badge className={stripe.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {stripe.configured ? "Connected" : "Not Configured"}
+            </Badge>
           </div>
+          <div className="space-y-2">
+            <Label>Stripe Secret API Key</Label>
+            <Input 
+              type="password" 
+              value={stripe.api_key} 
+              onChange={(e) => setStripe({ ...stripe, api_key: e.target.value })} 
+              placeholder="sk_live_... or sk_test_..." 
+              data-testid="stripe-api-key" 
+            />
+            <p className="text-xs text-muted-foreground">
+              Get your API key from <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer" className="text-primary underline">Stripe Dashboard → Developers → API keys</a>. 
+              Use your <strong>Secret key</strong> (starts with sk_live_ or sk_test_).
+            </p>
+          </div>
+          <Button onClick={async () => {
+            if (!stripe.api_key) { toast.error("Please enter a Stripe API key"); return; }
+            try {
+              await axios.put(`${API}/settings/stripe`, { api_key: stripe.api_key }, { headers });
+              toast.success("Stripe API key saved");
+              setStripe({ ...stripe, configured: true });
+            } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+          }} data-testid="save-stripe-btn">
+            <Save className="w-4 h-4 mr-2" />Save Stripe Settings
+          </Button>
         </CardContent>
       </Card>
     </div>

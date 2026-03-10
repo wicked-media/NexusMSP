@@ -2450,9 +2450,14 @@ async def create_invoice_payment(invoice_id: str, request_data: dict, current_us
     if invoice.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Invoice already paid")
 
-    stripe_key = os.environ.get("STRIPE_API_KEY")
+    stripe_key = None
+    stripe_setting = await db.settings.find_one({"type": "stripe"}, {"_id": 0})
+    if stripe_setting and stripe_setting.get("api_key"):
+        stripe_key = stripe_setting["api_key"]
     if not stripe_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
+        stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured. Go to Settings to add your Stripe API key.")
 
     from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
     origin_url = request_data.get("origin_url", "")
@@ -2488,7 +2493,12 @@ async def create_invoice_payment(invoice_id: str, request_data: dict, current_us
 
 @api_router.get("/invoices/{invoice_id}/payment-status")
 async def check_payment_status(invoice_id: str, session_id: str, current_user: dict = Depends(get_current_user)):
-    stripe_key = os.environ.get("STRIPE_API_KEY")
+    stripe_key = None
+    stripe_setting = await db.settings.find_one({"type": "stripe"}, {"_id": 0})
+    if stripe_setting and stripe_setting.get("api_key"):
+        stripe_key = stripe_setting["api_key"]
+    if not stripe_key:
+        stripe_key = os.environ.get("STRIPE_API_KEY")
     if not stripe_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
@@ -2632,6 +2642,35 @@ async def update_xero_settings(data: dict, current_user: dict = Depends(get_curr
         upsert=True
     )
     return {"message": "Xero settings saved"}
+
+# ============== STRIPE SETTINGS ==============
+
+@api_router.get("/settings/stripe")
+async def get_stripe_settings(current_user: dict = Depends(get_current_user)):
+    setting = await db.settings.find_one({"type": "stripe"}, {"_id": 0})
+    env_key = os.environ.get("STRIPE_API_KEY", "")
+    if setting:
+        return {"api_key": "***" + (setting.get("api_key", ""))[-4:] if setting.get("api_key") else "", "configured": bool(setting.get("api_key") or env_key)}
+    return {"api_key": "***" + env_key[-4:] if env_key else "", "configured": bool(env_key)}
+
+@api_router.put("/settings/stripe")
+async def update_stripe_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    api_key = data.get("api_key", "")
+    if not api_key or api_key.startswith("***"):
+        return {"message": "No changes (masked key ignored)"}
+    await db.settings.update_one(
+        {"type": "stripe"},
+        {"$set": {
+            "type": "stripe",
+            "api_key": api_key,
+            "configured": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+    # Also update the env var in memory for immediate use
+    os.environ["STRIPE_API_KEY"] = api_key
+    return {"message": "Stripe API key saved"}
 
 # ============== ENHANCED DASHBOARD ==============
 

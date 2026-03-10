@@ -308,6 +308,42 @@ export default function TicketsPage() {
           </div>
         </div>
 
+        {/* Color-Coded Progress Tracker */}
+        {(() => {
+          const stages = [
+            { key: "open", label: "Open", color: "bg-blue-500" },
+            { key: "in_progress", label: "In Progress", color: "bg-yellow-500" },
+            { key: "on_hold", label: "On Hold", color: "bg-orange-500" },
+            { key: "resolved", label: "Resolved", color: "bg-green-500" },
+            { key: "closed", label: "Closed", color: "bg-gray-500" },
+          ];
+          const currentStatus = viewingTicket.status;
+          const currentIdx = stages.findIndex(s => s.key === currentStatus);
+          const activeIdx = currentIdx >= 0 ? currentIdx : 0;
+          return (
+            <div className="flex items-center gap-0 w-full" data-testid="ticket-progress-bar">
+              {stages.map((stage, i) => {
+                const isActive = i === activeIdx;
+                const isPast = i < activeIdx;
+                const dotColor = isActive ? stage.color : isPast ? "bg-green-500" : "bg-muted-foreground/20";
+                const lineColor = i < activeIdx ? "bg-green-500" : "bg-muted-foreground/15";
+                return (
+                  <div key={stage.key} className="flex items-center flex-1">
+                    <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                      <div className={`w-5 h-5 rounded-full ${dotColor} flex items-center justify-center transition-all ${isActive ? "ring-2 ring-offset-2 ring-offset-background ring-current scale-110" : ""}`}>
+                        {isPast && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+                        {isActive && <div className="w-2 h-2 rounded-full bg-white" />}
+                      </div>
+                      <span className={`text-[10px] font-medium whitespace-nowrap ${isActive ? "text-foreground" : isPast ? "text-green-500" : "text-muted-foreground/50"}`}>{stage.label}</span>
+                    </div>
+                    {i < stages.length - 1 && <div className={`h-0.5 flex-1 mx-1 rounded-full ${lineColor} transition-all`} />}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
