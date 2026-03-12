@@ -51,6 +51,7 @@ export default function InvoicesPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewInvoice, setViewInvoice] = useState(null);
+  const [invoiceActivity, setInvoiceActivity] = useState([]);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "", notes: "", date: "" });
   const [payingInvoice, setPayingInvoice] = useState(null);
@@ -114,6 +115,14 @@ export default function InvoicesPage() {
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
   });
+
+  const viewInvoiceWithActivity = async (inv) => {
+    setViewInvoice(inv);
+    try {
+      const res = await axios.get(`${API}/invoices/${inv.id}/activity-log`, { headers });
+      setInvoiceActivity(res.data);
+    } catch { setInvoiceActivity([]); }
+  };
 
   const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
   const openEdit = (inv) => {
@@ -502,6 +511,45 @@ export default function InvoicesPage() {
               </Card>
             )}
             {inv.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{inv.notes}</p></CardContent></Card>}
+
+            {/* Admin Audit Trail */}
+            {invoiceActivity.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Eye className="w-4 h-4" />Audit Trail (Admin)</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {invoiceActivity.map((log, i) => (
+                      <div key={log.id || i} className="flex items-start gap-3 p-2.5 rounded-lg border bg-muted/20" data-testid={`invoice-audit-${i}`}>
+                        <div className="mt-0.5">
+                          {log.action === "created" && <Plus className="w-3.5 h-3.5 text-green-500" />}
+                          {log.action === "updated" && <Edit className="w-3.5 h-3.5 text-blue-500" />}
+                          {log.action === "payment_recorded" && <Banknote className="w-3.5 h-3.5 text-amber-500" />}
+                          {log.action === "voided" && <Ban className="w-3.5 h-3.5 text-red-500" />}
+                          {log.action === "moved_client" && <ArrowRightLeft className="w-3.5 h-3.5 text-purple-500" />}
+                          {log.action === "deleted" && <Trash2 className="w-3.5 h-3.5 text-red-500" />}
+                          {!["created","updated","payment_recorded","voided","moved_client","deleted"].includes(log.action) && <FileText className="w-3.5 h-3.5 text-zinc-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium">{log.user_name}</span>
+                            <Badge variant="outline" className="text-[9px] capitalize">{(log.action || "").replace("_", " ")}</Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">{log.details}</p>
+                          {log.changes && Object.keys(log.changes).length > 0 && (
+                            <div className="mt-1 text-[10px] text-muted-foreground">
+                              {Object.entries(log.changes).slice(0, 3).map(([k, v]) => (
+                                <span key={k} className="mr-3">{k}: <span className="text-red-400 line-through">{v.old}</span> <span className="text-green-400">{v.new}</span></span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-muted-foreground whitespace-nowrap">{log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true }) : ""}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="col-span-4 space-y-4">
@@ -611,7 +659,7 @@ export default function InvoicesPage() {
                 const balance = (inv.total || 0) - (inv.amount_paid || 0);
                 const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
                 return (
-                  <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewInvoice(inv)} data-testid={`invoice-row-${inv.id}`}>
+                  <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => viewInvoiceWithActivity(inv)} data-testid={`invoice-row-${inv.id}`}>
                     <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">{inv.client_name}

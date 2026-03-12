@@ -60,12 +60,33 @@ class User(BaseModel):
     email: EmailStr
     name: str
     role: str = "technician"
+    job_title: str = ""
     avatar: Optional[str] = None
     hourly_rate: float = 75.0
     email_signature: Optional[str] = None
+    email_signature_html: Optional[str] = None
     phone: Optional[str] = None
     specialties: List[str] = []
     is_active: bool = True
+    is_admin: bool = False
+    permissions: dict = Field(default_factory=lambda: {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": False},
+        "clients": {"view": True, "create": False, "edit": False, "delete": False},
+        "invoices": {"view": False, "create": False, "edit": False, "delete": False},
+        "products": {"view": True, "create": False, "edit": False, "delete": False},
+        "devices": {"view": True, "create": True, "edit": True, "delete": False},
+        "networking": {"view": True, "create": False, "edit": False, "delete": False},
+        "assets": {"view": True, "create": True, "edit": True, "delete": False},
+        "reports": {"view": False, "create": False, "edit": False, "delete": False},
+        "knowledge_base": {"view": True, "create": True, "edit": True, "delete": False},
+        "it_docs": {"view": False, "create": False, "edit": False, "delete": False},
+        "contracts": {"view": False, "create": False, "edit": False, "delete": False},
+        "projects": {"view": True, "create": True, "edit": True, "delete": False},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": False},
+        "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
+        "scheduling": {"view": True, "create": False, "edit": False, "delete": False},
+        "settings": {"view": False, "create": False, "edit": False, "delete": False},
+    })
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ClientCreate(BaseModel):
@@ -467,11 +488,15 @@ class RemoteSession(BaseModel):
     device_id: str
     device_name: Optional[str] = None
     client_id: str
+    client_name: Optional[str] = None
     user_id: str
     user_name: Optional[str] = None
     session_type: str = "remote_desktop"  # remote_desktop, terminal, file_transfer
     status: str = "active"  # active, ended, failed
     rustdesk_id: Optional[str] = None
+    device_type: Optional[str] = None  # desktop, server, laptop, workstation
+    was_locked_before_disconnect: Optional[bool] = None
+    lock_action_on_disconnect: Optional[str] = None  # locked, unlocked, no_change
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     ended_at: Optional[datetime] = None
     duration_minutes: int = 0
@@ -1787,6 +1812,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     doc['sla_due'] = doc['sla_due'].isoformat() if doc['sla_due'] else None
     await db.tickets.insert_one(doc)
     await db.clients.update_one({"id": ticket_data.client_id}, {"$inc": {"ticket_count": 1}})
+    await _log_activity(current_user, "created", "ticket", ticket.id, ticket.title, f"Created ticket {ticket_number} for {client_name}", metadata={"ticket_number": ticket_number, "client_name": client_name, "priority": ticket_data.priority})
     return ticket
 
 @api_router.put("/tickets/{ticket_id}")
@@ -1804,11 +1830,14 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
         raise HTTPException(status_code=404, detail="Ticket not found")
     if old_ticket:
         changes = []
+        change_dict = {}
         for k, v in ticket_data.items():
             if k != "updated_at" and old_ticket.get(k) != v:
                 changes.append(f"{k}: {old_ticket.get(k)} -> {v}")
+                change_dict[k] = {"old": str(old_ticket.get(k)), "new": str(v)}
         if changes:
             await _ticket_audit(ticket_id, current_user, "updated", "; ".join(changes))
+            await _log_activity(current_user, "updated", "ticket", ticket_id, old_ticket.get("title", ""), "; ".join(changes), changes=change_dict)
     return {"message": "Ticket updated"}
 
 @api_router.delete("/tickets/{ticket_id}")
@@ -1816,6 +1845,7 @@ async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if ticket:
         await db.clients.update_one({"id": ticket['client_id']}, {"$inc": {"ticket_count": -1}})
+        await _log_activity(current_user, "deleted", "ticket", ticket_id, ticket.get("title", ""), f"Deleted ticket {ticket.get('ticket_number', '')}")
     result = await db.tickets.delete_one({"id": ticket_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -1967,6 +1997,73 @@ async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_
     entries = await db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return entries
 
+# ============== UNIFIED ACTIVITY LOG ==============
+
+async def _log_activity(user: dict, action: str, entity_type: str, entity_id: str, entity_name: str = "", details: str = "", changes: dict = None, metadata: dict = None):
+    """Log activity for cross-entity audit trail. Admin-visible only."""
+    entry = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.get("id", "system"),
+        "user_name": user.get("name", "System"),
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "details": details,
+        "changes": changes or {},
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.activity_logs.insert_one(entry)
+
+@api_router.get("/activity-logs")
+async def get_activity_logs(
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    technician_id: Optional[str] = None,
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get activity logs (admin only)"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if entity_id:
+        query["entity_id"] = entity_id
+    if technician_id:
+        query["user_id"] = technician_id
+    logs = await db.activity_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return logs
+
+@api_router.get("/activity-logs/entity/{entity_type}/{entity_id}")
+async def get_entity_activity_log(entity_type: str, entity_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all activity for a specific entity (admin only)"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    logs = await db.activity_logs.find({"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return logs
+
+@api_router.get("/technicians/{tech_id}/activity")
+async def get_technician_activity(tech_id: str, limit: int = 200, current_user: dict = Depends(get_current_user)):
+    """Get all activity performed by a technician (admin only)"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    logs = await db.activity_logs.find({"user_id": tech_id}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    remote_sessions = await db.remote_sessions.find({"user_id": tech_id}, {"_id": 0}).sort("started_at", -1).to_list(200)
+    return {
+        "technician": {"id": user["id"], "name": user["name"]},
+        "activity_logs": logs,
+        "remote_sessions": remote_sessions,
+    }
+
 # ============== CANNED RESPONSES ==============
 
 @api_router.get("/canned-responses")
@@ -2097,13 +2194,22 @@ async def create_device(device_data: DeviceCreate, current_user: dict = Depends(
     doc['last_seen'] = doc['last_seen'].isoformat()
     await db.devices.insert_one(doc)
     await db.clients.update_one({"id": device_data.client_id}, {"$inc": {"device_count": 1}})
+    await _log_activity(current_user, "created", "device", device.id, device.name, f"Added {device.device_type} '{device.name}' for {client_name}", metadata={"device_type": device.device_type, "client_name": client_name})
     return device
 
 @api_router.put("/devices/{device_id}")
 async def update_device(device_id: str, device_data: dict, current_user: dict = Depends(get_current_user)):
+    old_device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     result = await db.devices.update_one({"id": device_id}, {"$set": device_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Device not found")
+    if old_device:
+        change_dict = {}
+        for k, v in device_data.items():
+            if old_device.get(k) != v:
+                change_dict[k] = {"old": str(old_device.get(k)), "new": str(v)}
+        if change_dict:
+            await _log_activity(current_user, "updated", "device", device_id, old_device.get("name", ""), f"Updated device fields: {', '.join(change_dict.keys())}", changes=change_dict)
     return {"message": "Device updated"}
 
 @api_router.delete("/devices/{device_id}")
@@ -2111,6 +2217,7 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if device:
         await db.clients.update_one({"id": device['client_id']}, {"$inc": {"device_count": -1}})
+        await _log_activity(current_user, "deleted", "device", device_id, device.get("name", ""), f"Deleted device '{device.get('name', '')}'")
     result = await db.devices.delete_one({"id": device_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -2128,6 +2235,8 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
     alerts = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
     tickets = await db.tickets.find({"device_id": device_id}, {"_id": 0}).to_list(50)
     network_adapters = await db.device_network.find({"device_id": device_id}, {"_id": 0}).to_list(20)
+    remote_sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(50)
+    activity_logs = await db.activity_logs.find({"entity_type": "device", "entity_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return {
         "device": device,
         "software": software,
@@ -2136,7 +2245,9 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
         "performance": performance,
         "alerts": alerts,
         "tickets": tickets,
-        "network_adapters": network_adapters
+        "network_adapters": network_adapters,
+        "remote_sessions": remote_sessions,
+        "activity_logs": activity_logs,
     }
 
 @api_router.get("/devices/{device_id}/software")
@@ -2484,6 +2595,15 @@ async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
 
+@api_router.get("/invoices/{invoice_id}/activity-log")
+async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    """Get activity log for a specific invoice (admin only)"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    logs = await db.activity_logs.find({"entity_type": "invoice", "entity_id": invoice_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return logs
+
 @api_router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depends(get_current_user)):
     client = await db.clients.find_one({"id": invoice_data.client_id}, {"_id": 0})
@@ -2516,20 +2636,32 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
     doc['created_at'] = doc['created_at'].isoformat()
     await db.invoices.insert_one(doc)
     doc.pop("_id", None)
+    await _log_activity(current_user, "created", "invoice", invoice.id, invoice.invoice_number, f"Created invoice {invoice.invoice_number} for {client_name}", metadata={"client_name": client_name, "total": total})
     return invoice
 
 @api_router.put("/invoices/{invoice_id}")
 async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict = Depends(get_current_user)):
+    old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     result = await db.invoices.update_one({"id": invoice_id}, {"$set": invoice_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if old_inv:
+        change_dict = {}
+        for k, v in invoice_data.items():
+            if old_inv.get(k) != v:
+                change_dict[k] = {"old": str(old_inv.get(k)), "new": str(v)}
+        if change_dict:
+            await _log_activity(current_user, "updated", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Updated invoice fields: {', '.join(change_dict.keys())}", changes=change_dict)
     return {"message": "Invoice updated"}
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     result = await db.invoices.delete_one({"id": invoice_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if old_inv:
+        await _log_activity(current_user, "deleted", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Deleted invoice {old_inv.get('invoice_number', '')}")
     return {"message": "Invoice deleted"}
 
 @api_router.post("/invoices/{invoice_id}/generate-from-contract")
@@ -2684,6 +2816,7 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
                  "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if new_status == "paid" else invoice.get("paid_date")},
         "$push": {"payments": payment_record}
     })
+    await _log_activity(current_user, "payment_recorded", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded {method} payment of ${amount:.2f}", metadata={"amount": amount, "method": method})
     return {"message": "Payment recorded", "new_balance": float(invoice.get("total", 0)) - new_paid}
 
 # Move invoice to different client
@@ -2705,6 +2838,7 @@ async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict
         "action": "moved_client", "from_client": old_client_name, "to_client": new_client["name"],
         "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
     }}})
+    await _log_activity(current_user, "moved_client", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Moved invoice from {old_client_name} to {new_client['name']}", changes={"client": {"old": old_client_name, "new": new_client["name"]}})
     return {"message": f"Invoice moved to {new_client['name']}", "new_client_name": new_client["name"]}
 
 # Void / write off invoice
@@ -2720,6 +2854,7 @@ async def void_invoice(invoice_id: str, data: dict = {}, current_user: dict = De
         "action": "voided", "reason": reason,
         "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
     }}})
+    await _log_activity(current_user, "voided", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Voided invoice. Reason: {reason}")
     return {"message": "Invoice voided"}
 
 # Xero integration endpoints
@@ -3630,16 +3765,24 @@ async def get_technicians_overview(current_user: dict = Depends(get_current_user
 async def create_technician(tech_data: dict, current_user: dict = Depends(get_current_user)):
     from passlib.context import CryptContext
     pwd_context = CryptContext(schemes=["bcrypt"])
+    job_title = tech_data.get("job_title", "")
+    permissions = tech_data.get("permissions")
+    if not permissions and job_title in PERMISSION_PRESETS:
+        permissions = PERMISSION_PRESETS[job_title]
     user = User(
         email=tech_data["email"],
         name=tech_data["name"],
         role=tech_data.get("role", "technician"),
+        job_title=job_title,
         hourly_rate=float(tech_data.get("hourly_rate", 75)),
         phone=tech_data.get("phone", ""),
         specialties=tech_data.get("specialties", []),
         is_active=tech_data.get("is_active", True),
+        is_admin=tech_data.get("is_admin", False),
     )
     user_dict = user.model_dump()
+    if permissions:
+        user_dict["permissions"] = permissions
     user_dict["password_hash"] = pwd_context.hash(tech_data.get("password", "nexusops123"))
     user_dict["created_at"] = user_dict["created_at"].isoformat()
     await db.users.insert_one(user_dict)
@@ -3649,8 +3792,16 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
 
 @api_router.put("/technicians/{tech_id}")
 async def update_technician(tech_id: str, tech_data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "is_active", "email_signature", "avatar"}
+    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "is_active",
+               "email_signature", "email_signature_html", "signature_config", "avatar",
+               "job_title", "permissions", "is_admin"}
+    # Only admins can set is_admin and permissions
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        allowed -= {"is_admin", "permissions"}
     update = {k: v for k, v in tech_data.items() if k in allowed}
+    if "hourly_rate" in update:
+        update["hourly_rate"] = float(update["hourly_rate"])
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields")
     await db.users.update_one({"id": tech_id}, {"$set": update})
@@ -3716,6 +3867,221 @@ async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(ge
         "overdue_tickets": overdue_tickets,
         "no_notes_tickets": no_notes_tickets,
     }
+
+# Permission presets by job title
+PERMISSION_PRESETS = {
+    "L1 Technician": {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": False},
+        "clients": {"view": True, "create": False, "edit": False, "delete": False},
+        "invoices": {"view": False, "create": False, "edit": False, "delete": False},
+        "products": {"view": True, "create": False, "edit": False, "delete": False},
+        "devices": {"view": True, "create": False, "edit": False, "delete": False},
+        "networking": {"view": True, "create": False, "edit": False, "delete": False},
+        "assets": {"view": True, "create": False, "edit": False, "delete": False},
+        "reports": {"view": False, "create": False, "edit": False, "delete": False},
+        "knowledge_base": {"view": True, "create": True, "edit": False, "delete": False},
+        "it_docs": {"view": False, "create": False, "edit": False, "delete": False},
+        "contracts": {"view": False, "create": False, "edit": False, "delete": False},
+        "projects": {"view": True, "create": False, "edit": False, "delete": False},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": False},
+        "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
+        "scheduling": {"view": True, "create": False, "edit": False, "delete": False},
+        "settings": {"view": False, "create": False, "edit": False, "delete": False},
+    },
+    "L2 Technician": {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": False},
+        "clients": {"view": True, "create": True, "edit": True, "delete": False},
+        "invoices": {"view": True, "create": False, "edit": False, "delete": False},
+        "products": {"view": True, "create": True, "edit": True, "delete": False},
+        "devices": {"view": True, "create": True, "edit": True, "delete": False},
+        "networking": {"view": True, "create": True, "edit": True, "delete": False},
+        "assets": {"view": True, "create": True, "edit": True, "delete": False},
+        "reports": {"view": True, "create": False, "edit": False, "delete": False},
+        "knowledge_base": {"view": True, "create": True, "edit": True, "delete": False},
+        "it_docs": {"view": True, "create": False, "edit": False, "delete": False},
+        "contracts": {"view": True, "create": False, "edit": False, "delete": False},
+        "projects": {"view": True, "create": True, "edit": True, "delete": False},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": False},
+        "purchase_orders": {"view": True, "create": False, "edit": False, "delete": False},
+        "scheduling": {"view": True, "create": True, "edit": False, "delete": False},
+        "settings": {"view": False, "create": False, "edit": False, "delete": False},
+    },
+    "Senior Engineer": {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": True},
+        "clients": {"view": True, "create": True, "edit": True, "delete": False},
+        "invoices": {"view": True, "create": True, "edit": True, "delete": False},
+        "products": {"view": True, "create": True, "edit": True, "delete": True},
+        "devices": {"view": True, "create": True, "edit": True, "delete": True},
+        "networking": {"view": True, "create": True, "edit": True, "delete": True},
+        "assets": {"view": True, "create": True, "edit": True, "delete": True},
+        "reports": {"view": True, "create": True, "edit": False, "delete": False},
+        "knowledge_base": {"view": True, "create": True, "edit": True, "delete": True},
+        "it_docs": {"view": True, "create": True, "edit": True, "delete": False},
+        "contracts": {"view": True, "create": True, "edit": True, "delete": False},
+        "projects": {"view": True, "create": True, "edit": True, "delete": True},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": True},
+        "purchase_orders": {"view": True, "create": True, "edit": True, "delete": False},
+        "scheduling": {"view": True, "create": True, "edit": True, "delete": False},
+        "settings": {"view": True, "create": False, "edit": False, "delete": False},
+    },
+    "Service Manager": {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": True},
+        "clients": {"view": True, "create": True, "edit": True, "delete": True},
+        "invoices": {"view": True, "create": True, "edit": True, "delete": True},
+        "products": {"view": True, "create": True, "edit": True, "delete": True},
+        "devices": {"view": True, "create": True, "edit": True, "delete": True},
+        "networking": {"view": True, "create": True, "edit": True, "delete": True},
+        "assets": {"view": True, "create": True, "edit": True, "delete": True},
+        "reports": {"view": True, "create": True, "edit": True, "delete": True},
+        "knowledge_base": {"view": True, "create": True, "edit": True, "delete": True},
+        "it_docs": {"view": True, "create": True, "edit": True, "delete": True},
+        "contracts": {"view": True, "create": True, "edit": True, "delete": True},
+        "projects": {"view": True, "create": True, "edit": True, "delete": True},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": True},
+        "purchase_orders": {"view": True, "create": True, "edit": True, "delete": True},
+        "scheduling": {"view": True, "create": True, "edit": True, "delete": True},
+        "settings": {"view": True, "create": True, "edit": True, "delete": False},
+    },
+    "Dispatcher": {
+        "tickets": {"view": True, "create": True, "edit": True, "delete": False},
+        "clients": {"view": True, "create": True, "edit": False, "delete": False},
+        "invoices": {"view": True, "create": False, "edit": False, "delete": False},
+        "products": {"view": True, "create": False, "edit": False, "delete": False},
+        "devices": {"view": True, "create": False, "edit": False, "delete": False},
+        "networking": {"view": True, "create": False, "edit": False, "delete": False},
+        "assets": {"view": True, "create": False, "edit": False, "delete": False},
+        "reports": {"view": True, "create": False, "edit": False, "delete": False},
+        "knowledge_base": {"view": True, "create": False, "edit": False, "delete": False},
+        "it_docs": {"view": False, "create": False, "edit": False, "delete": False},
+        "contracts": {"view": False, "create": False, "edit": False, "delete": False},
+        "projects": {"view": True, "create": False, "edit": False, "delete": False},
+        "time_tracking": {"view": True, "create": True, "edit": True, "delete": False},
+        "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
+        "scheduling": {"view": True, "create": True, "edit": True, "delete": True},
+        "settings": {"view": False, "create": False, "edit": False, "delete": False},
+    },
+}
+
+@api_router.get("/technicians/permission-presets")
+async def get_permission_presets(current_user: dict = Depends(get_current_user)):
+    return PERMISSION_PRESETS
+
+@api_router.put("/technicians/{tech_id}/permissions")
+async def update_technician_permissions(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Only admins can modify permissions")
+    update = {}
+    if "permissions" in data:
+        update["permissions"] = data["permissions"]
+    if "is_admin" in data:
+        update["is_admin"] = data["is_admin"]
+    if "job_title" in data:
+        update["job_title"] = data["job_title"]
+    if update:
+        await db.users.update_one({"id": tech_id}, {"$set": update})
+    return {"message": "Permissions updated"}
+
+@api_router.get("/technicians/leaderboard")
+async def get_technician_leaderboard(current_user: dict = Depends(get_current_user)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    all_tickets = await db.tickets.find({}, {"_id": 0}).to_list(10000)
+    leaderboard = []
+    for u in users:
+        uid = u["id"]
+        assigned = [t for t in all_tickets if t.get("assigned_to") == uid]
+        closed_this_month = [t for t in assigned if t.get("status") in ("resolved", "closed") and t.get("resolved_at", t.get("updated_at", "")) >= month_start.isoformat()]
+        closed_total = [t for t in assigned if t.get("status") in ("resolved", "closed")]
+        time_entries = await db.ticket_time_entries.find({"user_id": uid}, {"_id": 0}).to_list(5000)
+        month_entries = [e for e in time_entries if e.get("created_at", "") >= month_start.isoformat()]
+        total_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
+        month_hours = round(sum(e.get("minutes", 0) for e in month_entries) / 60, 1)
+        avg_resolution = 0
+        resolved_with_time = [t for t in closed_total if t.get("resolved_at") and t.get("created_at")]
+        if resolved_with_time:
+            deltas = []
+            for t in resolved_with_time:
+                try:
+                    c = datetime.fromisoformat(str(t["created_at"]).replace("Z", "+00:00"))
+                    r = datetime.fromisoformat(str(t["resolved_at"]).replace("Z", "+00:00"))
+                    deltas.append((r - c).total_seconds() / 3600)
+                except:
+                    pass
+            if deltas:
+                avg_resolution = round(sum(deltas) / len(deltas), 1)
+        csat_total = sum(1 for t in closed_total if t.get("satisfaction_rating"))
+        csat_positive = sum(1 for t in closed_total if t.get("satisfaction_rating", 0) >= 4)
+        csat_score = round((csat_positive / csat_total * 100) if csat_total > 0 else 0, 1)
+        leaderboard.append({
+            "id": uid, "name": u["name"], "email": u["email"], "role": u.get("role", "technician"),
+            "job_title": u.get("job_title", ""), "avatar": u.get("avatar"),
+            "is_active": u.get("is_active", True),
+            "closed_this_month": len(closed_this_month), "closed_total": len(closed_total),
+            "total_assigned": len(assigned), "total_hours": total_hours,
+            "month_hours": month_hours, "avg_resolution_hours": avg_resolution,
+            "csat_score": csat_score, "specialties": u.get("specialties", []),
+        })
+    leaderboard.sort(key=lambda x: x["closed_this_month"], reverse=True)
+    for i, entry in enumerate(leaderboard):
+        entry["rank"] = i + 1
+    return {"month": now.strftime("%B %Y"), "leaderboard": leaderboard}
+
+@api_router.get("/technicians/{tech_id}/history")
+async def get_technician_history(tech_id: str, current_user: dict = Depends(get_current_user)):
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    all_tickets = await db.tickets.find({"assigned_to": tech_id}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    resolved = [t for t in all_tickets if t.get("status") in ("resolved", "closed")]
+    now = datetime.now(timezone.utc)
+    monthly_data = {}
+    for i in range(6):
+        d = now - timedelta(days=30 * i)
+        key = d.strftime("%Y-%m")
+        label = d.strftime("%b %Y")
+        month_start = d.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if d.month == 12:
+            month_end = month_start.replace(year=d.year + 1, month=1)
+        else:
+            month_end = month_start.replace(month=d.month + 1)
+        closed_in_month = [t for t in resolved if month_start.isoformat() <= t.get("resolved_at", t.get("updated_at", "")) < month_end.isoformat()]
+        opened_in_month = [t for t in all_tickets if month_start.isoformat() <= t.get("created_at", "") < month_end.isoformat()]
+        monthly_data[key] = {"label": label, "closed": len(closed_in_month), "opened": len(opened_in_month)}
+    recent_resolved = resolved[:20]
+    return {
+        "technician": {"id": user["id"], "name": user["name"]},
+        "total_tickets": len(all_tickets), "total_resolved": len(resolved),
+        "monthly": list(reversed(monthly_data.values())),
+        "recent_resolved": recent_resolved,
+    }
+
+@api_router.put("/technicians/{tech_id}/email-signature")
+async def update_email_signature(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    sig_data = {
+        "email_signature": data.get("email_signature", ""),
+        "email_signature_html": data.get("email_signature_html", ""),
+        "signature_config": data.get("signature_config", {}),
+    }
+    await db.users.update_one({"id": tech_id}, {"$set": sig_data})
+    return {"message": "Email signature updated"}
+
+@api_router.get("/technicians/{tech_id}/email-signature")
+async def get_email_signature(tech_id: str, current_user: dict = Depends(get_current_user)):
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0, "email_signature": 1, "email_signature_html": 1, "signature_config": 1, "name": 1, "email": 1, "phone": 1, "job_title": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    return user
+
+@api_router.get("/settings/email-signature-templates")
+async def get_signature_templates(current_user: dict = Depends(get_current_user)):
+    return [
+        {"id": "professional", "name": "Professional", "description": "Clean, corporate style with company branding"},
+        {"id": "modern", "name": "Modern", "description": "Sleek design with social links and gradient accent"},
+        {"id": "minimal", "name": "Minimal", "description": "Simple text-based signature with essential info"},
+        {"id": "technical", "name": "Technical", "description": "Tech-focused with certifications and skills"},
+    ]
 
 # ============== SCHEDULING ENDPOINTS ==============
 
@@ -4458,18 +4824,22 @@ async def create_remote_session(device_id: str, session_type: str = "remote_desk
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
+    client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0})
     session = RemoteSession(
         device_id=device_id,
         device_name=device.get('name'),
         client_id=device.get('client_id'),
+        client_name=client.get('name') if client else None,
         user_id=current_user['id'],
         user_name=current_user['name'],
         session_type=session_type,
-        rustdesk_id=device.get('rustdesk_id')
+        rustdesk_id=device.get('rustdesk_id'),
+        device_type=device.get('device_type', 'workstation'),
     )
     doc = session.model_dump()
     doc['started_at'] = doc['started_at'].isoformat()
     await db.remote_sessions.insert_one(doc)
+    await _log_activity(current_user, "remote_connect", "device", device_id, device.get("name", ""), f"Started {session_type} session on {device.get('name', '')}", metadata={"session_id": session.id, "device_type": device.get("device_type", "workstation")})
     
     return session
 
@@ -4477,6 +4847,7 @@ async def create_remote_session(device_id: str, session_type: str = "remote_desk
 async def get_remote_sessions(
     device_id: Optional[str] = None,
     status: Optional[str] = None,
+    user_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
     query = {}
@@ -4484,12 +4855,28 @@ async def get_remote_sessions(
         query["device_id"] = device_id
     if status:
         query["status"] = status
+    if user_id:
+        query["user_id"] = user_id
     
-    sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(100)
+    sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(200)
+    return sessions
+
+@api_router.get("/remote/active-sessions")
+async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
+    """Get all currently active remote sessions"""
+    sessions = await db.remote_sessions.find({"status": "active"}, {"_id": 0}).sort("started_at", -1).to_list(100)
+    # Calculate live duration for active sessions
+    now = datetime.now(timezone.utc)
+    for s in sessions:
+        try:
+            started = datetime.fromisoformat(str(s["started_at"]).replace("Z", "+00:00"))
+            s["live_duration_minutes"] = int((now - started).total_seconds() / 60)
+        except:
+            s["live_duration_minutes"] = 0
     return sessions
 
 @api_router.put("/remote/sessions/{session_id}/end")
-async def end_remote_session(session_id: str, notes: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+async def end_remote_session(session_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
     session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -4497,16 +4884,55 @@ async def end_remote_session(session_id: str, notes: Optional[str] = None, curre
     started_at = datetime.fromisoformat(session['started_at']) if isinstance(session['started_at'], str) else session['started_at']
     duration = int((datetime.now(timezone.utc) - started_at).total_seconds() / 60)
     
+    was_locked = data.get("was_locked_before_disconnect")
+    lock_action = data.get("lock_action_on_disconnect", "no_change")
+    notes = data.get("notes")
+    
     await db.remote_sessions.update_one(
         {"id": session_id},
         {"$set": {
             "status": "ended",
             "ended_at": datetime.now(timezone.utc).isoformat(),
             "duration_minutes": duration,
-            "notes": notes
+            "notes": notes,
+            "was_locked_before_disconnect": was_locked,
+            "lock_action_on_disconnect": lock_action,
         }}
     )
+    device_name = session.get("device_name", "")
+    await _log_activity(current_user, "remote_disconnect", "device", session.get("device_id", ""), device_name, f"Ended {session.get('session_type', 'remote')} session on {device_name} ({duration}min). Lock: {lock_action}", metadata={"session_id": session_id, "duration_minutes": duration, "was_locked": was_locked, "lock_action": lock_action})
     return {"message": "Session ended", "duration_minutes": duration}
+
+@api_router.get("/devices/{device_id}/remote-sessions")
+async def get_device_remote_sessions(device_id: str, limit: int = 50, current_user: dict = Depends(get_current_user)):
+    """Get remote session history for a specific device"""
+    sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    active_count = sum(1 for s in sessions if s.get("status") == "active")
+    total_minutes = sum(s.get("duration_minutes", 0) for s in sessions if s.get("status") == "ended")
+    return {
+        "sessions": sessions,
+        "active_count": active_count,
+        "total_sessions": len(sessions),
+        "total_minutes": total_minutes,
+    }
+
+@api_router.get("/technicians/{tech_id}/remote-sessions")
+async def get_technician_remote_sessions(tech_id: str, limit: int = 100, current_user: dict = Depends(get_current_user)):
+    """Get remote session history for a specific technician"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin") and current_user["id"] != tech_id):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sessions = await db.remote_sessions.find({"user_id": tech_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    active_count = sum(1 for s in sessions if s.get("status") == "active")
+    total_minutes = sum(s.get("duration_minutes", 0) for s in sessions if s.get("status") == "ended")
+    unique_devices = len(set(s.get("device_id") for s in sessions))
+    return {
+        "sessions": sessions,
+        "active_count": active_count,
+        "total_sessions": len(sessions),
+        "total_minutes": total_minutes,
+        "unique_devices": unique_devices,
+    }
 
 # ============== DEVICE CHAT ENDPOINTS ==============
 
@@ -6556,20 +6982,31 @@ async def seed_data():
         name="Alex Thompson",
         role="admin",
         avatar="https://api.dicebear.com/7.x/initials/svg?seed=AT",
-        hourly_rate=125.0
+        hourly_rate=125.0,
+        is_admin=True,
     )
     demo_doc = demo_user.model_dump()
     demo_doc['password_hash'] = hash_password("admin123")
+    demo_doc['job_title'] = "Service Manager"
+    demo_doc['phone'] = "+1 (555) 123-4567"
+    demo_doc['specialties'] = ["Management", "Strategy", "Enterprise Architecture"]
     demo_doc['created_at'] = demo_doc['created_at'].isoformat()
     await db.users.insert_one(demo_doc)
     
     users_data = [
-        {"id": "user-002", "email": "sarah@nexusops.io", "name": "Sarah Chen", "role": "technician", "hourly_rate": 85.0},
-        {"id": "user-003", "email": "mike@nexusops.io", "name": "Mike Rodriguez", "role": "technician", "hourly_rate": 75.0},
+        {"id": "user-002", "email": "sarah@nexusops.io", "name": "Sarah Chen", "role": "technician", "job_title": "Senior Engineer", "hourly_rate": 85.0, "phone": "+1 (555) 234-5678", "specialties": ["Networking", "Cloud Infrastructure", "Azure"], "is_admin": False},
+        {"id": "user-003", "email": "mike@nexusops.io", "name": "Mike Rodriguez", "role": "technician", "job_title": "L2 Technician", "hourly_rate": 75.0, "phone": "+1 (555) 345-6789", "specialties": ["Windows Server", "Active Directory", "Security"], "is_admin": False},
+        {"id": "user-004", "email": "lisa@nexusops.io", "name": "Lisa Park", "role": "technician", "job_title": "L1 Technician", "hourly_rate": 55.0, "phone": "+1 (555) 456-7890", "specialties": ["Help Desk", "macOS", "Printers"], "is_admin": False},
+        {"id": "user-005", "email": "james@nexusops.io", "name": "James Wilson", "role": "dispatcher", "job_title": "Dispatcher", "hourly_rate": 60.0, "phone": "+1 (555) 567-8901", "specialties": ["Scheduling", "Triage"], "is_admin": False},
     ]
     for u in users_data:
-        user = User(**u, avatar=f"https://api.dicebear.com/7.x/initials/svg?seed={u['name']}")
+        jt = u.get("job_title", "")
+        perms = PERMISSION_PRESETS.get(jt, {})
+        user = User(**{k: v for k, v in u.items() if k != "job_title"}, avatar=f"https://api.dicebear.com/7.x/initials/svg?seed={u['name']}")
         doc = user.model_dump()
+        doc["job_title"] = jt
+        if perms:
+            doc["permissions"] = perms
         doc['password_hash'] = hash_password("tech123")
         doc['created_at'] = doc['created_at'].isoformat()
         await db.users.insert_one(doc)

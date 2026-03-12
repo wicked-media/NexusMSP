@@ -164,15 +164,17 @@ export default function DeviceDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-8 w-full" data-testid="device-tabs">
+        <TabsList className="grid grid-cols-10 w-full" data-testid="device-tabs">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="tickets">Tickets ({data.tickets?.length || 0})</TabsTrigger>
+          <TabsTrigger value="remote-sessions" data-testid="device-remote-tab">Sessions ({data.remote_sessions?.length || 0})</TabsTrigger>
           <TabsTrigger value="software">Software ({data.software?.length || 0})</TabsTrigger>
           <TabsTrigger value="patches">Patches ({data.patches?.length || 0})</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="events">Events ({data.events?.length || 0})</TabsTrigger>
+          <TabsTrigger value="audit-log" data-testid="device-audit-tab">Audit Log</TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW TAB */}
@@ -638,6 +640,103 @@ export default function DeviceDetailPage() {
                   })}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* REMOTE SESSIONS TAB */}
+        <TabsContent value="remote-sessions" className="mt-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><ExternalLink className="w-4 h-4" />Remote Session History</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Technician</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead>
+                    <TableHead>Duration</TableHead><TableHead>Lock Status</TableHead><TableHead>Started</TableHead><TableHead>Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(data.remote_sessions || []).length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No remote sessions recorded</TableCell></TableRow>
+                  ) : (data.remote_sessions || []).map((s, i) => (
+                    <TableRow key={s.id || i} data-testid={`device-session-${i}`}>
+                      <TableCell className="font-medium">{s.user_name || "Unknown"}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs capitalize">{(s.session_type || "remote").replace("_", " ")}</Badge></TableCell>
+                      <TableCell>
+                        {s.status === "active" ? (
+                          <Badge className="bg-emerald-600 text-white text-xs">Active</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-zinc-400">Ended</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">{s.status === "active" ? <span className="text-emerald-500">Live</span> : `${s.duration_minutes || 0}m`}</TableCell>
+                      <TableCell>
+                        <div className="text-xs">
+                          {s.lock_action_on_disconnect ? (
+                            <span className={s.lock_action_on_disconnect === "locked" ? "text-amber-500" : s.lock_action_on_disconnect === "unlocked" ? "text-green-500" : "text-zinc-500"}>
+                              {s.lock_action_on_disconnect === "locked" && <Lock className="w-3 h-3 inline mr-1" />}
+                              {s.lock_action_on_disconnect === "unlocked" && <Eye className="w-3 h-3 inline mr-1" />}
+                              {s.lock_action_on_disconnect}
+                            </span>
+                          ) : "n/a"}
+                          {s.was_locked_before_disconnect != null && (
+                            <div className="text-[10px] text-muted-foreground">Before: {s.was_locked_before_disconnect ? "Locked" : "Unlocked"}</div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{s.started_at ? formatDistanceToNow(new Date(s.started_at), { addSuffix: true }) : "-"}</TableCell>
+                      <TableCell className="text-xs max-w-[150px] truncate">{s.notes || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* AUDIT LOG TAB */}
+        <TabsContent value="audit-log" className="mt-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4" />Device Activity Log (Admin)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(data.activity_logs || []).length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">No activity logs recorded for this device</div>
+              ) : (
+                <div className="space-y-2">
+                  {(data.activity_logs || []).map((log, i) => (
+                    <div key={log.id || i} className="flex items-start gap-3 p-3 rounded-lg border bg-card" data-testid={`device-audit-${i}`}>
+                      <div className="mt-0.5">
+                        {log.action === "created" && <Plus className="w-4 h-4 text-green-500" />}
+                        {log.action === "updated" && <Wrench className="w-4 h-4 text-blue-500" />}
+                        {log.action === "deleted" && <XCircle className="w-4 h-4 text-red-500" />}
+                        {log.action === "remote_connect" && <ExternalLink className="w-4 h-4 text-emerald-500" />}
+                        {log.action === "remote_disconnect" && <Lock className="w-4 h-4 text-zinc-400" />}
+                        {!["created","updated","deleted","remote_connect","remote_disconnect"].includes(log.action) && <Info className="w-4 h-4 text-zinc-500" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{log.user_name}</span>
+                          <Badge variant="outline" className="text-[10px] capitalize">{(log.action || "").replace("_", " ")}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{log.details}</p>
+                        {log.changes && Object.keys(log.changes).length > 0 && (
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            {Object.entries(log.changes).slice(0, 5).map(([k, v]) => (
+                              <div key={k}><span className="text-zinc-500">{k}:</span> <span className="text-red-400 line-through">{v.old}</span> <span className="text-green-400">{v.new}</span></div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">{log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true }) : "-"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
