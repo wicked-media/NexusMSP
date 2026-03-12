@@ -11,13 +11,13 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 ## Core Modules (Implemented)
 - Dashboard (fleet overview, system health)
 - Tickets (rich text, parent/child, device linking, product linking, audit trail)
-- Clients & Contacts
-- Technicians (permissions, leaderboard, history, signatures, activity log, remote sessions tracking)
+- Clients & Contacts (M365 tenancy sync, CIPP-ready)
+- Technicians (permissions, leaderboard, history, signatures, activity log, remote sessions, profile pictures, about me, achievements/badges, hover status cards, Teams status sync)
 - Invoices (recurring, Stripe, manual payments x9, move-client, void, Xero-ready, admin audit trail)
 - Products (stock tracking, barcodes, instances, label printing)
 - Purchase Orders
 - Assets
-- Devices (detailed hardware/software/security info, remote access, remote session history, admin audit log)
+- Devices (detailed hardware/software/security info, remote access, remote session history with lock tracking, admin audit log)
 - Networking (UniFi sites CRUD, device adoption, edit, test connection, clients)
 - Time Tracking
 - Leads / CRM
@@ -58,7 +58,41 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Admin-only "Audit Trail" section in invoice detail view
 - Shows creation, updates, payments, voiding, client moves with timestamps and change diffs
 
-### Previous Session Features (March 2026 - Session 1)
+### Session 2b - Achievement Badges, Profile & Microsoft Integrations
+
+#### Achievement Badge System (Gamification)
+- 18 built-in achievement definitions across 6 categories: tickets (6), invoices (3), remote (2), tenure (4), celebration (1), special (2)
+- Auto-check milestones on profile view (ticket closures, invoices created, remote sessions, tenure, birthday)
+- Admin can manually award any badge + create custom badges
+- Admin can revoke badges
+- Visual showcase: earned badges with glow effects, all badges by category with earned/locked state
+
+#### Technician Profile Enhancements
+- Profile picture upload with file validation (jpg, png, webp, gif)
+- About Me bio section
+- Hire Date and Birthday fields (for tenure/birthday badges)
+- "Edit Profile" dialog for updating bio/dates
+- Profile tab shows all personal info, specialties, hourly rate
+
+#### Hover Status Card
+- Hovering over tech avatar shows real-time status card
+- Status types: remote (green pulse), active (blue), available (grey)
+- Shows: status text ("In remote session with ClientName"), active sessions with device/client/duration, assigned tickets, badge count
+
+#### Microsoft Integration Configuration
+- Microsoft Teams: Config UI for tenant_id, client_id, client_secret, webhook_url + status sync endpoint
+- CIPP: Config UI for api_url, api_key, tenant_filter + tenant sync endpoint
+- Microsoft 365: Config UI for tenant_id, client_id, client_secret, redirect_uri
+- All configs stored in settings collection, enabled/disabled toggle
+- Real API calls are MOCKED (configuration UI is ready, actual Graph API/CIPP calls need real credentials)
+
+#### Client M365 Tenancy Sync
+- New "Microsoft 365" tab on client detail page
+- One-click "Connect M365" to link tenant ID and domain
+- User table showing Display Name, UPN/Email, License Type, Status
+- CIPP integration notice for full sync capability
+
+### Previous Session Features (March 2026 - Session 2a)
 
 ### Networking Page Enhancement
 - Full CRUD for network sites: add/edit/delete with UniFi controller URL, API key, credentials
@@ -99,7 +133,11 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - purchase_orders, assets, devices, device_events, network_sites, network_devices, network_clients
 - time_entries, leads, projects, project_tasks, knowledge_base, it_documents
 - contracts, schedules, custom_fields, remote_sessions, settings
-- activity_logs (NEW - unified cross-entity audit trail)
+- activity_logs (unified cross-entity audit trail)
+- user_achievements (earned badges per user)
+- achievement_definitions (custom admin-created badges)
+- m365_users (synced Microsoft 365 users per client)
+- teams_status (Teams status per user)
 
 ## Key API Endpoints
 - `/api/activity-logs` - Admin-only activity trail (filter by entity_type, entity_id, technician_id)
@@ -125,9 +163,9 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Password: admin123
 
 ## Testing Status
+- Iteration 18: 28/28 backend + all frontend features passed (100%) - Achievements, Profile, Hover cards, M365
 - Iteration 17: 15/15 backend + frontend features passed (100%) - Activity logs, remote sessions, audit trails
 - Iteration 16: 20/20 backend + 18/18 frontend features passed (100%)
-- Iteration 15: 24/24 backend + 22/22 frontend features passed (100%)
 
 ## Integrations
 - **Stripe**: Implemented (payments)
