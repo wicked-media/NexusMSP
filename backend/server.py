@@ -147,6 +147,17 @@ class DeviceCreate(BaseModel):
     os: str = "Windows 11"
     ip_address: Optional[str] = None
     serial_number: Optional[str] = None
+    mac_address: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    processor: Optional[str] = None
+    ram_gb: Optional[float] = None
+    storage_total_gb: Optional[float] = None
+    domain: Optional[str] = None
+    location: Optional[str] = None
+    assigned_user: Optional[str] = None
+    tags: List[str] = []
+    notes: Optional[str] = None
 
 class Device(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -156,13 +167,46 @@ class Device(BaseModel):
     client_name: Optional[str] = None
     device_type: str = "workstation"
     os: str = "Windows 11"
+    os_version: Optional[str] = None
+    os_build: Optional[str] = None
     ip_address: Optional[str] = None
+    public_ip: Optional[str] = None
+    mac_address: Optional[str] = None
     serial_number: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    processor: Optional[str] = None
+    processor_cores: Optional[int] = None
+    ram_gb: Optional[float] = None
+    storage_total_gb: Optional[float] = None
+    storage_used_gb: Optional[float] = None
+    gpu: Optional[str] = None
+    domain: Optional[str] = None
+    location: Optional[str] = None
+    assigned_user: Optional[str] = None
+    last_logged_in_user: Optional[str] = None
+    uptime_hours: Optional[float] = None
+    last_reboot: Optional[str] = None
+    agent_version: Optional[str] = None
+    antivirus: Optional[str] = None
+    antivirus_status: Optional[str] = None
+    firewall_enabled: Optional[bool] = True
+    edr_status: Optional[str] = None
+    encryption_status: Optional[str] = None
+    compliance_score: Optional[int] = None
+    patch_status: Optional[str] = None
+    pending_patches: Optional[int] = 0
+    installed_software_count: Optional[int] = 0
+    tags: List[str] = []
+    notes: Optional[str] = None
+    rustdesk_id: Optional[str] = None
     status: str = "online"
     last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     cpu_usage: float = 0.0
     memory_usage: float = 0.0
     disk_usage: float = 0.0
+    network_in_mbps: Optional[float] = 0.0
+    network_out_mbps: Optional[float] = 0.0
     alerts_count: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -2051,6 +2095,71 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Device not found")
     return {"message": "Device deleted"}
+
+@api_router.get("/devices/{device_id}/detail")
+async def get_device_detail(device_id: str, current_user: dict = Depends(get_current_user)):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
+    patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(100)
+    events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
+    alerts = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    tickets = await db.tickets.find({"device_id": device_id}, {"_id": 0}).to_list(50)
+    network_adapters = await db.device_network.find({"device_id": device_id}, {"_id": 0}).to_list(20)
+    return {
+        "device": device,
+        "software": software,
+        "patches": patches,
+        "events": events,
+        "performance": performance,
+        "alerts": alerts,
+        "tickets": tickets,
+        "network_adapters": network_adapters
+    }
+
+@api_router.get("/devices/{device_id}/software")
+async def get_device_software(device_id: str, current_user: dict = Depends(get_current_user)):
+    software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
+    return software
+
+@api_router.get("/devices/{device_id}/patches")
+async def get_device_patches(device_id: str, current_user: dict = Depends(get_current_user)):
+    patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(200)
+    return patches
+
+@api_router.get("/devices/{device_id}/events")
+async def get_device_events(device_id: str, current_user: dict = Depends(get_current_user)):
+    events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    return events
+
+@api_router.get("/devices/{device_id}/performance")
+async def get_device_performance(device_id: str, current_user: dict = Depends(get_current_user)):
+    performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
+    return performance
+
+@api_router.get("/devices/stats/summary")
+async def get_devices_stats(current_user: dict = Depends(get_current_user)):
+    devices = await db.devices.find({}, {"_id": 0}).to_list(10000)
+    total = len(devices)
+    online = len([d for d in devices if d.get("status") == "online"])
+    offline = len([d for d in devices if d.get("status") == "offline"])
+    warning = len([d for d in devices if d.get("status") == "warning"])
+    servers = len([d for d in devices if d.get("device_type") == "server"])
+    workstations = len([d for d in devices if d.get("device_type") == "workstation"])
+    laptops = len([d for d in devices if d.get("device_type") == "laptop"])
+    needs_patching = len([d for d in devices if (d.get("pending_patches") or 0) > 0])
+    avg_cpu = sum(d.get("cpu_usage", 0) for d in devices) / max(total, 1)
+    avg_ram = sum(d.get("memory_usage", 0) for d in devices) / max(total, 1)
+    avg_disk = sum(d.get("disk_usage", 0) for d in devices) / max(total, 1)
+    return {
+        "total": total, "online": online, "offline": offline, "warning": warning,
+        "servers": servers, "workstations": workstations, "laptops": laptops,
+        "needs_patching": needs_patching,
+        "avg_cpu": round(avg_cpu, 1), "avg_ram": round(avg_ram, 1), "avg_disk": round(avg_disk, 1)
+    }
+
 
 # ============== ASSETS ENDPOINTS ==============
 
@@ -6017,12 +6126,16 @@ async def seed_data():
         await db.clients.insert_one(doc)
     
     devices_data = [
-        {"id": "dev-001", "name": "ACME-DC-01", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "server", "os": "Windows Server 2022", "ip_address": "192.168.1.10", "status": "online", "cpu_usage": 45, "memory_usage": 62, "disk_usage": 78},
-        {"id": "dev-002", "name": "ACME-WS-001", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "workstation", "os": "Windows 11", "ip_address": "192.168.1.101", "status": "online", "cpu_usage": 23, "memory_usage": 41, "disk_usage": 55},
-        {"id": "dev-003", "name": "TECH-SRV-01", "client_id": "client-002", "client_name": "TechStart Inc", "device_type": "server", "os": "Ubuntu 22.04", "ip_address": "10.0.0.5", "status": "warning", "cpu_usage": 89, "memory_usage": 78, "disk_usage": 45},
-        {"id": "dev-004", "name": "GF-DC-MAIN", "client_id": "client-003", "client_name": "Global Finance Ltd", "device_type": "server", "os": "Windows Server 2022", "ip_address": "172.16.0.10", "status": "online", "cpu_usage": 34, "memory_usage": 56, "disk_usage": 67},
-        {"id": "dev-005", "name": "HC-WS-REC01", "client_id": "client-004", "client_name": "HealthCare Plus", "device_type": "workstation", "os": "Windows 10", "ip_address": "192.168.5.20", "status": "offline", "cpu_usage": 0, "memory_usage": 0, "disk_usage": 82},
-        {"id": "dev-006", "name": "RETAIL-POS-01", "client_id": "client-005", "client_name": "RetailMax", "device_type": "workstation", "os": "Windows 11", "ip_address": "192.168.10.50", "status": "online", "cpu_usage": 15, "memory_usage": 28, "disk_usage": 34},
+        {"id": "dev-001", "name": "ACME-DC-01", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "server", "os": "Windows Server 2022", "os_version": "21H2", "os_build": "20348.2340", "ip_address": "192.168.1.10", "public_ip": "203.45.67.10", "mac_address": "00:1A:2B:3C:4D:01", "serial_number": "DELL-PE-R740-001", "manufacturer": "Dell", "model": "PowerEdge R740", "processor": "Intel Xeon Gold 6248R", "processor_cores": 24, "ram_gb": 128, "storage_total_gb": 3600, "storage_used_gb": 2808, "gpu": "N/A", "domain": "acme.local", "location": "Server Room A, Rack 1", "assigned_user": "System", "last_logged_in_user": "admin@acme.local", "uptime_hours": 2184, "last_reboot": "2025-12-15T03:00:00Z", "agent_version": "2.4.1", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 95, "patch_status": "current", "pending_patches": 2, "installed_software_count": 34, "tags": ["production", "domain-controller", "critical"], "rustdesk_id": "842931675", "status": "online", "cpu_usage": 45, "memory_usage": 62, "disk_usage": 78, "network_in_mbps": 245.3, "network_out_mbps": 189.7},
+        {"id": "dev-002", "name": "ACME-WS-001", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "workstation", "os": "Windows 11", "os_version": "23H2", "os_build": "22631.3085", "ip_address": "192.168.1.101", "mac_address": "00:1A:2B:3C:4D:02", "serial_number": "DELL-OPT-7090-001", "manufacturer": "Dell", "model": "OptiPlex 7090", "processor": "Intel Core i7-11700", "processor_cores": 8, "ram_gb": 32, "storage_total_gb": 512, "storage_used_gb": 281, "gpu": "Intel UHD 750", "domain": "acme.local", "location": "Office Floor 2", "assigned_user": "john.smith@acme.com", "last_logged_in_user": "john.smith@acme.com", "uptime_hours": 168, "last_reboot": "2026-03-03T08:15:00Z", "agent_version": "2.4.1", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 98, "patch_status": "current", "pending_patches": 0, "installed_software_count": 47, "tags": ["production", "accounting-dept"], "status": "online", "cpu_usage": 23, "memory_usage": 41, "disk_usage": 55, "network_in_mbps": 12.4, "network_out_mbps": 3.2},
+        {"id": "dev-003", "name": "TECH-SRV-01", "client_id": "client-002", "client_name": "TechStart Inc", "device_type": "server", "os": "Ubuntu 22.04", "os_version": "22.04.3 LTS", "os_build": "5.15.0-91-generic", "ip_address": "10.0.0.5", "public_ip": "45.67.89.12", "mac_address": "00:1A:2B:3C:4D:03", "serial_number": "HPE-DL380-001", "manufacturer": "HPE", "model": "ProLiant DL380 Gen10", "processor": "Intel Xeon Silver 4214R", "processor_cores": 12, "ram_gb": 64, "storage_total_gb": 1800, "storage_used_gb": 810, "domain": "techstart.local", "location": "Cloud DC - US East", "assigned_user": "System", "uptime_hours": 4380, "last_reboot": "2025-09-15T02:00:00Z", "agent_version": "2.3.8", "antivirus": "CrowdStrike Falcon", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "LUKS - Encrypted", "compliance_score": 72, "patch_status": "needs_attention", "pending_patches": 8, "installed_software_count": 62, "tags": ["production", "web-server", "docker"], "status": "warning", "cpu_usage": 89, "memory_usage": 78, "disk_usage": 45, "network_in_mbps": 567.8, "network_out_mbps": 423.1},
+        {"id": "dev-004", "name": "GF-DC-MAIN", "client_id": "client-003", "client_name": "Global Finance Ltd", "device_type": "server", "os": "Windows Server 2022", "os_version": "21H2", "os_build": "20348.2159", "ip_address": "172.16.0.10", "public_ip": "91.23.45.67", "mac_address": "00:1A:2B:3C:4D:04", "serial_number": "DELL-PE-R750-001", "manufacturer": "Dell", "model": "PowerEdge R750", "processor": "Intel Xeon Gold 6338", "processor_cores": 32, "ram_gb": 256, "storage_total_gb": 7200, "storage_used_gb": 4824, "domain": "globalfin.local", "location": "Primary DC - Floor B2", "assigned_user": "System", "uptime_hours": 720, "last_reboot": "2026-02-10T01:00:00Z", "agent_version": "2.4.1", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 100, "patch_status": "current", "pending_patches": 0, "installed_software_count": 28, "tags": ["production", "domain-controller", "critical", "pci-dss"], "rustdesk_id": "742156823", "status": "online", "cpu_usage": 34, "memory_usage": 56, "disk_usage": 67, "network_in_mbps": 890.2, "network_out_mbps": 654.8},
+        {"id": "dev-005", "name": "HC-WS-REC01", "client_id": "client-004", "client_name": "HealthCare Plus", "device_type": "workstation", "os": "Windows 10", "os_version": "22H2", "os_build": "19045.3930", "ip_address": "192.168.5.20", "mac_address": "00:1A:2B:3C:4D:05", "serial_number": "HP-PD600-045", "manufacturer": "HP", "model": "ProDesk 600 G6", "processor": "Intel Core i5-10500", "processor_cores": 6, "ram_gb": 16, "storage_total_gb": 256, "storage_used_gb": 210, "domain": "hcplus.local", "location": "Reception Area", "assigned_user": "receptionist@hcplus.org", "last_logged_in_user": "receptionist@hcplus.org", "uptime_hours": 0, "agent_version": "2.3.5", "antivirus": "Windows Defender", "antivirus_status": "outdated", "firewall_enabled": True, "edr_status": "inactive", "encryption_status": "Not Encrypted", "compliance_score": 45, "patch_status": "critical", "pending_patches": 15, "installed_software_count": 23, "tags": ["production", "hipaa", "needs-attention"], "status": "offline", "cpu_usage": 0, "memory_usage": 0, "disk_usage": 82},
+        {"id": "dev-006", "name": "RETAIL-POS-01", "client_id": "client-005", "client_name": "RetailMax", "device_type": "workstation", "os": "Windows 11", "os_version": "23H2", "os_build": "22631.2861", "ip_address": "192.168.10.50", "mac_address": "00:1A:2B:3C:4D:06", "serial_number": "LEN-M90Q-012", "manufacturer": "Lenovo", "model": "ThinkCentre M90q Gen 3", "processor": "Intel Core i5-12500T", "processor_cores": 6, "ram_gb": 16, "storage_total_gb": 256, "storage_used_gb": 87, "domain": "retailmax.local", "location": "Store Front - Register 1", "assigned_user": "pos-system", "agent_version": "2.4.0", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 88, "patch_status": "current", "pending_patches": 1, "installed_software_count": 15, "tags": ["production", "pos", "pci-dss"], "status": "online", "cpu_usage": 15, "memory_usage": 28, "disk_usage": 34, "network_in_mbps": 2.1, "network_out_mbps": 0.8},
+        {"id": "dev-007", "name": "ACME-LT-001", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "laptop", "os": "Windows 11", "os_version": "23H2", "os_build": "22631.3085", "ip_address": "192.168.1.150", "mac_address": "00:1A:2B:3C:4D:07", "serial_number": "DELL-LAT-5530-001", "manufacturer": "Dell", "model": "Latitude 5530", "processor": "Intel Core i7-1265U", "processor_cores": 10, "ram_gb": 16, "storage_total_gb": 512, "storage_used_gb": 245, "gpu": "Intel Iris Xe", "domain": "acme.local", "location": "Mobile / WFH", "assigned_user": "jane.doe@acme.com", "last_logged_in_user": "jane.doe@acme.com", "uptime_hours": 72, "last_reboot": "2026-03-07T09:30:00Z", "agent_version": "2.4.1", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 92, "patch_status": "needs_attention", "pending_patches": 3, "installed_software_count": 52, "tags": ["mobile", "wfh", "vpn-user"], "status": "online", "cpu_usage": 35, "memory_usage": 68, "disk_usage": 48, "network_in_mbps": 5.6, "network_out_mbps": 1.2},
+        {"id": "dev-008", "name": "ACME-FW-01", "client_id": "client-001", "client_name": "Acme Corporation", "device_type": "network", "os": "FortiOS", "os_version": "7.4.3", "ip_address": "192.168.1.1", "public_ip": "203.45.67.1", "mac_address": "00:1A:2B:3C:4D:08", "serial_number": "FGT-60F-001", "manufacturer": "Fortinet", "model": "FortiGate 60F", "processor": "NP6 ASIC", "ram_gb": 4, "storage_total_gb": 128, "storage_used_gb": 12, "location": "Server Room A, Rack 1 - U1", "assigned_user": "System", "uptime_hours": 8760, "agent_version": "SNMP v3", "antivirus": "FortiGuard", "antivirus_status": "active", "firewall_enabled": True, "compliance_score": 100, "tags": ["infrastructure", "firewall", "critical"], "status": "online", "cpu_usage": 12, "memory_usage": 35, "disk_usage": 9, "network_in_mbps": 450.0, "network_out_mbps": 380.0},
+        {"id": "dev-009", "name": "GF-LT-CFO01", "client_id": "client-003", "client_name": "Global Finance Ltd", "device_type": "laptop", "os": "macOS Sonoma", "os_version": "14.3", "os_build": "23D56", "ip_address": "172.16.1.45", "mac_address": "00:1A:2B:3C:4D:09", "serial_number": "APPLE-MBP-M3-001", "manufacturer": "Apple", "model": "MacBook Pro 16\" M3 Pro", "processor": "Apple M3 Pro", "processor_cores": 12, "ram_gb": 36, "storage_total_gb": 1000, "storage_used_gb": 412, "gpu": "M3 Pro 18-core GPU", "domain": "globalfin.local", "location": "Executive Suite", "assigned_user": "cfo@globalfin.com", "last_logged_in_user": "cfo@globalfin.com", "uptime_hours": 48, "last_reboot": "2026-03-08T07:00:00Z", "agent_version": "2.4.1", "antivirus": "CrowdStrike Falcon", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "FileVault - Encrypted", "compliance_score": 96, "patch_status": "current", "pending_patches": 0, "installed_software_count": 38, "tags": ["executive", "mobile", "vip"], "status": "online", "cpu_usage": 18, "memory_usage": 52, "disk_usage": 41, "network_in_mbps": 8.3, "network_out_mbps": 2.1},
+        {"id": "dev-010", "name": "TECH-DOCKER-01", "client_id": "client-002", "client_name": "TechStart Inc", "device_type": "server", "os": "Ubuntu 24.04", "os_version": "24.04 LTS", "os_build": "6.5.0-14-generic", "ip_address": "10.0.0.20", "public_ip": "45.67.89.20", "mac_address": "00:1A:2B:3C:4D:0A", "serial_number": "HPE-DL360-003", "manufacturer": "HPE", "model": "ProLiant DL360 Gen10 Plus", "processor": "AMD EPYC 7313", "processor_cores": 16, "ram_gb": 128, "storage_total_gb": 4000, "storage_used_gb": 1600, "domain": "techstart.local", "location": "Cloud DC - US East", "assigned_user": "System", "uptime_hours": 720, "last_reboot": "2026-02-10T04:00:00Z", "agent_version": "2.4.0", "antivirus": "ClamAV", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "LUKS - Encrypted", "compliance_score": 85, "patch_status": "needs_attention", "pending_patches": 4, "installed_software_count": 89, "tags": ["production", "docker", "kubernetes", "ci-cd"], "status": "online", "cpu_usage": 67, "memory_usage": 72, "disk_usage": 40, "network_in_mbps": 312.5, "network_out_mbps": 278.9},
     ]
     for d in devices_data:
         device = Device(**d)
@@ -6030,6 +6143,104 @@ async def seed_data():
         doc['created_at'] = doc['created_at'].isoformat()
         doc['last_seen'] = doc['last_seen'].isoformat()
         await db.devices.insert_one(doc)
+
+    # Seed device software for ACME-DC-01
+    software_data = [
+        {"id": "sw-001", "device_id": "dev-001", "name": "Windows Server 2022 Standard", "version": "21H2 (20348.2340)", "publisher": "Microsoft", "install_date": "2024-01-15", "size_mb": 15360, "category": "operating_system"},
+        {"id": "sw-002", "device_id": "dev-001", "name": "Active Directory Domain Services", "version": "10.0.20348", "publisher": "Microsoft", "install_date": "2024-01-15", "size_mb": 512, "category": "system"},
+        {"id": "sw-003", "device_id": "dev-001", "name": "DNS Server", "version": "10.0.20348", "publisher": "Microsoft", "install_date": "2024-01-15", "size_mb": 128, "category": "system"},
+        {"id": "sw-004", "device_id": "dev-001", "name": "SentinelOne Agent", "version": "23.4.2.115", "publisher": "SentinelOne", "install_date": "2024-02-10", "size_mb": 420, "category": "security"},
+        {"id": "sw-005", "device_id": "dev-001", "name": "Tactical RMM Agent", "version": "2.4.1", "publisher": "Tactical RMM", "install_date": "2024-01-20", "size_mb": 85, "category": "management"},
+        {"id": "sw-006", "device_id": "dev-001", "name": "MeshCentral Agent", "version": "1.1.21", "publisher": "MeshCentral", "install_date": "2024-01-20", "size_mb": 45, "category": "remote_access"},
+        {"id": "sw-007", "device_id": "dev-001", "name": "Veeam Backup Agent", "version": "6.1.0.957", "publisher": "Veeam", "install_date": "2024-03-01", "size_mb": 890, "category": "backup"},
+        {"id": "sw-008", "device_id": "dev-001", "name": "SQL Server 2022", "version": "16.0.4105.2", "publisher": "Microsoft", "install_date": "2024-01-20", "size_mb": 4096, "category": "database"},
+        {"id": "sw-009", "device_id": "dev-002", "name": "Microsoft 365 Apps for Enterprise", "version": "16.0.17328.20162", "publisher": "Microsoft", "install_date": "2024-06-01", "size_mb": 3200, "category": "productivity"},
+        {"id": "sw-010", "device_id": "dev-002", "name": "Google Chrome", "version": "122.0.6261.112", "publisher": "Google", "install_date": "2024-01-15", "size_mb": 280, "category": "browser"},
+        {"id": "sw-011", "device_id": "dev-002", "name": "Adobe Acrobat Pro DC", "version": "24.001.20604", "publisher": "Adobe", "install_date": "2024-04-10", "size_mb": 1024, "category": "productivity"},
+        {"id": "sw-012", "device_id": "dev-002", "name": "SentinelOne Agent", "version": "23.4.2.115", "publisher": "SentinelOne", "install_date": "2024-02-10", "size_mb": 420, "category": "security"},
+        {"id": "sw-013", "device_id": "dev-002", "name": "Tactical RMM Agent", "version": "2.4.1", "publisher": "Tactical RMM", "install_date": "2024-01-20", "size_mb": 85, "category": "management"},
+        {"id": "sw-014", "device_id": "dev-002", "name": "Zoom Workplace", "version": "6.0.2", "publisher": "Zoom", "install_date": "2024-05-15", "size_mb": 350, "category": "communication"},
+        {"id": "sw-015", "device_id": "dev-002", "name": "Slack", "version": "4.37.94", "publisher": "Salesforce", "install_date": "2024-03-20", "size_mb": 280, "category": "communication"},
+        {"id": "sw-016", "device_id": "dev-003", "name": "Docker Engine", "version": "25.0.3", "publisher": "Docker Inc", "install_date": "2024-02-01", "size_mb": 512, "category": "development"},
+        {"id": "sw-017", "device_id": "dev-003", "name": "Nginx", "version": "1.24.0", "publisher": "Nginx Inc", "install_date": "2024-01-15", "size_mb": 64, "category": "web_server"},
+        {"id": "sw-018", "device_id": "dev-003", "name": "PostgreSQL", "version": "16.1", "publisher": "PostgreSQL", "install_date": "2024-01-20", "size_mb": 256, "category": "database"},
+        {"id": "sw-019", "device_id": "dev-003", "name": "CrowdStrike Falcon Sensor", "version": "7.10.0-16303", "publisher": "CrowdStrike", "install_date": "2024-03-15", "size_mb": 350, "category": "security"},
+        {"id": "sw-020", "device_id": "dev-003", "name": "Prometheus Node Exporter", "version": "1.7.0", "publisher": "Prometheus", "install_date": "2024-02-01", "size_mb": 24, "category": "monitoring"},
+    ]
+    for s in software_data:
+        await db.device_software.insert_one(s)
+
+    # Seed device patches
+    patches_data = [
+        {"id": "patch-001", "device_id": "dev-001", "kb_id": "KB5034439", "title": "2024-01 Cumulative Update for Windows Server 2022", "severity": "critical", "status": "installed", "installed_date": "2026-01-15", "category": "Security Updates"},
+        {"id": "patch-002", "device_id": "dev-001", "kb_id": "KB5034765", "title": "2024-02 Servicing Stack Update for Windows Server 2022", "severity": "important", "status": "installed", "installed_date": "2026-02-12", "category": "Security Updates"},
+        {"id": "patch-003", "device_id": "dev-001", "kb_id": "KB5035857", "title": "2024-03 Cumulative Update for Windows Server 2022", "severity": "critical", "status": "pending", "installed_date": None, "category": "Security Updates"},
+        {"id": "patch-004", "device_id": "dev-001", "kb_id": "KB5036909", "title": ".NET Framework 4.8.1 Security Update", "severity": "important", "status": "pending", "installed_date": None, "category": "Security Updates"},
+        {"id": "patch-005", "device_id": "dev-002", "kb_id": "KB5034763", "title": "2024-02 Cumulative Update for Windows 11 23H2", "severity": "critical", "status": "installed", "installed_date": "2026-02-14", "category": "Security Updates"},
+        {"id": "patch-006", "device_id": "dev-002", "kb_id": "KB5035853", "title": "2024-03 Cumulative Update for Windows 11 23H2", "severity": "critical", "status": "installed", "installed_date": "2026-03-09", "category": "Security Updates"},
+        {"id": "patch-007", "device_id": "dev-005", "kb_id": "KB5032278", "title": "2023-11 Cumulative Update for Windows 10 22H2", "severity": "critical", "status": "failed", "installed_date": None, "category": "Security Updates"},
+        {"id": "patch-008", "device_id": "dev-005", "kb_id": "KB5033372", "title": "2023-12 Cumulative Update for Windows 10 22H2", "severity": "critical", "status": "pending", "installed_date": None, "category": "Security Updates"},
+        {"id": "patch-009", "device_id": "dev-003", "kb_id": "USN-6609-1", "title": "Linux kernel vulnerabilities - Ubuntu 22.04", "severity": "high", "status": "pending", "installed_date": None, "category": "Security Updates"},
+        {"id": "patch-010", "device_id": "dev-003", "kb_id": "USN-6615-1", "title": "OpenSSL vulnerability - Ubuntu 22.04", "severity": "critical", "status": "pending", "installed_date": None, "category": "Security Updates"},
+    ]
+    for p in patches_data:
+        await db.device_patches.insert_one(p)
+
+    # Seed device events
+    import random
+    event_types = ["agent_check_in", "login", "logout", "software_installed", "patch_applied", "alert_triggered", "reboot", "service_restart", "backup_completed", "script_executed"]
+    events_data = []
+    for i in range(50):
+        dev_id = random.choice(["dev-001", "dev-002", "dev-003", "dev-004", "dev-006", "dev-007"])
+        evt_type = random.choice(event_types)
+        hours_ago = random.randint(1, 720)
+        ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+        severity = "info" if evt_type in ["agent_check_in", "login", "logout", "backup_completed"] else random.choice(["info", "warning", "error"])
+        messages = {
+            "agent_check_in": "Agent checked in successfully",
+            "login": f"User logged in via RDP",
+            "logout": "User session ended",
+            "software_installed": f"Software package installed",
+            "patch_applied": f"Windows Update applied successfully",
+            "alert_triggered": f"High resource usage detected",
+            "reboot": "System rebooted",
+            "service_restart": "Service 'Spooler' restarted",
+            "backup_completed": "Backup completed successfully (12.4 GB)",
+            "script_executed": "Script 'Clear-TempFiles.ps1' executed"
+        }
+        events_data.append({"id": f"evt-{i+1:03d}", "device_id": dev_id, "event_type": evt_type, "severity": severity, "message": messages[evt_type], "timestamp": ts, "user": "System"})
+    for e in events_data:
+        await db.device_events.insert_one(e)
+
+    # Seed performance data (last 24 hours, every 5 min = 288 entries for dev-001)
+    perf_data = []
+    for i in range(288):
+        ts = (datetime.now(timezone.utc) - timedelta(minutes=i*5)).isoformat()
+        base_cpu = 40 + random.uniform(-15, 25)
+        base_ram = 58 + random.uniform(-10, 15)
+        base_disk = 77.5 + random.uniform(-0.5, 0.5)
+        perf_data.append({"device_id": "dev-001", "timestamp": ts, "cpu": round(min(100, max(5, base_cpu)), 1), "memory": round(min(100, max(20, base_ram)), 1), "disk": round(base_disk, 1), "network_in": round(random.uniform(50, 500), 1), "network_out": round(random.uniform(30, 300), 1)})
+    # Also add for dev-003 (warning state)
+    for i in range(288):
+        ts = (datetime.now(timezone.utc) - timedelta(minutes=i*5)).isoformat()
+        base_cpu = 82 + random.uniform(-10, 18)
+        base_ram = 75 + random.uniform(-8, 15)
+        perf_data.append({"device_id": "dev-003", "timestamp": ts, "cpu": round(min(100, max(20, base_cpu)), 1), "memory": round(min(100, max(30, base_ram)), 1), "disk": round(45 + random.uniform(-1, 1), 1), "network_in": round(random.uniform(200, 800), 1), "network_out": round(random.uniform(100, 600), 1)})
+    for p in perf_data:
+        await db.device_performance.insert_one(p)
+
+    # Seed network adapters
+    network_data = [
+        {"device_id": "dev-001", "adapter_name": "Ethernet 1 (Management)", "type": "ethernet", "ip_address": "192.168.1.10", "subnet": "255.255.255.0", "gateway": "192.168.1.1", "dns": ["192.168.1.10", "8.8.8.8"], "mac_address": "00:1A:2B:3C:4D:01", "speed_mbps": 10000, "status": "up"},
+        {"device_id": "dev-001", "adapter_name": "Ethernet 2 (Storage)", "type": "ethernet", "ip_address": "10.10.10.10", "subnet": "255.255.255.0", "gateway": None, "dns": [], "mac_address": "00:1A:2B:3C:4D:11", "speed_mbps": 25000, "status": "up"},
+        {"device_id": "dev-002", "adapter_name": "Ethernet", "type": "ethernet", "ip_address": "192.168.1.101", "subnet": "255.255.255.0", "gateway": "192.168.1.1", "dns": ["192.168.1.10", "8.8.8.8"], "mac_address": "00:1A:2B:3C:4D:02", "speed_mbps": 1000, "status": "up"},
+        {"device_id": "dev-007", "adapter_name": "Wi-Fi", "type": "wifi", "ip_address": "192.168.1.150", "subnet": "255.255.255.0", "gateway": "192.168.1.1", "dns": ["192.168.1.10", "8.8.8.8"], "mac_address": "00:1A:2B:3C:4D:07", "speed_mbps": 867, "status": "up", "ssid": "ACME-Corporate"},
+        {"device_id": "dev-007", "adapter_name": "VPN (GlobalProtect)", "type": "vpn", "ip_address": "10.255.0.45", "subnet": "255.255.255.0", "gateway": "10.255.0.1", "dns": ["172.16.0.10"], "mac_address": None, "speed_mbps": None, "status": "up"},
+        {"device_id": "dev-009", "adapter_name": "Wi-Fi (en0)", "type": "wifi", "ip_address": "172.16.1.45", "subnet": "255.255.255.0", "gateway": "172.16.1.1", "dns": ["172.16.0.10", "1.1.1.1"], "mac_address": "00:1A:2B:3C:4D:09", "speed_mbps": 1200, "status": "up", "ssid": "GF-Exec-5G"},
+    ]
+    for n in network_data:
+        await db.device_network.insert_one(n)
+
     
     tickets_data = [
         {"id": "TKT-001", "title": "Server unresponsive", "description": "Main DC server not responding to ping", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "critical", "status": "open", "category": "infrastructure", "assigned_to": "user-002", "assigned_name": "Sarah Chen"},

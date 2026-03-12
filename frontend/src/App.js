@@ -34,6 +34,7 @@ import TechniciansPage from "@/pages/TechniciansPage";
 import SchedulingPage from "@/pages/SchedulingPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
+import DeviceDetailPage from "@/pages/DeviceDetailPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -194,6 +195,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <DevicesPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/devices/:deviceId"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DeviceDetailPage />
                 </MainLayout>
               </ProtectedRoute>
             }
