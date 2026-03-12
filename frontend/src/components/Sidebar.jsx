@@ -29,7 +29,8 @@ import {
   CalendarClock,
   UserCog,
   CalendarDays,
-  ShoppingCart
+  ShoppingCart,
+  Wifi
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -51,6 +52,7 @@ const navGroups = [
     title: "Infrastructure",
     items: [
       { path: "/devices", icon: Monitor, label: "Devices" },
+      { path: "/networking", icon: Wifi, label: "Networking" },
       { path: "/assets", icon: Package, label: "Assets" },
       { path: "/scripting", icon: Terminal, label: "Scripting" },
       { path: "/remote-access", icon: Laptop, label: "Remote Access" },

@@ -35,6 +35,7 @@ import SchedulingPage from "@/pages/SchedulingPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import DeviceDetailPage from "@/pages/DeviceDetailPage";
+import NetworkingPage from "@/pages/NetworkingPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -425,6 +426,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <PurchaseOrdersPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/networking"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <NetworkingPage />
                 </MainLayout>
               </ProtectedRoute>
             }

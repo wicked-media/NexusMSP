@@ -13,6 +13,10 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 import httpx
+import barcode
+from barcode.writer import SVGWriter
+from io import BytesIO
+import base64
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -3684,6 +3688,11 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
 
 @api_router.post("/products")
 async def create_product(data: dict, current_user: dict = Depends(get_current_user)):
+    barcode_value = data.get("barcode", data.get("sku", ""))
+    barcode_type = data.get("barcode_type", "code128")
+    barcode_image = ""
+    if barcode_value:
+        barcode_image = generate_barcode_svg_data(barcode_value, barcode_type)
     product = {
         "id": str(uuid.uuid4()),
         "name": data.get("name", ""),
@@ -3701,6 +3710,9 @@ async def create_product(data: dict, current_user: dict = Depends(get_current_us
         "is_taxable": data.get("is_taxable", True),
         "is_recurring": data.get("is_recurring", False),
         "billing_cycle": data.get("billing_cycle", "monthly"),
+        "barcode": barcode_value,
+        "barcode_type": barcode_type,
+        "barcode_image": barcode_image,
         "created_by": current_user["id"],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -3720,7 +3732,7 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
 async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"name", "sku", "description", "category", "vendor", "cost_price", "retail_price",
                "tax_rate", "quantity_in_stock", "reorder_level", "unit", "is_active", "is_taxable",
-               "is_recurring", "billing_cycle"}
+               "is_recurring", "billing_cycle", "barcode", "barcode_type"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "cost_price" in update:
         update["cost_price"] = float(update["cost_price"])
@@ -3732,6 +3744,8 @@ async def update_product(product_id: str, data: dict, current_user: dict = Depen
         update["quantity_in_stock"] = int(update["quantity_in_stock"])
     if "reorder_level" in update:
         update["reorder_level"] = int(update["reorder_level"])
+    if "barcode" in update and update["barcode"]:
+        update["barcode_image"] = generate_barcode_svg_data(update["barcode"], update.get("barcode_type", "code128"))
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.products.update_one({"id": product_id}, {"$set": update})
     return {"message": "Product updated"}
@@ -3740,6 +3754,276 @@ async def update_product(product_id: str, data: dict, current_user: dict = Depen
 async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
     await db.products.delete_one({"id": product_id})
     return {"message": "Product deleted"}
+
+# ============== PRODUCT BARCODE & STOCK ENDPOINTS ==============
+
+def generate_barcode_svg_data(code: str, barcode_type: str = "code128") -> str:
+    """Generate a barcode and return as base64 SVG data URI."""
+    try:
+        barcode_class = barcode.get_barcode_class(barcode_type.lower())
+        bc = barcode_class(code, writer=SVGWriter())
+        output = BytesIO()
+        bc.write(output)
+        output.seek(0)
+        encoded = base64.b64encode(output.getvalue()).decode()
+        return f"data:image/svg+xml;base64,{encoded}"
+    except Exception as e:
+        logger.error(f"Barcode generation error: {e}")
+        return ""
+
+@api_router.post("/products/{product_id}/generate-barcode")
+async def generate_product_barcode(product_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    barcode_type = data.get("barcode_type", "code128")
+    barcode_value = data.get("barcode_value", product.get("sku", product_id[:12]))
+    if not barcode_value:
+        barcode_value = str(uuid.uuid4())[:12].replace("-", "").upper()
+    barcode_image = generate_barcode_svg_data(barcode_value, barcode_type)
+    await db.products.update_one({"id": product_id}, {"$set": {
+        "barcode": barcode_value, "barcode_type": barcode_type, "barcode_image": barcode_image,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }})
+    return {"barcode": barcode_value, "barcode_type": barcode_type, "barcode_image": barcode_image}
+
+@api_router.get("/products/{product_id}/barcode")
+async def get_product_barcode(product_id: str, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0, "barcode": 1, "barcode_type": 1, "barcode_image": 1, "name": 1, "sku": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if not product.get("barcode"):
+        barcode_value = product.get("sku", product_id[:12])
+        barcode_image = generate_barcode_svg_data(barcode_value, "code128")
+        return {"barcode": barcode_value, "barcode_type": "code128", "barcode_image": barcode_image, "name": product.get("name"), "sku": product.get("sku")}
+    return product
+
+# Product Instances (individual items with unique barcodes)
+@api_router.get("/products/{product_id}/instances")
+async def get_product_instances(product_id: str, current_user: dict = Depends(get_current_user)):
+    instances = await db.product_instances.find({"product_id": product_id}, {"_id": 0}).to_list(5000)
+    return instances
+
+@api_router.post("/products/{product_id}/instances")
+async def create_product_instance(product_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    count = data.get("count", 1)
+    instances = []
+    for _ in range(min(count, 100)):
+        serial = data.get("serial_number", str(uuid.uuid4())[:8].upper())
+        barcode_value = f"{product.get('sku', 'PRD')}-{serial}"
+        barcode_image = generate_barcode_svg_data(barcode_value, "code128")
+        instance = {
+            "id": str(uuid.uuid4()), "product_id": product_id, "product_name": product["name"],
+            "serial_number": serial, "barcode": barcode_value, "barcode_image": barcode_image,
+            "status": data.get("status", "in_stock"), "location": data.get("location", "Warehouse"),
+            "assigned_to": None, "ticket_id": None, "invoice_id": None,
+            "notes": data.get("notes", ""), "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.product_instances.insert_one(instance)
+        instance.pop("_id", None)
+        instances.append(instance)
+    # Update stock count
+    current_stock = product.get("quantity_in_stock", 0)
+    await db.products.update_one({"id": product_id}, {"$set": {"quantity_in_stock": current_stock + count, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return instances
+
+# Stock Movements
+@api_router.get("/products/{product_id}/stock-movements")
+async def get_stock_movements(product_id: str, current_user: dict = Depends(get_current_user)):
+    movements = await db.stock_movements.find({"product_id": product_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return movements
+
+@api_router.post("/products/{product_id}/stock-movement")
+async def create_stock_movement(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    movement_type = data.get("type", "in")  # in, out, adjustment
+    quantity = int(data.get("quantity", 0))
+    current_stock = product.get("quantity_in_stock", 0)
+    if movement_type == "in":
+        new_stock = current_stock + quantity
+    elif movement_type == "out":
+        new_stock = max(0, current_stock - quantity)
+    else:
+        new_stock = quantity  # adjustment sets exact value
+    movement = {
+        "id": str(uuid.uuid4()), "product_id": product_id, "product_name": product["name"],
+        "type": movement_type, "quantity": quantity, "previous_stock": current_stock, "new_stock": new_stock,
+        "reason": data.get("reason", ""), "reference": data.get("reference", ""),
+        "ticket_id": data.get("ticket_id"), "invoice_id": data.get("invoice_id"),
+        "created_by": current_user["id"], "created_by_name": current_user.get("name", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.stock_movements.insert_one(movement)
+    movement.pop("_id", None)
+    await db.products.update_one({"id": product_id}, {"$set": {"quantity_in_stock": new_stock, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return movement
+
+# Label printing endpoint - returns HTML for print
+@api_router.get("/products/{product_id}/label")
+async def get_product_label(product_id: str, instance_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    barcode_value = product.get("barcode", product.get("sku", product_id[:12]))
+    barcode_image = product.get("barcode_image", generate_barcode_svg_data(barcode_value, "code128"))
+    if instance_id:
+        instance = await db.product_instances.find_one({"id": instance_id}, {"_id": 0})
+        if instance:
+            barcode_value = instance.get("barcode", barcode_value)
+            barcode_image = instance.get("barcode_image", barcode_image)
+    return {
+        "product_name": product["name"], "sku": product.get("sku", ""),
+        "barcode": barcode_value, "barcode_image": barcode_image,
+        "retail_price": product.get("retail_price", 0), "category": product.get("category", ""),
+        "vendor": product.get("vendor", ""),
+    }
+
+# Link product to ticket
+@api_router.post("/tickets/{ticket_id}/products")
+async def add_product_to_ticket(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    product = await db.products.find_one({"id": data.get("product_id")}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    quantity = int(data.get("quantity", 1))
+    line_item = {
+        "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
+        "sku": product.get("sku", ""), "quantity": quantity,
+        "unit_price": product.get("retail_price", 0),
+        "total": quantity * product.get("retail_price", 0),
+    }
+    await db.tickets.update_one({"id": ticket_id}, {"$push": {"products": line_item}})
+    # Stock movement out
+    current_stock = product.get("quantity_in_stock", 0)
+    await db.products.update_one({"id": product["id"]}, {"$set": {"quantity_in_stock": max(0, current_stock - quantity)}})
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
+        "type": "out", "quantity": quantity, "previous_stock": current_stock,
+        "new_stock": max(0, current_stock - quantity), "reason": f"Added to ticket {ticket_id}",
+        "reference": ticket_id, "ticket_id": ticket_id,
+        "created_by": current_user["id"], "created_by_name": current_user.get("name", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return line_item
+
+# Get products on a ticket
+@api_router.get("/tickets/{ticket_id}/products")
+async def get_ticket_products(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "products": 1})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket.get("products", [])
+
+# ============== NETWORKING / UNIFI ENDPOINTS ==============
+
+@api_router.get("/networking/sites")
+async def get_networking_sites(current_user: dict = Depends(get_current_user)):
+    sites = await db.network_sites.find({}, {"_id": 0}).to_list(100)
+    return sites
+
+@api_router.post("/networking/sites")
+async def create_networking_site(data: dict, current_user: dict = Depends(get_current_user)):
+    site = {
+        "id": str(uuid.uuid4()), "name": data.get("name", ""),
+        "client_id": data.get("client_id"), "client_name": data.get("client_name", ""),
+        "controller_url": data.get("controller_url", ""), "site_id": data.get("site_id", "default"),
+        "status": "online", "location": data.get("location", ""),
+        "wan_ip": data.get("wan_ip", ""), "isp": data.get("isp", ""),
+        "download_speed_mbps": data.get("download_speed_mbps", 0),
+        "upload_speed_mbps": data.get("upload_speed_mbps", 0),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.network_sites.insert_one(site)
+    site.pop("_id", None)
+    return site
+
+@api_router.get("/networking/sites/{site_id}")
+async def get_networking_site(site_id: str, current_user: dict = Depends(get_current_user)):
+    site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    return site
+
+@api_router.get("/networking/sites/{site_id}/overview")
+async def get_site_overview(site_id: str, current_user: dict = Depends(get_current_user)):
+    site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    devices = await db.network_devices.find({"site_id": site_id}, {"_id": 0}).to_list(500)
+    clients = await db.network_clients.find({"site_id": site_id}, {"_id": 0}).to_list(1000)
+    online_devices = [d for d in devices if d.get("status") == "online"]
+    aps = [d for d in devices if d.get("device_type") == "ap"]
+    switches = [d for d in devices if d.get("device_type") == "switch"]
+    gateways = [d for d in devices if d.get("device_type") == "gateway"]
+    wireless_clients = [c for c in clients if c.get("is_wireless")]
+    wired_clients = [c for c in clients if not c.get("is_wireless")]
+    total_rx = sum(c.get("rx_bytes", 0) for c in clients)
+    total_tx = sum(c.get("tx_bytes", 0) for c in clients)
+    return {
+        "site": site, "total_devices": len(devices), "online_devices": len(online_devices),
+        "access_points": len(aps), "switches": len(switches), "gateways": len(gateways),
+        "total_clients": len(clients), "wireless_clients": len(wireless_clients), "wired_clients": len(wired_clients),
+        "total_rx_bytes": total_rx, "total_tx_bytes": total_tx,
+        "health": {"wan": "healthy", "lan": "healthy", "wlan": "healthy" if aps else "n/a"},
+    }
+
+@api_router.get("/networking/sites/{site_id}/devices")
+async def get_site_devices(site_id: str, device_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {"site_id": site_id}
+    if device_type:
+        query["device_type"] = device_type
+    devices = await db.network_devices.find(query, {"_id": 0}).to_list(500)
+    return devices
+
+@api_router.get("/networking/sites/{site_id}/clients")
+async def get_site_clients(site_id: str, connected_only: bool = False, current_user: dict = Depends(get_current_user)):
+    query = {"site_id": site_id}
+    if connected_only:
+        query["is_connected"] = True
+    clients = await db.network_clients.find(query, {"_id": 0}).to_list(1000)
+    return clients
+
+@api_router.get("/networking/stats")
+async def get_networking_stats(current_user: dict = Depends(get_current_user)):
+    sites = await db.network_sites.find({}, {"_id": 0}).to_list(100)
+    devices = await db.network_devices.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.network_clients.find({}, {"_id": 0}).to_list(10000)
+    online_sites = [s for s in sites if s.get("status") == "online"]
+    online_devices = [d for d in devices if d.get("status") == "online"]
+    aps = [d for d in devices if d.get("device_type") == "ap"]
+    switches_list = [d for d in devices if d.get("device_type") == "switch"]
+    gateways = [d for d in devices if d.get("device_type") == "gateway"]
+    return {
+        "total_sites": len(sites), "online_sites": len(online_sites),
+        "total_devices": len(devices), "online_devices": len(online_devices),
+        "total_clients": len(clients),
+        "access_points": len(aps), "switches": len(switches_list), "gateways": len(gateways),
+    }
+
+@api_router.put("/settings/unifi")
+async def update_unifi_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one({"type": "unifi"}, {"$set": {
+        "type": "unifi", "controller_url": data.get("controller_url", ""),
+        "username": data.get("username", ""), "password": data.get("password", ""),
+        "verify_ssl": data.get("verify_ssl", False),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }}, upsert=True)
+    return {"message": "UniFi settings updated"}
+
+@api_router.get("/settings/unifi")
+async def get_unifi_settings(current_user: dict = Depends(get_current_user)):
+    settings_doc = await db.settings.find_one({"type": "unifi"}, {"_id": 0})
+    if not settings_doc:
+        return {"type": "unifi", "controller_url": "", "username": "", "verify_ssl": False}
+    settings_doc.pop("password", None)
+    return settings_doc
 
 # ============== PURCHASE ORDER ENDPOINTS ==============
 
@@ -6356,6 +6640,83 @@ async def seed_data():
         doc['created_at'] = doc['created_at'].isoformat()
         await db.time_entries.insert_one(doc)
     
+    # Seed Products
+    products_data = [
+        {"id": "prod-001", "name": "Dell OptiPlex 7090 SFF", "sku": "DELL-OPT-7090", "description": "Small form factor desktop with Intel Core i7-11700, 16GB RAM, 512GB SSD", "category": "Hardware", "vendor": "Dell Technologies", "cost_price": 899.00, "retail_price": 1199.00, "tax_rate": 10.0, "quantity_in_stock": 15, "reorder_level": 5, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "DELL-OPT-7090", "barcode_type": "code128"},
+        {"id": "prod-002", "name": "Microsoft 365 Business Premium", "sku": "MS365-BIZ-PREM", "description": "Monthly per-user license for Microsoft 365 Business Premium", "category": "Licensing", "vendor": "Microsoft", "cost_price": 18.00, "retail_price": 22.00, "tax_rate": 0.0, "quantity_in_stock": 200, "reorder_level": 50, "unit": "license", "is_active": True, "is_taxable": False, "is_recurring": True, "billing_cycle": "monthly", "barcode": "MS365-BIZ-PREM", "barcode_type": "code128"},
+        {"id": "prod-003", "name": "Ubiquiti UniFi U6-LR Access Point", "sku": "UI-U6LR-AP", "description": "WiFi 6 Long-Range Access Point, 4x4 MIMO, PoE+", "category": "Networking", "vendor": "Ubiquiti", "cost_price": 149.00, "retail_price": 199.00, "tax_rate": 10.0, "quantity_in_stock": 8, "reorder_level": 3, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "UI-U6LR-AP", "barcode_type": "code128"},
+        {"id": "prod-004", "name": "SentinelOne Complete", "sku": "S1-COMPLETE-YR", "description": "SentinelOne endpoint protection per-device annual license", "category": "Security", "vendor": "SentinelOne", "cost_price": 45.00, "retail_price": 65.00, "tax_rate": 0.0, "quantity_in_stock": 100, "reorder_level": 20, "unit": "license", "is_active": True, "is_taxable": False, "is_recurring": True, "billing_cycle": "annually", "barcode": "S1-COMPLETE-YR", "barcode_type": "code128"},
+        {"id": "prod-005", "name": "Cat6A Ethernet Cable 5m", "sku": "CAT6A-5M-BLU", "description": "Category 6A shielded ethernet cable, 5 meters, blue", "category": "Accessories", "vendor": "CommScope", "cost_price": 8.50, "retail_price": 15.00, "tax_rate": 10.0, "quantity_in_stock": 45, "reorder_level": 10, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "CAT6A-5M-BLU", "barcode_type": "code128"},
+        {"id": "prod-006", "name": "Acronis Cyber Protect Cloud", "sku": "ACR-CP-CLOUD", "description": "Cloud backup and disaster recovery per-device monthly", "category": "Cloud", "vendor": "Acronis", "cost_price": 2.50, "retail_price": 5.00, "tax_rate": 0.0, "quantity_in_stock": 500, "reorder_level": 100, "unit": "license", "is_active": True, "is_taxable": False, "is_recurring": True, "billing_cycle": "monthly", "barcode": "ACR-CP-CLOUD", "barcode_type": "code128"},
+        {"id": "prod-007", "name": "Lenovo ThinkPad T14s Gen 4", "sku": "LEN-T14S-G4", "description": "14\" laptop, AMD Ryzen 7 PRO, 16GB, 512GB SSD", "category": "Hardware", "vendor": "Lenovo", "cost_price": 1050.00, "retail_price": 1399.00, "tax_rate": 10.0, "quantity_in_stock": 3, "reorder_level": 5, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "LEN-T14S-G4", "barcode_type": "code128"},
+        {"id": "prod-008", "name": "UniFi USW-24-PoE Switch", "sku": "UI-USW24-POE", "description": "24-port PoE managed switch with 2x SFP+", "category": "Networking", "vendor": "Ubiquiti", "cost_price": 399.00, "retail_price": 549.00, "tax_rate": 10.0, "quantity_in_stock": 4, "reorder_level": 2, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "UI-USW24-POE", "barcode_type": "code128"},
+        {"id": "prod-009", "name": "Remote Support - Hourly", "sku": "SVC-REM-HR", "description": "Remote technical support, billed per hour", "category": "Services", "vendor": "Flamingo MSP", "cost_price": 0.00, "retail_price": 125.00, "tax_rate": 0.0, "quantity_in_stock": 999, "reorder_level": 0, "unit": "hour", "is_active": True, "is_taxable": False, "is_recurring": False, "barcode": "SVC-REM-HR", "barcode_type": "code128"},
+        {"id": "prod-010", "name": "HP LaserJet Pro MFP M428fdn", "sku": "HP-LJ-M428", "description": "All-in-one laser printer, scan, copy, fax", "category": "Hardware", "vendor": "HP Inc", "cost_price": 349.00, "retail_price": 449.00, "tax_rate": 10.0, "quantity_in_stock": 2, "reorder_level": 2, "unit": "each", "is_active": True, "is_taxable": True, "is_recurring": False, "barcode": "HP-LJ-M428", "barcode_type": "code128"},
+    ]
+    for p in products_data:
+        p["barcode_image"] = generate_barcode_svg_data(p["barcode"], p["barcode_type"])
+        p["created_by"] = "user-001"
+        p["created_at"] = datetime.now(timezone.utc).isoformat()
+        p["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.products.insert_one(p)
+
+    # Seed Network Sites
+    network_sites_data = [
+        {"id": "nsite-001", "name": "Acme Corp - Main Office", "client_id": "client-001", "client_name": "Acme Corporation", "controller_url": "https://192.168.1.1:8443", "site_id": "default", "status": "online", "location": "123 Business Ave, Suite 200", "wan_ip": "203.45.67.10", "isp": "AT&T Business Fiber", "download_speed_mbps": 500, "upload_speed_mbps": 100},
+        {"id": "nsite-002", "name": "TechStart - Cloud DC", "client_id": "client-002", "client_name": "TechStart Inc", "controller_url": "https://10.0.0.1:8443", "site_id": "techstart", "status": "online", "location": "AWS US-East-1", "wan_ip": "45.67.89.12", "isp": "AWS Direct Connect", "download_speed_mbps": 1000, "upload_speed_mbps": 1000},
+        {"id": "nsite-003", "name": "Global Finance - HQ", "client_id": "client-003", "client_name": "Global Finance Ltd", "controller_url": "https://172.16.0.1:8443", "site_id": "gf-hq", "status": "online", "location": "456 Finance Blvd, Floor B2", "wan_ip": "91.23.45.67", "isp": "Verizon FiOS Business", "download_speed_mbps": 940, "upload_speed_mbps": 880},
+        {"id": "nsite-004", "name": "HealthCare Plus - Clinic", "client_id": "client-004", "client_name": "HealthCare Plus", "controller_url": "https://192.168.5.1:8443", "site_id": "hcplus", "status": "warning", "location": "789 Health Way", "wan_ip": "67.89.12.34", "isp": "Comcast Business", "download_speed_mbps": 200, "upload_speed_mbps": 35},
+        {"id": "nsite-005", "name": "RetailMax - Store Network", "client_id": "client-005", "client_name": "RetailMax", "controller_url": "https://192.168.10.1:8443", "site_id": "retail", "status": "online", "location": "101 Retail Rd", "wan_ip": "34.56.78.90", "isp": "Spectrum Business", "download_speed_mbps": 300, "upload_speed_mbps": 50},
+    ]
+    for s in network_sites_data:
+        s["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.network_sites.insert_one(s)
+
+    # Seed Network Devices
+    network_devices_data = [
+        # Acme Corp devices
+        {"id": "ndev-001", "site_id": "nsite-001", "name": "USG-Pro-4", "mac": "F0:9F:C2:AA:01:01", "model": "UniFi Security Gateway Pro", "device_type": "gateway", "ip_address": "192.168.1.1", "status": "online", "firmware": "6.0.45", "uptime_seconds": 7776000, "cpu_usage": 12, "mem_usage": 34, "wan_ip": "203.45.67.10", "num_ports": 4, "throughput_rx_mbps": 245.3, "throughput_tx_mbps": 89.7},
+        {"id": "ndev-002", "site_id": "nsite-001", "name": "USW-48-PoE", "mac": "F0:9F:C2:AA:02:01", "model": "UniFi Switch 48 PoE", "device_type": "switch", "ip_address": "192.168.1.2", "status": "online", "firmware": "6.6.65", "uptime_seconds": 7776000, "cpu_usage": 8, "mem_usage": 22, "num_ports": 48, "poe_power_w": 187.3, "poe_max_w": 740, "port_stats": [{"port": 1, "up": True, "speed": "1000M", "poe": True, "power_w": 12.4}, {"port": 2, "up": True, "speed": "1000M", "poe": True, "power_w": 8.1}]},
+        {"id": "ndev-003", "site_id": "nsite-001", "name": "U6-LR-Lobby", "mac": "F0:9F:C2:AA:03:01", "model": "U6-LR", "device_type": "ap", "ip_address": "192.168.1.10", "status": "online", "firmware": "7.0.83", "uptime_seconds": 5184000, "cpu_usage": 15, "mem_usage": 38, "channel_2g": 6, "channel_5g": 36, "clients_2g": 8, "clients_5g": 14, "tx_power_2g": 20, "tx_power_5g": 23, "satisfaction": 96},
+        {"id": "ndev-004", "site_id": "nsite-001", "name": "U6-LR-Floor2", "mac": "F0:9F:C2:AA:03:02", "model": "U6-LR", "device_type": "ap", "ip_address": "192.168.1.11", "status": "online", "firmware": "7.0.83", "uptime_seconds": 5184000, "cpu_usage": 22, "mem_usage": 45, "channel_2g": 11, "channel_5g": 149, "clients_2g": 12, "clients_5g": 18, "tx_power_2g": 20, "tx_power_5g": 23, "satisfaction": 92},
+        # TechStart devices
+        {"id": "ndev-005", "site_id": "nsite-002", "name": "UDM-Pro", "mac": "F0:9F:C2:BB:01:01", "model": "UniFi Dream Machine Pro", "device_type": "gateway", "ip_address": "10.0.0.1", "status": "online", "firmware": "4.0.6", "uptime_seconds": 2592000, "cpu_usage": 28, "mem_usage": 52, "wan_ip": "45.67.89.12", "num_ports": 8, "throughput_rx_mbps": 567.8, "throughput_tx_mbps": 423.1},
+        {"id": "ndev-006", "site_id": "nsite-002", "name": "USW-Pro-24-PoE", "mac": "F0:9F:C2:BB:02:01", "model": "USW-Pro-24-PoE", "device_type": "switch", "ip_address": "10.0.0.2", "status": "online", "firmware": "6.6.65", "uptime_seconds": 2592000, "cpu_usage": 5, "mem_usage": 18, "num_ports": 24, "poe_power_w": 92.5, "poe_max_w": 400},
+        {"id": "ndev-007", "site_id": "nsite-002", "name": "U6-Enterprise", "mac": "F0:9F:C2:BB:03:01", "model": "U6-Enterprise", "device_type": "ap", "ip_address": "10.0.0.10", "status": "online", "firmware": "7.0.83", "uptime_seconds": 2592000, "cpu_usage": 10, "mem_usage": 30, "channel_2g": 1, "channel_5g": 44, "clients_2g": 3, "clients_5g": 22, "satisfaction": 98},
+        # Global Finance devices
+        {"id": "ndev-008", "site_id": "nsite-003", "name": "UXG-Pro", "mac": "F0:9F:C2:CC:01:01", "model": "UniFi Next-Gen Gateway Pro", "device_type": "gateway", "ip_address": "172.16.0.1", "status": "online", "firmware": "4.0.6", "uptime_seconds": 15552000, "cpu_usage": 18, "mem_usage": 41, "wan_ip": "91.23.45.67", "num_ports": 4, "throughput_rx_mbps": 890.2, "throughput_tx_mbps": 654.8},
+        {"id": "ndev-009", "site_id": "nsite-003", "name": "USW-Enterprise-48-PoE", "mac": "F0:9F:C2:CC:02:01", "model": "USW-Enterprise-48-PoE", "device_type": "switch", "ip_address": "172.16.0.2", "status": "online", "firmware": "6.6.65", "uptime_seconds": 15552000, "cpu_usage": 14, "mem_usage": 28, "num_ports": 48, "poe_power_w": 312.8, "poe_max_w": 740},
+        {"id": "ndev-010", "site_id": "nsite-003", "name": "USW-Enterprise-48-PoE-2", "mac": "F0:9F:C2:CC:02:02", "model": "USW-Enterprise-48-PoE", "device_type": "switch", "ip_address": "172.16.0.3", "status": "online", "firmware": "6.6.65", "uptime_seconds": 15552000, "cpu_usage": 11, "mem_usage": 24, "num_ports": 48, "poe_power_w": 245.1, "poe_max_w": 740},
+        {"id": "ndev-011", "site_id": "nsite-003", "name": "U6-Pro-TradeFloor", "mac": "F0:9F:C2:CC:03:01", "model": "U6-Pro", "device_type": "ap", "ip_address": "172.16.0.10", "status": "online", "firmware": "7.0.83", "uptime_seconds": 15552000, "cpu_usage": 35, "mem_usage": 56, "channel_2g": 6, "channel_5g": 36, "clients_2g": 15, "clients_5g": 45, "satisfaction": 89},
+        {"id": "ndev-012", "site_id": "nsite-003", "name": "U6-Pro-ExecSuite", "mac": "F0:9F:C2:CC:03:02", "model": "U6-Pro", "device_type": "ap", "ip_address": "172.16.0.11", "status": "online", "firmware": "7.0.83", "uptime_seconds": 15552000, "cpu_usage": 8, "mem_usage": 25, "channel_2g": 11, "channel_5g": 149, "clients_2g": 4, "clients_5g": 12, "satisfaction": 97},
+        # HealthCare Plus
+        {"id": "ndev-013", "site_id": "nsite-004", "name": "USG-3P", "mac": "F0:9F:C2:DD:01:01", "model": "UniFi Security Gateway", "device_type": "gateway", "ip_address": "192.168.5.1", "status": "warning", "firmware": "4.4.57", "uptime_seconds": 864000, "cpu_usage": 78, "mem_usage": 82, "wan_ip": "67.89.12.34", "num_ports": 3, "throughput_rx_mbps": 145.2, "throughput_tx_mbps": 28.4},
+        {"id": "ndev-014", "site_id": "nsite-004", "name": "U6-Lite-Waiting", "mac": "F0:9F:C2:DD:03:01", "model": "U6-Lite", "device_type": "ap", "ip_address": "192.168.5.10", "status": "online", "firmware": "7.0.83", "uptime_seconds": 864000, "cpu_usage": 5, "mem_usage": 20, "channel_2g": 1, "channel_5g": 44, "clients_2g": 6, "clients_5g": 8, "satisfaction": 94},
+        # RetailMax
+        {"id": "ndev-015", "site_id": "nsite-005", "name": "UDM", "mac": "F0:9F:C2:EE:01:01", "model": "UniFi Dream Machine", "device_type": "gateway", "ip_address": "192.168.10.1", "status": "online", "firmware": "4.0.6", "uptime_seconds": 3456000, "cpu_usage": 20, "mem_usage": 45, "wan_ip": "34.56.78.90", "num_ports": 4, "throughput_rx_mbps": 78.5, "throughput_tx_mbps": 23.1},
+        {"id": "ndev-016", "site_id": "nsite-005", "name": "USW-Lite-16-PoE", "mac": "F0:9F:C2:EE:02:01", "model": "USW-Lite-16-PoE", "device_type": "switch", "ip_address": "192.168.10.2", "status": "online", "firmware": "6.6.65", "uptime_seconds": 3456000, "cpu_usage": 3, "mem_usage": 15, "num_ports": 16, "poe_power_w": 45.2, "poe_max_w": 120},
+    ]
+    for d in network_devices_data:
+        d["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.network_devices.insert_one(d)
+
+    # Seed Network Clients
+    network_clients_data = [
+        {"id": "ncli-001", "site_id": "nsite-001", "mac": "A4:83:E7:01:01:01", "name": "John-MacBook", "ip_address": "192.168.1.101", "hostname": "Johns-MacBook-Pro", "os_type": "macOS", "is_wireless": True, "is_connected": True, "signal_strength": -52, "rx_bytes": 2457600000, "tx_bytes": 1228800000, "ap_name": "U6-LR-Floor2", "ssid": "ACME-Corp"},
+        {"id": "ncli-002", "site_id": "nsite-001", "mac": "A4:83:E7:01:02:01", "name": "ACC-PC-001", "ip_address": "192.168.1.102", "hostname": "ACC-PC-001", "os_type": "Windows", "is_wireless": False, "is_connected": True, "rx_bytes": 5242880000, "tx_bytes": 524288000},
+        {"id": "ncli-003", "site_id": "nsite-001", "mac": "A4:83:E7:01:03:01", "name": "Printer-Floor1", "ip_address": "192.168.1.200", "hostname": "HP-MFP-M428", "os_type": "Other", "is_wireless": False, "is_connected": True, "rx_bytes": 104857600, "tx_bytes": 52428800},
+        {"id": "ncli-004", "site_id": "nsite-002", "mac": "B8:27:EB:02:01:01", "name": "Dev-Server-01", "ip_address": "10.0.0.50", "hostname": "dev-server-01", "os_type": "Linux", "is_wireless": False, "is_connected": True, "rx_bytes": 52428800000, "tx_bytes": 26214400000},
+        {"id": "ncli-005", "site_id": "nsite-002", "mac": "B8:27:EB:02:02:01", "name": "Sarah-iPhone", "ip_address": "10.0.0.120", "hostname": "Sarahs-iPhone", "os_type": "iOS", "is_wireless": True, "is_connected": True, "signal_strength": -45, "rx_bytes": 524288000, "tx_bytes": 262144000, "ap_name": "U6-Enterprise", "ssid": "TechStart-5G"},
+        {"id": "ncli-006", "site_id": "nsite-003", "mac": "C0:25:E9:03:01:01", "name": "Trade-WS-001", "ip_address": "172.16.0.100", "hostname": "TRADE-WS-001", "os_type": "Windows", "is_wireless": False, "is_connected": True, "rx_bytes": 10485760000, "tx_bytes": 5242880000},
+        {"id": "ncli-007", "site_id": "nsite-003", "mac": "C0:25:E9:03:02:01", "name": "CEO-iPad", "ip_address": "172.16.0.150", "hostname": "CEOs-iPad-Pro", "os_type": "iOS", "is_wireless": True, "is_connected": True, "signal_strength": -38, "rx_bytes": 1073741824, "tx_bytes": 536870912, "ap_name": "U6-Pro-ExecSuite", "ssid": "GF-Executive"},
+        {"id": "ncli-008", "site_id": "nsite-004", "mac": "D4:F5:47:04:01:01", "name": "Reception-PC", "ip_address": "192.168.5.20", "hostname": "HC-RECEPTION", "os_type": "Windows", "is_wireless": False, "is_connected": True, "rx_bytes": 2147483648, "tx_bytes": 1073741824},
+        {"id": "ncli-009", "site_id": "nsite-005", "mac": "E8:6F:38:05:01:01", "name": "POS-Terminal-1", "ip_address": "192.168.10.50", "hostname": "POS-01", "os_type": "Windows", "is_wireless": False, "is_connected": True, "rx_bytes": 524288000, "tx_bytes": 262144000},
+        {"id": "ncli-010", "site_id": "nsite-005", "mac": "E8:6F:38:05:02:01", "name": "Staff-Android", "ip_address": "192.168.10.120", "hostname": "Galaxy-S24", "os_type": "Android", "is_wireless": True, "is_connected": True, "signal_strength": -60, "rx_bytes": 209715200, "tx_bytes": 104857600, "ap_name": "UDM", "ssid": "RetailMax-Staff"},
+    ]
+    for c in network_clients_data:
+        c["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.network_clients.insert_one(c)
+
     return {"message": "Demo data seeded successfully"}
 
 # ============== YEASTAR PBX ENDPOINTS ==============
