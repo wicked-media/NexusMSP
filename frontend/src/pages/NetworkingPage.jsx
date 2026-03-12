@@ -5,17 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Wifi, Router, Server, Monitor, Globe, Activity, Signal, Search,
-  Loader2, RefreshCw, ChevronRight, ArrowUpDown, Plus, Cpu, HardDrive,
-  Users, Laptop, Smartphone, Download, Upload, Shield, AlertTriangle, CheckCircle2
+  Wifi, Router, Server, Monitor, Globe, Search, Loader2, RefreshCw, ChevronRight,
+  Plus, Users, Smartphone, Download, Upload, Shield, AlertTriangle, CheckCircle2,
+  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap
 } from "lucide-react";
 
 function formatBytes(bytes) {
@@ -28,62 +30,168 @@ function formatBytes(bytes) {
 
 function formatUptime(seconds) {
   if (!seconds) return "N/A";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+  const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600);
+  return d > 0 ? `${d}d ${h}h` : `${h}h`;
 }
 
 const StatusDot = ({ status }) => {
-  const colors = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500" };
-  return <span className={`inline-block w-2.5 h-2.5 rounded-full ${colors[status] || "bg-slate-500"}`} />;
+  const c = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500", pending_adoption: "bg-blue-500" };
+  return <span className={`inline-block w-2.5 h-2.5 rounded-full ${c[status] || "bg-slate-500"}`} />;
 };
+
+const emptySiteForm = { name: "", client_id: "", client_name: "", controller_url: "", site_id: "default", location: "", wan_ip: "", isp: "", download_speed_mbps: "", upload_speed_mbps: "", api_key: "", username: "", password: "", verify_ssl: false, notes: "" };
+const emptyDeviceForm = { name: "", mac: "", model: "", device_type: "ap", ip_address: "", firmware: "" };
 
 export default function NetworkingPage() {
   const { token } = useAuth();
   const [sites, setSites] = useState([]);
+  const [clients, setClients] = useState([]);
   const [stats, setStats] = useState(null);
   const [selectedSite, setSelectedSite] = useState(null);
   const [siteOverview, setSiteOverview] = useState(null);
   const [siteDevices, setSiteDevices] = useState([]);
   const [siteClients, setSiteClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("devices");
   const [search, setSearch] = useState("");
   const [deviceFilter, setDeviceFilter] = useState("all");
+  const [siteDialog, setSiteDialog] = useState(false);
+  const [editingSite, setEditingSite] = useState(null);
+  const [siteForm, setSiteForm] = useState({ ...emptySiteForm });
+  const [adoptDialog, setAdoptDialog] = useState(false);
+  const [adoptForm, setAdoptForm] = useState({ ...emptyDeviceForm });
+  const [editDeviceDialog, setEditDeviceDialog] = useState(false);
+  const [editingDevice, setEditingDevice] = useState(null);
+  const [testing, setTesting] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [sitesRes, statsRes] = await Promise.all([
+      const [sitesRes, statsRes, clientsRes] = await Promise.all([
         axios.get(`${API}/networking/sites`, { headers }),
         axios.get(`${API}/networking/stats`, { headers }),
+        axios.get(`${API}/clients`, { headers }),
       ]);
       setSites(sitesRes.data);
       setStats(statsRes.data);
+      setClients(clientsRes.data);
     } catch { toast.error("Failed to load networking data"); }
     finally { setLoading(false); }
   };
 
   const fetchSiteData = async (siteId) => {
     try {
-      const [overviewRes, devicesRes, clientsRes] = await Promise.all([
+      const [ovRes, devRes, cliRes] = await Promise.all([
         axios.get(`${API}/networking/sites/${siteId}/overview`, { headers }),
         axios.get(`${API}/networking/sites/${siteId}/devices`, { headers }),
         axios.get(`${API}/networking/sites/${siteId}/clients`, { headers }),
       ]);
-      setSiteOverview(overviewRes.data);
-      setSiteDevices(devicesRes.data);
-      setSiteClients(clientsRes.data);
+      setSiteOverview(ovRes.data);
+      setSiteDevices(devRes.data);
+      setSiteClients(cliRes.data);
     } catch { toast.error("Failed to load site data"); }
   };
 
   useEffect(() => { fetchData(); }, []);
+  useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [selectedSite]);
 
-  useEffect(() => {
-    if (selectedSite) fetchSiteData(selectedSite.id);
-  }, [selectedSite]);
+  const openAddSite = () => { setEditingSite(null); setSiteForm({ ...emptySiteForm }); setSiteDialog(true); };
+  const openEditSite = (site) => {
+    setEditingSite(site);
+    setSiteForm({
+      name: site.name || "", client_id: site.client_id || "", client_name: site.client_name || "",
+      controller_url: site.controller_url || "", site_id: site.site_id || "default",
+      location: site.location || "", wan_ip: site.wan_ip || "", isp: site.isp || "",
+      download_speed_mbps: String(site.download_speed_mbps || ""),
+      upload_speed_mbps: String(site.upload_speed_mbps || ""),
+      api_key: site.api_key || "", username: site.username || "", password: "",
+      verify_ssl: site.verify_ssl || false, notes: site.notes || "",
+    });
+    setSiteDialog(true);
+  };
+
+  const handleSaveSite = async () => {
+    if (!siteForm.name) { toast.error("Site name is required"); return; }
+    const payload = {
+      ...siteForm,
+      download_speed_mbps: parseInt(siteForm.download_speed_mbps) || 0,
+      upload_speed_mbps: parseInt(siteForm.upload_speed_mbps) || 0,
+    };
+    if (siteForm.client_id) {
+      const cl = clients.find(c => c.id === siteForm.client_id);
+      if (cl) payload.client_name = cl.name;
+    }
+    try {
+      if (editingSite) {
+        await axios.put(`${API}/networking/sites/${editingSite.id}`, payload, { headers });
+        toast.success("Site updated");
+        if (selectedSite?.id === editingSite.id) {
+          setSelectedSite({ ...selectedSite, ...payload });
+          fetchSiteData(editingSite.id);
+        }
+      } else {
+        await axios.post(`${API}/networking/sites`, payload, { headers });
+        toast.success("Site added");
+      }
+      setSiteDialog(false); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save site"); }
+  };
+
+  const handleDeleteSite = async (siteId) => {
+    try {
+      await axios.delete(`${API}/networking/sites/${siteId}`, { headers });
+      toast.success("Site deleted");
+      if (selectedSite?.id === siteId) { setSelectedSite(null); setSiteOverview(null); }
+      fetchData();
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  const handleTestConnection = async (siteId) => {
+    setTesting(true);
+    try {
+      const res = await axios.post(`${API}/networking/sites/${siteId}/test-connection`, {}, { headers });
+      if (res.data.success) toast.success(res.data.message);
+      else toast.error(res.data.message);
+    } catch { toast.error("Connection test failed"); }
+    finally { setTesting(false); }
+  };
+
+  const handleAdoptDevice = async () => {
+    if (!adoptForm.name || !adoptForm.mac) { toast.error("Name and MAC are required"); return; }
+    try {
+      await axios.post(`${API}/networking/sites/${selectedSite.id}/adopt-device`, adoptForm, { headers });
+      toast.success("Device adoption initiated");
+      setAdoptDialog(false);
+      fetchSiteData(selectedSite.id);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to adopt device"); }
+  };
+
+  const openEditDevice = (device) => {
+    setEditingDevice(device);
+    setEditDeviceDialog(true);
+  };
+
+  const handleUpdateDevice = async () => {
+    try {
+      const update = { name: editingDevice.name, ip_address: editingDevice.ip_address, status: editingDevice.status, notes: editingDevice.notes || "" };
+      await axios.put(`${API}/networking/devices/${editingDevice.id}`, update, { headers });
+      toast.success("Device updated");
+      setEditDeviceDialog(false);
+      fetchSiteData(selectedSite.id);
+    } catch { toast.error("Failed to update device"); }
+  };
+
+  const handleDeleteDevice = async (deviceId) => {
+    try {
+      await axios.delete(`${API}/networking/devices/${deviceId}`, { headers });
+      toast.success("Device removed");
+      fetchSiteData(selectedSite.id);
+      fetchData();
+    } catch { toast.error("Failed to delete"); }
+  };
 
   const filteredDevices = siteDevices
     .filter(d => deviceFilter === "all" || d.device_type === deviceFilter)
@@ -94,77 +202,213 @@ export default function NetworkingPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  // ===== SITE FORM DIALOG =====
+  const siteFormDialog = (
+    <Dialog open={siteDialog} onOpenChange={v => { setSiteDialog(v); if (!v) setEditingSite(null); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{editingSite ? "Edit Site" : "Add Network Site"}</DialogTitle></DialogHeader>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Site Name *</Label><Input value={siteForm.name} onChange={e => setSiteForm({ ...siteForm, name: e.target.value })} placeholder="e.g. Acme Corp - Main Office" data-testid="site-name-input" /></div>
+            <div><Label>Client</Label>
+              <Select value={siteForm.client_id} onValueChange={v => setSiteForm({ ...siteForm, client_id: v })}>
+                <SelectTrigger data-testid="site-client-select"><SelectValue placeholder="Link to client" /></SelectTrigger>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div><Label>Location</Label><Input value={siteForm.location} onChange={e => setSiteForm({ ...siteForm, location: e.target.value })} placeholder="123 Business Ave, Suite 200" /></div>
+
+          <Separator />
+          <p className="text-sm font-semibold flex items-center gap-2"><Link2 className="w-4 h-4" />UniFi Controller Connection</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Controller URL *</Label><Input value={siteForm.controller_url} onChange={e => setSiteForm({ ...siteForm, controller_url: e.target.value })} placeholder="https://192.168.1.1:8443" data-testid="site-controller-url" /></div>
+            <div><Label>UniFi Site ID</Label><Input value={siteForm.site_id} onChange={e => setSiteForm({ ...siteForm, site_id: e.target.value })} placeholder="default" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>API Key / Token</Label><Input type="password" value={siteForm.api_key} onChange={e => setSiteForm({ ...siteForm, api_key: e.target.value })} placeholder="UniFi API key" data-testid="site-api-key" /></div>
+            <div><Label>Username (legacy)</Label><Input value={siteForm.username} onChange={e => setSiteForm({ ...siteForm, username: e.target.value })} placeholder="Optional" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Password (legacy)</Label><Input type="password" value={siteForm.password} onChange={e => setSiteForm({ ...siteForm, password: e.target.value })} placeholder="Optional" /></div>
+            <div className="flex items-end gap-2 pb-1"><Switch checked={siteForm.verify_ssl} onCheckedChange={v => setSiteForm({ ...siteForm, verify_ssl: v })} /><Label>Verify SSL</Label></div>
+          </div>
+
+          <Separator />
+          <p className="text-sm font-semibold flex items-center gap-2"><Activity className="w-4 h-4" />WAN Details</p>
+          <div className="grid grid-cols-4 gap-3">
+            <div><Label>WAN IP</Label><Input value={siteForm.wan_ip} onChange={e => setSiteForm({ ...siteForm, wan_ip: e.target.value })} placeholder="203.45.67.10" /></div>
+            <div><Label>ISP</Label><Input value={siteForm.isp} onChange={e => setSiteForm({ ...siteForm, isp: e.target.value })} placeholder="AT&T Fiber" /></div>
+            <div><Label>Download (Mbps)</Label><Input type="number" value={siteForm.download_speed_mbps} onChange={e => setSiteForm({ ...siteForm, download_speed_mbps: e.target.value })} /></div>
+            <div><Label>Upload (Mbps)</Label><Input type="number" value={siteForm.upload_speed_mbps} onChange={e => setSiteForm({ ...siteForm, upload_speed_mbps: e.target.value })} /></div>
+          </div>
+          <div><Label>Notes</Label><Textarea value={siteForm.notes} onChange={e => setSiteForm({ ...siteForm, notes: e.target.value })} rows={2} placeholder="Site notes..." /></div>
+        </div>
+        <DialogFooter>
+          {editingSite && <Button variant="outline" onClick={() => handleTestConnection(editingSite.id)} disabled={testing} data-testid="test-connection-btn"><Plug className="w-4 h-4 mr-1" />{testing ? "Testing..." : "Test Connection"}</Button>}
+          <Button onClick={handleSaveSite} data-testid="save-site-btn">{editingSite ? "Update" : "Add"} Site</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // ===== ADOPT DEVICE DIALOG =====
+  const adoptDeviceDialog = (
+    <Dialog open={adoptDialog} onOpenChange={setAdoptDialog}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Adopt Device</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Device Name *</Label><Input value={adoptForm.name} onChange={e => setAdoptForm({ ...adoptForm, name: e.target.value })} placeholder="e.g. U6-Pro-Lobby" data-testid="adopt-device-name" /></div>
+          <div><Label>MAC Address *</Label><Input value={adoptForm.mac} onChange={e => setAdoptForm({ ...adoptForm, mac: e.target.value })} placeholder="F0:9F:C2:AA:BB:CC" data-testid="adopt-device-mac" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Type</Label>
+              <Select value={adoptForm.device_type} onValueChange={v => setAdoptForm({ ...adoptForm, device_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ap">Access Point</SelectItem>
+                  <SelectItem value="switch">Switch</SelectItem>
+                  <SelectItem value="gateway">Gateway</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Model</Label><Input value={adoptForm.model} onChange={e => setAdoptForm({ ...adoptForm, model: e.target.value })} placeholder="e.g. U6-Pro" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>IP Address</Label><Input value={adoptForm.ip_address} onChange={e => setAdoptForm({ ...adoptForm, ip_address: e.target.value })} placeholder="192.168.1.50" /></div>
+            <div><Label>Firmware</Label><Input value={adoptForm.firmware} onChange={e => setAdoptForm({ ...adoptForm, firmware: e.target.value })} placeholder="7.0.83" /></div>
+          </div>
+        </div>
+        <DialogFooter><Button onClick={handleAdoptDevice} data-testid="adopt-device-btn"><Radio className="w-4 h-4 mr-1" />Adopt Device</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // ===== EDIT DEVICE DIALOG =====
+  const editDeviceDlg = (
+    <Dialog open={editDeviceDialog} onOpenChange={v => { setEditDeviceDialog(v); if (!v) setEditingDevice(null); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Device</DialogTitle></DialogHeader>
+        {editingDevice && (
+          <div className="space-y-3">
+            <div><Label>Name</Label><Input value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></div>
+            <div><Label>IP Address</Label><Input value={editingDevice.ip_address || ""} onChange={e => setEditingDevice({ ...editingDevice, ip_address: e.target.value })} /></div>
+            <div><Label>Status</Label>
+              <Select value={editingDevice.status} onValueChange={v => setEditingDevice({ ...editingDevice, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="online">Online</SelectItem>
+                  <SelectItem value="offline">Offline</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                  <SelectItem value="pending_adoption">Pending Adoption</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Notes</Label><Textarea value={editingDevice.notes || ""} onChange={e => setEditingDevice({ ...editingDevice, notes: e.target.value })} rows={2} /></div>
+          </div>
+        )}
+        <DialogFooter><Button onClick={handleUpdateDevice} data-testid="update-device-btn">Update</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ============ SITE DETAIL VIEW ============
   if (selectedSite && siteOverview) {
     return (
       <div className="space-y-6" data-testid="networking-site-detail">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites">
-            <Globe className="w-4 h-4 mr-1" />Back to Sites
-          </Button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-medium">{selectedSite.name}</span>
-          <StatusDot status={selectedSite.status} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites"><Globe className="w-4 h-4 mr-1" />Back</Button>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            <span className="font-semibold">{selectedSite.name}</span>
+            <StatusDot status={selectedSite.status} />
+            {selectedSite.client_name && <Badge variant="outline" className="text-xs">{selectedSite.client_name}</Badge>}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
+            <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
+          </div>
         </div>
 
-        {/* Site Stats Row */}
+        {/* Controller Info */}
+        <Card className="border-zinc-800">
+          <CardContent className="py-3 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-4">
+              <span className="text-muted-foreground">Controller:</span>
+              <span className="font-mono text-xs">{selectedSite.controller_url || "Not configured"}</span>
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-muted-foreground">WAN:</span>
+              <span className="font-mono text-xs">{selectedSite.wan_ip || "-"}</span>
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-muted-foreground">ISP:</span>
+              <span>{selectedSite.isp || "-"}</span>
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-muted-foreground">Speed:</span>
+              <span className="font-mono text-xs">{selectedSite.download_speed_mbps || 0}/{selectedSite.upload_speed_mbps || 0} Mbps</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Router className="w-5 h-5 text-blue-500" /><div><p className="text-xs text-muted-foreground">Devices</p><p className="text-lg font-bold">{siteOverview.online_devices}/{siteOverview.total_devices}</p></div></div></CardContent></Card>
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Wifi className="w-5 h-5 text-cyan-500" /><div><p className="text-xs text-muted-foreground">APs</p><p className="text-lg font-bold">{siteOverview.access_points}</p></div></div></CardContent></Card>
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Server className="w-5 h-5 text-purple-500" /><div><p className="text-xs text-muted-foreground">Switches</p><p className="text-lg font-bold">{siteOverview.switches}</p></div></div></CardContent></Card>
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Users className="w-5 h-5 text-green-500" /><div><p className="text-xs text-muted-foreground">Clients</p><p className="text-lg font-bold">{siteOverview.total_clients}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Download className="w-5 h-5 text-emerald-500" /><div><p className="text-xs text-muted-foreground">RX Total</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_rx_bytes)}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Upload className="w-5 h-5 text-orange-500" /><div><p className="text-xs text-muted-foreground">TX Total</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_tx_bytes)}</p></div></div></CardContent></Card>
+          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Download className="w-5 h-5 text-emerald-500" /><div><p className="text-xs text-muted-foreground">RX</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_rx_bytes)}</p></div></div></CardContent></Card>
+          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Upload className="w-5 h-5 text-orange-500" /><div><p className="text-xs text-muted-foreground">TX</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_tx_bytes)}</p></div></div></CardContent></Card>
         </div>
 
-        {/* Health Status */}
+        {/* Health */}
         <div className="grid grid-cols-3 gap-3">
-          {["wan", "lan", "wlan"].map(subsystem => {
-            const status = siteOverview.health?.[subsystem] || "n/a";
+          {["wan", "lan", "wlan"].map(sub => {
+            const st = siteOverview.health?.[sub] || "n/a";
             return (
-              <Card key={subsystem} className={status === "healthy" ? "border-emerald-500/30" : status === "warning" ? "border-amber-500/30" : "border-slate-500/30"}>
+              <Card key={sub} className={st === "healthy" ? "border-emerald-500/30" : st === "warning" ? "border-amber-500/30" : ""}>
                 <CardContent className="pt-4 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    {subsystem === "wan" ? <Globe className="w-5 h-5" /> : subsystem === "lan" ? <Server className="w-5 h-5" /> : <Wifi className="w-5 h-5" />}
+                    {sub === "wan" ? <Globe className="w-5 h-5" /> : sub === "lan" ? <Server className="w-5 h-5" /> : <Wifi className="w-5 h-5" />}
                     <div>
-                      <p className="font-medium uppercase text-sm">{subsystem}</p>
-                      <p className="text-xs text-muted-foreground">{subsystem === "wan" ? `${selectedSite.isp} - ${selectedSite.wan_ip}` : subsystem === "lan" ? `${siteOverview.wired_clients} wired clients` : `${siteOverview.wireless_clients} wireless`}</p>
+                      <p className="font-medium uppercase text-sm">{sub}</p>
+                      <p className="text-xs text-muted-foreground">{sub === "wan" ? `${selectedSite.isp || "-"} - ${selectedSite.wan_ip || "-"}` : sub === "lan" ? `${siteOverview.wired_clients} wired` : `${siteOverview.wireless_clients} wireless`}</p>
                     </div>
                   </div>
-                  <Badge variant={status === "healthy" ? "default" : status === "warning" ? "destructive" : "secondary"} className={status === "healthy" ? "bg-emerald-600" : ""}>{status}</Badge>
+                  <Badge variant={st === "healthy" ? "default" : "secondary"} className={st === "healthy" ? "bg-emerald-600" : ""}>{st}</Badge>
                 </CardContent>
               </Card>
             );
           })}
         </div>
 
-        {/* Tabs: Devices / Clients */}
+        {/* Tabs */}
         <Tabs value={tab} onValueChange={setTab}>
           <div className="flex items-center justify-between">
             <TabsList>
-              <TabsTrigger value="overview" data-testid="tab-overview">Devices</TabsTrigger>
+              <TabsTrigger value="devices" data-testid="tab-devices">Devices ({siteDevices.length})</TabsTrigger>
               <TabsTrigger value="clients" data-testid="tab-clients">Clients ({siteClients.length})</TabsTrigger>
             </TabsList>
             <div className="flex items-center gap-2">
-              {tab === "overview" && (
-                <Select value={deviceFilter} onValueChange={setDeviceFilter}>
-                  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="gateway">Gateways</SelectItem>
-                    <SelectItem value="switch">Switches</SelectItem>
-                    <SelectItem value="ap">Access Points</SelectItem>
-                  </SelectContent>
-                </Select>
+              {tab === "devices" && (
+                <>
+                  <Button size="sm" onClick={() => { setAdoptForm({ ...emptyDeviceForm }); setAdoptDialog(true); }} data-testid="adopt-btn"><Plus className="w-3 h-3 mr-1" />Adopt Device</Button>
+                  <Select value={deviceFilter} onValueChange={setDeviceFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="gateway">Gateways</SelectItem>
+                      <SelectItem value="switch">Switches</SelectItem>
+                      <SelectItem value="ap">Access Points</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
               )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input className="pl-9 w-[200px]" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
+                <Input className="pl-9 w-[180px]" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             </div>
           </div>
 
-          <TabsContent value="overview" className="space-y-3 mt-4">
+          <TabsContent value="devices" className="space-y-3 mt-4">
             {filteredDevices.map(device => (
               <Card key={device.id} className="hover:border-primary/40 transition-colors" data-testid={`net-device-${device.id}`}>
                 <CardContent className="py-4">
@@ -174,35 +418,30 @@ export default function NetworkingPage() {
                         {device.device_type === "gateway" ? <Router className="w-5 h-5 text-blue-500" /> : device.device_type === "switch" ? <Server className="w-5 h-5 text-purple-500" /> : <Wifi className="w-5 h-5 text-cyan-500" />}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{device.name}</p>
-                          <StatusDot status={device.status} />
-                        </div>
+                        <div className="flex items-center gap-2"><p className="font-medium">{device.name}</p><StatusDot status={device.status} /></div>
                         <p className="text-xs text-muted-foreground">{device.model} &middot; {device.ip_address} &middot; FW: {device.firmware}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-6 text-sm">
                       <div className="text-center"><p className="text-xs text-muted-foreground">CPU</p><p className="font-mono font-medium">{device.cpu_usage ?? "-"}%</p></div>
                       <div className="text-center"><p className="text-xs text-muted-foreground">MEM</p><p className="font-mono font-medium">{device.mem_usage ?? "-"}%</p></div>
-                      {device.device_type === "ap" && (
-                        <>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">Clients</p><p className="font-mono font-medium">{(device.clients_2g || 0) + (device.clients_5g || 0)}</p></div>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">Satisfaction</p><p className="font-mono font-medium">{device.satisfaction ?? "-"}%</p></div>
-                        </>
-                      )}
-                      {device.device_type === "switch" && (
-                        <>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">Ports</p><p className="font-mono font-medium">{device.num_ports}</p></div>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">PoE</p><p className="font-mono font-medium">{device.poe_power_w ? `${device.poe_power_w}W` : "-"}</p></div>
-                        </>
-                      )}
-                      {device.device_type === "gateway" && (
-                        <>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">DL</p><p className="font-mono font-medium">{device.throughput_rx_mbps ? `${device.throughput_rx_mbps}Mbps` : "-"}</p></div>
-                          <div className="text-center"><p className="text-xs text-muted-foreground">UL</p><p className="font-mono font-medium">{device.throughput_tx_mbps ? `${device.throughput_tx_mbps}Mbps` : "-"}</p></div>
-                        </>
-                      )}
+                      {device.device_type === "ap" && <>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">Clients</p><p className="font-mono font-medium">{(device.clients_2g || 0) + (device.clients_5g || 0)}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">Satisfaction</p><p className="font-mono font-medium">{device.satisfaction ?? "-"}%</p></div>
+                      </>}
+                      {device.device_type === "switch" && <>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">Ports</p><p className="font-mono font-medium">{device.num_ports}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">PoE</p><p className="font-mono font-medium">{device.poe_power_w ? `${device.poe_power_w}W` : "-"}</p></div>
+                      </>}
+                      {device.device_type === "gateway" && <>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">DL</p><p className="font-mono font-medium">{device.throughput_rx_mbps ? `${device.throughput_rx_mbps}Mbps` : "-"}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">UL</p><p className="font-mono font-medium">{device.throughput_tx_mbps ? `${device.throughput_tx_mbps}Mbps` : "-"}</p></div>
+                      </>}
                       <div className="text-center"><p className="text-xs text-muted-foreground">Uptime</p><p className="font-mono font-medium">{formatUptime(device.uptime_seconds)}</p></div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditDevice(device)}><Edit className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteDevice(device.id)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -217,25 +456,15 @@ export default function NetworkingPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Client</TableHead>
-                      <TableHead>IP Address</TableHead>
-                      <TableHead>MAC</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>OS</TableHead>
-                      <TableHead>AP / SSID</TableHead>
-                      <TableHead>Signal</TableHead>
-                      <TableHead className="text-right">RX / TX</TableHead>
+                      <TableHead>Client</TableHead><TableHead>IP</TableHead><TableHead>MAC</TableHead>
+                      <TableHead>Type</TableHead><TableHead>OS</TableHead><TableHead>AP / SSID</TableHead>
+                      <TableHead>Signal</TableHead><TableHead className="text-right">RX / TX</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredClients.map(c => (
-                      <TableRow key={c.id} data-testid={`net-client-${c.id}`}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {c.is_wireless ? <Smartphone className="w-4 h-4 text-cyan-500" /> : <Monitor className="w-4 h-4 text-blue-500" />}
-                            <span className="font-medium">{c.name || c.hostname || "Unknown"}</span>
-                          </div>
-                        </TableCell>
+                      <TableRow key={c.id}>
+                        <TableCell><div className="flex items-center gap-2">{c.is_wireless ? <Smartphone className="w-4 h-4 text-cyan-500" /> : <Monitor className="w-4 h-4 text-blue-500" />}<span className="font-medium">{c.name || c.hostname || "Unknown"}</span></div></TableCell>
                         <TableCell className="font-mono text-xs">{c.ip_address}</TableCell>
                         <TableCell className="font-mono text-xs">{c.mac}</TableCell>
                         <TableCell><Badge variant="outline" className="text-xs">{c.is_wireless ? "WiFi" : "Wired"}</Badge></TableCell>
@@ -245,29 +474,33 @@ export default function NetworkingPage() {
                         <TableCell className="text-right font-mono text-xs">{formatBytes(c.rx_bytes)} / {formatBytes(c.tx_bytes)}</TableCell>
                       </TableRow>
                     ))}
-                    {filteredClients.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No clients found</TableCell></TableRow>}
+                    {filteredClients.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No clients</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+        {siteFormDialog}{adoptDeviceDialog}{editDeviceDlg}
       </div>
     );
   }
 
-  // ============ SITES LIST VIEW ============
+  // ============ SITES LIST ============
   return (
     <div className="space-y-6" data-testid="networking-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Networking</h1>
-          <p className="text-muted-foreground">UniFi network management across all client sites</p>
+          <p className="text-muted-foreground">UniFi network management across client sites</p>
         </div>
-        <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+        <div className="flex gap-2">
+          <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add Site</Button>
+        </div>
       </div>
 
-      {/* Global Stats */}
+      {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Globe className="w-5 h-5 text-blue-500" /><div><p className="text-xs text-muted-foreground">Sites</p><p className="text-xl font-bold">{stats.online_sites}/{stats.total_sites}</p></div></div></CardContent></Card>
@@ -277,15 +510,7 @@ export default function NetworkingPage() {
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Server className="w-5 h-5 text-purple-500" /><div><p className="text-xs text-muted-foreground">Switches</p><p className="text-xl font-bold">{stats.switches}</p></div></div></CardContent></Card>
           <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Shield className="w-5 h-5 text-indigo-500" /><div><p className="text-xs text-muted-foreground">Gateways</p><p className="text-xl font-bold">{stats.gateways}</p></div></div></CardContent></Card>
           <Card className={stats.online_sites < stats.total_sites ? "border-amber-500/40" : "border-emerald-500/40"}>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                {stats.online_sites < stats.total_sites ? <AlertTriangle className="w-5 h-5 text-amber-500" /> : <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                <div>
-                  <p className="text-xs text-muted-foreground">Health</p>
-                  <p className="text-xl font-bold">{stats.online_sites < stats.total_sites ? "Warning" : "Healthy"}</p>
-                </div>
-              </div>
-            </CardContent>
+            <CardContent className="pt-4"><div className="flex items-center gap-2">{stats.online_sites < stats.total_sites ? <AlertTriangle className="w-5 h-5 text-amber-500" /> : <CheckCircle2 className="w-5 h-5 text-emerald-500" />}<div><p className="text-xs text-muted-foreground">Health</p><p className="text-xl font-bold">{stats.online_sites < stats.total_sites ? "Warning" : "Healthy"}</p></div></div></CardContent>
           </Card>
         </div>
       )}
@@ -293,35 +518,44 @@ export default function NetworkingPage() {
       {/* Sites List */}
       <div className="space-y-3">
         {sites.map(site => (
-          <Card key={site.id} className="cursor-pointer hover:border-primary/50 transition-all" onClick={() => { setSelectedSite(site); setTab("overview"); setSearch(""); setDeviceFilter("all"); }} data-testid={`site-card-${site.id}`}>
+          <Card key={site.id} className="hover:border-primary/50 transition-all" data-testid={`site-card-${site.id}`}>
             <CardContent className="py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => { setSelectedSite(site); setTab("devices"); setSearch(""); setDeviceFilter("all"); }}>
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${site.status === "online" ? "bg-emerald-500/10" : site.status === "warning" ? "bg-amber-500/10" : "bg-red-500/10"}`}>
                     <Globe className={`w-6 h-6 ${site.status === "online" ? "text-emerald-500" : site.status === "warning" ? "text-amber-500" : "text-red-500"}`} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-semibold">{site.name}</p>
-                      <StatusDot status={site.status} />
+                      <p className="font-semibold">{site.name}</p><StatusDot status={site.status} />
+                      {site.client_name && <Badge variant="outline" className="text-[10px]">{site.client_name}</Badge>}
                     </div>
-                    <p className="text-xs text-muted-foreground">{site.client_name} &middot; {site.location}</p>
+                    <p className="text-xs text-muted-foreground">{site.location} {site.controller_url ? `| ${site.controller_url}` : ""}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-8 text-sm">
-                  <div className="text-center"><p className="text-xs text-muted-foreground">ISP</p><p className="font-medium">{site.isp}</p></div>
-                  <div className="text-center"><p className="text-xs text-muted-foreground">WAN IP</p><p className="font-mono text-xs">{site.wan_ip}</p></div>
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="text-center"><p className="text-xs text-muted-foreground">ISP</p><p className="font-medium">{site.isp || "-"}</p></div>
+                  <div className="text-center"><p className="text-xs text-muted-foreground">WAN</p><p className="font-mono text-xs">{site.wan_ip || "-"}</p></div>
                   <div className="text-center"><p className="text-xs text-muted-foreground">Speed</p><p className="font-mono">{site.download_speed_mbps}/{site.upload_speed_mbps} Mbps</p></div>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditSite(site)}><Settings className="w-3 h-3" /></Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteSite(site.id)}><Trash2 className="w-3 h-3" /></Button>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-muted-foreground cursor-pointer" onClick={() => { setSelectedSite(site); setTab("devices"); }} />
                 </div>
               </div>
             </CardContent>
           </Card>
         ))}
         {sites.length === 0 && (
-          <Card><CardContent className="py-12 text-center text-muted-foreground">No network sites configured. Add a UniFi controller in Settings.</CardContent></Card>
+          <Card className="border-dashed"><CardContent className="py-12 text-center">
+            <Globe className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
+            <p className="text-muted-foreground mb-3">No network sites configured</p>
+            <Button onClick={openAddSite}><Plus className="w-4 h-4 mr-1" />Add Your First Site</Button>
+          </CardContent></Card>
         )}
       </div>
+      {siteFormDialog}
     </div>
   );
 }

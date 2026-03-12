@@ -1,34 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Zap, Eye, EyeOff, Server, Shield, Headphones } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [registerData, setRegisterData] = useState({ name: "", email: "", password: "" });
+  const canvasRef = useRef(null);
 
-  if (user) {
-    return <Navigate to="/" replace />;
-  }
+  if (user) return <Navigate to="/" replace />;
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     const success = await login(loginData.email, loginData.password);
     setIsLoading(false);
-    if (success) {
-      navigate("/");
-    }
+    if (success) navigate("/");
   };
 
   const handleRegister = async (e) => {
@@ -36,9 +31,7 @@ export default function LoginPage() {
     setIsLoading(true);
     const success = await register(registerData.name, registerData.email, registerData.password);
     setIsLoading(false);
-    if (success) {
-      navigate("/");
-    }
+    if (success) navigate("/");
   };
 
   const fillDemoCredentials = () => {
@@ -46,212 +39,191 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex" data-testid="login-page">
-      {/* Left Panel - Hero */}
-      <div className="hidden lg:flex lg:w-[60%] login-bg relative">
-        <div className="absolute inset-0 login-overlay" />
-        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+    <div className="min-h-screen flex relative overflow-hidden" data-testid="login-page">
+      {/* Animated Background */}
+      <div className="absolute inset-0 bg-[#0a0a0f]">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `radial-gradient(circle at 25% 25%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+                           radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
+                           radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%)`,
+        }} />
+        {/* Grid overlay */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
+          backgroundImage: `linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px)`,
+          backgroundSize: '60px 60px',
+        }} />
+        {/* Floating orbs */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-[120px] animate-pulse" style={{animationDuration: '8s'}} />
+        <div className="absolute bottom-1/4 right-1/3 w-80 h-80 bg-blue-500/5 rounded-full blur-[100px] animate-pulse" style={{animationDuration: '12s', animationDelay: '2s'}} />
+      </div>
+
+      {/* Left Panel */}
+      <div className="hidden lg:flex lg:w-[55%] relative z-10">
+        <div className="flex flex-col justify-between p-16 w-full">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Zap className="w-6 h-6 text-primary-foreground" />
+            <div className="relative">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </div>
+              <div className="absolute -inset-1 bg-emerald-500/20 rounded-lg blur-sm -z-10" />
             </div>
-            <span className="text-2xl font-bold tracking-tight">NexusOps</span>
+            <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
           </div>
 
-          {/* Features */}
-          <div className="space-y-8">
-            <h1 className="text-4xl font-bold tracking-tight leading-tight">
-              The Command Center<br />
-              <span className="text-gradient">for Modern MSPs</span>
-            </h1>
-            <p className="text-lg text-muted-foreground max-w-md">
-              Unified RMM & PSA platform combining the best of Syncro and SuperOps. 
-              Monitor, manage, and support your clients from a single dashboard.
-            </p>
-            
-            <div className="grid grid-cols-3 gap-6 pt-4">
-              <div className="space-y-2">
-                <div className="w-12 h-12 rounded-lg metric-icon-blue flex items-center justify-center">
-                  <Server className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-semibold">RMM</h3>
-                <p className="text-sm text-muted-foreground">Real-time device monitoring</p>
+          {/* Hero */}
+          <div className="space-y-8 max-w-lg">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Platform Active
               </div>
-              <div className="space-y-2">
-                <div className="w-12 h-12 rounded-lg metric-icon-green flex items-center justify-center">
-                  <Headphones className="w-6 h-6 text-green-500" />
+              <h1 className="text-5xl font-bold tracking-tight leading-[1.1] text-white">
+                Infrastructure<br />
+                <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                  Command Center
+                </span>
+              </h1>
+              <p className="text-base text-zinc-400 leading-relaxed max-w-md">
+                Unified RMM & PSA platform for modern managed service providers. Monitor, manage, and support from a single pane of glass.
+              </p>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-6">
+              {[
+                { value: "99.9%", label: "Uptime SLA", color: "emerald" },
+                { value: "< 2s", label: "Avg Response", color: "cyan" },
+                { value: "256-bit", label: "AES Encryption", color: "blue" },
+              ].map((stat, i) => (
+                <div key={i} className="space-y-1">
+                  <p className={`text-2xl font-bold font-mono text-${stat.color}-400`}>{stat.value}</p>
+                  <p className="text-xs text-zinc-500">{stat.label}</p>
                 </div>
-                <h3 className="font-semibold">Ticketing</h3>
-                <p className="text-sm text-muted-foreground">SLA-powered help desk</p>
-              </div>
-              <div className="space-y-2">
-                <div className="w-12 h-12 rounded-lg metric-icon-yellow flex items-center justify-center">
-                  <Shield className="w-6 h-6 text-yellow-500" />
-                </div>
-                <h3 className="font-semibold">Assets</h3>
-                <p className="text-sm text-muted-foreground">Complete inventory tracking</p>
-              </div>
+              ))}
+            </div>
+
+            {/* Feature pills */}
+            <div className="flex flex-wrap gap-2">
+              {["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"].map(f => (
+                <span key={f} className="px-3 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/50 text-xs text-zinc-400 font-medium">
+                  {f}
+                </span>
+              ))}
             </div>
           </div>
 
-          {/* Testimonial */}
-          <div className="glass rounded-xl p-6 max-w-lg">
-            <p className="text-sm leading-relaxed mb-4">
-              "NexusOps transformed how we manage our 50+ clients. The unified dashboard 
-              gives us complete visibility, and the SLA tracking keeps our response times sharp."
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                <span className="text-sm font-semibold text-primary">JD</span>
-              </div>
-              <div>
-                <p className="text-sm font-medium">James Davidson</p>
-                <p className="text-xs text-muted-foreground">CTO, TechForce MSP</p>
-              </div>
+          {/* Bottom quote */}
+          <div className="flex items-center gap-4 border-t border-zinc-800/50 pt-6">
+            <div className="flex -space-x-2">
+              {["AT", "SC", "MR"].map((init, i) => (
+                <div key={i} className="w-8 h-8 rounded-full border-2 border-[#0a0a0f] bg-zinc-800 flex items-center justify-center text-[10px] font-medium text-zinc-400">
+                  {init}
+                </div>
+              ))}
             </div>
+            <p className="text-xs text-zinc-500">
+              Trusted by <span className="text-zinc-300 font-medium">200+</span> managed service providers
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Right Panel - Auth Forms */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
+      {/* Right Panel - Auth */}
+      <div className="flex-1 flex items-center justify-center p-8 relative z-10">
+        <div className="w-full max-w-[380px]">
           {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Zap className="w-6 h-6 text-primary-foreground" />
+          <div className="lg:hidden flex items-center gap-3 mb-10 justify-center">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
             </div>
-            <span className="text-2xl font-bold tracking-tight">NexusOps</span>
+            <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
           </div>
 
-          <Card className="border-border/50 shadow-xl">
-            <CardHeader className="space-y-1 pb-4">
-              <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
-              <CardDescription>Sign in to your account to continue</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="login" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-6">
-                  <TabsTrigger value="login" data-testid="login-tab">Sign In</TabsTrigger>
-                  <TabsTrigger value="register" data-testid="register-tab">Sign Up</TabsTrigger>
-                </TabsList>
+          <div className="p-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-xl shadow-2xl shadow-black/20">
+            <Tabs defaultValue="login" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-8 bg-zinc-800/50">
+                <TabsTrigger value="login" data-testid="login-tab" className="data-[state=active]:bg-zinc-700 data-[state=active]:text-white text-zinc-400">Sign In</TabsTrigger>
+                <TabsTrigger value="register" data-testid="register-tab" className="data-[state=active]:bg-zinc-700 data-[state=active]:text-white text-zinc-400">Sign Up</TabsTrigger>
+              </TabsList>
 
-                <TabsContent value="login">
-                  <form onSubmit={handleLogin} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="login-email">Email</Label>
+              <TabsContent value="login">
+                <form onSubmit={handleLogin} className="space-y-5">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Email</Label>
+                    <Input
+                      type="email" placeholder="admin@nexusops.io"
+                      value={loginData.email}
+                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      required data-testid="login-email-input"
+                      className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Password</Label>
+                    <div className="relative">
                       <Input
-                        id="login-email"
-                        type="email"
-                        placeholder="admin@nexusops.io"
-                        value={loginData.email}
-                        onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
-                        required
-                        data-testid="login-email-input"
+                        type={showPassword ? "text" : "password"} placeholder="Enter password"
+                        value={loginData.password}
+                        onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                        required data-testid="login-password-input"
+                        className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600 pr-10"
                       />
+                      <Button type="button" variant="ghost" size="icon"
+                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent text-zinc-500 hover:text-zinc-300"
+                        onClick={() => setShowPassword(!showPassword)}>
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="login-password">Password</Label>
-                      <div className="relative">
-                        <Input
-                          id="login-password"
-                          type={showPassword ? "text" : "password"}
-                          placeholder="••••••••"
-                          value={loginData.password}
-                          onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                          required
-                          data-testid="login-password-input"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                          onClick={() => setShowPassword(!showPassword)}
-                        >
-                          {showPassword ? (
-                            <EyeOff className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <Eye className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full" 
-                      disabled={isLoading}
-                      data-testid="login-submit-button"
-                    >
-                      {isLoading ? "Signing in..." : "Sign In"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={fillDemoCredentials}
-                      data-testid="demo-credentials-button"
-                    >
-                      Use Demo Credentials
-                    </Button>
-                  </form>
-                </TabsContent>
+                  </div>
+                  <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="login-submit-button">
+                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Sign In <ArrowRight className="w-4 h-4 ml-1" /></>}
+                  </Button>
+                  <Button type="button" variant="ghost" className="w-full h-9 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50" onClick={fillDemoCredentials} data-testid="demo-credentials-button">
+                    Use Demo Credentials
+                  </Button>
+                </form>
+              </TabsContent>
 
-                <TabsContent value="register">
-                  <form onSubmit={handleRegister} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="register-name">Full Name</Label>
-                      <Input
-                        id="register-name"
-                        type="text"
-                        placeholder="John Doe"
-                        value={registerData.name}
-                        onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
-                        required
-                        data-testid="register-name-input"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="register-email">Email</Label>
-                      <Input
-                        id="register-email"
-                        type="email"
-                        placeholder="john@company.com"
-                        value={registerData.email}
-                        onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                        required
-                        data-testid="register-email-input"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="register-password">Password</Label>
-                      <Input
-                        id="register-password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={registerData.password}
-                        onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                        required
-                        minLength={6}
-                        data-testid="register-password-input"
-                      />
-                    </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full" 
-                      disabled={isLoading}
-                      data-testid="register-submit-button"
-                    >
-                      {isLoading ? "Creating account..." : "Create Account"}
-                    </Button>
-                  </form>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
+              <TabsContent value="register">
+                <form onSubmit={handleRegister} className="space-y-5">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Full Name</Label>
+                    <Input type="text" placeholder="John Doe"
+                      value={registerData.name}
+                      onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
+                      required data-testid="register-name-input"
+                      className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Email</Label>
+                    <Input type="email" placeholder="john@company.com"
+                      value={registerData.email}
+                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      required data-testid="register-email-input"
+                      className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Password</Label>
+                    <Input type="password" placeholder="Min 6 characters"
+                      value={registerData.password}
+                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
+                      required minLength={6} data-testid="register-password-input"
+                      className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600" />
+                  </div>
+                  <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="register-submit-button">
+                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4 ml-1" /></>}
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
+          </div>
 
-          <p className="text-center text-xs text-muted-foreground mt-6">
+          <p className="text-center text-[11px] text-zinc-600 mt-6">
             By continuing, you agree to our Terms of Service and Privacy Policy.
           </p>
         </div>

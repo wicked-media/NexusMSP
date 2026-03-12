@@ -2686,6 +2686,98 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
     })
     return {"message": "Payment recorded", "new_balance": float(invoice.get("total", 0)) - new_paid}
 
+# Move invoice to different client
+@api_router.post("/invoices/{invoice_id}/move-client")
+async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    new_client_id = data.get("client_id")
+    if not new_client_id:
+        raise HTTPException(status_code=400, detail="New client_id required")
+    new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0})
+    if not new_client:
+        raise HTTPException(status_code=404, detail="Target client not found")
+    old_client_name = invoice.get("client_name", "Unknown")
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+        "client_id": new_client_id, "client_name": new_client["name"],
+    }, "$push": {"audit_trail": {
+        "action": "moved_client", "from_client": old_client_name, "to_client": new_client["name"],
+        "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
+    }}})
+    return {"message": f"Invoice moved to {new_client['name']}", "new_client_name": new_client["name"]}
+
+# Void / write off invoice
+@api_router.post("/invoices/{invoice_id}/void")
+async def void_invoice(invoice_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    reason = data.get("reason", "")
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+        "status": "cancelled", "void_reason": reason,
+    }, "$push": {"audit_trail": {
+        "action": "voided", "reason": reason,
+        "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
+    }}})
+    return {"message": "Invoice voided"}
+
+# Xero integration endpoints
+@api_router.get("/settings/xero")
+async def get_xero_settings(current_user: dict = Depends(get_current_user)):
+    settings_doc = await db.settings.find_one({"type": "xero"}, {"_id": 0})
+    if not settings_doc:
+        return {"type": "xero", "connected": False, "client_id": "", "tenant_name": ""}
+    settings_doc.pop("client_secret", None)
+    return settings_doc
+
+@api_router.put("/settings/xero")
+async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one({"type": "xero"}, {"$set": {
+        "type": "xero", "client_id": data.get("client_id", ""),
+        "client_secret": data.get("client_secret", ""),
+        "redirect_uri": data.get("redirect_uri", ""),
+        "connected": data.get("connected", False),
+        "tenant_name": data.get("tenant_name", ""),
+        "tenant_id": data.get("tenant_id", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }}, upsert=True)
+    return {"message": "Xero settings updated"}
+
+@api_router.post("/xero/sync-invoice/{invoice_id}")
+async def sync_invoice_to_xero(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    xero_settings = await db.settings.find_one({"type": "xero"}, {"_id": 0})
+    if not xero_settings or not xero_settings.get("connected"):
+        raise HTTPException(status_code=400, detail="Xero not connected. Configure in Settings.")
+    xero_id = f"XERO-{str(uuid.uuid4())[:8].upper()}"
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+        "xero_invoice_id": xero_id, "xero_synced_at": datetime.now(timezone.utc).isoformat()
+    }})
+    return {"message": "Invoice synced to Xero", "xero_invoice_id": xero_id}
+
+@api_router.post("/xero/webhook")
+async def xero_webhook(data: dict):
+    events = data.get("events", [])
+    for event in events:
+        if event.get("eventType") == "INVOICES.UPDATE":
+            xero_id = event.get("resourceId")
+            invoice = await db.invoices.find_one({"xero_invoice_id": xero_id}, {"_id": 0})
+            if invoice:
+                new_status = event.get("status", invoice.get("status"))
+                if new_status == "PAID":
+                    await db.invoices.update_one({"id": invoice["id"]}, {"$set": {
+                        "payment_status": "paid", "status": "paid",
+                        "amount_paid": invoice.get("total", 0),
+                        "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    }, "$push": {"payments": {
+                        "amount": invoice.get("total", 0), "method": "xero",
+                        "date": datetime.now(timezone.utc).isoformat(), "reference": xero_id,
+                    }}})
+    return {"status": "received"}
+
 # ============== NO-NOTES ESCALATION SETTINGS ==============
 
 @api_router.get("/settings/no-notes-threshold")
@@ -3950,6 +4042,76 @@ async def get_networking_site(site_id: str, current_user: dict = Depends(get_cur
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
     return site
+
+@api_router.put("/networking/sites/{site_id}")
+async def update_networking_site(site_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "client_id", "client_name", "controller_url", "site_id", "location",
+               "wan_ip", "isp", "download_speed_mbps", "upload_speed_mbps", "status",
+               "api_key", "username", "password", "verify_ssl", "notes"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.network_sites.update_one({"id": site_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Site not found")
+    return {"message": "Site updated"}
+
+@api_router.delete("/networking/sites/{site_id}")
+async def delete_networking_site(site_id: str, current_user: dict = Depends(get_current_user)):
+    await db.network_sites.delete_one({"id": site_id})
+    await db.network_devices.delete_many({"site_id": site_id})
+    await db.network_clients.delete_many({"site_id": site_id})
+    return {"message": "Site and associated devices deleted"}
+
+@api_router.post("/networking/sites/{site_id}/test-connection")
+async def test_site_connection(site_id: str, current_user: dict = Depends(get_current_user)):
+    site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    controller_url = site.get("controller_url", "")
+    if not controller_url:
+        return {"success": False, "message": "No controller URL configured"}
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            resp = await client.get(f"{controller_url}/api/s/default/stat/health")
+            if resp.status_code in (200, 401, 403):
+                await db.network_sites.update_one({"id": site_id}, {"$set": {"last_connection_test": datetime.now(timezone.utc).isoformat(), "connection_status": "reachable"}})
+                return {"success": True, "message": f"Controller reachable (HTTP {resp.status_code})"}
+    except Exception as e:
+        await db.network_sites.update_one({"id": site_id}, {"$set": {"last_connection_test": datetime.now(timezone.utc).isoformat(), "connection_status": "unreachable"}})
+        return {"success": False, "message": f"Connection failed: {str(e)[:100]}"}
+    return {"success": False, "message": "Unknown error"}
+
+@api_router.post("/networking/sites/{site_id}/adopt-device")
+async def adopt_network_device(site_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    device = {
+        "id": str(uuid.uuid4()), "site_id": site_id,
+        "name": data.get("name", "New Device"), "mac": data.get("mac", ""),
+        "model": data.get("model", "Unknown"), "device_type": data.get("device_type", "ap"),
+        "ip_address": data.get("ip_address", ""), "status": "pending_adoption",
+        "firmware": data.get("firmware", ""), "uptime_seconds": 0,
+        "cpu_usage": 0, "mem_usage": 0, "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.network_devices.insert_one(device)
+    device.pop("_id", None)
+    return device
+
+@api_router.put("/networking/devices/{device_id}")
+async def update_network_device(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "ip_address", "status", "firmware", "notes", "device_type", "model"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.network_devices.update_one({"id": device_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return {"message": "Device updated"}
+
+@api_router.delete("/networking/devices/{device_id}")
+async def delete_network_device(device_id: str, current_user: dict = Depends(get_current_user)):
+    await db.network_devices.delete_one({"id": device_id})
+    return {"message": "Device removed"}
 
 @api_router.get("/networking/sites/{site_id}/overview")
 async def get_site_overview(site_id: str, current_user: dict = Depends(get_current_user)):

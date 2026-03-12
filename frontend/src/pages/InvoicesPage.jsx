@@ -18,7 +18,8 @@ import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
-  Receipt, TrendingUp, Eye, Banknote, RefreshCw
+  Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
+  Building2, Wallet
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 
@@ -51,8 +52,14 @@ export default function InvoicesPage() {
   const [editing, setEditing] = useState(null);
   const [viewInvoice, setViewInvoice] = useState(null);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "" });
+  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "", notes: "", date: "" });
   const [payingInvoice, setPayingInvoice] = useState(null);
+  const [moveDialog, setMoveDialog] = useState(false);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [movingInvoice, setMovingInvoice] = useState(null);
+  const [voidDialog, setVoidDialog] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", due_date: "", notes: "",
     line_items: [], tax_rate: "0",
@@ -196,6 +203,33 @@ export default function InvoicesPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
+  const handleMoveClient = async () => {
+    if (!moveTarget) { toast.error("Select a target client"); return; }
+    try {
+      const res = await axios.post(`${API}/invoices/${movingInvoice.id}/move-client`, { client_id: moveTarget }, { headers });
+      toast.success(res.data.message);
+      setMoveDialog(false);
+      fetchAll();
+      if (viewInvoice?.id === movingInvoice.id) {
+        const updated = await axios.get(`${API}/invoices/${movingInvoice.id}`, { headers });
+        setViewInvoice(updated.data);
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to move invoice"); }
+  };
+
+  const handleVoidInvoice = async () => {
+    try {
+      await axios.post(`${API}/invoices/${voidingInvoice.id}/void`, { reason: voidReason }, { headers });
+      toast.success("Invoice voided");
+      setVoidDialog(false);
+      fetchAll();
+      if (viewInvoice?.id === voidingInvoice.id) {
+        const updated = await axios.get(`${API}/invoices/${voidingInvoice.id}`, { headers });
+        setViewInvoice(updated.data);
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to void invoice"); }
+  };
+
   const filtered = invoices
     .filter(i => filterStatus === "all" || i.status === filterStatus)
     .filter(i => filterPayment === "all" || (i.payment_status || "unpaid") === filterPayment)
@@ -319,20 +353,77 @@ export default function InvoicesPage() {
           <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Amount ($)</Label><Input type="number" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div>
-            <div><Label>Method</Label>
+            <div><Label>Payment Method</Label>
               <Select value={paymentForm.method} onValueChange={v => setPaymentForm({ ...paymentForm, method: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger data-testid="payment-method"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="manual">Manual / Cash</SelectItem>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                  <SelectItem value="check">Check</SelectItem>
-                  <SelectItem value="credit_card">Credit Card (offline)</SelectItem>
+                  <SelectItem value="cash"><div className="flex items-center gap-2"><Wallet className="w-3 h-3" />Cash</div></SelectItem>
+                  <SelectItem value="bank_transfer"><div className="flex items-center gap-2"><Building2 className="w-3 h-3" />Bank Transfer / EFT</div></SelectItem>
+                  <SelectItem value="check"><div className="flex items-center gap-2"><Receipt className="w-3 h-3" />Check / Cheque</div></SelectItem>
+                  <SelectItem value="credit_card_offline"><div className="flex items-center gap-2"><CreditCard className="w-3 h-3" />Credit Card (Offline)</div></SelectItem>
+                  <SelectItem value="debit_card"><div className="flex items-center gap-2"><CreditCard className="w-3 h-3" />Debit Card</div></SelectItem>
+                  <SelectItem value="paypal"><div className="flex items-center gap-2"><DollarSign className="w-3 h-3" />PayPal</div></SelectItem>
+                  <SelectItem value="crypto"><div className="flex items-center gap-2"><DollarSign className="w-3 h-3" />Cryptocurrency</div></SelectItem>
+                  <SelectItem value="wire"><div className="flex items-center gap-2"><Building2 className="w-3 h-3" />Wire Transfer</div></SelectItem>
+                  <SelectItem value="other"><div className="flex items-center gap-2"><Banknote className="w-3 h-3" />Other</div></SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Reference / Check #</Label><Input value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder="Optional reference" /></div>
+            <div><Label>Reference / Check # / Transaction ID</Label><Input value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder="Optional reference number" data-testid="payment-reference" /></div>
+            <div><Label>Payment Date</Label><Input type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div>
+            <div><Label>Notes</Label><Textarea value={paymentForm.notes || ""} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Payment notes..." rows={2} /></div>
           </div>
           <DialogFooter><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="w-4 h-4 mr-1" />Confirm Payment</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MOVE TO CLIENT DIALOG */}
+      <Dialog open={moveDialog} onOpenChange={v => { setMoveDialog(v); if (!v) setMovingInvoice(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Move Invoice to Different Client</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {movingInvoice && (
+              <div className="p-3 rounded-lg bg-muted/30 border text-sm">
+                <p className="font-medium font-mono">{movingInvoice.invoice_number}</p>
+                <p className="text-muted-foreground">Currently assigned to: <span className="text-foreground font-medium">{movingInvoice.client_name}</span></p>
+                <p className="text-muted-foreground">Total: <span className="text-foreground font-mono">${(movingInvoice.total || 0).toFixed(2)}</span></p>
+              </div>
+            )}
+            <div><Label>Move to Client *</Label>
+              <Select value={moveTarget} onValueChange={setMoveTarget}>
+                <SelectTrigger data-testid="move-target-client"><SelectValue placeholder="Select new client" /></SelectTrigger>
+                <SelectContent>
+                  {clients.filter(c => c.id !== movingInvoice?.client_id).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveDialog(false)}>Cancel</Button>
+            <Button onClick={handleMoveClient} data-testid="confirm-move-btn"><ArrowRightLeft className="w-4 h-4 mr-1" />Move Invoice</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* VOID DIALOG */}
+      <Dialog open={voidDialog} onOpenChange={v => { setVoidDialog(v); if (!v) setVoidingInvoice(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Void Invoice</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {voidingInvoice && (
+              <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20 text-sm">
+                <p className="font-medium text-red-400">This will cancel the invoice permanently.</p>
+                <p className="text-muted-foreground mt-1">{voidingInvoice.invoice_number} - {voidingInvoice.client_name} - ${(voidingInvoice.total || 0).toFixed(2)}</p>
+              </div>
+            )}
+            <div><Label>Reason for voiding</Label><Textarea value={voidReason} onChange={e => setVoidReason(e.target.value)} placeholder="Enter reason..." rows={2} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoidDialog(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleVoidInvoice} data-testid="confirm-void-btn"><Ban className="w-4 h-4 mr-1" />Void Invoice</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -431,13 +522,21 @@ export default function InvoicesPage() {
                     <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleStripePayment(inv)} data-testid="stripe-pay-btn">
                       <CreditCard className="w-4 h-4 mr-1" />Pay with Stripe
                     </Button>
-                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "manual", reference: "" }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
+                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "cash", reference: "", notes: "", date: new Date().toISOString().split("T")[0] }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
                       <Banknote className="w-4 h-4 mr-1" />Record Manual Payment
                     </Button>
                   </>
                 )}
                 {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
+                <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
+                  <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Different Client
+                </Button>
                 <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
+                {inv.status !== "cancelled" && (
+                  <Button variant="outline" className="w-full text-amber-500 hover:text-amber-400" onClick={() => { setVoidingInvoice(inv); setVoidReason(""); setVoidDialog(true); }} data-testid="void-invoice-btn">
+                    <Ban className="w-4 h-4 mr-1" />Void Invoice
+                  </Button>
+                )}
                 <Button variant="destructive" className="w-full" onClick={() => handleDelete(inv.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
               </CardContent>
             </Card>
@@ -532,6 +631,7 @@ export default function InvoicesPage() {
                     <TableCell>
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                         {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Move to client" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }}><ArrowRightLeft className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
                       </div>
                     </TableCell>
