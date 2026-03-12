@@ -60,6 +60,19 @@ NexusOps is a comprehensive RMM/PSA platform designed to outdo Syncro, SuperOps,
 - **Backend**: Enhanced Device model (40+ fields), new collections (device_software, device_patches, device_events, device_performance, device_network), 6 new API endpoints
 - **Seed Data**: 10 realistic devices across 5 clients with full hardware/software/security data
 
+## Enhanced Dashboard (March 2026)
+- **MSP Command Center**: Top stats (Clients, Devices online/total, Open Tickets, MRR, Active Alerts), operational alerts row (Collected, Outstanding, SLA Breaches, Need Patching, Low Compliance, Pending POs)
+- **Device Fleet Overview**: Table sorted by criticality (warning/offline first), CPU/RAM/Disk/Security/Status, clickable rows to device detail
+- **System Health**: Donut chart (Online/Warning/Offline), Fleet Breakdown (Servers/Workstations/Laptops/Network), Avg CPU/RAM
+- **Ticket Volume**: 7-day area chart, Open Tickets scrollable list with device names
+- **Alerts & Activity**: Active alerts section, Activity feed with timestamps
+
+## Remote Access Integration (March 2026)
+- **Remote Access Dialog**: Connection status (Ready/Unavailable), RustDesk ID, IP, OS display
+- **4 Session Types**: Remote Desktop, Terminal/SSH, File Transfer, View Only
+- **Online/Offline Awareness**: Green "Remote Access" button for online devices, disabled "Offline" for offline devices
+- **RustDesk Launch**: Opens rustdesk:// protocol URL with device's RustDesk ID
+
 ## Device-Ticket Integration (March 2026)
 - **Bidirectional linking**: Tickets now have device_id/device_name fields. Backend auto-resolves device_name on create/update.
 - **Device Detail - Tickets Tab**: Shows all linked tickets with priority/status badges, plus stats (Total/Open/In Progress/Resolved). "Create Ticket for Device" button.
@@ -71,4 +84,4 @@ NexusOps is a comprehensive RMM/PSA platform designed to outdo Syncro, SuperOps,
 ## Test Results
 - Backend: 100% (12/12 in iteration 13)
 - Frontend: 100% (11/11 features verified)
-- Last tested: March 2026, iteration 13
+- Last tested: March 2026, iteration 14 (42/42 frontend checks passed)
