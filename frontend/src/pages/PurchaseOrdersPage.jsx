@@ -160,6 +160,85 @@ export default function PurchaseOrdersPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  const formDialog = (
+    <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader><DialogTitle>{editing ? `Edit ${editing.po_number}` : "New Purchase Order"}</DialogTitle></DialogHeader>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-3 gap-3">
+            <div><Label>Vendor *</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="Vendor name" data-testid="po-vendor" /></div>
+            <div><Label>Vendor Contact</Label><Input value={form.vendor_contact} onChange={e => setForm({ ...form, vendor_contact: e.target.value })} placeholder="Contact person" /></div>
+            <div><Label>Vendor Email</Label><Input value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} placeholder="vendor@email.com" /></div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div><Label>Client (optional)</Label>
+              <Select value={form.client_id} onValueChange={v => { const c = clients.find(cl => cl.id === v); setForm({ ...form, client_id: v, client_name: c?.name || "" }); }}>
+                <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Ship To</Label><Input value={form.ship_to} onChange={e => setForm({ ...form, ship_to: e.target.value })} placeholder="Shipping address" /></div>
+            <div><Label>Expected Delivery</Label><Input type="date" value={form.expected_delivery} onChange={e => setForm({ ...form, expected_delivery: e.target.value })} /></div>
+          </div>
+          <Separator />
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-base font-semibold">Line Items</Label>
+              <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+            </div>
+            {form.line_items.length === 0 ? (
+              <div className="text-center py-6 border rounded-lg border-dashed text-muted-foreground text-sm">
+                <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                No items added yet. Click "Add Item" to begin.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {form.line_items.map((li, idx) => (
+                  <div key={idx} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
+                    <div className="col-span-5">
+                      {idx === 0 && <Label className="text-xs">Product</Label>}
+                      <Select value={li.product_id} onValueChange={v => updateLineItem(idx, "product_id", v)}>
+                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                        <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.cost_price.toFixed(2)}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-2">
+                      {idx === 0 && <Label className="text-xs">Qty</Label>}
+                      <Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} />
+                    </div>
+                    <div className="col-span-2">
+                      {idx === 0 && <Label className="text-xs">Unit Price</Label>}
+                      <Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div className="col-span-2 text-right">
+                      {idx === 0 && <Label className="text-xs block">Total</Label>}
+                      <p className="font-mono text-sm font-medium py-2">${(li.quantity * li.unit_price).toFixed(2)}</p>
+                    </div>
+                    <div className="col-span-1 text-right">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)}><Trash2 className="w-3 h-3" /></Button>
+                    </div>
+                  </div>
+                ))}
+                <Separator />
+                <div className="flex items-center gap-3 justify-end">
+                  <div><Label className="text-xs">Shipping ($)</Label><Input type="number" step="0.01" className="w-24" value={form.shipping} onChange={e => setForm({ ...form, shipping: e.target.value })} /></div>
+                </div>
+                <div className="flex flex-col items-end gap-1 text-sm mt-2">
+                  <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${calcSubtotal().toFixed(2)}</span></div>
+                  <div className="flex gap-8"><span className="text-muted-foreground">Tax</span><span className="font-mono">${calcTax().toFixed(2)}</span></div>
+                  <div className="flex gap-8"><span className="text-muted-foreground">Shipping</span><span className="font-mono">${(parseFloat(form.shipping) || 0).toFixed(2)}</span></div>
+                  <div className="flex gap-8 text-base font-semibold"><span>Total</span><span className="font-mono text-green-500">${(calcSubtotal() + calcTax() + (parseFloat(form.shipping) || 0)).toFixed(2)}</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Internal notes..." rows={2} /></div>
+        </div>
+        <DialogFooter><Button onClick={handleSave} data-testid="save-po-btn">{editing ? "Update" : "Create"} Purchase Order</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewPO) {
     const po = viewPO;
@@ -241,6 +320,7 @@ export default function PurchaseOrdersPage() {
             </Card>
           </div>
         </div>
+        {formDialog}
       </div>
     );
   }
@@ -321,87 +401,7 @@ export default function PurchaseOrdersPage() {
         </CardContent>
       </Card>
 
-      {/* CREATE/EDIT DIALOG */}
-      <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>{editing ? `Edit ${editing.po_number}` : "New Purchase Order"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Vendor *</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="Vendor name" data-testid="po-vendor" /></div>
-              <div><Label>Vendor Contact</Label><Input value={form.vendor_contact} onChange={e => setForm({ ...form, vendor_contact: e.target.value })} placeholder="Contact person" /></div>
-              <div><Label>Vendor Email</Label><Input value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} placeholder="vendor@email.com" /></div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Client (optional)</Label>
-                <Select value={form.client_id} onValueChange={v => { const c = clients.find(cl => cl.id === v); setForm({ ...form, client_id: v, client_name: c?.name || "" }); }}>
-                  <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
-                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Ship To</Label><Input value={form.ship_to} onChange={e => setForm({ ...form, ship_to: e.target.value })} placeholder="Shipping address" /></div>
-              <div><Label>Expected Delivery</Label><Input type="date" value={form.expected_delivery} onChange={e => setForm({ ...form, expected_delivery: e.target.value })} /></div>
-            </div>
-
-            <Separator />
-
-            {/* Line Items */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-base font-semibold">Line Items</Label>
-                <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
-              </div>
-              {form.line_items.length === 0 ? (
-                <div className="text-center py-6 border rounded-lg border-dashed text-muted-foreground text-sm">
-                  <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  No items added yet. Click "Add Item" to begin.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {form.line_items.map((li, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
-                      <div className="col-span-5">
-                        {idx === 0 && <Label className="text-xs">Product</Label>}
-                        <Select value={li.product_id} onValueChange={v => updateLineItem(idx, "product_id", v)}>
-                          <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                          <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.cost_price.toFixed(2)}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </div>
-                      <div className="col-span-2">
-                        {idx === 0 && <Label className="text-xs">Qty</Label>}
-                        <Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} />
-                      </div>
-                      <div className="col-span-2">
-                        {idx === 0 && <Label className="text-xs">Unit Price</Label>}
-                        <Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} />
-                      </div>
-                      <div className="col-span-2 text-right">
-                        {idx === 0 && <Label className="text-xs block">Total</Label>}
-                        <p className="font-mono text-sm font-medium py-2">${(li.quantity * li.unit_price).toFixed(2)}</p>
-                      </div>
-                      <div className="col-span-1 text-right">
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)}><Trash2 className="w-3 h-3" /></Button>
-                      </div>
-                    </div>
-                  ))}
-                  <Separator />
-                  <div className="flex items-center gap-3 justify-end">
-                    <div><Label className="text-xs">Shipping ($)</Label><Input type="number" step="0.01" className="w-24" value={form.shipping} onChange={e => setForm({ ...form, shipping: e.target.value })} /></div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 text-sm mt-2">
-                    <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${calcSubtotal().toFixed(2)}</span></div>
-                    <div className="flex gap-8"><span className="text-muted-foreground">Tax</span><span className="font-mono">${calcTax().toFixed(2)}</span></div>
-                    <div className="flex gap-8"><span className="text-muted-foreground">Shipping</span><span className="font-mono">${(parseFloat(form.shipping) || 0).toFixed(2)}</span></div>
-                    <div className="flex gap-8 text-base font-semibold"><span>Total</span><span className="font-mono text-green-500">${(calcSubtotal() + calcTax() + (parseFloat(form.shipping) || 0)).toFixed(2)}</span></div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Internal notes..." rows={2} /></div>
-          </div>
-          <DialogFooter><Button onClick={handleSave} data-testid="save-po-btn">{editing ? "Update" : "Create"} Purchase Order</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {formDialog}
     </div>
   );
 }

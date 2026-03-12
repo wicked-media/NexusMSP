@@ -51,7 +51,10 @@ NexusOps is a comprehensive RMM/PSA platform designed to outdo Syncro, SuperOps,
 ### P2
 - Client portal, PDF export, RBAC/SSO, mobile responsive, Expiry Tracker
 
+## Bug Fixes
+- **Edit Dialog Bug (March 2026)**: Fixed across 5 pages (Invoices, Products, Purchase Orders, Assets, Clients). Edit dialogs were not rendering when clicking Edit from detail views due to early-return rendering pattern. Dialogs are now extracted into shared variables and rendered in both detail and list views.
+
 ## Test Results
 - Backend: 100% (12/12 in iteration 11)
-- Frontend: 100% (all flows verified)
-- Last tested: March 2026, iteration 11
+- Frontend: 100% (all flows verified, edit dialog fix verified across all 5 pages)
+- Last tested: March 2026

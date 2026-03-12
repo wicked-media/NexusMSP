@@ -130,6 +130,33 @@ export default function ClientsPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  const clientFormDialog = (
+    <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingClient(null); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{editingClient ? "Edit Client" : "New Client"}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Company Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="client-name" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} /></div>
+            <div><Label>Phone</Label><Input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
+          </div>
+          <div><Label>Address</Label><Input value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
+          <div className="grid grid-cols-3 gap-3">
+            <div><Label>Industry</Label><Input value={formData.industry} onChange={e => setFormData({ ...formData, industry: e.target.value })} /></div>
+            <div><Label>Contract</Label>
+              <Select value={formData.contract_type} onValueChange={v => setFormData({ ...formData, contract_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="annual">Annual</SelectItem><SelectItem value="per_incident">Per Incident</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div><Label>MRR ($)</Label><Input type="number" value={formData.mrr} onChange={e => setFormData({ ...formData, mrr: e.target.value })} /></div>
+          </div>
+        </div>
+        <DialogFooter><Button onClick={handleCreateClient} data-testid="save-client-btn">{editingClient ? "Update" : "Create"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewingClient && clientDetail) {
     const { client, tickets, devices, contracts } = clientDetail;
@@ -306,6 +333,7 @@ export default function ClientsPage() {
             <DialogFooter><Button onClick={handleAddContact} data-testid="save-contact-btn">{editingContact ? "Update" : "Add"} Contact</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+        {clientFormDialog}
       </div>
     );
   }
@@ -368,31 +396,7 @@ export default function ClientsPage() {
         </CardContent>
       </Card>
 
-      {/* CREATE/EDIT CLIENT DIALOG */}
-      <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingClient(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editingClient ? "Edit Client" : "New Client"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Company Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="client-name" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} /></div>
-              <div><Label>Phone</Label><Input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
-            </div>
-            <div><Label>Address</Label><Input value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Industry</Label><Input value={formData.industry} onChange={e => setFormData({ ...formData, industry: e.target.value })} /></div>
-              <div><Label>Contract</Label>
-                <Select value={formData.contract_type} onValueChange={v => setFormData({ ...formData, contract_type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="annual">Annual</SelectItem><SelectItem value="per_incident">Per Incident</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label>MRR ($)</Label><Input type="number" value={formData.mrr} onChange={e => setFormData({ ...formData, mrr: e.target.value })} /></div>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateClient} data-testid="save-client-btn">{editingClient ? "Update" : "Create"}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {clientFormDialog}
     </div>
   );
 }

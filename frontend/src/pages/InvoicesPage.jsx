@@ -209,210 +209,9 @@ export default function InvoicesPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
-  // ========== DETAIL VIEW ==========
-  if (viewInvoice) {
-    const inv = viewInvoice;
-    const pStatus = inv.payment_status || "unpaid";
-    const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
-    const balance = (inv.total || 0) - (inv.amount_paid || 0);
-    return (
-      <div className="space-y-6" data-testid="invoice-detail">
-        <Button variant="ghost" size="sm" onClick={() => setViewInvoice(null)} data-testid="back-to-invoices"><ArrowLeft className="w-4 h-4 mr-1" />Back to Invoices</Button>
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-8 space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-2xl font-mono">{inv.invoice_number}</CardTitle>
-                    <p className="text-muted-foreground mt-1">Client: <span className="font-medium text-foreground">{inv.client_name}</span></p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Badge className={PAYMENT_STATUS[pStatus]?.class}><PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}</Badge>
-                    <Badge className={STATUS_CONFIG[inv.status]?.class}>{STATUS_CONFIG[inv.status]?.label}</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {(inv.line_items || []).map((li, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="font-medium">{li.name}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{li.description || "-"}</TableCell>
-                        <TableCell className="text-right">{li.quantity}</TableCell>
-                        <TableCell className="text-right font-mono">${(li.unit_price || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-mono font-medium">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <Separator className="my-3" />
-                <div className="flex flex-col items-end gap-1 text-sm">
-                  <div className="flex gap-12"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${(inv.subtotal || 0).toFixed(2)}</span></div>
-                  <div className="flex gap-12"><span className="text-muted-foreground">Tax ({inv.tax_rate || 0}%)</span><span className="font-mono">${(inv.tax || 0).toFixed(2)}</span></div>
-                  <Separator className="w-48 my-1" />
-                  <div className="flex gap-12 text-base"><span className="font-semibold">Total</span><span className="font-mono font-bold">${(inv.total || 0).toFixed(2)}</span></div>
-                  {(inv.amount_paid || 0) > 0 && <div className="flex gap-12"><span className="text-green-500">Amount Paid</span><span className="font-mono text-green-500">-${(inv.amount_paid || 0).toFixed(2)}</span></div>}
-                  {balance > 0 && <div className="flex gap-12 text-lg"><span className="font-bold text-red-500">Balance Due</span><span className="font-mono font-bold text-red-500">${balance.toFixed(2)}</span></div>}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Payment History */}
-            {(inv.payments || []).length > 0 && (
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4" />Payment History</CardTitle></CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {(inv.payments || []).map((p, i) => (
-                        <TableRow key={i}>
-                          <TableCell className="text-sm">{p.date ? format(new Date(p.date), "MMM d, yyyy h:mm a") : "-"}</TableCell>
-                          <TableCell><Badge variant="outline" className="capitalize text-xs">{p.method}</Badge></TableCell>
-                          <TableCell className="text-sm">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
-                          <TableCell className="text-right font-mono font-medium text-green-500">${(p.amount || 0).toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
-            {inv.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{inv.notes}</p></CardContent></Card>}
-          </div>
-
-          <div className="col-span-4 space-y-4">
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div><span className="text-muted-foreground block">Due Date</span><span className={`font-medium ${inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid" ? "text-red-500" : ""}`}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "N/A"}</span></div>
-                <Separator />
-                <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{inv.created_at ? format(new Date(inv.created_at), "MMM d, yyyy") : "N/A"}</span></div>
-                {inv.paid_date && <><Separator /><div><span className="text-muted-foreground block">Paid Date</span><span className="font-medium text-green-500">{format(parseISO(inv.paid_date), "MMM d, yyyy")}</span></div></>}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {pStatus !== "paid" && (
-                  <>
-                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleStripePayment(inv)} data-testid="stripe-pay-btn">
-                      <CreditCard className="w-4 h-4 mr-1" />Pay with Stripe
-                    </Button>
-                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "manual", reference: "" }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
-                      <Banknote className="w-4 h-4 mr-1" />Record Manual Payment
-                    </Button>
-                  </>
-                )}
-                {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
-                <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
-                <Button variant="destructive" className="w-full" onClick={() => handleDelete(inv.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ========== LIST VIEW ==========
-  return (
-    <div className="space-y-6" data-testid="invoices-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Invoices</h1><p className="text-muted-foreground">{invoices.length} invoices</p></div>
-        <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Paid</p><p className="text-xl font-bold text-green-500">{stats.paid || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Unpaid</p><p className="text-xl font-bold text-red-500">{stats.unpaid || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Collected</p><p className="text-xl font-bold">${(stats.total_collected || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-orange-500" /></div><div><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-orange-500">${(stats.total_outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search invoice #, client..." value={search} onChange={e => setSearch(e.target.value)} data-testid="invoice-search" />
-        </div>
-        <Select value={filterPayment} onValueChange={setFilterPayment}>
-          <SelectTrigger className="w-[140px]" data-testid="payment-filter"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Payments</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-            <SelectItem value="unpaid">Not Paid</SelectItem>
-            <SelectItem value="partial">Partial</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="sent">Sent</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Invoice Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead>
-                <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Paid</TableHead>
-                <TableHead className="text-right">Balance</TableHead><TableHead>Payment</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
-              ) : filtered.map(inv => {
-                const pStatus = inv.payment_status || "unpaid";
-                const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
-                const effectiveStatus = getEffectiveStatus(inv);
-                const balance = (inv.total || 0) - (inv.amount_paid || 0);
-                const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
-                return (
-                  <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewInvoice(inv)} data-testid={`invoice-row-${inv.id}`}>
-                    <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">{inv.client_name}
-                        {inv.is_recurring && <RefreshCw className="w-3 h-3 text-purple-500" />}
-                      </div>
-                    </TableCell>
-                    <TableCell className={isOverdue ? "text-red-500 font-medium" : ""}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "-"}{isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}</TableCell>
-                    <TableCell className="text-right font-mono">${(inv.total || 0).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-mono text-green-500">${(inv.amount_paid || 0).toFixed(2)}</TableCell>
-                    <TableCell className={`text-right font-mono font-medium ${balance > 0 ? 'text-red-500' : 'text-green-500'}`}>${balance.toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Badge className={PAYMENT_STATUS[pStatus]?.class + " text-[10px]"}>
-                        <PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
-                    <TableCell>
-                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
+  // Shared dialogs rendered at all times (detail + list view)
+  const dialogs = (
+    <>
       {/* CREATE/EDIT DIALOG */}
       <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
         <DialogContent className="max-w-3xl">
@@ -536,6 +335,215 @@ export default function InvoicesPage() {
           <DialogFooter><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="w-4 h-4 mr-1" />Confirm Payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  // ========== DETAIL VIEW ==========
+  if (viewInvoice) {
+    const inv = viewInvoice;
+    const pStatus = inv.payment_status || "unpaid";
+    const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
+    const balance = (inv.total || 0) - (inv.amount_paid || 0);
+    return (
+      <div className="space-y-6" data-testid="invoice-detail">
+        <Button variant="ghost" size="sm" onClick={() => setViewInvoice(null)} data-testid="back-to-invoices"><ArrowLeft className="w-4 h-4 mr-1" />Back to Invoices</Button>
+        <div className="grid grid-cols-12 gap-6">
+          <div className="col-span-8 space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-2xl font-mono">{inv.invoice_number}</CardTitle>
+                    <p className="text-muted-foreground mt-1">Client: <span className="font-medium text-foreground">{inv.client_name}</span></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge className={PAYMENT_STATUS[pStatus]?.class}><PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}</Badge>
+                    <Badge className={STATUS_CONFIG[inv.status]?.class}>{STATUS_CONFIG[inv.status]?.label}</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {(inv.line_items || []).map((li, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-medium">{li.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{li.description || "-"}</TableCell>
+                        <TableCell className="text-right">{li.quantity}</TableCell>
+                        <TableCell className="text-right font-mono">${(li.unit_price || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono font-medium">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <Separator className="my-3" />
+                <div className="flex flex-col items-end gap-1 text-sm">
+                  <div className="flex gap-12"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${(inv.subtotal || 0).toFixed(2)}</span></div>
+                  <div className="flex gap-12"><span className="text-muted-foreground">Tax ({inv.tax_rate || 0}%)</span><span className="font-mono">${(inv.tax || 0).toFixed(2)}</span></div>
+                  <Separator className="w-48 my-1" />
+                  <div className="flex gap-12 text-base"><span className="font-semibold">Total</span><span className="font-mono font-bold">${(inv.total || 0).toFixed(2)}</span></div>
+                  {(inv.amount_paid || 0) > 0 && <div className="flex gap-12"><span className="text-green-500">Amount Paid</span><span className="font-mono text-green-500">-${(inv.amount_paid || 0).toFixed(2)}</span></div>}
+                  {balance > 0 && <div className="flex gap-12 text-lg"><span className="font-bold text-red-500">Balance Due</span><span className="font-mono font-bold text-red-500">${balance.toFixed(2)}</span></div>}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Payment History */}
+            {(inv.payments || []).length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4" />Payment History</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {(inv.payments || []).map((p, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-sm">{p.date ? format(new Date(p.date), "MMM d, yyyy h:mm a") : "-"}</TableCell>
+                          <TableCell><Badge variant="outline" className="capitalize text-xs">{p.method}</Badge></TableCell>
+                          <TableCell className="text-sm">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
+                          <TableCell className="text-right font-mono font-medium text-green-500">${(p.amount || 0).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+            {inv.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{inv.notes}</p></CardContent></Card>}
+          </div>
+
+          <div className="col-span-4 space-y-4">
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div><span className="text-muted-foreground block">Due Date</span><span className={`font-medium ${inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid" ? "text-red-500" : ""}`}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "N/A"}</span></div>
+                <Separator />
+                <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{inv.created_at ? format(new Date(inv.created_at), "MMM d, yyyy") : "N/A"}</span></div>
+                {inv.paid_date && <><Separator /><div><span className="text-muted-foreground block">Paid Date</span><span className="font-medium text-green-500">{format(parseISO(inv.paid_date), "MMM d, yyyy")}</span></div></>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {pStatus !== "paid" && (
+                  <>
+                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleStripePayment(inv)} data-testid="stripe-pay-btn">
+                      <CreditCard className="w-4 h-4 mr-1" />Pay with Stripe
+                    </Button>
+                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "manual", reference: "" }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
+                      <Banknote className="w-4 h-4 mr-1" />Record Manual Payment
+                    </Button>
+                  </>
+                )}
+                {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
+                <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
+                <Button variant="destructive" className="w-full" onClick={() => handleDelete(inv.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  // ========== LIST VIEW ==========
+  return (
+    <div className="space-y-6" data-testid="invoices-page">
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Invoices</h1><p className="text-muted-foreground">{invoices.length} invoices</p></div>
+        <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
+      </div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Paid</p><p className="text-xl font-bold text-green-500">{stats.paid || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Unpaid</p><p className="text-xl font-bold text-red-500">{stats.unpaid || 0}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Collected</p><p className="text-xl font-bold">${(stats.total_collected || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-orange-500" /></div><div><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-orange-500">${(stats.total_outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-9" placeholder="Search invoice #, client..." value={search} onChange={e => setSearch(e.target.value)} data-testid="invoice-search" />
+        </div>
+        <Select value={filterPayment} onValueChange={setFilterPayment}>
+          <SelectTrigger className="w-[140px]" data-testid="payment-filter"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Payments</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="unpaid">Not Paid</SelectItem>
+            <SelectItem value="partial">Partial</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="sent">Sent</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Invoice Table */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead>
+                <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Paid</TableHead>
+                <TableHead className="text-right">Balance</TableHead><TableHead>Payment</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
+              ) : filtered.map(inv => {
+                const pStatus = inv.payment_status || "unpaid";
+                const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
+                const effectiveStatus = getEffectiveStatus(inv);
+                const balance = (inv.total || 0) - (inv.amount_paid || 0);
+                const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+                return (
+                  <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewInvoice(inv)} data-testid={`invoice-row-${inv.id}`}>
+                    <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">{inv.client_name}
+                        {inv.is_recurring && <RefreshCw className="w-3 h-3 text-purple-500" />}
+                      </div>
+                    </TableCell>
+                    <TableCell className={isOverdue ? "text-red-500 font-medium" : ""}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "-"}{isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}</TableCell>
+                    <TableCell className="text-right font-mono">${(inv.total || 0).toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-mono text-green-500">${(inv.amount_paid || 0).toFixed(2)}</TableCell>
+                    <TableCell className={`text-right font-mono font-medium ${balance > 0 ? 'text-red-500' : 'text-green-500'}`}>${balance.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Badge className={PAYMENT_STATUS[pStatus]?.class + " text-[10px]"}>
+                        <PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                        {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {dialogs}
     </div>
   );
 }

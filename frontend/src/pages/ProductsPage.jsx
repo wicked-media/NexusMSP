@@ -119,6 +119,71 @@ export default function ProductsPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  const formDialog = (
+    <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{editing ? "Edit Product" : "Add Product"}</DialogTitle></DialogHeader>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Product Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dell OptiPlex 7090" data-testid="product-name" /></div>
+            <div><Label>SKU</Label><Input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="e.g. DELL-OPT-7090" data-testid="product-sku" /></div>
+          </div>
+          <div><Label>Description</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Product description..." rows={2} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Category</Label>
+              <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Vendor</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="e.g. Dell Technologies" /></div>
+          </div>
+          <Separator />
+          <div className="grid grid-cols-3 gap-3">
+            <div><Label>Cost Price ($)</Label><Input type="number" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} data-testid="product-cost" /></div>
+            <div><Label>Retail Price ($)</Label><Input type="number" step="0.01" value={form.retail_price} onChange={e => setForm({ ...form, retail_price: e.target.value })} data-testid="product-price" /></div>
+            <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div><Label>Quantity in Stock</Label><Input type="number" value={form.quantity_in_stock} onChange={e => setForm({ ...form, quantity_in_stock: e.target.value })} data-testid="product-stock" /></div>
+            <div><Label>Reorder Level</Label><Input type="number" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} /></div>
+            <div><Label>Unit</Label>
+              <Select value={form.unit} onValueChange={v => setForm({ ...form, unit: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="each">Each</SelectItem>
+                  <SelectItem value="pack">Pack</SelectItem>
+                  <SelectItem value="box">Box</SelectItem>
+                  <SelectItem value="license">License</SelectItem>
+                  <SelectItem value="hour">Hour</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <Separator />
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2"><Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} /><Label>Active</Label></div>
+            <div className="flex items-center gap-2"><Switch checked={form.is_taxable} onCheckedChange={v => setForm({ ...form, is_taxable: v })} /><Label>Taxable</Label></div>
+            <div className="flex items-center gap-2"><Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} /><Label>Recurring</Label></div>
+          </div>
+          {form.is_recurring && (
+            <div className="max-w-xs"><Label>Billing Cycle</Label>
+              <Select value={form.billing_cycle} onValueChange={v => setForm({ ...form, billing_cycle: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="quarterly">Quarterly</SelectItem>
+                  <SelectItem value="annually">Annually</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+        <DialogFooter><Button onClick={handleSave} data-testid="save-product-btn">{editing ? "Update" : "Create"} Product</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewProduct) {
     const p = viewProduct;
@@ -192,6 +257,7 @@ export default function ProductsPage() {
             </div>
           </div>
         </div>
+        {formDialog}
       </div>
     );
   }
@@ -306,69 +372,7 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      {/* CREATE/EDIT DIALOG */}
-      <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{editing ? "Edit Product" : "Add Product"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Product Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dell OptiPlex 7090" data-testid="product-name" /></div>
-              <div><Label>SKU</Label><Input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="e.g. DELL-OPT-7090" data-testid="product-sku" /></div>
-            </div>
-            <div><Label>Description</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Product description..." rows={2} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Category</Label>
-                <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Vendor</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="e.g. Dell Technologies" /></div>
-            </div>
-            <Separator />
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Cost Price ($)</Label><Input type="number" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} data-testid="product-cost" /></div>
-              <div><Label>Retail Price ($)</Label><Input type="number" step="0.01" value={form.retail_price} onChange={e => setForm({ ...form, retail_price: e.target.value })} data-testid="product-price" /></div>
-              <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Quantity in Stock</Label><Input type="number" value={form.quantity_in_stock} onChange={e => setForm({ ...form, quantity_in_stock: e.target.value })} data-testid="product-stock" /></div>
-              <div><Label>Reorder Level</Label><Input type="number" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} /></div>
-              <div><Label>Unit</Label>
-                <Select value={form.unit} onValueChange={v => setForm({ ...form, unit: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="each">Each</SelectItem>
-                    <SelectItem value="pack">Pack</SelectItem>
-                    <SelectItem value="box">Box</SelectItem>
-                    <SelectItem value="license">License</SelectItem>
-                    <SelectItem value="hour">Hour</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <Separator />
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2"><Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} /><Label>Active</Label></div>
-              <div className="flex items-center gap-2"><Switch checked={form.is_taxable} onCheckedChange={v => setForm({ ...form, is_taxable: v })} /><Label>Taxable</Label></div>
-              <div className="flex items-center gap-2"><Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} /><Label>Recurring</Label></div>
-            </div>
-            {form.is_recurring && (
-              <div className="max-w-xs"><Label>Billing Cycle</Label>
-                <Select value={form.billing_cycle} onValueChange={v => setForm({ ...form, billing_cycle: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-          <DialogFooter><Button onClick={handleSave} data-testid="save-product-btn">{editing ? "Update" : "Create"} Product</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {formDialog}
     </div>
   );
 }
