@@ -10,14 +10,14 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 
 ## Core Modules (Implemented)
 - Dashboard (fleet overview, system health)
-- Tickets (rich text, parent/child, device linking, product linking)
+- Tickets (rich text, parent/child, device linking, product linking, audit trail)
 - Clients & Contacts
-- Technicians
-- Invoices (recurring, Stripe, manual payments x9, move-client, void, Xero-ready)
+- Technicians (permissions, leaderboard, history, signatures, activity log, remote sessions tracking)
+- Invoices (recurring, Stripe, manual payments x9, move-client, void, Xero-ready, admin audit trail)
 - Products (stock tracking, barcodes, instances, label printing)
 - Purchase Orders
 - Assets
-- Devices (detailed hardware/software/security info, remote access)
+- Devices (detailed hardware/software/security info, remote access, remote session history, admin audit log)
 - Networking (UniFi sites CRUD, device adoption, edit, test connection, clients)
 - Time Tracking
 - Leads / CRM
@@ -29,7 +29,36 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Scheduling
 - Scripting (UI placeholder)
 
-## Latest Session Implementations (March 2026)
+## Latest Session Implementations (March 2026 - Session 2)
+
+### Cross-Entity Activity Logging & Audit Trail
+- Unified `activity_logs` collection recording all actions across tickets, invoices, devices
+- Admin-only access on all activity log endpoints
+- Action types: created, updated, deleted, payment_recorded, voided, moved_client, remote_connect, remote_disconnect
+- Change tracking with old/new field values
+- Activity logged on: ticket CRUD, invoice CRUD/payment/move/void, device CRUD, remote sessions
+
+### Enhanced Remote Session Tracking (RustDesk)
+- Device type tracking (desktop, server, laptop, workstation) on each session
+- Lock status tracking: `was_locked_before_disconnect` and `lock_action_on_disconnect` (locked/unlocked/no_change)
+- Active sessions endpoint showing live duration
+- Per-device session history with stats
+- Per-technician session history with aggregated stats (total sessions, total time, unique devices)
+
+### Technician Activity Page (Admin)
+- New "Remote Sessions" tab: shows active count, total sessions, total time, unique devices, full session table with device type and lock status
+- New "Activity Log" tab: combined timeline of all activity logs + remote sessions, color-coded action badges, entity icons, change diffs
+- Admin can view full historical data for each technician
+
+### Device Detail Enhancements
+- New "Sessions" tab: shows remote session history per device with technician, type, status, duration, lock status
+- New "Audit Log" tab: admin-only device activity trail showing all changes and remote access events
+
+### Invoice Detail Audit Trail
+- Admin-only "Audit Trail" section in invoice detail view
+- Shows creation, updates, payments, voiding, client moves with timestamps and change diffs
+
+### Previous Session Features (March 2026 - Session 1)
 
 ### Networking Page Enhancement
 - Full CRUD for network sites: add/edit/delete with UniFi controller URL, API key, credentials
@@ -70,8 +99,18 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - purchase_orders, assets, devices, device_events, network_sites, network_devices, network_clients
 - time_entries, leads, projects, project_tasks, knowledge_base, it_documents
 - contracts, schedules, custom_fields, remote_sessions, settings
+- activity_logs (NEW - unified cross-entity audit trail)
 
 ## Key API Endpoints
+- `/api/activity-logs` - Admin-only activity trail (filter by entity_type, entity_id, technician_id)
+- `/api/activity-logs/entity/{type}/{id}` - Activity logs for specific entity
+- `/api/technicians/{id}/activity` - Full technician activity + remote sessions
+- `/api/technicians/{id}/remote-sessions` - Technician remote session history with stats
+- `/api/devices/{id}/remote-sessions` - Device remote session history
+- `/api/remote/active-sessions` - Currently active remote sessions with live duration
+- `/api/remote/sessions` - Create/list remote sessions (with device_type, lock tracking)
+- `/api/remote/sessions/{id}/end` - End session with lock status data
+- `/api/invoices/{id}/activity-log` - Admin-only invoice activity trail
 - `/api/products/*` - Full CRUD + barcode, instances, stock-movements, labels
 - `/api/networking/*` - Sites CRUD, devices CRUD, clients, stats, test-connection, adopt-device
 - `/api/invoices/{id}/move-client` - Move invoice between clients
@@ -86,6 +125,7 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Password: admin123
 
 ## Testing Status
+- Iteration 17: 15/15 backend + frontend features passed (100%) - Activity logs, remote sessions, audit trails
 - Iteration 16: 20/20 backend + 18/18 frontend features passed (100%)
 - Iteration 15: 24/24 backend + 22/22 frontend features passed (100%)
 
@@ -105,9 +145,12 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - P2: Recharts console warnings on Reports page
 
 ## Upcoming Tasks
-- P0: Refactor server.py into modular FastAPI structure
+- P0: Refactor server.py into modular FastAPI structure (7500+ lines)
+- P1: Implement Xero Integration (playbook fetched)
+- P1: Full UniFi Integration (deep API integration)
 - P1: Standalone database seeding script
-- P2: Enhance remaining modules (Contracts, Reports, Technicians, Clients)
+- P2: Enhance remaining modules (Contracts, Reports, Clients)
 - P2: Scripting & Automation Engine
 - P2: Real backend for mocked integrations
 - P2: Client portal
+- P2: Fix Recharts console warnings
