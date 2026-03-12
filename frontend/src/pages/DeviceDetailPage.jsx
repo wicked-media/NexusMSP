@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
 
@@ -41,6 +43,8 @@ export default function DeviceDetailPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
+  const [remoteDialogOpen, setRemoteDialogOpen] = useState(false);
+  const [remoteLoading, setRemoteLoading] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -54,6 +58,22 @@ export default function DeviceDetailPage() {
   }, [deviceId, token]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  const startRemoteSession = async (sessionType = "remote_desktop") => {
+    setRemoteLoading(true);
+    try {
+      await axios.post(`${API}/remote/sessions?device_id=${deviceId}&session_type=${sessionType}`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(`Remote ${sessionType.replace("_", " ")} session initiated`);
+      if (dev.rustdesk_id) {
+        window.open(`rustdesk://${dev.rustdesk_id}`, "_blank");
+      }
+      setRemoteDialogOpen(false);
+    } catch (e) {
+      toast.error("Failed to start remote session");
+    } finally {
+      setRemoteLoading(false);
+    }
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin" /></div>;
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
@@ -97,7 +117,16 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {dev.rustdesk_id && <Button variant="outline" size="sm" data-testid="remote-access-btn"><ExternalLink className="w-4 h-4 mr-1" />Remote Access</Button>}
+          {dev.status === "online" && (
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setRemoteDialogOpen(true)} data-testid="remote-access-btn">
+              <ExternalLink className="w-4 h-4 mr-1" />Remote Access
+            </Button>
+          )}
+          {dev.status === "offline" && (
+            <Button size="sm" variant="outline" disabled data-testid="remote-access-btn-disabled">
+              <XCircle className="w-4 h-4 mr-1" />Offline
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={fetchDetail}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
         </div>
       </div>
@@ -613,6 +642,67 @@ export default function DeviceDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Remote Access Dialog */}
+      <Dialog open={remoteDialogOpen} onOpenChange={setRemoteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><ExternalLink className="w-5 h-5" />Remote Access - {dev.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-muted-foreground">Connection Status</span>
+                <Badge className={dev.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}>
+                  <CheckCircle className="w-3 h-3 mr-1" />{dev.status === "online" ? "Ready" : "Unavailable"}
+                </Badge>
+              </div>
+              {dev.rustdesk_id && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">RustDesk ID</span>
+                  <span className="font-mono text-sm font-medium">{dev.rustdesk_id}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-sm text-muted-foreground">IP Address</span>
+                <span className="font-mono text-sm">{dev.ip_address || "N/A"}</span>
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-sm text-muted-foreground">OS</span>
+                <span className="text-sm">{dev.os} {dev.os_version || ""}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Session Type</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("remote_desktop")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-remote-desktop">
+                  <Monitor className="w-5 h-5 mb-1" />
+                  <span className="text-xs">Remote Desktop</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("terminal")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-terminal">
+                  <Terminal className="w-5 h-5 mb-1" />
+                  <span className="text-xs">Terminal / SSH</span>
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("file_transfer")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-file-transfer">
+                  <HardDrive className="w-5 h-5 mb-1" />
+                  <span className="text-xs">File Transfer</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("view_only")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-view-only">
+                  <Eye className="w-5 h-5 mb-1" />
+                  <span className="text-xs">View Only</span>
+                </Button>
+              </div>
+            </div>
+
+            {!dev.rustdesk_id && (
+              <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500">
+                No RustDesk ID configured. Set up the agent on this device for direct remote access.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
