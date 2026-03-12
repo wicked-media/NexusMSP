@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
-  ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus
+  ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw
 } from "lucide-react";
 
 const roleColors = {
@@ -35,6 +35,11 @@ export default function ClientsPage() {
   const [isContactOpen, setIsContactOpen] = useState(false);
   const [editingContact, setEditingContact] = useState(null);
   const [contactForm, setContactForm] = useState({ name: "", email: "", phone: "", role: "general", is_primary: false });
+  const [m365Users, setM365Users] = useState([]);
+  const [m365Config, setM365Config] = useState(null);
+  const [m365SyncDialog, setM365SyncDialog] = useState(false);
+  const [m365TenantId, setM365TenantId] = useState("");
+  const [m365Domain, setM365Domain] = useState("");
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -55,9 +60,26 @@ export default function ClientsPage() {
   const fetchClientDetail = async (client) => {
     setViewingClient(client);
     try {
-      const res = await axios.get(`${API}/clients/${client.id}/detail`, { headers });
-      setClientDetail(res.data);
+      const [detailRes, m365Res] = await Promise.all([
+        axios.get(`${API}/clients/${client.id}/detail`, { headers }),
+        axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
+      ]);
+      setClientDetail(detailRes.data);
+      setM365Users(m365Res.data.users || []);
+      setM365Config(m365Res.data.config || null);
     } catch { toast.error("Failed to load client details"); }
+  };
+
+  const syncM365 = async () => {
+    if (!viewingClient) return;
+    try {
+      const res = await axios.post(`${API}/clients/${viewingClient.id}/m365-sync`, {
+        tenant_id: m365TenantId, domain: m365Domain, users: []
+      }, { headers });
+      toast.success(res.data.message);
+      setM365SyncDialog(false);
+      fetchClientDetail(viewingClient);
+    } catch { toast.error("Failed to sync M365"); }
   };
 
   const handleCreateClient = async () => {
@@ -183,11 +205,12 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-4 w-full">
+              <TabsList className="grid grid-cols-5 w-full">
                 <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts ({contacts.length})</TabsTrigger>
                 <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
                 <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
                 <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts ({contracts.length})</TabsTrigger>
+                <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />Microsoft 365</TabsTrigger>
               </TabsList>
 
               {/* CONTACTS TAB */}
@@ -289,6 +312,54 @@ export default function ClientsPage() {
                   </Table>
                 ) : <p className="text-center py-8 text-muted-foreground">No contracts</p>}
               </TabsContent>
+
+              {/* MICROSOFT 365 TAB */}
+              <TabsContent value="m365" className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-medium">Microsoft 365 Integration</span>
+                    {m365Config?.sync_status === "synced" && <Badge className="bg-green-600 text-white text-xs">Synced</Badge>}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => { setM365TenantId(m365Config?.tenant_id || ""); setM365Domain(m365Config?.domain || ""); setM365SyncDialog(true); }} data-testid="m365-sync-btn">
+                    <RefreshCw className="w-3.5 h-3.5 mr-1" />{m365Config ? "Re-sync" : "Connect M365"}
+                  </Button>
+                </div>
+
+                {m365Config ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-3">
+                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Tenant ID</p><p className="text-sm font-mono truncate">{m365Config.tenant_id}</p></CardContent></Card>
+                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Domain</p><p className="text-sm">{m365Config.domain}</p></CardContent></Card>
+                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Last Synced</p><p className="text-sm">{m365Config.last_synced ? new Date(m365Config.last_synced).toLocaleDateString() : "Never"}</p></CardContent></Card>
+                    </div>
+
+                    {m365Users.length > 0 ? (
+                      <Table>
+                        <TableHeader><TableRow><TableHead>Display Name</TableHead><TableHead>UPN / Email</TableHead><TableHead>License Type</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                          {m365Users.map((u, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="font-medium">{u.display_name || u.name}</TableCell>
+                              <TableCell className="text-sm">{u.upn || u.email}</TableCell>
+                              <TableCell><Badge variant="outline" className="text-xs">{u.license_type || "Unknown"}</Badge></TableCell>
+                              <TableCell><Badge className={u.status === "active" ? "bg-green-600 text-white text-xs" : "bg-zinc-600 text-white text-xs"}>{u.status || "active"}</Badge></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="text-center py-6 text-muted-foreground text-sm">No users synced yet. Configure CIPP integration in Settings to sync UPNs and licenses.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 space-y-2">
+                    <Cloud className="w-12 h-12 mx-auto text-muted-foreground/30" />
+                    <p className="text-muted-foreground text-sm">No Microsoft 365 tenancy linked</p>
+                    <p className="text-xs text-muted-foreground">Click "Connect M365" to link this client's Microsoft 365 tenant for user & license sync via CIPP.</p>
+                  </div>
+                )}
+              </TabsContent>
             </Tabs>
           </div>
 
@@ -333,6 +404,26 @@ export default function ClientsPage() {
             <DialogFooter><Button onClick={handleAddContact} data-testid="save-contact-btn">{editingContact ? "Update" : "Add"} Contact</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* M365 SYNC DIALOG */}
+        <Dialog open={m365SyncDialog} onOpenChange={setM365SyncDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Connect Microsoft 365 Tenancy</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Link this client's Microsoft 365 tenant to sync user accounts, licenses, and UPNs via CIPP integration.</p>
+              <div><Label>Tenant ID</Label><Input value={m365TenantId} onChange={e => setM365TenantId(e.target.value)} placeholder="e.g., 12345678-1234-1234-1234-123456789abc" data-testid="m365-tenant-id" /></div>
+              <div><Label>Primary Domain</Label><Input value={m365Domain} onChange={e => setM365Domain(e.target.value)} placeholder="e.g., contoso.onmicrosoft.com" data-testid="m365-domain" /></div>
+              <div className="p-3 rounded-lg border bg-muted/30">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Requires CIPP integration to be configured in Settings for full user/license sync.</span>
+                </div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={syncM365} data-testid="confirm-m365-sync"><Cloud className="w-4 h-4 mr-1" />Connect & Sync</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {clientFormDialog}
       </div>
     );

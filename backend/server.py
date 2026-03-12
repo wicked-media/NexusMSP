@@ -1,5 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -17,6 +18,7 @@ import barcode
 from barcode.writer import SVGWriter
 from io import BytesIO
 import base64
+import shutil
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -38,6 +40,12 @@ PAX8_AUTH_URL = "https://login.pax8.com/oauth/token"
 app = FastAPI(title="NexusOps API", version="2.0.0")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
+
+# Setup uploads directory and static file serving
+UPLOADS_DIR = ROOT_DIR / "uploads"
+AVATARS_DIR = UPLOADS_DIR / "avatars"
+AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,6 +77,9 @@ class User(BaseModel):
     specialties: List[str] = []
     is_active: bool = True
     is_admin: bool = False
+    about_me: Optional[str] = None
+    hire_date: Optional[str] = None
+    birthday: Optional[str] = None
     permissions: dict = Field(default_factory=lambda: {
         "tickets": {"view": True, "create": True, "edit": True, "delete": False},
         "clients": {"view": True, "create": False, "edit": False, "delete": False},
@@ -2063,6 +2074,399 @@ async def get_technician_activity(tech_id: str, limit: int = 200, current_user: 
         "activity_logs": logs,
         "remote_sessions": remote_sessions,
     }
+
+# ============== ACHIEVEMENT BADGE SYSTEM ==============
+
+ACHIEVEMENT_DEFINITIONS = [
+    {"id": "first_ticket", "name": "First Resolve", "description": "Closed your first ticket", "icon": "trophy", "category": "tickets", "threshold": 1, "color": "#22c55e"},
+    {"id": "ticket_10", "name": "Problem Solver", "description": "Closed 10 tickets", "icon": "target", "category": "tickets", "threshold": 10, "color": "#3b82f6"},
+    {"id": "ticket_50", "name": "Resolution Machine", "description": "Closed 50 tickets", "icon": "zap", "category": "tickets", "threshold": 50, "color": "#8b5cf6"},
+    {"id": "ticket_100", "name": "Century Club", "description": "Closed 100 tickets", "icon": "award", "category": "tickets", "threshold": 100, "color": "#f59e0b"},
+    {"id": "ticket_500", "name": "Legend", "description": "Closed 500 tickets", "icon": "crown", "category": "tickets", "threshold": 500, "color": "#ef4444"},
+    {"id": "ticket_1000", "name": "Ticket Titan", "description": "Closed 1,000 tickets", "icon": "gem", "category": "tickets", "threshold": 1000, "color": "#ec4899"},
+    {"id": "first_invoice", "name": "Revenue Starter", "description": "Created your first invoice", "icon": "dollar-sign", "category": "invoices", "threshold": 1, "color": "#22c55e"},
+    {"id": "invoice_25", "name": "Billing Pro", "description": "Created 25 invoices", "icon": "credit-card", "category": "invoices", "threshold": 25, "color": "#3b82f6"},
+    {"id": "invoice_100", "name": "Finance Wizard", "description": "Created 100 invoices", "icon": "banknote", "category": "invoices", "threshold": 100, "color": "#f59e0b"},
+    {"id": "remote_10", "name": "Remote Rookie", "description": "Completed 10 remote sessions", "icon": "monitor", "category": "remote", "threshold": 10, "color": "#06b6d4"},
+    {"id": "remote_100", "name": "Remote Hero", "description": "Completed 100 remote sessions", "icon": "wifi", "category": "remote", "threshold": 100, "color": "#8b5cf6"},
+    {"id": "tenure_1yr", "name": "Year One", "description": "1 year with the company", "icon": "calendar", "category": "tenure", "threshold": 365, "color": "#22c55e"},
+    {"id": "tenure_3yr", "name": "Veteran", "description": "3 years with the company", "icon": "shield", "category": "tenure", "threshold": 1095, "color": "#3b82f6"},
+    {"id": "tenure_5yr", "name": "Half Decade", "description": "5 years with the company", "icon": "star", "category": "tenure", "threshold": 1825, "color": "#f59e0b"},
+    {"id": "tenure_10yr", "name": "Decade Hero", "description": "10 years with the company", "icon": "crown", "category": "tenure", "threshold": 3650, "color": "#ef4444"},
+    {"id": "birthday", "name": "Birthday Star", "description": "It's your birthday!", "icon": "cake", "category": "celebration", "threshold": 0, "color": "#ec4899"},
+    {"id": "speed_demon", "name": "Speed Demon", "description": "Average ticket resolution under 2 hours", "icon": "rocket", "category": "special", "threshold": 0, "color": "#f97316"},
+    {"id": "multitasker", "name": "Multitasker", "description": "Worked on 5+ tickets in a single day", "icon": "layers", "category": "special", "threshold": 5, "color": "#14b8a6"},
+]
+
+@api_router.get("/achievements")
+async def get_achievement_definitions(current_user: dict = Depends(get_current_user)):
+    """Get all achievement badge definitions"""
+    custom = await db.achievement_definitions.find({}, {"_id": 0}).to_list(200)
+    return ACHIEVEMENT_DEFINITIONS + custom
+
+@api_router.post("/achievements/custom")
+async def create_custom_achievement(data: dict, current_user: dict = Depends(get_current_user)):
+    """Admin creates a custom achievement badge"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ach = {
+        "id": f"custom_{str(uuid.uuid4())[:8]}",
+        "name": data.get("name", "Custom Badge"),
+        "description": data.get("description", ""),
+        "icon": data.get("icon", "award"),
+        "category": "custom",
+        "threshold": 0,
+        "color": data.get("color", "#8b5cf6"),
+        "created_by": current_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.achievement_definitions.insert_one({**ach})
+    return ach
+
+@api_router.get("/technicians/{tech_id}/achievements")
+async def get_technician_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all achievements earned by a technician"""
+    earned = await db.user_achievements.find({"user_id": tech_id}, {"_id": 0}).to_list(500)
+    return earned
+
+@api_router.post("/technicians/{tech_id}/achievements/award")
+async def award_achievement(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Admin awards a badge to a technician"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    achievement_id = data.get("achievement_id")
+    existing = await db.user_achievements.find_one({"user_id": tech_id, "achievement_id": achievement_id})
+    if existing:
+        return {"message": "Already earned", "already_earned": True}
+    entry = {
+        "id": str(uuid.uuid4()),
+        "user_id": tech_id,
+        "user_name": user.get("name"),
+        "achievement_id": achievement_id,
+        "achievement_name": data.get("achievement_name", achievement_id),
+        "awarded_by": current_user.get("name", "System"),
+        "awarded_at": datetime.now(timezone.utc).isoformat(),
+        "note": data.get("note", ""),
+    }
+    await db.user_achievements.insert_one(entry)
+    # Remove MongoDB _id before returning
+    entry.pop("_id", None)
+    return {"message": "Achievement awarded", "achievement": entry}
+
+@api_router.post("/technicians/{tech_id}/achievements/check")
+async def check_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
+    """Auto-check and award milestone achievements for a technician"""
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    
+    earned = await db.user_achievements.find({"user_id": tech_id}, {"_id": 0}).to_list(500)
+    earned_ids = {e["achievement_id"] for e in earned}
+    newly_awarded = []
+    
+    # Count ticket closures
+    closed_tickets = await db.tickets.count_documents({"assigned_to": tech_id, "status": {"$in": ["closed", "resolved"]}})
+    for ach in ACHIEVEMENT_DEFINITIONS:
+        if ach["category"] == "tickets" and ach["id"] not in earned_ids and closed_tickets >= ach["threshold"]:
+            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {closed_tickets} tickets closed"}
+            await db.user_achievements.insert_one(entry)
+            newly_awarded.append(ach["name"])
+    
+    # Count invoices
+    invoices_created = await db.activity_logs.count_documents({"user_id": tech_id, "entity_type": "invoice", "action": "created"})
+    for ach in ACHIEVEMENT_DEFINITIONS:
+        if ach["category"] == "invoices" and ach["id"] not in earned_ids and invoices_created >= ach["threshold"]:
+            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {invoices_created} invoices created"}
+            await db.user_achievements.insert_one(entry)
+            newly_awarded.append(ach["name"])
+    
+    # Count remote sessions
+    remote_count = await db.remote_sessions.count_documents({"user_id": tech_id, "status": "ended"})
+    for ach in ACHIEVEMENT_DEFINITIONS:
+        if ach["category"] == "remote" and ach["id"] not in earned_ids and remote_count >= ach["threshold"]:
+            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {remote_count} remote sessions"}
+            await db.user_achievements.insert_one(entry)
+            newly_awarded.append(ach["name"])
+    
+    # Check tenure
+    hire_date = user.get("hire_date")
+    if hire_date:
+        try:
+            hd = datetime.fromisoformat(hire_date)
+            days_employed = (datetime.now(timezone.utc) - hd).days
+            for ach in ACHIEVEMENT_DEFINITIONS:
+                if ach["category"] == "tenure" and ach["id"] not in earned_ids and days_employed >= ach["threshold"]:
+                    entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {days_employed} days employed"}
+                    await db.user_achievements.insert_one(entry)
+                    newly_awarded.append(ach["name"])
+        except:
+            pass
+    
+    # Check birthday
+    birthday = user.get("birthday")
+    if birthday and "birthday" not in earned_ids:
+        try:
+            today = datetime.now(timezone.utc)
+            bd = datetime.fromisoformat(birthday)
+            if bd.month == today.month and bd.day == today.day:
+                entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": "birthday", "achievement_name": "Birthday Star", "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": "Happy Birthday!"}
+                await db.user_achievements.insert_one(entry)
+                newly_awarded.append("Birthday Star")
+        except:
+            pass
+    
+    return {"newly_awarded": newly_awarded, "total_earned": len(earned_ids) + len(newly_awarded)}
+
+@api_router.delete("/technicians/{tech_id}/achievements/{achievement_id}")
+async def revoke_achievement(tech_id: str, achievement_id: str, current_user: dict = Depends(get_current_user)):
+    """Admin revokes a badge"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    result = await db.user_achievements.delete_one({"user_id": tech_id, "achievement_id": achievement_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    return {"message": "Achievement revoked"}
+
+# ============== AVATAR UPLOAD ==============
+
+@api_router.post("/technicians/{tech_id}/avatar")
+async def upload_avatar(tech_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    """Upload profile picture for a technician"""
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if current_user["id"] != tech_id:
+        caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+        if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+            raise HTTPException(status_code=403, detail="Can only update your own avatar or admin required")
+    
+    ext = file.filename.split(".")[-1].lower() if file.filename else "png"
+    if ext not in ["jpg", "jpeg", "png", "webp", "gif"]:
+        raise HTTPException(status_code=400, detail="Invalid file type. Allowed: jpg, jpeg, png, webp, gif")
+    
+    filename = f"{tech_id}.{ext}"
+    filepath = AVATARS_DIR / filename
+    
+    # Remove old avatar if different extension
+    for old_ext in ["jpg", "jpeg", "png", "webp", "gif"]:
+        old_path = AVATARS_DIR / f"{tech_id}.{old_ext}"
+        if old_path.exists() and old_path != filepath:
+            old_path.unlink()
+    
+    with open(filepath, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    
+    avatar_url = f"/api/uploads/avatars/{filename}"
+    await db.users.update_one({"id": tech_id}, {"$set": {"avatar": avatar_url}})
+    return {"message": "Avatar uploaded", "avatar_url": avatar_url}
+
+@api_router.put("/technicians/{tech_id}/profile")
+async def update_tech_profile(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Update technician profile (about_me, hire_date, birthday, etc.)"""
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if current_user["id"] != tech_id:
+        caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+        if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+            raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    allowed_fields = {"about_me", "hire_date", "birthday", "job_title", "phone", "specialties", "name", "email"}
+    update = {k: v for k, v in data.items() if k in allowed_fields}
+    if update:
+        await db.users.update_one({"id": tech_id}, {"$set": update})
+    return {"message": "Profile updated"}
+
+# ============== TECHNICIAN STATUS / HOVER CARD ==============
+
+@api_router.get("/technicians/{tech_id}/status")
+async def get_technician_status(tech_id: str, current_user: dict = Depends(get_current_user)):
+    """Get current status for hover card - active sessions, assigned tickets, etc."""
+    user = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    
+    # Active remote sessions
+    active_sessions = await db.remote_sessions.find({"user_id": tech_id, "status": "active"}, {"_id": 0}).to_list(10)
+    now = datetime.now(timezone.utc)
+    for s in active_sessions:
+        try:
+            started = datetime.fromisoformat(str(s["started_at"]).replace("Z", "+00:00"))
+            s["live_duration_minutes"] = int((now - started).total_seconds() / 60)
+        except:
+            s["live_duration_minutes"] = 0
+    
+    # Enrich active sessions with client name from device
+    for s in active_sessions:
+        device = await db.devices.find_one({"id": s.get("device_id")}, {"_id": 0, "client_name": 1, "client_id": 1, "name": 1})
+        if device:
+            s["device_name"] = device.get("name", s.get("device_name"))
+            s["client_name"] = device.get("client_name", s.get("client_name", ""))
+    
+    # Assigned open tickets
+    assigned_tickets = await db.tickets.find(
+        {"assigned_to": tech_id, "status": {"$nin": ["closed", "resolved"]}},
+        {"_id": 0, "id": 1, "title": 1, "ticket_number": 1, "priority": 1, "status": 1, "client_name": 1}
+    ).to_list(20)
+    
+    # Determine status
+    if active_sessions:
+        status_text = f"In remote session with {active_sessions[0].get('client_name', 'a client')}"
+        status_type = "remote"
+    elif assigned_tickets:
+        status_text = f"Working on {len(assigned_tickets)} ticket(s)"
+        status_type = "active"
+    else:
+        status_text = "Available"
+        status_type = "available"
+    
+    # Achievements count
+    achievement_count = await db.user_achievements.count_documents({"user_id": tech_id})
+    
+    return {
+        "user_id": tech_id,
+        "name": user.get("name"),
+        "avatar": user.get("avatar"),
+        "job_title": user.get("job_title", ""),
+        "status_text": status_text,
+        "status_type": status_type,
+        "active_sessions": active_sessions,
+        "assigned_tickets": assigned_tickets,
+        "achievement_count": achievement_count,
+        "about_me": user.get("about_me", ""),
+    }
+
+# ============== MICROSOFT INTEGRATIONS CONFIG ==============
+
+@api_router.get("/settings/microsoft-teams")
+async def get_teams_settings(current_user: dict = Depends(get_current_user)):
+    """Get Microsoft Teams integration settings"""
+    settings = await db.settings.find_one({"type": "microsoft_teams"}, {"_id": 0})
+    return settings or {"type": "microsoft_teams", "enabled": False, "tenant_id": "", "client_id": "", "client_secret": "", "webhook_url": ""}
+
+@api_router.put("/settings/microsoft-teams")
+async def update_teams_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    """Update Microsoft Teams integration settings"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    data["type"] = "microsoft_teams"
+    await db.settings.update_one({"type": "microsoft_teams"}, {"$set": data}, upsert=True)
+    return {"message": "Teams settings updated"}
+
+@api_router.get("/settings/cipp")
+async def get_cipp_settings(current_user: dict = Depends(get_current_user)):
+    """Get CIPP integration settings"""
+    settings = await db.settings.find_one({"type": "cipp"}, {"_id": 0})
+    return settings or {"type": "cipp", "enabled": False, "api_url": "", "api_key": "", "tenant_filter": ""}
+
+@api_router.put("/settings/cipp")
+async def update_cipp_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    """Update CIPP integration settings"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    data["type"] = "cipp"
+    await db.settings.update_one({"type": "cipp"}, {"$set": data}, upsert=True)
+    return {"message": "CIPP settings updated"}
+
+@api_router.get("/settings/microsoft365")
+async def get_m365_settings(current_user: dict = Depends(get_current_user)):
+    """Get Microsoft 365 integration settings"""
+    settings = await db.settings.find_one({"type": "microsoft365"}, {"_id": 0})
+    return settings or {"type": "microsoft365", "enabled": False, "tenant_id": "", "client_id": "", "client_secret": "", "redirect_uri": ""}
+
+@api_router.put("/settings/microsoft365")
+async def update_m365_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    """Update Microsoft 365 integration settings"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    data["type"] = "microsoft365"
+    await db.settings.update_one({"type": "microsoft365"}, {"$set": data}, upsert=True)
+    return {"message": "Microsoft 365 settings updated"}
+
+@api_router.post("/clients/{client_id}/m365-sync")
+async def sync_client_m365(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Sync Microsoft 365 tenancy for a client"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    m365_data = {
+        "tenant_id": data.get("tenant_id", ""),
+        "domain": data.get("domain", ""),
+        "last_synced": datetime.now(timezone.utc).isoformat(),
+        "sync_status": "synced",
+    }
+    await db.clients.update_one({"id": client_id}, {"$set": {"m365_config": m365_data}})
+    
+    # Store user licenses from CIPP if provided
+    users_data = data.get("users", [])
+    if users_data:
+        for u in users_data:
+            u["client_id"] = client_id
+            u["synced_at"] = datetime.now(timezone.utc).isoformat()
+        await db.m365_users.delete_many({"client_id": client_id})
+        if users_data:
+            await db.m365_users.insert_many(users_data)
+    
+    return {"message": f"M365 synced for {client['name']}", "users_synced": len(users_data)}
+
+@api_router.get("/clients/{client_id}/m365-users")
+async def get_client_m365_users(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Get M365 users for a client"""
+    users = await db.m365_users.find({"client_id": client_id}, {"_id": 0}).to_list(500)
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "m365_config": 1})
+    return {"users": users, "config": client.get("m365_config") if client else None}
+
+@api_router.post("/cipp/sync-tenants")
+async def sync_cipp_tenants(current_user: dict = Depends(get_current_user)):
+    """Sync tenants from CIPP - returns mock data for now, real integration when CIPP configured"""
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    cipp_settings = await db.settings.find_one({"type": "cipp"}, {"_id": 0})
+    if not cipp_settings or not cipp_settings.get("enabled"):
+        return {"message": "CIPP integration not configured. Please set up in Settings > Integrations.", "tenants": [], "configured": False}
+    
+    # When CIPP is configured, it would call the CIPP API here
+    # For now, return configuration status
+    return {"message": "CIPP sync initiated", "tenants": [], "configured": True, "api_url": cipp_settings.get("api_url", "")}
+
+@api_router.post("/teams/update-status")
+async def update_teams_status(data: dict, current_user: dict = Depends(get_current_user)):
+    """Update Microsoft Teams status for current user"""
+    teams_settings = await db.settings.find_one({"type": "microsoft_teams"}, {"_id": 0})
+    if not teams_settings or not teams_settings.get("enabled"):
+        return {"message": "Teams integration not configured. Please set up in Settings > Integrations.", "configured": False}
+    
+    # Store the desired status locally
+    status_data = {
+        "user_id": current_user["id"],
+        "availability": data.get("availability", "Available"),
+        "status_message": data.get("status_message", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.teams_status.update_one({"user_id": current_user["id"]}, {"$set": status_data}, upsert=True)
+    return {"message": "Status updated", "configured": True, "status": status_data}
+
+@api_router.get("/technicians/{tech_id}/teams-status")
+async def get_tech_teams_status(tech_id: str, current_user: dict = Depends(get_current_user)):
+    """Get Teams status for a technician"""
+    status = await db.teams_status.find_one({"user_id": tech_id}, {"_id": 0})
+    return status or {"availability": "Unknown", "status_message": ""}
 
 # ============== CANNED RESPONSES ==============
 

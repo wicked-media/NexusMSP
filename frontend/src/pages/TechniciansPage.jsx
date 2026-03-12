@@ -20,7 +20,9 @@ import {
   Plus, Search, Loader2, User, ArrowLeft, Ticket, Clock, AlertTriangle,
   CheckCircle, XCircle, Mail, Phone, Edit, Wrench, DollarSign, UserCheck,
   AlertCircle, ExternalLink, Shield, Trophy, History, BarChart3, Award,
-  Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff
+  Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff,
+  Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
+  Layers, MessageSquare, Image
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
@@ -83,6 +85,18 @@ export default function TechniciansPage() {
   const [sigDialog, setSigDialog] = useState(false);
   const [sigTarget, setSigTarget] = useState(null);
   const [sigConfig, setSigConfig] = useState({ full_name: "", job_title: "", email: "", phone: "", company: "Flamingo MSP", website: "https://flamingomsp.com", linkedin: "", certifications: "", template: "professional" });
+  const [techAchievements, setTechAchievements] = useState([]);
+  const [allAchievements, setAllAchievements] = useState([]);
+  const [techStatusCard, setTechStatusCard] = useState(null);
+  const [hoveredTech, setHoveredTech] = useState(null);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [profileDialog, setProfileDialog] = useState(false);
+  const [profileTarget, setProfileTarget] = useState(null);
+  const [profileData, setProfileData] = useState({ about_me: "", hire_date: "", birthday: "" });
+  const [awardDialog, setAwardDialog] = useState(false);
+  const [awardTarget, setAwardTarget] = useState(null);
+  const [teamsStatusDialog, setTeamsStatusDialog] = useState(false);
+  const [teamsData, setTeamsData] = useState({ availability: "Available", status_message: "" });
   const [formData, setFormData] = useState({
     name: "", email: "", password: "nexusops123", role: "technician", job_title: "",
     hourly_rate: "75", phone: "", specialties: [], is_admin: false
@@ -110,23 +124,84 @@ export default function TechniciansPage() {
     } catch { toast.error("Failed to load leaderboard"); }
   };
 
-  useEffect(() => { fetchTechs(); fetchLeaderboard(); }, []);
+  useEffect(() => { fetchTechs(); fetchLeaderboard(); fetchAllAchievements(); }, []);
+
+  const fetchAllAchievements = async () => {
+    try { const r = await axios.get(`${API}/achievements`, { headers }); setAllAchievements(r.data); } catch {}
+  };
 
   const fetchTechDashboard = async (tech) => {
     setViewingTech(tech);
     setDetailTab("tickets");
     try {
-      const [dashRes, histRes, actRes, remRes] = await Promise.all([
+      const [dashRes, histRes, actRes, remRes, achRes] = await Promise.all([
         axios.get(`${API}/technicians/${tech.id}/dashboard`, { headers }),
         axios.get(`${API}/technicians/${tech.id}/history`, { headers }),
         axios.get(`${API}/technicians/${tech.id}/activity`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/technicians/${tech.id}/remote-sessions`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/technicians/${tech.id}/achievements`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTechDashboard(dashRes.data);
       setTechHistory(histRes.data);
       setTechActivity(actRes.data);
       setTechRemoteSessions(remRes.data);
+      setTechAchievements(achRes.data);
+      // Auto-check achievements
+      axios.post(`${API}/technicians/${tech.id}/achievements/check`, {}, { headers }).then(r => {
+        if (r.data.newly_awarded?.length > 0) {
+          r.data.newly_awarded.forEach(n => toast.success(`Badge Unlocked: ${n}`));
+          axios.get(`${API}/technicians/${tech.id}/achievements`, { headers }).then(r2 => setTechAchievements(r2.data));
+        }
+      }).catch(() => {});
     } catch { toast.error("Failed to load dashboard"); }
+  };
+
+  const fetchTechStatus = async (techId) => {
+    try { const r = await axios.get(`${API}/technicians/${techId}/status`, { headers }); setTechStatusCard(r.data); } catch { setTechStatusCard(null); }
+  };
+
+  const uploadAvatar = async (techId) => {
+    if (!avatarFile) return;
+    const fd = new FormData();
+    fd.append("file", avatarFile);
+    try {
+      await axios.post(`${API}/technicians/${techId}/avatar`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      toast.success("Avatar uploaded");
+      setAvatarFile(null);
+      fetchTechs();
+    } catch { toast.error("Failed to upload avatar"); }
+  };
+
+  const updateProfile = async () => {
+    if (!profileTarget) return;
+    try {
+      await axios.put(`${API}/technicians/${profileTarget.id}/profile`, profileData, { headers });
+      toast.success("Profile updated");
+      setProfileDialog(false);
+      fetchTechs();
+    } catch { toast.error("Failed to update profile"); }
+  };
+
+  const awardBadge = async (achievementDef) => {
+    if (!awardTarget) return;
+    try {
+      const r = await axios.post(`${API}/technicians/${awardTarget.id}/achievements/award`, {
+        achievement_id: achievementDef.id, achievement_name: achievementDef.name, note: "Awarded by admin"
+      }, { headers });
+      if (r.data.already_earned) toast.info("Already earned this badge");
+      else toast.success(`Awarded ${achievementDef.name}`);
+      const achRes = await axios.get(`${API}/technicians/${awardTarget.id}/achievements`, { headers });
+      setTechAchievements(achRes.data);
+    } catch { toast.error("Failed to award badge"); }
+  };
+
+  const updateTeamsStatus = async () => {
+    try {
+      const r = await axios.post(`${API}/teams/update-status`, teamsData, { headers });
+      if (r.data.configured === false) toast.info(r.data.message);
+      else toast.success("Teams status updated");
+      setTeamsStatusDialog(false);
+    } catch { toast.error("Failed to update status"); }
   };
 
   const handleCreate = async () => {
@@ -242,7 +317,7 @@ export default function TechniciansPage() {
     return (
       <div className="space-y-4" data-testid="tech-detail-view">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setViewingTech(null); setTechDashboard(null); setTechHistory(null); setTechActivity(null); setTechRemoteSessions(null); }} data-testid="back-to-techs"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setViewingTech(null); setTechDashboard(null); setTechHistory(null); setTechActivity(null); setTechRemoteSessions(null); setTechAchievements([]); }} data-testid="back-to-techs"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">{technician.name?.charAt(0)?.toUpperCase()}</div>
           <div>
             <h1 className="text-2xl font-bold">{technician.name}</h1>
@@ -279,8 +354,10 @@ export default function TechniciansPage() {
           <TabsList>
             <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets</TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-tech-history"><History className="w-3 h-3 mr-1" />History</TabsTrigger>
+            <TabsTrigger value="achievements" data-testid="tab-tech-achievements"><Trophy className="w-3 h-3 mr-1" />Achievements ({techAchievements.length})</TabsTrigger>
             <TabsTrigger value="remote-sessions" data-testid="tab-tech-remote"><ExternalLink className="w-3 h-3 mr-1" />Remote Sessions</TabsTrigger>
             <TabsTrigger value="activity" data-testid="tab-tech-activity"><Eye className="w-3 h-3 mr-1" />Activity Log</TabsTrigger>
+            <TabsTrigger value="profile" data-testid="tab-tech-profile"><User className="w-3 h-3 mr-1" />Profile</TabsTrigger>
             <TabsTrigger value="permissions" data-testid="tab-tech-permissions"><Shield className="w-3 h-3 mr-1" />Permissions</TabsTrigger>
           </TabsList>
 
@@ -367,6 +444,31 @@ export default function TechniciansPage() {
             <div className="mt-4">
               <PermissionsGrid permissions={technician.permissions || {}} readOnly />
             </div>
+          </TabsContent>
+
+          <TabsContent value="achievements">
+            <AchievementsTab
+              earned={techAchievements}
+              allDefs={allAchievements}
+              techName={technician.name}
+              techId={technician.id}
+              onAward={() => { setAwardTarget(viewingTech); setAwardDialog(true); }}
+            />
+          </TabsContent>
+
+          <TabsContent value="profile">
+            <ProfileTab
+              technician={technician}
+              onEditProfile={() => {
+                setProfileTarget(viewingTech);
+                setProfileData({ about_me: technician.about_me || "", hire_date: technician.hire_date || "", birthday: technician.birthday || "" });
+                setProfileDialog(true);
+              }}
+              onUploadAvatar={(file) => { setAvatarFile(file); }}
+              avatarFile={avatarFile}
+              onConfirmUpload={() => uploadAvatar(technician.id)}
+              onTeamsStatus={() => setTeamsStatusDialog(true)}
+            />
           </TabsContent>
 
           <TabsContent value="remote-sessions">
@@ -457,11 +559,55 @@ export default function TechniciansPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map(tech => (
-          <Card key={tech.id} className={`cursor-pointer hover:border-primary/50 transition-colors ${tech.no_notes_count > 0 ? 'border-red-500/30' : ''}`} onClick={() => fetchTechDashboard(tech)} data-testid={`tech-card-${tech.id}`}>
+          <Card key={tech.id} className={`cursor-pointer hover:border-primary/50 transition-colors relative ${tech.no_notes_count > 0 ? 'border-red-500/30' : ''}`} onClick={() => fetchTechDashboard(tech)} data-testid={`tech-card-${tech.id}`}>
             <CardContent className="pt-4">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">{tech.name?.charAt(0)?.toUpperCase()}</div>
+                  <div className="relative"
+                    onMouseEnter={() => { setHoveredTech(tech.id); fetchTechStatus(tech.id); }}
+                    onMouseLeave={() => setHoveredTech(null)}
+                  >
+                    {tech.avatar ? (
+                      <img src={tech.avatar} alt={tech.name} className="w-12 h-12 rounded-full object-cover border-2 border-primary/30" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">{tech.name?.charAt(0)?.toUpperCase()}</div>
+                    )}
+                    {/* Hover Card */}
+                    {hoveredTech === tech.id && techStatusCard && (
+                      <div className="absolute left-14 top-0 z-50 w-72 rounded-xl border bg-card shadow-xl p-4 space-y-2 animate-in fade-in-0 zoom-in-95" data-testid={`hover-card-${tech.id}`} onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full ${techStatusCard.status_type === "remote" ? "bg-green-500 animate-pulse" : techStatusCard.status_type === "active" ? "bg-blue-500" : "bg-zinc-400"}`} />
+                          <span className="text-sm font-medium">{techStatusCard.status_text}</span>
+                        </div>
+                        {techStatusCard.active_sessions?.length > 0 && (
+                          <div className="text-xs space-y-1">
+                            {techStatusCard.active_sessions.map(s => (
+                              <div key={s.id} className="flex items-center gap-1.5 text-emerald-400">
+                                <Monitor className="w-3 h-3" />
+                                <span>{s.device_name} ({s.client_name})</span>
+                                <span className="text-muted-foreground">{s.live_duration_minutes}m</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {techStatusCard.assigned_tickets?.length > 0 && (
+                          <div className="text-xs space-y-1 border-t pt-2">
+                            <p className="text-muted-foreground">Assigned Tickets:</p>
+                            {techStatusCard.assigned_tickets.slice(0, 3).map(t => (
+                              <div key={t.id} className="flex items-center gap-1.5">
+                                <Ticket className="w-3 h-3 text-blue-400" />
+                                <span className="truncate">{t.ticket_number}: {t.title}</span>
+                              </div>
+                            ))}
+                            {techStatusCard.assigned_tickets.length > 3 && <p className="text-muted-foreground">+{techStatusCard.assigned_tickets.length - 3} more</p>}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground pt-1 border-t">
+                          <Trophy className="w-3 h-3 text-amber-500" />{techStatusCard.achievement_count} badges
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div>
                     <p className="font-semibold">{tech.name}</p>
                     <p className="text-xs text-muted-foreground">{tech.email}</p>
@@ -538,6 +684,60 @@ export default function TechniciansPage() {
 
       {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} />}
       {sigDialog && <SignatureDialog sigConfig={sigConfig} setSigConfig={setSigConfig} handleSaveSignature={handleSaveSignature} setSigDialog={setSigDialog} generateSignatureHtml={generateSignatureHtml} />}
+
+      {/* Profile Edit Dialog */}
+      <Dialog open={profileDialog} onOpenChange={setProfileDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Edit Profile - {profileTarget?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>About Me</Label><Textarea value={profileData.about_me} onChange={e => setProfileData({...profileData, about_me: e.target.value})} placeholder="Tell us about yourself..." rows={4} data-testid="profile-about-me" /></div>
+            <div><Label>Hire Date</Label><Input type="date" value={profileData.hire_date} onChange={e => setProfileData({...profileData, hire_date: e.target.value})} data-testid="profile-hire-date" /></div>
+            <div><Label>Birthday</Label><Input type="date" value={profileData.birthday} onChange={e => setProfileData({...profileData, birthday: e.target.value})} data-testid="profile-birthday" /></div>
+          </div>
+          <DialogFooter><Button onClick={updateProfile} data-testid="save-profile-btn">Save Profile</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Award Badge Dialog */}
+      <Dialog open={awardDialog} onOpenChange={setAwardDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Award Badge - {awardTarget?.name}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {allAchievements.map(a => (
+              <Button key={a.id} variant="outline" className="h-auto py-3 flex flex-col items-center gap-1 hover:border-primary" onClick={() => awardBadge(a)} data-testid={`award-${a.id}`}>
+                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: a.color + "30", color: a.color }}>
+                  <AchievementIcon icon={a.icon} />
+                </div>
+                <span className="text-xs font-medium">{a.name}</span>
+                <span className="text-[10px] text-muted-foreground text-center">{a.description}</span>
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Teams Status Dialog */}
+      <Dialog open={teamsStatusDialog} onOpenChange={setTeamsStatusDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Update Teams Status</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Availability</Label>
+              <Select value={teamsData.availability} onValueChange={v => setTeamsData({...teamsData, availability: v})}>
+                <SelectTrigger data-testid="teams-availability"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Available">Available</SelectItem>
+                  <SelectItem value="Busy">Busy</SelectItem>
+                  <SelectItem value="DoNotDisturb">Do Not Disturb</SelectItem>
+                  <SelectItem value="Away">Away</SelectItem>
+                  <SelectItem value="Offline">Offline</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Status Message</Label><Input value={teamsData.status_message} onChange={e => setTeamsData({...teamsData, status_message: e.target.value})} placeholder="What are you working on?" data-testid="teams-status-msg" /></div>
+          </div>
+          <DialogFooter><Button onClick={updateTeamsStatus} data-testid="save-teams-status"><MessageSquare className="w-4 h-4 mr-1" />Update Status</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -816,6 +1016,141 @@ function ActivityLogTab({ activity, techName, navigate }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ========== ACHIEVEMENT ICON MAPPER ==========
+const ICON_MAP = { trophy: Trophy, target: Target, zap: Zap, award: Award, crown: Crown, gem: Gem, "dollar-sign": DollarSign, "credit-card": CreditCard, banknote: DollarSign, monitor: Monitor, wifi: Wifi, calendar: Calendar, shield: Shield, star: Star, cake: Cake, rocket: Rocket, layers: Layers };
+function AchievementIcon({ icon, className = "w-4 h-4" }) {
+  const Icon = ICON_MAP[icon] || Trophy;
+  return <Icon className={className} />;
+}
+
+// ========== ACHIEVEMENTS TAB ==========
+function AchievementsTab({ earned = [], allDefs = [], techName, techId, onAward }) {
+  const earnedIds = new Set(earned.map(e => e.achievement_id));
+  const categories = [...new Set(allDefs.map(d => d.category))];
+  return (
+    <div className="space-y-6 mt-4" data-testid="achievements-tab">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Trophy className="w-5 h-5 text-amber-500" />
+          <span className="text-sm"><strong className="text-foreground">{techName}</strong> has earned <strong className="text-amber-500">{earned.length}</strong> of {allDefs.length} badges</span>
+        </div>
+        <Button size="sm" variant="outline" onClick={onAward} data-testid="award-badge-btn"><Award className="w-3.5 h-3.5 mr-1" />Award Badge</Button>
+      </div>
+
+      {/* Earned Badges - Showcase */}
+      {earned.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Earned Badges</h3>
+          <div className="flex flex-wrap gap-3">
+            {earned.map(e => {
+              const def = allDefs.find(d => d.id === e.achievement_id) || {};
+              return (
+                <div key={e.id} className="group relative flex flex-col items-center gap-1.5 p-3 rounded-xl border bg-card hover:shadow-lg transition-all w-28" data-testid={`earned-badge-${e.achievement_id}`}>
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg" style={{ backgroundColor: (def.color || "#8b5cf6") + "25", color: def.color || "#8b5cf6", boxShadow: `0 0 20px ${(def.color || "#8b5cf6")}30` }}>
+                    <AchievementIcon icon={def.icon || "trophy"} className="w-6 h-6" />
+                  </div>
+                  <span className="text-xs font-medium text-center leading-tight">{e.achievement_name}</span>
+                  <span className="text-[9px] text-muted-foreground">{e.awarded_at ? formatDistanceToNow(new Date(e.awarded_at), { addSuffix: true }) : ""}</span>
+                  {e.awarded_by !== "System" && <Badge variant="outline" className="text-[8px] h-4">Admin</Badge>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* All Badges by Category */}
+      {categories.map(cat => (
+        <div key={cat}>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 capitalize">{cat}</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            {allDefs.filter(d => d.category === cat).map(def => {
+              const isEarned = earnedIds.has(def.id);
+              return (
+                <div key={def.id} className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border transition-all ${isEarned ? "border-primary/30 bg-primary/5" : "opacity-40 grayscale"}`} data-testid={`badge-def-${def.id}`}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: isEarned ? def.color + "25" : "#27272a", color: isEarned ? def.color : "#52525b" }}>
+                    <AchievementIcon icon={def.icon} className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-medium text-center">{def.name}</span>
+                  <span className="text-[9px] text-muted-foreground text-center leading-tight">{def.description}</span>
+                  {isEarned && <CheckCircle className="w-3 h-3 text-green-500" />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ========== PROFILE TAB ==========
+function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onConfirmUpload, onTeamsStatus }) {
+  const t = technician;
+  return (
+    <div className="space-y-4 mt-4" data-testid="profile-tab">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Avatar Upload */}
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Profile Picture</CardTitle></CardHeader>
+          <CardContent className="flex flex-col items-center gap-3">
+            {t.avatar ? (
+              <img src={t.avatar} alt={t.name} className="w-24 h-24 rounded-full object-cover border-4 border-primary/20" />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-3xl">{t.name?.charAt(0)?.toUpperCase()}</div>
+            )}
+            <label className="cursor-pointer">
+              <input type="file" accept="image/*" className="hidden" onChange={e => onUploadAvatar(e.target.files?.[0])} data-testid="avatar-file-input" />
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs hover:bg-muted transition-colors">
+                <Camera className="w-3.5 h-3.5" />Change Photo
+              </div>
+            </label>
+            {avatarFile && (
+              <div className="text-xs text-center">
+                <p className="text-muted-foreground">{avatarFile.name}</p>
+                <Button size="sm" className="h-7 mt-1" onClick={onConfirmUpload} data-testid="confirm-avatar-upload"><Upload className="w-3 h-3 mr-1" />Upload</Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* About Me */}
+        <Card className="md:col-span-2">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">About</CardTitle>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" className="h-7" onClick={onEditProfile} data-testid="edit-profile-btn"><Edit className="w-3 h-3 mr-1" />Edit Profile</Button>
+              <Button variant="ghost" size="sm" className="h-7" onClick={onTeamsStatus} data-testid="teams-status-btn"><MessageSquare className="w-3 h-3 mr-1" />Teams Status</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <Label className="text-xs text-muted-foreground">About Me</Label>
+              <p className="text-sm mt-0.5">{t.about_me || <span className="italic text-muted-foreground">No bio added yet</span>}</p>
+            </div>
+            <Separator />
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs text-muted-foreground">Hire Date</Label><p className="text-sm">{t.hire_date || "Not set"}</p></div>
+              <div><Label className="text-xs text-muted-foreground">Birthday</Label><p className="text-sm">{t.birthday || "Not set"}</p></div>
+              <div><Label className="text-xs text-muted-foreground">Job Title</Label><p className="text-sm">{t.job_title || "Not set"}</p></div>
+              <div><Label className="text-xs text-muted-foreground">Email</Label><p className="text-sm">{t.email}</p></div>
+              <div><Label className="text-xs text-muted-foreground">Phone</Label><p className="text-sm">{t.phone || "Not set"}</p></div>
+              <div><Label className="text-xs text-muted-foreground">Hourly Rate</Label><p className="text-sm">${t.hourly_rate || "75"}/hr</p></div>
+            </div>
+            {t.specialties?.length > 0 && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Specialties</Label>
+                <div className="flex gap-1 flex-wrap mt-1">{t.specialties.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
