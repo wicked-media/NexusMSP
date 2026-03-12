@@ -30,7 +30,8 @@ import {
   UserCog,
   CalendarDays,
   ShoppingCart,
-  Wifi
+  Wifi,
+  Trophy
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -45,6 +46,7 @@ const navGroups = [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
       { path: "/technicians", icon: UserCog, label: "Technicians" },
+      { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
       { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
     ]
   },

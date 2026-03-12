@@ -163,6 +163,7 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Password: admin123
 
 ## Testing Status
+- Iteration 19: 27/27 regression tests passed (100%) - Post-refactoring full verification
 - Iteration 18: 28/28 backend + all frontend features passed (100%) - Achievements, Profile, Hover cards, M365
 - Iteration 17: 15/15 backend + frontend features passed (100%) - Activity logs, remote sessions, audit trails
 - Iteration 16: 20/20 backend + 18/18 frontend features passed (100%)
@@ -171,11 +172,14 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - **Stripe**: Implemented (payments)
 - **Xero**: Configuration-ready (MOCKED - settings stored, webhook endpoint active)
 - **UniFi**: Configuration-ready (MOCKED - test-connection makes real HTTP, data from MongoDB)
+- **Microsoft Teams**: Configuration-ready (MOCKED - status sync UI ready)
+- **CIPP**: Configuration-ready (MOCKED - tenant sync UI ready)
+- **Microsoft 365**: Configuration-ready (MOCKED - tenancy sync per client)
 - **TipTap**: Implemented (rich text)
 - **Recharts**: Implemented (charts)
 - **@dnd-kit/core**: Implemented (Kanban)
 - **react-barcode + python-barcode**: Implemented (barcode generation)
-- **RustDesk**: Mock (remote access)
+- **RustDesk**: Mock (remote access with session tracking + lock status)
 - **Pax8, Domotz, Acronis, Proxmox**: Mocked
 
 ## Pending Issues
@@ -183,12 +187,37 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - P2: Recharts console warnings on Reports page
 
 ## Upcoming Tasks
-- P0: Refactor server.py into modular FastAPI structure (7500+ lines)
 - P1: Implement Xero Integration (playbook fetched)
 - P1: Full UniFi Integration (deep API integration)
 - P1: Standalone database seeding script
 - P2: Enhance remaining modules (Contracts, Reports, Clients)
 - P2: Scripting & Automation Engine
-- P2: Real backend for mocked integrations
+- P2: Real backend for mocked integrations (Pax8, Domotz, Acronis, Proxmox, Microsoft Graph/CIPP)
 - P2: Client portal
 - P2: Fix Recharts console warnings
+
+## Architecture (Post-Refactoring)
+```
+/app/backend/
+├── server.py                  # Thin entry point (~100 lines)
+├── app/
+│   ├── database.py           # MongoDB connection, constants
+│   ├── auth.py               # JWT auth, password helpers
+│   ├── models.py             # All Pydantic models (1265 lines)
+│   ├── routers/              # 30 modular router files
+│   │   ├── auth.py, clients.py, clients_contacts.py
+│   │   ├── tickets.py, devices.py, assets.py, contracts.py
+│   │   ├── invoices.py, time_entries.py, knowledge_base.py
+│   │   ├── integrations.py (Pax8/Domotz/O365/Acronis)
+│   │   ├── dashboard.py, technicians.py, scheduling.py
+│   │   ├── products.py, networking.py, purchase_orders.py
+│   │   ├── remote.py, crm.py, scripting.py
+│   │   ├── it_docs.py, portal.py, projects.py
+│   │   ├── admin.py, infrastructure.py, yeastar.py
+│   │   ├── activity_logs.py, achievements.py
+│   │   ├── technicians_profile.py, microsoft_config.py
+│   └── services/
+│       ├── activity.py       # Activity logging + ticket audit
+│       ├── integrations.py   # Service classes (Pax8, Domotz, O365, Acronis)
+│       └── seed.py           # Database seeding
+```

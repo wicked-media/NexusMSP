@@ -36,6 +36,7 @@ import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import DeviceDetailPage from "@/pages/DeviceDetailPage";
 import NetworkingPage from "@/pages/NetworkingPage";
+import LeaderboardPage from "@/pages/LeaderboardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -456,6 +457,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <SchedulingPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/leaderboard"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <LeaderboardPage />
                 </MainLayout>
               </ProtectedRoute>
             }
