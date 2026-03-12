@@ -60,7 +60,15 @@ NexusOps is a comprehensive RMM/PSA platform designed to outdo Syncro, SuperOps,
 - **Backend**: Enhanced Device model (40+ fields), new collections (device_software, device_patches, device_events, device_performance, device_network), 6 new API endpoints
 - **Seed Data**: 10 realistic devices across 5 clients with full hardware/software/security data
 
+## Device-Ticket Integration (March 2026)
+- **Bidirectional linking**: Tickets now have device_id/device_name fields. Backend auto-resolves device_name on create/update.
+- **Device Detail - Tickets Tab**: Shows all linked tickets with priority/status badges, plus stats (Total/Open/In Progress/Resolved). "Create Ticket for Device" button.
+- **Tickets Page - Device Column**: Shows linked device name for each ticket in the list view
+- **Ticket Detail - Device Selector**: Dropdown to link/change device, filtered by client. "View {device} details" navigation link.
+- **Ticket Creation - Device Field**: Device selector in create form, filtered by selected client
+- **Seed Data**: 16 realistic MSP tickets, 15 linked to devices across 5 clients
+
 ## Test Results
-- Backend: 100% (16/16 in iteration 12)
-- Frontend: 100% (15/15 features verified)
-- Last tested: March 2026, iteration 12
+- Backend: 100% (12/12 in iteration 13)
+- Frontend: 100% (11/11 features verified)
+- Last tested: March 2026, iteration 13
