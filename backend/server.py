@@ -108,6 +108,7 @@ class TicketCreate(BaseModel):
     impact: str = "medium"
     source: str = "portal"
     asset_id: Optional[str] = None
+    device_id: Optional[str] = None
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -131,6 +132,8 @@ class Ticket(BaseModel):
     total_time_minutes: int = 0
     parent_id: Optional[str] = None
     asset_id: Optional[str] = None
+    device_id: Optional[str] = None
+    device_name: Optional[str] = None
     tags: List[str] = []
     cc: List[str] = []
     watchers: List[str] = []
@@ -1756,6 +1759,12 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}
     sla_due = datetime.now(timezone.utc) + timedelta(hours=sla_hours.get(ticket_data.priority, 8))
     
+    # Resolve device name
+    device_name = None
+    if ticket_data.device_id:
+        device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1})
+        device_name = device['name'] if device else None
+    
     # Generate ticket number
     ticket_count = await db.tickets.count_documents({})
     ticket_number = f"TKT-{str(ticket_count + 1).zfill(3)}"
@@ -1765,6 +1774,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         ticket_number=ticket_number,
         client_name=client_name,
         assigned_name=assigned_name,
+        device_name=device_name,
         sla_due=sla_due
     )
     doc = ticket.model_dump()
@@ -1779,6 +1789,12 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
 async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
     old_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     ticket_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    # Resolve device name if device_id changed
+    if 'device_id' in ticket_data and ticket_data['device_id']:
+        device = await db.devices.find_one({"id": ticket_data['device_id']}, {"_id": 0, "name": 1})
+        ticket_data['device_name'] = device['name'] if device else None
+    elif 'device_id' in ticket_data and not ticket_data['device_id']:
+        ticket_data['device_name'] = None
     result = await db.tickets.update_one({"id": ticket_id}, {"$set": ticket_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -6243,11 +6259,22 @@ async def seed_data():
 
     
     tickets_data = [
-        {"id": "TKT-001", "title": "Server unresponsive", "description": "Main DC server not responding to ping", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "critical", "status": "open", "category": "infrastructure", "assigned_to": "user-002", "assigned_name": "Sarah Chen"},
-        {"id": "TKT-002", "title": "Email sync issues", "description": "Outlook not syncing emails for multiple users", "client_id": "client-002", "client_name": "TechStart Inc", "priority": "high", "status": "in_progress", "category": "support", "assigned_to": "user-003", "assigned_name": "Mike Rodriguez"},
-        {"id": "TKT-003", "title": "New user setup", "description": "Setup workstation and accounts for new employee", "client_id": "client-003", "client_name": "Global Finance Ltd", "priority": "medium", "status": "open", "category": "onboarding", "assigned_to": "user-002", "assigned_name": "Sarah Chen"},
+        {"id": "TKT-001", "title": "Server unresponsive", "description": "Main DC server not responding to ping. Users unable to authenticate.", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "critical", "status": "open", "category": "infrastructure", "assigned_to": "user-002", "assigned_name": "Sarah Chen", "device_id": "dev-001", "device_name": "ACME-DC-01", "ticket_type": "incident", "impact": "high"},
+        {"id": "TKT-002", "title": "Email sync issues", "description": "Outlook not syncing emails for multiple users. Exchange connectivity issues.", "client_id": "client-002", "client_name": "TechStart Inc", "priority": "high", "status": "in_progress", "category": "support", "assigned_to": "user-003", "assigned_name": "Mike Rodriguez", "device_id": "dev-003", "device_name": "TECH-SRV-01"},
+        {"id": "TKT-003", "title": "New user setup - Jane Doe", "description": "Setup workstation and accounts for new employee starting Monday", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "medium", "status": "open", "category": "onboarding", "assigned_to": "user-002", "assigned_name": "Sarah Chen", "device_id": "dev-002", "device_name": "ACME-WS-001", "ticket_type": "service_request"},
         {"id": "TKT-004", "title": "Printer not working", "description": "Network printer in reception area offline", "client_id": "client-004", "client_name": "HealthCare Plus", "priority": "low", "status": "resolved", "category": "hardware"},
-        {"id": "TKT-005", "title": "VPN connection drops", "description": "Remote workers experiencing VPN disconnections", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "high", "status": "in_progress", "category": "network", "assigned_to": "user-001", "assigned_name": "Alex Thompson"},
+        {"id": "TKT-005", "title": "VPN connection drops", "description": "Remote workers experiencing VPN disconnections every 30 minutes", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "high", "status": "in_progress", "category": "network", "assigned_to": "user-001", "assigned_name": "Alex Thompson", "device_id": "dev-007", "device_name": "ACME-LT-001"},
+        {"id": "TKT-006", "title": "High CPU usage on web server", "description": "Docker containers consuming excessive CPU. Nginx worker processes spiking to 95%.", "client_id": "client-002", "client_name": "TechStart Inc", "priority": "high", "status": "open", "category": "infrastructure", "assigned_to": "user-002", "assigned_name": "Sarah Chen", "device_id": "dev-003", "device_name": "TECH-SRV-01", "ticket_type": "incident", "impact": "high"},
+        {"id": "TKT-007", "title": "Workstation BSOD - Blue Screen", "description": "John's workstation experiencing intermittent BSOD with DRIVER_IRQL_NOT_LESS_OR_EQUAL", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "medium", "status": "in_progress", "category": "hardware", "assigned_to": "user-003", "assigned_name": "Mike Rodriguez", "device_id": "dev-002", "device_name": "ACME-WS-001", "ticket_type": "incident"},
+        {"id": "TKT-008", "title": "Firewall rule update for new VPN subnet", "description": "Need to add rules for new 10.255.x.x VPN subnet to FortiGate", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "medium", "status": "open", "category": "network", "device_id": "dev-008", "device_name": "ACME-FW-01", "ticket_type": "change_request"},
+        {"id": "TKT-009", "title": "Windows patches failing on reception PC", "description": "KB5032278 fails with error 0x800f0922. Machine hasn't been patched in 4 months.", "client_id": "client-004", "client_name": "HealthCare Plus", "priority": "critical", "status": "open", "category": "patching", "assigned_to": "user-001", "assigned_name": "Alex Thompson", "device_id": "dev-005", "device_name": "HC-WS-REC01", "ticket_type": "incident", "impact": "medium"},
+        {"id": "TKT-010", "title": "SSL certificate renewal - Kubernetes cluster", "description": "Cert expiring in 14 days for *.techstart.local wildcard", "client_id": "client-002", "client_name": "TechStart Inc", "priority": "high", "status": "open", "category": "infrastructure", "device_id": "dev-010", "device_name": "TECH-DOCKER-01", "ticket_type": "change_request"},
+        {"id": "TKT-011", "title": "CFO MacBook slow after update", "description": "macOS Sonoma 14.3 update caused significant performance degradation", "client_id": "client-003", "client_name": "Global Finance Ltd", "priority": "high", "status": "in_progress", "category": "support", "assigned_to": "user-002", "assigned_name": "Sarah Chen", "device_id": "dev-009", "device_name": "GF-LT-CFO01", "ticket_type": "incident", "tags": ["vip"]},
+        {"id": "TKT-012", "title": "POS system intermittent freezing", "description": "Register 1 freezing during checkout. Staff have to force reboot 2-3 times per day.", "client_id": "client-005", "client_name": "RetailMax", "priority": "critical", "status": "open", "category": "hardware", "assigned_to": "user-003", "assigned_name": "Mike Rodriguez", "device_id": "dev-006", "device_name": "RETAIL-POS-01", "ticket_type": "incident", "impact": "high"},
+        {"id": "TKT-013", "title": "Deploy SentinelOne on HC-WS-REC01", "description": "Device currently has only Windows Defender. Need to deploy SentinelOne EDR agent.", "client_id": "client-004", "client_name": "HealthCare Plus", "priority": "medium", "status": "open", "category": "security", "device_id": "dev-005", "device_name": "HC-WS-REC01", "ticket_type": "service_request"},
+        {"id": "TKT-014", "title": "DC storage nearing capacity", "description": "ACME-DC-01 disk at 78% (2808/3600 GB). Need to archive old logs and plan expansion.", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "medium", "status": "open", "category": "infrastructure", "device_id": "dev-001", "device_name": "ACME-DC-01", "ticket_type": "problem"},
+        {"id": "TKT-015", "title": "Laptop BitLocker recovery", "description": "Jane unable to boot laptop after BIOS update triggered BitLocker recovery.", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "high", "status": "resolved", "category": "security", "assigned_to": "user-001", "assigned_name": "Alex Thompson", "device_id": "dev-007", "device_name": "ACME-LT-001", "ticket_type": "incident"},
+        {"id": "TKT-016", "title": "Domain controller replication errors", "description": "AD replication failing between ACME-DC-01 and secondary DC. Event ID 1864.", "client_id": "client-001", "client_name": "Acme Corporation", "priority": "critical", "status": "in_progress", "category": "infrastructure", "assigned_to": "user-002", "assigned_name": "Sarah Chen", "device_id": "dev-001", "device_name": "ACME-DC-01", "ticket_type": "incident", "impact": "high"},
     ]
     for t in tickets_data:
         sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}

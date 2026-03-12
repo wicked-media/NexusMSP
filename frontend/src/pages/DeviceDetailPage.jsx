@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink } from "lucide-react";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -135,9 +135,10 @@ export default function DeviceDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-7 w-full" data-testid="device-tabs">
+        <TabsList className="grid grid-cols-8 w-full" data-testid="device-tabs">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="tickets">Tickets ({data.tickets?.length || 0})</TabsTrigger>
           <TabsTrigger value="software">Software ({data.software?.length || 0})</TabsTrigger>
           <TabsTrigger value="patches">Patches ({data.patches?.length || 0})</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
@@ -287,6 +288,67 @@ export default function DeviceDetailPage() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        {/* TICKETS TAB */}
+        <TabsContent value="tickets" className="mt-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2"><Ticket className="w-4 h-4" />Linked Tickets</CardTitle>
+                <Link to={`/tickets?device_id=${deviceId}`}><Button variant="outline" size="sm"><Plus className="w-3 h-3 mr-1" />Create Ticket for Device</Button></Link>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ticket #</TableHead><TableHead>Title</TableHead><TableHead>Priority</TableHead>
+                    <TableHead>Status</TableHead><TableHead>Assigned</TableHead><TableHead>Created</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(data.tickets || []).length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No tickets linked to this device</TableCell></TableRow>
+                  ) : (data.tickets || []).map((t, i) => {
+                    const priorityColor = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
+                    const statusColor = { open: "border-blue-500/30 text-blue-500", in_progress: "border-amber-500/30 text-amber-500", resolved: "border-emerald-500/30 text-emerald-500", closed: "border-gray-500/30 text-gray-400", on_hold: "border-orange-500/30 text-orange-500" };
+                    return (
+                      <TableRow key={i} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/tickets`)} data-testid={`device-ticket-${t.id || i}`}>
+                        <TableCell className="font-mono text-xs font-medium">{t.ticket_number || `TKT-${String(i+1).padStart(3,"0")}`}</TableCell>
+                        <TableCell className="max-w-xs truncate font-medium">{t.title}</TableCell>
+                        <TableCell><Badge className={`${priorityColor[t.priority] || ""} text-[10px] capitalize`}>{t.priority}</Badge></TableCell>
+                        <TableCell><Badge variant="outline" className={`${statusColor[t.status] || ""} text-[10px] capitalize`}>{(t.status || "").replace("_", " ")}</Badge></TableCell>
+                        <TableCell className="text-sm">{t.assigned_name || "Unassigned"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{t.created_at ? formatDistanceToNow(new Date(t.created_at), { addSuffix: true }) : "-"}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+          {/* Ticket Statistics for this device */}
+          {(data.tickets || []).length > 0 && (
+            <div className="grid grid-cols-4 gap-3 mt-4">
+              <Card><CardContent className="pt-4 text-center">
+                <p className="text-2xl font-bold">{data.tickets.length}</p>
+                <p className="text-xs text-muted-foreground">Total Tickets</p>
+              </CardContent></Card>
+              <Card><CardContent className="pt-4 text-center">
+                <p className="text-2xl font-bold text-blue-500">{data.tickets.filter(t => t.status === "open").length}</p>
+                <p className="text-xs text-muted-foreground">Open</p>
+              </CardContent></Card>
+              <Card><CardContent className="pt-4 text-center">
+                <p className="text-2xl font-bold text-amber-500">{data.tickets.filter(t => t.status === "in_progress").length}</p>
+                <p className="text-xs text-muted-foreground">In Progress</p>
+              </CardContent></Card>
+              <Card><CardContent className="pt-4 text-center">
+                <p className="text-2xl font-bold text-emerald-500">{data.tickets.filter(t => ["resolved", "closed"].includes(t.status)).length}</p>
+                <p className="text-xs text-muted-foreground">Resolved</p>
+              </CardContent></Card>
+            </div>
+          )}
         </TabsContent>
 
         {/* PERFORMANCE TAB */}

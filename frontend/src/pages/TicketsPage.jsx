@@ -41,6 +41,7 @@ export default function TicketsPage() {
   const [tickets, setTickets] = useState([]);
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -71,6 +72,7 @@ export default function TicketsPage() {
     title: "", description: "", client_id: "", priority: "medium", category: "support",
     assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
     source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+    device_id: "",
     cc: [], watchers: []
   });
   const [childForm, setChildForm] = useState({ title: "", description: "", priority: "medium" });
@@ -84,18 +86,20 @@ export default function TicketsPage() {
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes, ncRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes, dRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
         axios.get(`${API}/canned-responses`, { headers }),
         axios.get(`${API}/tickets/note-counts`, { headers }),
+        axios.get(`${API}/devices`, { headers }),
       ]);
       setTickets(tRes.data);
       setClients(cRes.data);
       setUsers(uRes.data);
       setCannedResponses(crRes.data);
       setNoteCounts(ncRes.data);
+      setDevices(dRes.data);
     } catch { toast.error("Failed to fetch tickets"); }
     finally { setLoading(false); }
   }, [token]);
@@ -147,6 +151,7 @@ export default function TicketsPage() {
         title: "", description: "", client_id: "", priority: "medium", category: "support",
         assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
         source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+        device_id: "",
         cc: [], watchers: []
       });
       fetchTickets();
@@ -542,6 +547,23 @@ export default function TicketsPage() {
                     <div className="flex justify-between text-sm"><span className="text-muted-foreground">Watchers</span><span>{viewingTicket.watchers.length}</span></div>
                   )}
                 </div>
+                <Separator />
+                <div><Label className="text-xs text-muted-foreground">Linked Device</Label>
+                  <Select value={viewingTicket.device_id || "none"} onValueChange={v => handleUpdateTicket("device_id", v === "none" ? "" : v)}>
+                    <SelectTrigger data-testid="device-select"><SelectValue placeholder="No device linked" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- No device --</SelectItem>
+                      {devices.filter(d => !viewingTicket.client_id || d.client_id === viewingTicket.client_id).map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {viewingTicket.device_id && viewingTicket.device_name && (
+                    <Button variant="link" size="sm" className="px-0 h-6 text-xs" onClick={() => window.location.href = `/devices/${viewingTicket.device_id}`} data-testid="view-device-link">
+                      View {viewingTicket.device_name} details
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -694,8 +716,8 @@ export default function TicketsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead>
-                <TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead>Assigned</TableHead>
-                <TableHead>Tags</TableHead><TableHead>Time</TableHead><TableHead>Created</TableHead>
+                <TableHead>Device</TableHead><TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead>Assigned</TableHead>
+                <TableHead>Created</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -711,11 +733,10 @@ export default function TicketsPage() {
                   </TableCell>
                   <TableCell className="max-w-[250px] truncate">{ticket.title}</TableCell>
                   <TableCell className="text-sm">{ticket.client_name}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{ticket.device_name || "-"}</TableCell>
                   <TableCell><Badge className={priorityConfig[ticket.priority]?.class + " text-xs"}>{priorityConfig[ticket.priority]?.label}</Badge></TableCell>
                   <TableCell><Badge variant="outline" className={statusConfig[ticket.status]?.class}>{statusConfig[ticket.status]?.label}</Badge></TableCell>
                   <TableCell className="text-sm">{ticket.assigned_name || "Unassigned"}</TableCell>
-                  <TableCell>{(ticket.tags || []).length > 0 && <div className="flex gap-1">{ticket.tags.slice(0, 2).map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}{ticket.tags.length > 2 && <span className="text-xs text-muted-foreground">+{ticket.tags.length - 2}</span>}</div>}</TableCell>
-                  <TableCell className="font-mono text-sm">{ticket.total_time_minutes > 0 ? `${ticket.total_time_minutes}m` : '-'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{ticket.created_at && formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}</TableCell>
                 </TableRow>
               ))}
@@ -733,10 +754,10 @@ export default function TicketsPage() {
             <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
             <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
 
-            {/* Row 1: Client, Contact, Asset */}
+            {/* Row 1: Client, Contact, Device */}
             <div className="grid grid-cols-3 gap-3">
               <div><Label>Client *</Label>
-                <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "" })}>
+                <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "", device_id: "" })}>
                   <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
                   <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
@@ -752,8 +773,16 @@ export default function TicketsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Linked Asset</Label>
-                <Input value={formData.asset_id || ""} onChange={e => setFormData({ ...formData, asset_id: e.target.value })} placeholder="Asset ID (optional)" data-testid="create-asset" />
+              <div><Label>Linked Device</Label>
+                <Select value={formData.device_id || "none"} onValueChange={v => setFormData({ ...formData, device_id: v === "none" ? "" : v })}>
+                  <SelectTrigger data-testid="create-device"><SelectValue placeholder="Select device" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- No device --</SelectItem>
+                    {devices.filter(d => !formData.client_id || d.client_id === formData.client_id).map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name} ({d.os} - {d.ip_address || "No IP"})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
