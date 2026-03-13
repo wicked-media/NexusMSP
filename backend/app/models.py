@@ -1263,3 +1263,114 @@ class Site(BaseModel):
     notes: Optional[str] = None
     device_count: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ============== VENDOR MODELS ==============
+
+class VendorCreate(BaseModel):
+    name: str
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = "Australia"
+    postal_code: Optional[str] = None
+    abn: Optional[str] = None
+    tax_id: Optional[str] = None
+    payment_terms: str = "Net 30"
+    website: Optional[str] = None
+    notes: Optional[str] = None
+    category: str = "general"  # general, hardware, software, telecom, networking
+
+class Vendor(VendorCreate):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    is_active: bool = True
+    total_orders: int = 0
+    total_spent: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== RENTAL MODELS ==============
+
+YEALINK_MODELS = [
+    "Yealink T31G", "Yealink T33G", "Yealink T43U", "Yealink T46U", "Yealink T48U",
+    "Yealink T53W", "Yealink T54W", "Yealink T57W", "Yealink T58W",
+    "Yealink CP920", "Yealink CP960", "Yealink CP965",
+    "Yealink W73H", "Yealink W76H", "Yealink W70B", "Yealink W80B",
+    "Yealink MP50", "Yealink MP54", "Yealink MP56", "Yealink MP58",
+    "Yealink VP59", "Yealink SIP-T19P E2", "Other"
+]
+
+class RentalDeviceCreate(BaseModel):
+    model_name: str  # Yealink model
+    serial_number: str
+    mac_address: Optional[str] = None
+    imei: Optional[str] = None
+    firmware_version: Optional[str] = None
+    condition: str = "new"  # new, excellent, good, fair, damaged
+    notes: Optional[str] = None
+
+class RentalDevice(RentalDeviceCreate):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "available"  # available, rented, sold, returned, decommissioned
+    current_rental_id: Optional[str] = None
+    current_client_id: Optional[str] = None
+    current_client_name: Optional[str] = None
+    purchase_price: float = 0.0
+    purchase_date: Optional[str] = None
+    vendor_id: Optional[str] = None
+    vendor_name: Optional[str] = None
+    warranty_expiry: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class RentalAgreementCreate(BaseModel):
+    client_id: str
+    device_id: str
+    agreement_type: str = "rental"  # rental, buy_outright, lease_to_own
+    start_date: str
+    end_date: Optional[str] = None
+    # Pricing
+    device_cost: float = 0.0
+    deposit_amount: float = 0.0
+    monthly_amount: float = 0.0
+    total_payments: int = 0  # Number of monthly payments (0 for buy outright)
+    # SLA
+    sla_contract_id: Optional[str] = None
+    notes: Optional[str] = None
+
+class RentalAgreement(RentalAgreementCreate):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_name: Optional[str] = None
+    device_model: Optional[str] = None
+    device_serial: Optional[str] = None
+    device_mac: Optional[str] = None
+    status: str = "active"  # active, completed, overdue, cancelled, returned
+    payments_made: int = 0
+    amount_paid: float = 0.0
+    deposit_paid: bool = False
+    next_payment_date: Optional[str] = None
+    payment_history: list = Field(default_factory=list)
+    return_condition: Optional[str] = None
+    return_date: Optional[str] = None
+    return_notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# ============== TICKET CATEGORY MODELS ==============
+
+class TicketCategoryCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = "#3b82f6"
+    sort_order: int = 0
+
+class TicketCategory(TicketCategoryCreate):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    is_active: bool = True
+    issue_types: list = Field(default_factory=list)  # [{id, name, description, priority}]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

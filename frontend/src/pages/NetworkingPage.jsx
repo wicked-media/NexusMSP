@@ -200,6 +200,21 @@ export default function NetworkingPage() {
   const filteredClients = siteClients
     .filter(c => !search || c.name?.toLowerCase().includes(search.toLowerCase()) || c.ip_address?.includes(search) || c.mac?.toLowerCase().includes(search.toLowerCase()));
 
+  // Dashboard data
+  const [dashboard, setDashboard] = useState(null);
+  const [dashLoading, setDashLoading] = useState(false);
+
+  const fetchDashboard = async () => {
+    setDashLoading(true);
+    try {
+      const res = await axios.get(`${API}/networking/dashboard`, { headers });
+      setDashboard(res.data);
+    } catch { toast.error("Failed to load dashboard"); }
+    finally { setDashLoading(false); }
+  };
+
+  useEffect(() => { if (!selectedSite) fetchDashboard(); }, [selectedSite]);
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   // ===== SITE FORM DIALOG =====
@@ -513,6 +528,95 @@ export default function NetworkingPage() {
             <CardContent className="pt-4"><div className="flex items-center gap-2">{stats.online_sites < stats.total_sites ? <AlertTriangle className="w-5 h-5 text-amber-500" /> : <CheckCircle2 className="w-5 h-5 text-emerald-500" />}<div><p className="text-xs text-muted-foreground">Health</p><p className="text-xl font-bold">{stats.online_sites < stats.total_sites ? "Warning" : "Healthy"}</p></div></div></CardContent>
           </Card>
         </div>
+      )}
+
+      {/* Dashboard Alerts */}
+      {dashboard && dashboard.alerts && dashboard.alerts.length > 0 && (
+        <Card className="border-amber-500/30" data-testid="network-alerts-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" />Active Alerts ({dashboard.alerts.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {dashboard.alerts.slice(0, 5).map((alert, i) => (
+              <div key={i} className={`flex items-center gap-3 text-sm p-2 rounded-lg ${alert.severity === "critical" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"}`}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{alert.message}</span>
+                <Badge variant="outline" className="ml-auto text-[10px] capitalize">{alert.severity}</Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Site Bandwidth Overview */}
+      {dashboard && dashboard.site_bandwidth && dashboard.site_bandwidth.length > 0 && (
+        <Card data-testid="site-bandwidth-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Site Bandwidth Overview</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Site</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead>
+                  <TableHead>Devices</TableHead><TableHead>Clients</TableHead><TableHead>ISP</TableHead>
+                  <TableHead>Speed</TableHead><TableHead className="text-right">RX / TX</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dashboard.site_bandwidth.map(sb => (
+                  <TableRow key={sb.site_id} className="cursor-pointer hover:bg-muted/50" onClick={() => { const s = sites.find(x => x.id === sb.site_id); if (s) { setSelectedSite(s); setTab("devices"); } }}>
+                    <TableCell className="font-medium">{sb.name}</TableCell>
+                    <TableCell className="text-xs">{sb.client_name || "-"}</TableCell>
+                    <TableCell><StatusDot status={sb.status} /></TableCell>
+                    <TableCell>{sb.device_count}</TableCell>
+                    <TableCell>{sb.client_count}</TableCell>
+                    <TableCell className="text-xs">{sb.isp || "-"}</TableCell>
+                    <TableCell className="text-xs font-mono">{sb.download_mbps}/{sb.upload_mbps} Mbps</TableCell>
+                    <TableCell className="text-right text-xs font-mono">{formatBytes(sb.rx_bytes)} / {formatBytes(sb.tx_bytes)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Offline Devices */}
+      {dashboard && dashboard.offline_devices && dashboard.offline_devices.length > 0 && (
+        <Card className="border-red-500/20" data-testid="offline-devices-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><Zap className="w-4 h-4 text-red-500" />Offline Devices ({dashboard.offline_devices.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {dashboard.offline_devices.map((d, i) => (
+              <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-red-500/5 text-sm">
+                <div className="flex items-center gap-3">
+                  <StatusDot status="offline" />
+                  <span className="font-medium">{d.name}</span>
+                  <Badge variant="outline" className="text-[10px] capitalize">{d.type}</Badge>
+                </div>
+                <span className="text-xs text-muted-foreground">{d.last_seen ? `Last seen: ${new Date(d.last_seen).toLocaleString()}` : "Never"}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Firmware Distribution */}
+      {dashboard && dashboard.firmware_versions && Object.keys(dashboard.firmware_versions).length > 0 && (
+        <Card data-testid="firmware-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-indigo-500" />Firmware Versions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(dashboard.firmware_versions).map(([fw, count]) => (
+                <Badge key={fw} variant="secondary" className="text-xs">{fw === "unknown" ? "Unknown" : `v${fw}`}: {count} device{count !== 1 ? "s" : ""}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Sites List */}

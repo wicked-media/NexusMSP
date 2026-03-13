@@ -15,7 +15,7 @@ from app.routers import (
     technicians, scheduling, products, networking, purchase_orders,
     remote, crm, scripting, it_docs, portal, projects, admin,
     infrastructure, yeastar, activity_logs, achievements,
-    technicians_profile, microsoft_config
+    technicians_profile, microsoft_config, vendors, rentals, ticket_categories
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -33,7 +33,7 @@ all_routers = [
     technicians, scheduling, products, networking, purchase_orders,
     remote, crm, scripting, it_docs, portal, projects, admin,
     infrastructure, yeastar, activity_logs, achievements,
-    technicians_profile, microsoft_config
+    technicians_profile, microsoft_config, vendors, rentals, ticket_categories
 ]
 
 for router_module in all_routers:

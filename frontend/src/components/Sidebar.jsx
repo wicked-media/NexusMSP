@@ -31,7 +31,10 @@ import {
   CalendarDays,
   ShoppingCart,
   Wifi,
-  Trophy
+  Trophy,
+  Phone,
+  Building2,
+  Tags
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -67,6 +70,8 @@ const navGroups = [
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
       { path: "/products", icon: Package, label: "Products" },
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
+      { path: "/vendors", icon: Building2, label: "Vendors" },
+      { path: "/rentals", icon: Phone, label: "Phone Rentals" },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
@@ -95,6 +100,7 @@ const navGroups = [
     items: [
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
+      { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },
       { path: "/settings", icon: Settings, label: "Settings" },
     ]
   },

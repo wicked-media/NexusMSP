@@ -37,6 +37,9 @@ import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import DeviceDetailPage from "@/pages/DeviceDetailPage";
 import NetworkingPage from "@/pages/NetworkingPage";
 import LeaderboardPage from "@/pages/LeaderboardPage";
+import RentalsPage from "@/pages/RentalsPage";
+import VendorsPage from "@/pages/VendorsPage";
+import TicketSettingsPage from "@/pages/TicketSettingsPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -467,6 +470,36 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <LeaderboardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RentalsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/vendors"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <VendorsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ticket-settings"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TicketSettingsPage />
                 </MainLayout>
               </ProtectedRoute>
             }

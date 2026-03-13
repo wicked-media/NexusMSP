@@ -183,3 +183,66 @@ async def get_unifi_settings(current_user: dict = Depends(get_current_user)):
     settings_doc.pop("password", None)
     return settings_doc
 
+
+@router.get("/networking/dashboard")
+async def get_networking_dashboard(current_user: dict = Depends(get_current_user)):
+    """Comprehensive networking dashboard with health, alerts, bandwidth"""
+    sites = await db.network_sites.find({}, {"_id": 0}).to_list(100)
+    all_devices = await db.network_devices.find({}, {"_id": 0}).to_list(5000)
+    all_clients = await db.network_clients.find({}, {"_id": 0}).to_list(10000)
+    
+    online_sites = [s for s in sites if s.get("status") == "online"]
+    offline_sites = [s for s in sites if s.get("status") != "online"]
+    
+    # Device breakdown
+    device_types = {}
+    firmware_versions = {}
+    offline_devices = []
+    for d in all_devices:
+        dt = d.get("device_type", "unknown")
+        device_types[dt] = device_types.get(dt, 0) + 1
+        fw = d.get("firmware_version", "unknown")
+        firmware_versions[fw] = firmware_versions.get(fw, 0) + 1
+        if d.get("status") != "online":
+            offline_devices.append({"name": d.get("name"), "site_id": d.get("site_id"), "type": dt, "status": d.get("status"), "last_seen": d.get("last_seen")})
+    
+    # Bandwidth aggregation
+    total_rx = sum(c.get("rx_bytes", 0) for c in all_clients)
+    total_tx = sum(c.get("tx_bytes", 0) for c in all_clients)
+    
+    # Site bandwidth breakdown
+    site_bandwidth = []
+    for site in sites:
+        site_clients = [c for c in all_clients if c.get("site_id") == site["id"]]
+        site_devices = [d for d in all_devices if d.get("site_id") == site["id"]]
+        rx = sum(c.get("rx_bytes", 0) for c in site_clients)
+        tx = sum(c.get("tx_bytes", 0) for c in site_clients)
+        site_bandwidth.append({
+            "site_id": site["id"], "name": site.get("name"), "client_name": site.get("client_name"),
+            "status": site.get("status"), "device_count": len(site_devices),
+            "client_count": len(site_clients), "rx_bytes": rx, "tx_bytes": tx,
+            "wan_ip": site.get("wan_ip"), "isp": site.get("isp"),
+            "download_mbps": site.get("download_speed_mbps", 0), "upload_mbps": site.get("upload_speed_mbps", 0),
+        })
+    
+    # Generate alerts
+    alerts = []
+    for d in offline_devices:
+        alerts.append({"type": "device_offline", "severity": "warning", "message": f"{d['name']} is offline", "device_type": d['type']})
+    for s in offline_sites:
+        alerts.append({"type": "site_offline", "severity": "critical", "message": f"Site '{s.get('name')}' is offline"})
+    
+    return {
+        "summary": {
+            "total_sites": len(sites), "online_sites": len(online_sites), "offline_sites": len(offline_sites),
+            "total_devices": len(all_devices), "online_devices": len([d for d in all_devices if d.get("status") == "online"]),
+            "total_clients": len(all_clients),
+            "total_rx_gb": round(total_rx / (1024**3), 2), "total_tx_gb": round(total_tx / (1024**3), 2),
+        },
+        "device_types": device_types,
+        "firmware_versions": firmware_versions,
+        "offline_devices": offline_devices,
+        "site_bandwidth": site_bandwidth,
+        "alerts": alerts,
+    }
+
