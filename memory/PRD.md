@@ -41,6 +41,18 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Clients list: Subscription status column with shield icon and active/total count
 - API key securely stored, masked in GET responses
 
+### Email Security Compliance Dashboard (March 16, 2026)
+- Dedicated DMARC Compliance page (/dmarc-compliance) with aggregate fleet posture
+- Overall compliance score ring with Critical/Poor/Fair/Good/Excellent labels
+- Fully Protected / Partially Protected / Unprotected client counts
+- Service Coverage progress bars showing adoption rate per service across all clients
+- Clients Needing Attention section highlighting at-risk clients sorted by score
+- Full client table with per-service checkmarks/X-marks and score badges
+- Search filter on client table
+- Dashboard widget: compact Email Security card on main dashboard showing score ring, quick stats, at-risk clients
+- Dashboard widget clickable, navigates to full compliance page
+- Sidebar link: "Email Security" under Infrastructure section
+
 ### Phone Rentals & Sales (March 16, 2026)
 - Full RentalsPage.jsx with Agreements tab and Device Inventory tab
 - Three agreement types: Rental (monthly payments), Buy Outright (one-time purchase), Lease to Own
@@ -206,10 +218,10 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Password: admin123
 
 ## Testing Status
+- Iteration 22: 11/11 backend + all frontend passed (100%) - DMARC Compliance Dashboard + Widget
+- Iteration 21: 21/21 backend + all frontend passed (100%) - Suped DMARC, Rentals, Vendors, Ticket Settings
 - Iteration 19: 27/27 regression tests passed (100%) - Post-refactoring full verification
 - Iteration 18: 28/28 backend + all frontend features passed (100%) - Achievements, Profile, Hover cards, M365
-- Iteration 17: 15/15 backend + frontend features passed (100%) - Activity logs, remote sessions, audit trails
-- Iteration 16: 20/20 backend + 18/18 frontend features passed (100%)
 
 ## Integrations
 - **Stripe**: Implemented (payments)
