@@ -25,7 +25,8 @@ import {
   Zap,
   CreditCard,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Wifi
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -47,24 +48,28 @@ export default function SettingsPage() {
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
+  const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
+  const [splynxSaving, setSplynxSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
           axios.get(`${API}/settings/stripe`, { headers }),
           axios.get(`${API}/settings/suped`, { headers }),
+          axios.get(`${API}/settings/splynx`, { headers }),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
         setXero(xeroRes.data);
         setStripe(stripeRes.data);
         setSuped(supedRes.data);
+        setSplynx(splynxRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -471,6 +476,83 @@ export default function SettingsPage() {
           }} data-testid="save-suped-btn" disabled={supedSaving}>
             {supedSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Suped Settings
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Splynx ISP Billing Integration */}
+      <Card data-testid="splynx-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Wifi className="w-5 h-5 text-cyan-500" />
+            <CardTitle>Splynx ISP Billing</CardTitle>
+          </div>
+          <CardDescription>Connect to Splynx for customer billing, internet services, and payment status monitoring</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={splynx.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {splynx.configured ? "Connected" : "Not Configured"}
+            </Badge>
+          </div>
+          <div>
+            <Label>Splynx URL</Label>
+            <Input
+              value={splynx.url}
+              onChange={(e) => setSplynx({ ...splynx, url: e.target.value })}
+              placeholder="https://your-instance.splynx.app"
+              data-testid="splynx-url"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>API Key</Label>
+              <Input
+                type="password"
+                value={splynx.api_key}
+                onChange={(e) => setSplynx({ ...splynx, api_key: e.target.value })}
+                placeholder="API Key"
+                data-testid="splynx-api-key"
+              />
+            </div>
+            <div>
+              <Label>API Secret</Label>
+              <Input
+                type="password"
+                value={splynx.api_secret}
+                onChange={(e) => setSplynx({ ...splynx, api_secret: e.target.value })}
+                placeholder="API Secret"
+                data-testid="splynx-api-secret"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            API credentials can be created in Splynx under <strong>Administration &gt; API Keys</strong>. Learn more at <a href="https://splynx.com" target="_blank" rel="noreferrer" className="text-primary underline">splynx.com</a>.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={async () => {
+              if (!splynx.url || !splynx.api_key || !splynx.api_secret) { toast.error("All Splynx fields are required"); return; }
+              setSplynxSaving(true);
+              try {
+                await axios.put(`${API}/settings/splynx`, { url: splynx.url, api_key: splynx.api_key, api_secret: splynx.api_secret }, { headers });
+                toast.success("Splynx settings saved");
+                setSplynx({ ...splynx, configured: true });
+              } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+              finally { setSplynxSaving(false); }
+            }} data-testid="save-splynx-btn" disabled={splynxSaving}>
+              {splynxSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Splynx Settings
+            </Button>
+            {splynx.configured && (
+              <Button variant="outline" onClick={async () => {
+                try {
+                  const res = await axios.post(`${API}/settings/splynx/test`, {}, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message);
+                } catch (e) { toast.error("Connection test failed"); }
+              }} data-testid="test-splynx-btn">
+                Test Connection
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

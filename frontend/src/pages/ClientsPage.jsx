@@ -16,7 +16,8 @@ import { toast } from "sonner";
 import {
   Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
   ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw,
-  ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck
+  ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck,
+  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink
 } from "lucide-react";
 
 const roleColors = {
@@ -47,6 +48,10 @@ export default function ClientsPage() {
   const [dmarcRecords, setDmarcRecords] = useState(null);
   const [dmarcLoading, setDmarcLoading] = useState(false);
   const [subsSummary, setSubsSummary] = useState({});
+  // Splynx
+  const [splynxLink, setSplynxLink] = useState(null);
+  const [splynxServices, setSplynxServices] = useState(null);
+  const [splynxLoading, setSplynxLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -74,16 +79,20 @@ export default function ClientsPage() {
     setViewingClient(client);
     setSubscriptions(null);
     setDmarcRecords(null);
+    setSplynxLink(null);
+    setSplynxServices(null);
     try {
-      const [detailRes, m365Res, subsRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/clients/${client.id}/splynx`, { headers }).catch(() => ({ data: null })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
       setM365Config(m365Res.data.config || null);
       setSubscriptions(subsRes.data);
+      setSplynxLink(splynxRes.data);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -124,6 +133,29 @@ export default function ClientsPage() {
       setDmarcRecords(res.data);
     } catch { toast.error("Failed to fetch DMARC records"); }
     finally { setDmarcLoading(false); }
+  };
+
+  const handleSaveSplynxLink = async () => {
+    if (!viewingClient || !splynxLink) return;
+    try {
+      await axios.put(`${API}/clients/${viewingClient.id}/splynx`, { splynx_customer_id: splynxLink.splynx_customer_id }, { headers });
+      toast.success("Splynx link saved");
+      if (splynxLink.splynx_customer_id) fetchSplynxServices();
+    } catch { toast.error("Failed to save Splynx link"); }
+  };
+
+  const fetchSplynxServices = async () => {
+    if (!viewingClient) return;
+    setSplynxLoading(true);
+    try {
+      const [svcRes, invRes, custRes] = await Promise.all([
+        axios.get(`${API}/clients/${viewingClient.id}/splynx/services`, { headers }),
+        axios.get(`${API}/clients/${viewingClient.id}/splynx/invoices`, { headers }).catch(() => ({ data: { invoices: [] } })),
+        axios.get(`${API}/clients/${viewingClient.id}/splynx/customer`, { headers }).catch(() => ({ data: {} })),
+      ]);
+      setSplynxServices({ services: svcRes.data.services || [], invoices: invRes.data.invoices || [], customer: custRes.data.customer || null, billing: custRes.data.billing || null, error: svcRes.data.error || invRes.data.error || custRes.data.error });
+    } catch { toast.error("Failed to fetch Splynx data"); }
+    finally { setSplynxLoading(false); }
   };
 
   const handleCreateClient = async () => {
@@ -249,12 +281,13 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-6 w-full">
+              <TabsList className="grid grid-cols-7 w-full">
                 <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts ({contacts.length})</TabsTrigger>
                 <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
                 <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
                 <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts ({contracts.length})</TabsTrigger>
                 <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subscriptions</TabsTrigger>
+                <TabsTrigger value="splynx" data-testid="client-splynx-tab"><Wifi className="w-3 h-3 mr-1" />Splynx</TabsTrigger>
                 <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />M365</TabsTrigger>
               </TabsList>
 
@@ -456,6 +489,170 @@ export default function ClientsPage() {
                       ) : (
                         <p className="text-center py-6 text-sm text-muted-foreground">No DMARC records found for the selected period</p>
                       )}
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+
+
+              {/* SPLYNX TAB */}
+              <TabsContent value="splynx" className="space-y-4">
+                {/* Splynx Customer ID Link */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">Splynx Customer ID</Label>
+                    <Input
+                      value={splynxLink?.splynx_customer_id || ""}
+                      onChange={e => setSplynxLink({ ...splynxLink, splynx_customer_id: e.target.value })}
+                      placeholder="Enter Splynx Customer ID"
+                      data-testid="splynx-customer-id-input"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <Button size="sm" className="mt-5" onClick={handleSaveSplynxLink} data-testid="save-splynx-link-btn">Link</Button>
+                  {splynxLink?.linked && (
+                    <Button size="sm" variant="outline" className="mt-5" onClick={fetchSplynxServices} data-testid="fetch-splynx-btn">
+                      <RefreshCw className="w-3 h-3 mr-1" />Fetch Services
+                    </Button>
+                  )}
+                </div>
+
+                {splynxLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
+
+                {splynxServices && !splynxLoading && (
+                  <>
+                    {splynxServices.error && (
+                      <div className="flex items-center gap-2 text-sm text-amber-400 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                        <AlertTriangle className="w-4 h-4" />{splynxServices.error}
+                      </div>
+                    )}
+
+                    {/* Customer Info */}
+                    {splynxServices.customer && (
+                      <Card>
+                        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><User className="w-4 h-4" />Splynx Customer</CardTitle></CardHeader>
+                        <CardContent className="text-sm space-y-1">
+                          <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span>{splynxServices.customer.name}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Login</span><span className="font-mono">{splynxServices.customer.login}</span></div>
+                          {splynxServices.customer.email && <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span>{splynxServices.customer.email}</span></div>}
+                          <div className="flex justify-between"><span className="text-muted-foreground">Status</span>
+                            <Badge className={splynxServices.customer.status === "active" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}>
+                              {splynxServices.customer.status?.toUpperCase()}
+                            </Badge>
+                          </div>
+                          {splynxServices.billing && (
+                            <>
+                              <Separator className="my-2" />
+                              <div className="flex justify-between"><span className="text-muted-foreground">Billing Type</span><span className="capitalize">{splynxServices.billing.billing_type || "-"}</span></div>
+                              <div className="flex justify-between"><span className="text-muted-foreground">Payment Method</span><span className="capitalize">{splynxServices.billing.payment_method || "-"}</span></div>
+                              {splynxServices.billing.deposit !== undefined && <div className="flex justify-between"><span className="text-muted-foreground">Deposit</span><span>${splynxServices.billing.deposit}</span></div>}
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Services with Status Bars */}
+                    <Card data-testid="splynx-services-card">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2"><Zap className="w-4 h-4 text-blue-500" />Services ({splynxServices.services.length})</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        {splynxServices.services.length > 0 ? splynxServices.services.map((svc, i) => {
+                          const isActive = (svc.status || "active").toLowerCase() === "active";
+                          const isSuspended = ["disabled", "blocked", "stopped"].includes((svc.status || "").toLowerCase());
+                          return (
+                            <div
+                              key={svc.id || i}
+                              className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
+                                isActive
+                                  ? "bg-emerald-500/8 border-emerald-500/30"
+                                  : isSuspended
+                                  ? "bg-red-500/8 border-red-500/30"
+                                  : "bg-amber-500/8 border-amber-500/30"
+                              }`}
+                              data-testid={`splynx-service-${svc.id || i}`}
+                            >
+                              <div className="flex items-center gap-3">
+                                {isActive ? <Wifi className="w-5 h-5 text-emerald-400" /> : <WifiOff className="w-5 h-5 text-red-400" />}
+                                <div>
+                                  <p className={`text-sm font-medium ${isActive ? "text-emerald-300" : isSuspended ? "text-red-300" : "text-amber-300"}`}>
+                                    {svc.description || svc.tariff_name || svc.service_name || "Service"}
+                                  </p>
+                                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                    <Badge variant="outline" className="text-[9px] h-4 capitalize">{svc.service_type}</Badge>
+                                    {svc.tariff_name && <span>Plan: {svc.tariff_name}</span>}
+                                    {svc.login && <span>Login: {svc.login}</span>}
+                                    {svc.router && <span>Router: {svc.router}</span>}
+                                    {svc.sector && <span>Sector: {svc.sector}</span>}
+                                  </div>
+                                  {(svc.taking_ipv4 || svc.ipv4) && (
+                                    <p className="text-[10px] font-mono text-muted-foreground mt-0.5">IP: {svc.taking_ipv4 || svc.ipv4}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                {svc.price && <span className="font-mono text-sm font-bold">${svc.price}</span>}
+                                <Badge className={`text-[10px] ${
+                                  isActive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                  : isSuspended ? "bg-red-500/20 text-red-400 border-red-500/40"
+                                  : "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                                }`}>
+                                  {isActive ? "ACTIVE" : isSuspended ? "SUSPENDED - NON PAYMENT" : (svc.status || "UNKNOWN").toUpperCase()}
+                                </Badge>
+                              </div>
+                            </div>
+                          );
+                        }) : (
+                          <p className="text-center py-6 text-sm text-muted-foreground">No services found in Splynx for this customer</p>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Invoices */}
+                    {splynxServices.invoices && splynxServices.invoices.length > 0 && (
+                      <Card data-testid="splynx-invoices-card">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2"><CreditCard className="w-4 h-4 text-indigo-500" />Recent Invoices ({splynxServices.invoices.length})</CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Invoice #</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Paid</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {splynxServices.invoices.slice(0, 15).map((inv, i) => {
+                                const isPaid = inv.status === "paid" || parseFloat(inv.payment_amount || 0) >= parseFloat(inv.total || 0);
+                                return (
+                                  <TableRow key={inv.id || i}>
+                                    <TableCell className="font-mono text-xs">{inv.number || inv.id}</TableCell>
+                                    <TableCell className="text-xs">{inv.date_created || inv.date || "-"}</TableCell>
+                                    <TableCell className="font-mono">${parseFloat(inv.total || 0).toFixed(2)}</TableCell>
+                                    <TableCell>
+                                      <Badge className={isPaid ? "bg-emerald-500/20 text-emerald-400 text-[10px]" : "bg-red-500/20 text-red-400 text-[10px]"}>
+                                        {isPaid ? "Paid" : inv.status || "Unpaid"}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="font-mono text-xs">${parseFloat(inv.payment_amount || 0).toFixed(2)}</TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                )}
+
+                {!splynxLink?.linked && !splynxLoading && (
+                  <Card className="border-dashed">
+                    <CardContent className="py-8 text-center">
+                      <Wifi className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-30" />
+                      <p className="text-sm text-muted-foreground mb-1">No Splynx customer linked</p>
+                      <p className="text-xs text-muted-foreground">Enter the Splynx Customer ID above to link this client and view their services & billing status</p>
                     </CardContent>
                   </Card>
                 )}

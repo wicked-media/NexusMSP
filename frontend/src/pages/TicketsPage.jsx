@@ -686,18 +686,53 @@ export default function TicketsPage() {
   }
 
   // ============ LIST VIEW ============
+  const openCount = tickets.filter(t => t.status === "open").length;
+  const inProgressCount = tickets.filter(t => t.status === "in_progress").length;
+  const resolvedCount = tickets.filter(t => t.status === "resolved").length;
+  const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
+  const noNotesCount = tickets.filter(t => noteCounts[t.id] === 0 && t.status !== "closed" && t.status !== "resolved").length;
+  const avgResTime = tickets.length > 0 ? Math.round(tickets.reduce((a, t) => a + (t.total_time_minutes || 0), 0) / Math.max(1, tickets.filter(t => t.total_time_minutes > 0).length)) : 0;
+
   return (
-    <div className="space-y-4" data-testid="tickets-page">
+    <div className="space-y-5" data-testid="tickets-page">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Tickets</h1><p className="text-muted-foreground">{tickets.length} total tickets</p></div>
-        <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New Ticket</Button>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Service Desk</h1>
+          <p className="text-muted-foreground">{tickets.length} total tickets across {new Set(tickets.map(t => t.client_id)).size} clients</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New Ticket</Button>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-6 gap-3">
+        <Card className="cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => setStatusFilter("open")} data-testid="stat-open">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-blue-400">{openCount}</p><p className="text-[11px] text-muted-foreground">Open</p></div><div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center"><Circle className="w-5 h-5 text-blue-400" /></div></div></CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-yellow-500/40 transition-colors" onClick={() => setStatusFilter("in_progress")} data-testid="stat-progress">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-yellow-400">{inProgressCount}</p><p className="text-[11px] text-muted-foreground">In Progress</p></div><div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-yellow-400" /></div></div></CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-green-500/40 transition-colors" onClick={() => setStatusFilter("resolved")} data-testid="stat-resolved">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-green-400">{resolvedCount}</p><p className="text-[11px] text-muted-foreground">Resolved</p></div><div className="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-400" /></div></div></CardContent>
+        </Card>
+        <Card className={`${criticalCount > 0 ? "border-red-500/40" : ""}`} data-testid="stat-critical">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className={`text-2xl font-black ${criticalCount > 0 ? "text-red-400" : "text-muted-foreground"}`}>{criticalCount}</p><p className="text-[11px] text-muted-foreground">Critical</p></div><div className={`w-10 h-10 rounded-xl ${criticalCount > 0 ? "bg-red-500/10" : "bg-muted/30"} flex items-center justify-center`}><AlertCircle className={`w-5 h-5 ${criticalCount > 0 ? "text-red-400" : "text-muted-foreground"}`} /></div></div></CardContent>
+        </Card>
+        <Card className={`${noNotesCount > 0 ? "border-amber-500/40" : ""}`} data-testid="stat-no-notes">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className={`text-2xl font-black ${noNotesCount > 0 ? "text-amber-400" : "text-muted-foreground"}`}>{noNotesCount}</p><p className="text-[11px] text-muted-foreground">No Response</p></div><div className={`w-10 h-10 rounded-xl ${noNotesCount > 0 ? "bg-amber-500/10" : "bg-muted/30"} flex items-center justify-center`}><MessageSquare className={`w-5 h-5 ${noNotesCount > 0 ? "text-amber-400" : "text-muted-foreground"}`} /></div></div></CardContent>
+        </Card>
+        <Card data-testid="stat-avg-time">
+          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black">{avgResTime}m</p><p className="text-[11px] text-muted-foreground">Avg Time</p></div><div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center"><Timer className="w-5 h-5 text-cyan-400" /></div></div></CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search tickets..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
+          <Input className="pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[140px]" data-testid="status-filter"><SelectValue /></SelectTrigger>
@@ -707,43 +742,79 @@ export default function TicketsPage() {
           <SelectTrigger className="w-[140px]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
         </Select>
+        {(statusFilter !== "all" || priorityFilter !== "all") && (
+          <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); }} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
+        )}
+        <p className="text-sm text-muted-foreground ml-auto">{filteredTickets.length} of {tickets.length} tickets</p>
       </div>
 
-      {/* Ticket Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead>
-                <TableHead>Device</TableHead><TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead>Assigned</TableHead>
-                <TableHead>Created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredTickets.map(ticket => (
-                <TableRow key={ticket.id} className={`cursor-pointer hover:bg-muted/50 ${noteCounts[ticket.id] === 0 && ticket.status !== 'closed' && ticket.status !== 'resolved' ? 'bg-red-500/5' : ''}`} onClick={() => fetchTicketDetail(ticket)} data-testid={`ticket-row-${ticket.id}`}>
-                  <TableCell className="font-mono text-sm">
-                    <div className="flex items-center gap-1">
-                      {ticket.parent_id && <GitBranch className="w-3 h-3 text-indigo-400" />}
-                      {ticket.merged_into && <Merge className="w-3 h-3 text-red-400" />}
-                      {noteCounts[ticket.id] === 0 && ticket.status !== 'closed' && ticket.status !== 'resolved' && <AlertCircle className="w-3 h-3 text-red-500" />}
-                      {ticket.ticket_number}
+      {/* Ticket Cards */}
+      <div className="space-y-2">
+        {filteredTickets.map(ticket => {
+          const pc = priorityConfig[ticket.priority] || priorityConfig.medium;
+          const sc = statusConfig[ticket.status] || statusConfig.open;
+          const hasNoNotes = noteCounts[ticket.id] === 0 && ticket.status !== "closed" && ticket.status !== "resolved";
+          const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && ticket.status !== "closed" && ticket.status !== "resolved";
+          const priorityBorder = ticket.priority === "critical" ? "border-l-red-500" : ticket.priority === "high" ? "border-l-orange-500" : ticket.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
+
+          return (
+            <Card
+              key={ticket.id}
+              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""}`}
+              onClick={() => fetchTicketDetail(ticket)}
+              data-testid={`ticket-row-${ticket.id}`}
+            >
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-4">
+                  {/* Priority Dot + Ticket Number */}
+                  <div className="flex flex-col items-center gap-1 w-16 flex-shrink-0">
+                    <span className="font-mono text-xs text-muted-foreground">{ticket.ticket_number}</span>
+                    {ticket.parent_id && <GitBranch className="w-3 h-3 text-indigo-400" />}
+                    {ticket.merged_into && <Merge className="w-3 h-3 text-red-400" />}
+                  </div>
+
+                  {/* Main Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-medium text-sm truncate">{ticket.title}</p>
+                      {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
+                      {hasNoNotes && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">AWAITING RESPONSE</Badge>}
                     </div>
-                  </TableCell>
-                  <TableCell className="max-w-[250px] truncate">{ticket.title}</TableCell>
-                  <TableCell className="text-sm">{ticket.client_name}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{ticket.device_name || "-"}</TableCell>
-                  <TableCell><Badge className={priorityConfig[ticket.priority]?.class + " text-xs"}>{priorityConfig[ticket.priority]?.label}</Badge></TableCell>
-                  <TableCell><Badge variant="outline" className={statusConfig[ticket.status]?.class}>{statusConfig[ticket.status]?.label}</Badge></TableCell>
-                  <TableCell className="text-sm">{ticket.assigned_name || "Unassigned"}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{ticket.created_at && formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{ticket.client_name}</span>
+                      {ticket.device_name && <><span className="text-muted-foreground/30">|</span><span className="font-mono">{ticket.device_name}</span></>}
+                      {ticket.category && <><span className="text-muted-foreground/30">|</span><span className="capitalize">{ticket.category}</span></>}
+                      {(ticket.tags || []).length > 0 && <><span className="text-muted-foreground/30">|</span>{ticket.tags.slice(0, 2).map(t => <Badge key={t} variant="outline" className="text-[9px] h-4 px-1">{t}</Badge>)}</>}
+                    </div>
+                  </div>
+
+                  {/* Right Side Info */}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-right">
+                      <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
+                      <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
+                    </div>
+                    <div className="text-right w-20">
+                      <p className="text-xs text-muted-foreground">{ticket.assigned_name || <span className="text-red-400">Unassigned</span>}</p>
+                      <p className="text-[10px] text-muted-foreground/60">{ticket.created_at && formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}</p>
+                    </div>
+                    {ticket.total_time_minutes > 0 && (
+                      <div className="text-right w-12"><p className="font-mono text-xs">{ticket.total_time_minutes}m</p><p className="text-[9px] text-muted-foreground">time</p></div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        {filteredTickets.length === 0 && (
+          <Card className="border-dashed"><CardContent className="py-12 text-center">
+            <Ticket className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
+            <p className="text-muted-foreground mb-3">No tickets match your filters</p>
+            <Button onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); setSearchQuery(""); }}>Clear Filters</Button>
+          </CardContent></Card>
+        )}
+      </div>
 
       {/* CREATE TICKET DIALOG - Syncro/SuperOps Style */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
