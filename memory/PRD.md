@@ -41,6 +41,24 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Clients list: Subscription status column with shield icon and active/total count
 - API key securely stored, masked in GET responses
 
+### Splynx ISP Billing Integration (March 16, 2026)
+- Full Splynx API v2 integration (REST, Basic Auth with API key + secret)
+- Settings page: Splynx URL, API Key, API Secret configuration with credential masking
+- Test Connection button verifies API connectivity
+- Per-client Splynx Customer ID linking
+- Client Splynx tab: customer info, billing details, all services (internet, voice, recurring, bundle)
+- Service status bars: green (ACTIVE) / red (SUSPENDED - NON PAYMENT) / amber (PENDING)
+- Splynx invoice history per client with paid/unpaid status
+- Splynx overview endpoint aggregating service counts across all linked clients
+
+### Tickets Page Revamp (March 16, 2026)
+- Renamed to "Service Desk" with enriched header showing ticket count across clients
+- 6 clickable stat cards: Open, In Progress, Resolved, Critical, No Response, Avg Time
+- Card-based ticket list with priority color-coded left borders (red/orange/yellow/green)
+- SLA BREACH badge on overdue tickets, AWAITING RESPONSE badge on no-note tickets
+- Enhanced filter bar with Clear Filters button and ticket count display
+- Richer ticket card layout with category, tags, device info, assignee, and relative time
+
 ### Email Security Compliance Dashboard (March 16, 2026)
 - Dedicated DMARC Compliance page (/dmarc-compliance) with aggregate fleet posture
 - Overall compliance score ring with Critical/Poor/Fair/Good/Excellent labels
@@ -218,6 +236,7 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Password: admin123
 
 ## Testing Status
+- Iteration 23: 17/17 backend + all frontend passed (100%) - Splynx Integration + Tickets Revamp
 - Iteration 22: 11/11 backend + all frontend passed (100%) - DMARC Compliance Dashboard + Widget
 - Iteration 21: 21/21 backend + all frontend passed (100%) - Suped DMARC, Rentals, Vendors, Ticket Settings
 - Iteration 19: 27/27 regression tests passed (100%) - Post-refactoring full verification
@@ -226,6 +245,7 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 ## Integrations
 - **Stripe**: Implemented (payments)
 - **Suped**: Implemented (DMARC monitoring, email security subscriptions - needs real API key for live data)
+- **Splynx**: Implemented (ISP billing, customer services, invoice tracking - needs real Splynx instance URL + API credentials)
 - **Xero**: Configuration-ready (MOCKED - settings stored, webhook endpoint active)
 - **UniFi**: Configuration-ready (MOCKED - test-connection makes real HTTP, data from MongoDB)
 - **Microsoft Teams**: Configuration-ready (MOCKED - status sync UI ready)
