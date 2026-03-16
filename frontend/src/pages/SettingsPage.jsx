@@ -45,22 +45,26 @@ export default function SettingsPage() {
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
+  const [suped, setSuped] = useState({ api_key: "", configured: false });
+  const [supedSaving, setSupedSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
           axios.get(`${API}/settings/stripe`, { headers }),
+          axios.get(`${API}/settings/suped`, { headers }),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
         setXero(xeroRes.data);
         setStripe(stripeRes.data);
+        setSuped(supedRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -423,6 +427,49 @@ export default function SettingsPage() {
             } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
           }} data-testid="save-stripe-btn">
             <Save className="w-4 h-4 mr-2" />Save Stripe Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Suped DMARC Integration */}
+      <Card data-testid="suped-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-blue-500" />
+            <CardTitle>Suped DMARC Monitoring</CardTitle>
+          </div>
+          <CardDescription>Connect to Suped for DMARC reporting, SPF management, and email security monitoring across all clients</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={suped.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {suped.configured ? "Connected" : "Not Configured"}
+            </Badge>
+          </div>
+          <div>
+            <Label>Suped API Key</Label>
+            <Input
+              type="password"
+              value={suped.api_key}
+              onChange={(e) => setSuped({ ...suped, api_key: e.target.value })}
+              placeholder="Enter your Suped API key"
+              data-testid="suped-api-key"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Get your API key by contacting <a href="mailto:contact@suped.com" className="text-primary underline">contact@suped.com</a> or from your Suped dashboard at <a href="https://www.suped.com" target="_blank" rel="noreferrer" className="text-primary underline">suped.com</a>.
+            </p>
+          </div>
+          <Button onClick={async () => {
+            if (!suped.api_key) { toast.error("Please enter a Suped API key"); return; }
+            setSupedSaving(true);
+            try {
+              await axios.put(`${API}/settings/suped`, { api_key: suped.api_key }, { headers });
+              toast.success("Suped API key saved");
+              setSuped({ ...suped, configured: true });
+            } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+            finally { setSupedSaving(false); }
+          }} data-testid="save-suped-btn" disabled={supedSaving}>
+            {supedSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Suped Settings
           </Button>
         </CardContent>
       </Card>

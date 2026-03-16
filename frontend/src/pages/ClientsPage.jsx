@@ -15,7 +15,8 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
-  ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw
+  ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw,
+  ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck
 } from "lucide-react";
 
 const roleColors = {
@@ -40,6 +41,12 @@ export default function ClientsPage() {
   const [m365SyncDialog, setM365SyncDialog] = useState(false);
   const [m365TenantId, setM365TenantId] = useState("");
   const [m365Domain, setM365Domain] = useState("");
+  // Suped / Subscriptions
+  const [subscriptions, setSubscriptions] = useState(null);
+  const [supedServices, setSupedServices] = useState([]);
+  const [dmarcRecords, setDmarcRecords] = useState(null);
+  const [dmarcLoading, setDmarcLoading] = useState(false);
+  const [subsSummary, setSubsSummary] = useState({});
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -49,8 +56,14 @@ export default function ClientsPage() {
   const fetchClients = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/clients`, { headers });
+      const [res, subsRes, servicesRes] = await Promise.all([
+        axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/clients/subscriptions/summary`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/suped/services`, { headers }).catch(() => ({ data: [] })),
+      ]);
       setClients(res.data);
+      setSubsSummary(subsRes.data);
+      setSupedServices(servicesRes.data);
     } catch { toast.error("Failed to fetch clients"); }
     finally { setLoading(false); }
   };
@@ -59,14 +72,18 @@ export default function ClientsPage() {
 
   const fetchClientDetail = async (client) => {
     setViewingClient(client);
+    setSubscriptions(null);
+    setDmarcRecords(null);
     try {
-      const [detailRes, m365Res] = await Promise.all([
+      const [detailRes, m365Res, subsRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
+        axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
       setM365Config(m365Res.data.config || null);
+      setSubscriptions(subsRes.data);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -80,6 +97,33 @@ export default function ClientsPage() {
       setM365SyncDialog(false);
       fetchClientDetail(viewingClient);
     } catch { toast.error("Failed to sync M365"); }
+  };
+
+  const handleSaveSubscriptions = async () => {
+    if (!viewingClient || !subscriptions) return;
+    try {
+      await axios.put(`${API}/clients/${viewingClient.id}/subscriptions`, subscriptions, { headers });
+      toast.success("Subscriptions updated");
+      fetchClients();
+    } catch { toast.error("Failed to save subscriptions"); }
+  };
+
+  const toggleService = (key) => {
+    if (!subscriptions) return;
+    setSubscriptions({
+      ...subscriptions,
+      services: { ...subscriptions.services, [key]: !subscriptions.services[key] }
+    });
+  };
+
+  const fetchDmarcRecords = async (days = 30) => {
+    if (!viewingClient) return;
+    setDmarcLoading(true);
+    try {
+      const res = await axios.get(`${API}/clients/${viewingClient.id}/dmarc-records?days=${days}`, { headers });
+      setDmarcRecords(res.data);
+    } catch { toast.error("Failed to fetch DMARC records"); }
+    finally { setDmarcLoading(false); }
   };
 
   const handleCreateClient = async () => {
@@ -205,12 +249,13 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-5 w-full">
+              <TabsList className="grid grid-cols-6 w-full">
                 <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts ({contacts.length})</TabsTrigger>
                 <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
                 <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
                 <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts ({contracts.length})</TabsTrigger>
-                <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />Microsoft 365</TabsTrigger>
+                <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subscriptions</TabsTrigger>
+                <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />M365</TabsTrigger>
               </TabsList>
 
               {/* CONTACTS TAB */}
@@ -311,6 +356,109 @@ export default function ClientsPage() {
                     </TableBody>
                   </Table>
                 ) : <p className="text-center py-8 text-muted-foreground">No contracts</p>}
+              </TabsContent>
+
+
+              {/* SUBSCRIPTIONS TAB */}
+              <TabsContent value="subscriptions" className="space-y-4">
+                {/* Suped Org ID */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">Suped Organization ID</Label>
+                    <Input
+                      value={subscriptions?.suped_org_id || ""}
+                      onChange={e => setSubscriptions({ ...subscriptions, suped_org_id: e.target.value })}
+                      placeholder="Enter Suped Org ID to enable DMARC reporting"
+                      data-testid="suped-org-id-input"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <Button size="sm" className="mt-5" onClick={handleSaveSubscriptions} data-testid="save-subscriptions-btn">Save</Button>
+                  {subscriptions?.suped_org_id && (
+                    <Button size="sm" variant="outline" className="mt-5" onClick={() => fetchDmarcRecords()} data-testid="fetch-dmarc-btn">
+                      <MailCheck className="w-3 h-3 mr-1" />Fetch DMARC
+                    </Button>
+                  )}
+                </div>
+
+                {/* Service Subscription Bars */}
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4" />Email Security Subscriptions</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    {supedServices.map(svc => {
+                      const isActive = subscriptions?.services?.[svc.key] || false;
+                      return (
+                        <div
+                          key={svc.key}
+                          className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
+                            isActive
+                              ? "bg-emerald-500/10 border-emerald-500/40 hover:bg-emerald-500/15"
+                              : "bg-red-500/8 border-red-500/30 hover:bg-red-500/12"
+                          }`}
+                          onClick={() => toggleService(svc.key)}
+                          data-testid={`subscription-${svc.key}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {isActive
+                              ? <CheckCircle className="w-5 h-5 text-emerald-400" />
+                              : <XCircle className="w-5 h-5 text-red-400" />
+                            }
+                            <div>
+                              <p className={`text-sm font-medium ${isActive ? "text-emerald-300" : "text-red-300"}`}>{svc.name}</p>
+                              <p className="text-[11px] text-muted-foreground">{svc.description}</p>
+                            </div>
+                          </div>
+                          <Badge className={`text-[10px] ${isActive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : "bg-red-500/20 text-red-400 border-red-500/40"}`}>
+                            {isActive ? "ACTIVE" : "NOT ACTIVE"}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                    <div className="pt-2 flex justify-end">
+                      <Button size="sm" onClick={handleSaveSubscriptions} data-testid="save-subs-bottom-btn">Save Changes</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* DMARC Report Data */}
+                {dmarcLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
+                {dmarcRecords && !dmarcLoading && (
+                  <Card data-testid="dmarc-report-card">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2"><MailCheck className="w-4 h-4 text-blue-500" />DMARC Report ({dmarcRecords.summary?.period_days || 30} days)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {dmarcRecords.message ? (
+                        <div className="flex items-center gap-2 text-sm text-amber-400 py-4">
+                          <AlertCircle className="w-4 h-4" />
+                          {dmarcRecords.message}
+                        </div>
+                      ) : dmarcRecords.summary ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="bg-muted/30 rounded-lg p-3"><p className="text-xs text-muted-foreground">Total Emails</p><p className="text-xl font-bold">{dmarcRecords.summary.total_emails?.toLocaleString()}</p></div>
+                            <div className="bg-emerald-500/10 rounded-lg p-3"><p className="text-xs text-emerald-400">Authorized</p><p className="text-xl font-bold text-emerald-400">{dmarcRecords.summary.authorized?.toLocaleString()}</p></div>
+                            <div className="bg-red-500/10 rounded-lg p-3"><p className="text-xs text-red-400">Rejected</p><p className="text-xl font-bold text-red-400">{dmarcRecords.summary.rejected?.toLocaleString()}</p></div>
+                            <div className="bg-amber-500/10 rounded-lg p-3"><p className="text-xs text-amber-400">Compliance</p><p className="text-xl font-bold text-amber-400">{dmarcRecords.summary.compliance_rate}%</p></div>
+                          </div>
+                          {dmarcRecords.summary.top_sources?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground mb-2">Top Sending Sources</p>
+                              {dmarcRecords.summary.top_sources.map((s, i) => (
+                                <div key={i} className="flex items-center justify-between py-1 text-sm">
+                                  <span className="text-muted-foreground">{s.source}</span>
+                                  <span className="font-mono">{s.count.toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-center py-6 text-sm text-muted-foreground">No DMARC records found for the selected period</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
 
               {/* MICROSOFT 365 TAB */}
@@ -448,8 +596,8 @@ export default function ClientsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Client</TableHead><TableHead>Contacts</TableHead><TableHead>Industry</TableHead>
-                <TableHead>Contract</TableHead><TableHead>MRR</TableHead><TableHead>Devices</TableHead>
-                <TableHead>Tickets</TableHead><TableHead>Actions</TableHead>
+                <TableHead>Contract</TableHead><TableHead>MRR</TableHead><TableHead>Subscriptions</TableHead>
+                <TableHead>Devices</TableHead><TableHead>Tickets</TableHead><TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -472,6 +620,20 @@ export default function ClientsPage() {
                   <TableCell className="text-sm capitalize">{client.industry || '-'}</TableCell>
                   <TableCell><Badge variant="outline" className="capitalize">{client.contract_type}</Badge></TableCell>
                   <TableCell className="font-mono text-green-500">${client.mrr?.toLocaleString()}</TableCell>
+                  <TableCell>
+                    {(() => {
+                      const sub = subsSummary[client.id];
+                      if (!sub) return <span className="text-xs text-muted-foreground">-</span>;
+                      const active = sub.active_count;
+                      const total = sub.total;
+                      return (
+                        <div className="flex items-center gap-1.5" data-testid={`subs-status-${client.id}`}>
+                          {active > 0 ? <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> : <ShieldX className="w-3.5 h-3.5 text-red-400" />}
+                          <span className={`text-xs font-medium ${active > 0 ? "text-emerald-400" : "text-red-400"}`}>{active}/{total}</span>
+                        </div>
+                      );
+                    })()}
+                  </TableCell>
                   <TableCell>{client.device_count || 0}</TableCell>
                   <TableCell>{client.ticket_count || 0}</TableCell>
                   <TableCell>
