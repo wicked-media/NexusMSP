@@ -29,7 +29,45 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Scheduling
 - Scripting (UI placeholder)
 
-## Latest Session Implementations (March 2026 - Session 2)
+## Latest Session Implementations (March 2026 - Session 3)
+
+### Suped DMARC Integration (March 16, 2026)
+- Integrated Suped API (https://www.suped.com/api) for DMARC monitoring and email security
+- 6 tracked services: DMARC Monitoring, Hosted DMARC, Hosted SPF, Hosted MTA-STS, SPF Flattening, Blocklist Monitoring
+- Client Subscriptions tab with green (active) / red (not active) toggle bars per service
+- Suped Organization ID per client for DMARC record fetching
+- DMARC records proxy endpoint with summary stats (total emails, authorized, rejected, compliance rate, top sources)
+- Settings page: Suped API key configuration with masking
+- Clients list: Subscription status column with shield icon and active/total count
+- API key securely stored, masked in GET responses
+
+### Phone Rentals & Sales (March 16, 2026)
+- Full RentalsPage.jsx with Agreements tab and Device Inventory tab
+- Three agreement types: Rental (monthly payments), Buy Outright (one-time purchase), Lease to Own
+- Device inventory tracking: Yealink phone models, serial numbers, MAC addresses, firmware, condition
+- Payment recording with multiple methods, deposit tracking, progress bars
+- Device return processing with condition assessment
+- Stats dashboard: total devices, available, active rentals, overdue, revenue
+
+### Vendor Management (March 16, 2026)
+- Full VendorsPage.jsx with CRUD, categories, and detail view
+- Vendor fields: name, contact, email, phone, address, ABN, tax ID, payment terms, website
+- 8 vendor categories (general, hardware, software, telecom, networking, cloud, security, consulting)
+- Category-based filtering and search
+- Vendor detail with purchase order history
+
+### Ticket Category & Issue Settings (March 16, 2026)
+- TicketSettingsPage.jsx for managing ticket categories and issue type dropdowns (Syncro-style)
+- Expandable accordion categories with color-coded issue types
+- Issue types with priority levels (critical, high, medium, low)
+- 8 default categories with 45+ built-in issue types
+- CRUD for categories and issue types with icon/color customization
+
+### Networking Page Enhancement (March 16, 2026)
+- Dashboard section: site bandwidth table, active alerts, offline devices, firmware distribution
+- Clickable site rows to drill into site details
+
+## Previous Session Implementations (March 2026 - Session 2)
 
 ### Cross-Entity Activity Logging & Audit Trail
 - Unified `activity_logs` collection recording all actions across tickets, invoices, devices
@@ -138,6 +176,11 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - achievement_definitions (custom admin-created badges)
 - m365_users (synced Microsoft 365 users per client)
 - teams_status (Teams status per user)
+- client_subscriptions (Suped service subscriptions per client)
+- vendors (vendor management)
+- ticket_categories (ticket category/issue type configuration)
+- rentals (phone rental agreements)
+- rental_devices (phone device inventory)
 
 ## Key API Endpoints
 - `/api/activity-logs` - Admin-only activity trail (filter by entity_type, entity_id, technician_id)
@@ -170,6 +213,7 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 
 ## Integrations
 - **Stripe**: Implemented (payments)
+- **Suped**: Implemented (DMARC monitoring, email security subscriptions - needs real API key for live data)
 - **Xero**: Configuration-ready (MOCKED - settings stored, webhook endpoint active)
 - **UniFi**: Configuration-ready (MOCKED - test-connection makes real HTTP, data from MongoDB)
 - **Microsoft Teams**: Configuration-ready (MOCKED - status sync UI ready)
@@ -216,6 +260,8 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 │   │   ├── admin.py, infrastructure.py, yeastar.py
 │   │   ├── activity_logs.py, achievements.py
 │   │   ├── technicians_profile.py, microsoft_config.py
+│   │   ├── vendors.py, rentals.py, ticket_categories.py
+│   │   └── suped.py           # Suped DMARC integration
 │   └── services/
 │       ├── activity.py       # Activity logging + ticket audit
 │       ├── integrations.py   # Service classes (Pax8, Domotz, O365, Acronis)
