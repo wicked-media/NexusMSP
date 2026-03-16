@@ -40,6 +40,7 @@ import LeaderboardPage from "@/pages/LeaderboardPage";
 import RentalsPage from "@/pages/RentalsPage";
 import VendorsPage from "@/pages/VendorsPage";
 import TicketSettingsPage from "@/pages/TicketSettingsPage";
+import DmarcCompliancePage from "@/pages/DmarcCompliancePage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -500,6 +501,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <TicketSettingsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dmarc-compliance"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DmarcCompliancePage />
                 </MainLayout>
               </ProtectedRoute>
             }

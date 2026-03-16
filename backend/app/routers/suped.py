@@ -165,3 +165,69 @@ async def get_client_dmarc_records(
 @router.get("/suped/services")
 async def get_suped_services(current_user: dict = Depends(get_current_user)):
     return SUPED_SERVICES
+
+@router.get("/suped/compliance-dashboard")
+async def get_compliance_dashboard(current_user: dict = Depends(get_current_user)):
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    all_subs = await db.client_subscriptions.find({}, {"_id": 0}).to_list(1000)
+    subs_map = {s["client_id"]: s for s in all_subs}
+
+    total_clients = len(clients)
+    fully_protected = 0
+    partially_protected = 0
+    unprotected = 0
+    at_risk = []
+    service_coverage = {s["key"]: {"name": s["name"], "active": 0, "total": total_clients} for s in SUPED_SERVICES}
+    client_details = []
+
+    for c in clients:
+        sub = subs_map.get(c["id"])
+        services = sub.get("services", {}) if sub else {}
+        active_count = sum(1 for v in services.values() if v)
+        total_services = len(SUPED_SERVICES)
+        score = round((active_count / total_services) * 100) if total_services > 0 else 0
+
+        detail = {
+            "client_id": c["id"],
+            "client_name": c["name"],
+            "active_services": active_count,
+            "total_services": total_services,
+            "score": score,
+            "has_suped": bool(sub and sub.get("suped_org_id")),
+            "services": services,
+        }
+        client_details.append(detail)
+
+        if active_count == total_services:
+            fully_protected += 1
+        elif active_count > 0:
+            partially_protected += 1
+        else:
+            unprotected += 1
+
+        if active_count < total_services:
+            at_risk.append(detail)
+
+        for s in SUPED_SERVICES:
+            if services.get(s["key"]):
+                service_coverage[s["key"]]["active"] += 1
+
+    overall_score = 0
+    if total_clients > 0:
+        total_possible = total_clients * len(SUPED_SERVICES)
+        total_active = sum(d["active_services"] for d in client_details)
+        overall_score = round((total_active / total_possible) * 100) if total_possible > 0 else 0
+
+    at_risk.sort(key=lambda x: x["score"])
+
+    return {
+        "overall_score": overall_score,
+        "total_clients": total_clients,
+        "fully_protected": fully_protected,
+        "partially_protected": partially_protected,
+        "unprotected": unprotected,
+        "at_risk": at_risk[:20],
+        "service_coverage": list(service_coverage.values()),
+        "client_details": sorted(client_details, key=lambda x: x["score"]),
+    }
+

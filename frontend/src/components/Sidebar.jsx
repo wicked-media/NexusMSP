@@ -34,7 +34,8 @@ import {
   Trophy,
   Phone,
   Building2,
-  Tags
+  Tags,
+  ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,6 +59,7 @@ const navGroups = [
     items: [
       { path: "/devices", icon: Monitor, label: "Devices" },
       { path: "/networking", icon: Wifi, label: "Networking" },
+      { path: "/dmarc-compliance", icon: ShieldCheck, label: "Email Security" },
       { path: "/assets", icon: Package, label: "Assets" },
       { path: "/scripting", icon: Terminal, label: "Scripting" },
       { path: "/remote-access", icon: Laptop, label: "Remote Access" },

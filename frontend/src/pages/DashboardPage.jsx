@@ -12,7 +12,7 @@ import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownRight,
   RefreshCw, MessageSquare, Activity, Package, ShoppingCart, AlertCircle, CheckCircle, XCircle,
   FileText, CreditCard, Zap, Server, Laptop, Wifi, Shield, ShieldAlert, HardDrive, Cpu, MemoryStick,
-  Download, ExternalLink, Plus
+  Download, ExternalLink, Plus, ShieldCheck, ShieldX
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar
@@ -53,6 +53,7 @@ export default function DashboardPage() {
   const [activityFeed, setActivityFeed] = useState([]);
   const [devices, setDevices] = useState([]);
   const [deviceStats, setDeviceStats] = useState({});
+  const [compliance, setCompliance] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -60,7 +61,7 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes, devStatsRes] = await Promise.all([
+      const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes, devStatsRes, complianceRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
         axios.get(`${API}/dashboard/ticket-trends`, { headers }),
         axios.get(`${API}/dashboard/device-health`, { headers }),
@@ -70,6 +71,7 @@ export default function DashboardPage() {
         axios.get(`${API}/dashboard/enhanced-stats`, { headers }),
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/devices/stats/summary`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/suped/compliance-dashboard`, { headers }).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
       setEnhancedStats(enhancedRes.data);
@@ -80,6 +82,7 @@ export default function DashboardPage() {
       setActivityFeed(activityRes.data);
       setDevices(devicesRes.data);
       setDeviceStats(devStatsRes.data);
+      setCompliance(complianceRes.data);
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
     } finally {
@@ -328,9 +331,9 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Alerts + Activity */}
+      {/* Alerts + Email Security + Activity */}
       <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-5">
+        <Card className="col-span-4">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" />Active Alerts</CardTitle>
             <Badge variant={alerts.length > 0 ? "destructive" : "secondary"} className="text-[10px]">{alerts.length}</Badge>
@@ -358,7 +361,70 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-7">
+        {/* Email Security Compliance Widget */}
+        <Card className="col-span-3 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate("/dmarc-compliance")} data-testid="email-security-widget">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-base font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-blue-500" />Email Security</CardTitle>
+            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {compliance ? (
+              <div className="space-y-4">
+                {/* Score Ring */}
+                <div className="flex items-center justify-center">
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center border-4 ${
+                    compliance.overall_score >= 80 ? "border-emerald-500/40" : compliance.overall_score >= 50 ? "border-amber-500/40" : "border-red-500/40"
+                  }`}>
+                    <p className={`text-2xl font-black ${
+                      compliance.overall_score >= 80 ? "text-emerald-400" : compliance.overall_score >= 50 ? "text-amber-400" : "text-red-400"
+                    }`}>{compliance.overall_score}%</p>
+                  </div>
+                </div>
+                <p className="text-center text-xs text-muted-foreground">Fleet Compliance</p>
+
+                <Separator />
+
+                {/* Quick Stats */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs">Protected</span></div>
+                    <span className="text-sm font-bold text-emerald-400">{compliance.fully_protected}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /><span className="text-xs">Partial</span></div>
+                    <span className="text-sm font-bold text-amber-400">{compliance.partially_protected}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2"><ShieldX className="w-3.5 h-3.5 text-red-400" /><span className="text-xs">Unprotected</span></div>
+                    <span className="text-sm font-bold text-red-400">{compliance.unprotected}</span>
+                  </div>
+                </div>
+
+                {compliance.at_risk.length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">At Risk</p>
+                      {compliance.at_risk.slice(0, 3).map(c => (
+                        <div key={c.client_id} className="flex items-center justify-between py-1">
+                          <span className="text-xs truncate max-w-[120px]">{c.client_name}</span>
+                          <Badge className={`text-[9px] ${c.score === 0 ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}>{c.score}%</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Shield className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-xs">No compliance data</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="col-span-5">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Activity Feed</CardTitle>
             <Badge variant="outline" className="text-[10px] text-muted-foreground">Live</Badge>
