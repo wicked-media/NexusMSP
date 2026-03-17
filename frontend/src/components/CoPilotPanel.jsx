@@ -6,8 +6,46 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  MessageCircle, Send, X, Loader2, Minimize2, Maximize2, Sparkles, Copy, Check, Bot
+  MessageCircle, Send, X, Loader2, Minimize2, Maximize2, Sparkles, Copy, Check, Bot, Code
 } from "lucide-react";
+
+// Renders text with code blocks properly formatted
+function RenderContent({ content }) {
+  const parts = content.split(/(```[\s\S]*?```)/g);
+  return (
+    <div className="space-y-2">
+      {parts.map((part, i) => {
+        if (part.startsWith("```")) {
+          const lines = part.slice(3, -3).split("\n");
+          const lang = lines[0].trim();
+          const code = lang ? lines.slice(1).join("\n") : lines.join("\n");
+          return (
+            <div key={i} className="relative group">
+              {lang && <span className="absolute top-1 left-2 text-[9px] text-muted-foreground/60 uppercase">{lang}</span>}
+              <pre className="bg-background/80 border rounded-md p-3 pt-5 text-xs font-mono overflow-x-auto whitespace-pre-wrap"><code>{code}</code></pre>
+              <button className="absolute top-1 right-1 p-1 rounded bg-muted/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(code); }}>
+                <Copy className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        }
+        // Render inline code with backticks
+        const inlineParts = part.split(/(`[^`]+`)/g);
+        return (
+          <div key={i} className="whitespace-pre-wrap break-words">
+            {inlineParts.map((ip, j) => {
+              if (ip.startsWith("`") && ip.endsWith("`")) {
+                return <code key={j} className="bg-background/80 border px-1 py-0.5 rounded text-xs font-mono">{ip.slice(1, -1)}</code>;
+              }
+              return <span key={j}>{ip}</span>;
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function CoPilotPanel({ ticket, device }) {
   const { token } = useAuth();
@@ -138,7 +176,7 @@ export default function CoPilotPanel({ ticket, device }) {
                   ? "bg-purple-600/20 text-foreground"
                   : "bg-muted/50 text-foreground"
               }`}>
-                <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                <RenderContent content={msg.content} />
                 {msg.role === "assistant" && (
                   <Button variant="ghost" size="sm" className="h-5 px-1 mt-1 text-[9px] text-muted-foreground"
                     onClick={() => copyText(msg.content, i)}>

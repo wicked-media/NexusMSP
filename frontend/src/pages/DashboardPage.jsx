@@ -1,18 +1,20 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownRight,
   RefreshCw, MessageSquare, Activity, Package, ShoppingCart, AlertCircle, CheckCircle, XCircle,
   FileText, CreditCard, Zap, Server, Laptop, Wifi, Shield, ShieldAlert, HardDrive, Cpu, MemoryStick,
-  Download, ExternalLink, Plus, ShieldCheck, ShieldX
+  Download, ExternalLink, Plus, ShieldCheck, ShieldX, Search, Terminal, UserCog, CalendarDays
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar
@@ -42,7 +44,7 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, iconBg, iconCol
 );
 
 export default function DashboardPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [enhancedStats, setEnhancedStats] = useState(null);
@@ -55,11 +57,14 @@ export default function DashboardPage() {
   const [deviceStats, setDeviceStats] = useState({});
   const [compliance, setCompliance] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef(null);
+  const autoRefreshRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchDashboardData = async () => {
-    setLoading(true);
     try {
       const [statsRes, trendsRes, healthRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes, devStatsRes, complianceRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
@@ -78,7 +83,7 @@ export default function DashboardPage() {
       setTicketTrends(trendsRes.data);
       setDeviceHealth(healthRes.data);
       setAlerts(alertsRes.data);
-      setTickets(ticketsRes.data.slice(0, 8));
+      setTickets(ticketsRes.data.slice(0, 10));
       setActivityFeed(activityRes.data);
       setDevices(devicesRes.data);
       setDeviceStats(devStatsRes.data);
@@ -91,6 +96,24 @@ export default function DashboardPage() {
   };
 
   useEffect(() => { fetchDashboardData(); }, []);
+
+  // Auto-refresh every 60s
+  useEffect(() => {
+    autoRefreshRef.current = setInterval(() => { fetchDashboardData(); }, 60000);
+    return () => clearInterval(autoRefreshRef.current);
+  }, []);
+
+  // Keyboard shortcut for quick search
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSearchOpen(true); }
+      if (e.key === 'Escape') setSearchOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => { if (searchOpen && searchRef.current) searchRef.current.focus(); }, [searchOpen]);
 
   if (loading || !stats) {
     return (
@@ -110,21 +133,81 @@ export default function DashboardPage() {
   const needsPatching = devices.filter(d => (d.pending_patches || 0) > 0);
   const lowCompliance = devices.filter(d => d.compliance_score != null && d.compliance_score < 70);
 
+  // SLA breach countdown - tickets approaching SLA
+  const slaTickets = tickets.filter(t => t.sla_due).map(t => {
+    const due = new Date(t.sla_due);
+    const now = new Date();
+    const diff = due - now;
+    const hours = Math.floor(diff / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    return { ...t, sla_remaining: diff, sla_hours: hours, sla_mins: mins, sla_breached: diff < 0 };
+  }).sort((a, b) => a.sla_remaining - b.sla_remaining).slice(0, 5);
+
   const priorityColors = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
   const statusDot = { open: "bg-blue-500", in_progress: "bg-amber-500", resolved: "bg-emerald-500", closed: "bg-gray-400" };
 
+  // Quick search results
+  const quickSearchResults = searchQuery ? [
+    ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: "/tickets" })),
+    ...devices.filter(d => d.name?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(d => ({ type: "device", label: d.name, sub: d.client_name, path: `/devices/${d.id}` })),
+  ] : [];
+
   return (
     <div className="space-y-6" data-testid="dashboard-page">
-      {/* Header */}
+      {/* Quick Search Modal */}
+      {searchOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-[20vh]" onClick={() => setSearchOpen(false)}>
+          <div className="bg-card border rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()} data-testid="quick-search-modal">
+            <div className="flex items-center gap-3 px-4 py-3 border-b">
+              <Search className="w-5 h-5 text-muted-foreground" />
+              <Input ref={searchRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search tickets, devices, clients..."
+                className="border-0 shadow-none focus-visible:ring-0 text-base" />
+              <kbd className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">ESC</kbd>
+            </div>
+            {searchQuery && (
+              <div className="p-2 max-h-64 overflow-y-auto">
+                {quickSearchResults.length > 0 ? quickSearchResults.map((r, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(r.path); setSearchOpen(false); }}>
+                    {r.type === "ticket" ? <Ticket className="w-4 h-4 text-blue-500" /> : <Monitor className="w-4 h-4 text-emerald-500" />}
+                    <div><p className="text-sm font-medium">{r.label}</p><p className="text-[10px] text-muted-foreground">{r.sub}</p></div>
+                  </div>
+                )) : <p className="text-sm text-muted-foreground text-center py-4">No results</p>}
+              </div>
+            )}
+            {!searchQuery && (
+              <div className="p-3 space-y-1">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider px-2 mb-2">Quick Actions</p>
+                {[
+                  { icon: Ticket, label: "New Ticket", path: "/tickets", color: "text-blue-500" },
+                  { icon: Users, label: "New Client", path: "/clients", color: "text-emerald-500" },
+                  { icon: Monitor, label: "Add Device", path: "/devices", color: "text-purple-500" },
+                  { icon: Terminal, label: "Run Script", path: "/scripting", color: "text-orange-500" },
+                  { icon: CalendarDays, label: "Schedule", path: "/scheduling", color: "text-cyan-500" },
+                  { icon: UserCog, label: "Technicians", path: "/technicians", color: "text-pink-500" },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
+                    <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Header with Quick Actions */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">MSP Command Center</p>
+          <p className="text-muted-foreground">Welcome back, {user?.name || "Admin"}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/devices")}><Plus className="w-4 h-4 mr-1" />Add Device</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/tickets")}><Ticket className="w-4 h-4 mr-1" />New Ticket</Button>
-          <Button variant="outline" size="sm" onClick={fetchDashboardData} data-testid="refresh-dashboard"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)} className="gap-2" data-testid="quick-search-btn">
+            <Search className="w-4 h-4" /><span className="hidden md:inline">Search</span><kbd className="text-[9px] text-muted-foreground bg-muted px-1 rounded ml-1">Ctrl+K</kbd>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/tickets")}><Plus className="w-4 h-4 mr-1" />Ticket</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/devices")}><Plus className="w-4 h-4 mr-1" />Device</Button>
+          <Button variant="outline" size="sm" onClick={() => fetchDashboardData()} data-testid="refresh-dashboard"><RefreshCw className="w-4 h-4" /></Button>
         </div>
       </div>
 
@@ -167,8 +250,45 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Device Fleet Overview + Charts */}
+      {/* SLA Countdown + Device Fleet */}
       <div className="grid grid-cols-12 gap-4">
+        {/* SLA Countdown Widget */}
+        <Card className="col-span-4" data-testid="sla-countdown-widget">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-base font-semibold flex items-center gap-2"><Clock className="w-4 h-4 text-orange-500" />SLA Countdown</CardTitle>
+            <Badge variant="outline" className="text-[10px]">{slaTickets.length} approaching</Badge>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[220px]">
+              {slaTickets.length > 0 ? (
+                <div className="space-y-3">
+                  {slaTickets.map(t => {
+                    const pct = t.sla_breached ? 100 : Math.max(0, Math.min(100, 100 - (t.sla_remaining / (4 * 3600000)) * 100));
+                    const color = t.sla_breached ? "text-red-500" : t.sla_hours < 1 ? "text-orange-500" : t.sla_hours < 4 ? "text-amber-500" : "text-emerald-500";
+                    return (
+                      <div key={t.id} className="space-y-1 cursor-pointer hover:bg-muted/50 p-2 rounded-lg" onClick={() => navigate("/tickets")} data-testid={`sla-ticket-${t.id}`}>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium truncate max-w-[200px]">{t.title}</p>
+                          <span className={`text-xs font-mono font-bold ${color}`}>
+                            {t.sla_breached ? "BREACHED" : `${t.sla_hours}h ${t.sla_mins}m`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground">{t.ticket_number}</span>
+                          <Badge className={`${priorityColors[t.priority]} text-[9px]`}>{t.priority}</Badge>
+                        </div>
+                        <Progress value={pct} className="h-1" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">All SLAs on track</p></div>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
         {/* Device Fleet */}
         <Card className="col-span-8">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
@@ -190,12 +310,7 @@ export default function DashboardPage() {
                   const usageColor = v => v >= 90 ? "text-red-500 font-bold" : v >= 70 ? "text-amber-500" : "text-emerald-500";
                   return (
                     <TableRow key={d.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`dash-device-${d.id}`}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <DevIcon className="w-4 h-4 text-muted-foreground" />
-                          <div><p className="font-medium text-sm">{d.name}</p><p className="text-[10px] text-muted-foreground">{d.os}</p></div>
-                        </div>
-                      </TableCell>
+                      <TableCell><div className="flex items-center gap-2"><DevIcon className="w-4 h-4 text-muted-foreground" /><div><p className="font-medium text-sm">{d.name}</p><p className="text-[10px] text-muted-foreground">{d.os}</p></div></div></TableCell>
                       <TableCell className="text-xs">{d.client_name}</TableCell>
                       <TableCell className={`text-center text-xs font-mono ${usageColor(d.cpu_usage || 0)}`}>{Math.round(d.cpu_usage || 0)}%</TableCell>
                       <TableCell className={`text-center text-xs font-mono ${usageColor(d.memory_usage || 0)}`}>{Math.round(d.memory_usage || 0)}%</TableCell>
@@ -207,9 +322,7 @@ export default function DashboardPage() {
                           </Badge>
                         ) : "-"}
                       </TableCell>
-                      <TableCell>
-                        <Badge className={`text-[9px] capitalize ${d.status === "online" ? "bg-emerald-500/10 text-emerald-500" : d.status === "warning" ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"}`}>{d.status}</Badge>
-                      </TableCell>
+                      <TableCell><Badge className={`text-[9px] capitalize ${d.status === "online" ? "bg-emerald-500/10 text-emerald-500" : d.status === "warning" ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"}`}>{d.status}</Badge></TableCell>
                     </TableRow>
                   );
                 })}
@@ -217,23 +330,23 @@ export default function DashboardPage() {
             </Table>
           </CardContent>
         </Card>
+      </div>
 
-        {/* System Health Donut + Fleet Breakdown */}
+      {/* Charts Row */}
+      <div className="grid grid-cols-12 gap-4">
+        {/* System Health + Fleet Breakdown */}
         <div className="col-span-4 space-y-4">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-base font-semibold">System Health</CardTitle></CardHeader>
             <CardContent>
-              <div className="h-[160px]">
+              <div className="h-[150px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie
-                      data={[
-                        { name: "Online", value: onlineDevices.length, color: "#22C55E" },
-                        { name: "Warning", value: warningDevices.length, color: "#EAB308" },
-                        { name: "Offline", value: offlineDevices.length, color: "#EF4444" }
-                      ]}
-                      cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={4} dataKey="value"
-                    >
+                    <Pie data={[
+                      { name: "Online", value: onlineDevices.length, color: "#22C55E" },
+                      { name: "Warning", value: warningDevices.length, color: "#EAB308" },
+                      { name: "Offline", value: offlineDevices.length, color: "#EF4444" }
+                    ]} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={4} dataKey="value">
                       {[{ color: "#22C55E" }, { color: "#EAB308" }, { color: "#EF4444" }].map((e, i) => <Cell key={i} fill={e.color} />)}
                     </Pie>
                     <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
@@ -245,46 +358,37 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-amber-500" /><span className="text-xs">{warningDevices.length} Warning</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span className="text-xs">{offlineDevices.length} Offline</span></div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base font-semibold">Fleet Breakdown</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {[
-                { label: "Servers", icon: Server, count: devices.filter(d => d.device_type === "server").length, color: "text-blue-500" },
-                { label: "Workstations", icon: Monitor, count: devices.filter(d => d.device_type === "workstation").length, color: "text-purple-500" },
-                { label: "Laptops", icon: Laptop, count: devices.filter(d => d.device_type === "laptop").length, color: "text-cyan-500" },
-                { label: "Network", icon: Wifi, count: devices.filter(d => d.device_type === "network").length, color: "text-orange-500" },
-              ].map((item, i) => (
-                <div key={i} className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-2"><item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span></div>
-                  <span className="font-mono text-sm font-bold">{item.count}</span>
-                </div>
-              ))}
-              <Separator />
-              <div className="flex items-center justify-between py-1">
-                <div className="flex items-center gap-2"><Cpu className="w-4 h-4 text-muted-foreground" /><span className="text-sm text-muted-foreground">Avg CPU</span></div>
-                <span className="font-mono text-sm">{deviceStats.avg_cpu || 0}%</span>
-              </div>
-              <div className="flex items-center justify-between py-1">
-                <div className="flex items-center gap-2"><MemoryStick className="w-4 h-4 text-muted-foreground" /><span className="text-sm text-muted-foreground">Avg RAM</span></div>
-                <span className="font-mono text-sm">{deviceStats.avg_ram || 0}%</span>
+              <Separator className="my-3" />
+              <div className="space-y-2">
+                {[
+                  { label: "Servers", icon: Server, count: devices.filter(d => d.device_type === "server").length, color: "text-blue-500" },
+                  { label: "Workstations", icon: Monitor, count: devices.filter(d => d.device_type === "workstation").length, color: "text-purple-500" },
+                  { label: "Laptops", icon: Laptop, count: devices.filter(d => d.device_type === "laptop").length, color: "text-cyan-500" },
+                  { label: "Network", icon: Wifi, count: devices.filter(d => d.device_type === "network").length, color: "text-orange-500" },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5">
+                    <div className="flex items-center gap-2"><item.icon className={`w-3.5 h-3.5 ${item.color}`} /><span className="text-xs">{item.label}</span></div>
+                    <span className="font-mono text-xs font-bold">{item.count}</span>
+                  </div>
+                ))}
+                <Separator />
+                <div className="flex items-center justify-between py-0.5"><div className="flex items-center gap-2"><Cpu className="w-3.5 h-3.5 text-muted-foreground" /><span className="text-xs text-muted-foreground">Avg CPU</span></div><span className="font-mono text-xs">{deviceStats.avg_cpu || 0}%</span></div>
+                <div className="flex items-center justify-between py-0.5"><div className="flex items-center gap-2"><MemoryStick className="w-3.5 h-3.5 text-muted-foreground" /><span className="text-xs text-muted-foreground">Avg RAM</span></div><span className="font-mono text-xs">{deviceStats.avg_ram || 0}%</span></div>
               </div>
             </CardContent>
           </Card>
         </div>
-      </div>
 
-      {/* Ticket Trends + Open Tickets */}
-      <div className="grid grid-cols-12 gap-4">
+        {/* Ticket Trends Chart */}
         <Card className="col-span-8">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold">Ticket Volume (7 Days)</CardTitle>
-            <Badge variant="outline" className="text-[10px]">Trend</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px]">Auto-refresh: 60s</Badge>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="h-[240px]">
+            <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={ticketTrends.length > 0 ? ticketTrends : [
                   { date: "Mon", tickets: 12 }, { date: "Tue", tickets: 19 }, { date: "Wed", tickets: 15 },
@@ -301,14 +405,17 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
 
+      {/* Bottom Row - Tickets + Alerts + Activity */}
+      <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-4">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2"><Ticket className="w-4 h-4" />Open Tickets</CardTitle>
             <Badge variant="secondary" className="text-[10px]">{stats.open_tickets}</Badge>
           </CardHeader>
           <CardContent className="p-0">
-            <ScrollArea className="h-[260px]">
+            <ScrollArea className="h-[240px]">
               <div className="space-y-0">
                 {tickets.length > 0 ? tickets.map(t => (
                   <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 cursor-pointer border-b border-border/50" onClick={() => navigate("/tickets")} data-testid={`dash-ticket-${t.id}`}>
@@ -317,7 +424,7 @@ export default function DashboardPage() {
                       <p className="text-sm font-medium truncate">{t.title}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] text-muted-foreground">{t.client_name}</span>
-                        {t.device_name && <><span className="text-[10px] text-muted-foreground">|</span><span className="text-[10px] text-muted-foreground font-mono">{t.device_name}</span></>}
+                        {t.device_name && <span className="text-[10px] text-muted-foreground font-mono">| {t.device_name}</span>}
                       </div>
                     </div>
                     <Badge className={`${priorityColors[t.priority]} text-[9px]`}>{t.priority}</Badge>
@@ -329,98 +436,28 @@ export default function DashboardPage() {
             </ScrollArea>
           </CardContent>
         </Card>
-      </div>
 
-      {/* Alerts + Email Security + Activity */}
-      <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-4">
+        <Card className="col-span-3">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" />Active Alerts</CardTitle>
             <Badge variant={alerts.length > 0 ? "destructive" : "secondary"} className="text-[10px]">{alerts.length}</Badge>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[240px]">
+            <ScrollArea className="h-[220px]">
               <div className="space-y-2">
-                {alerts.length > 0 ? alerts.map(a => (
-                  <div key={a.id} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-muted/50 border border-transparent hover:border-border">
-                    <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${a.severity === "critical" ? "bg-red-500" : a.severity === "warning" ? "bg-amber-500" : "bg-blue-500"}`} />
+                {alerts.length > 0 ? alerts.slice(0, 8).map(a => (
+                  <div key={a.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 border border-transparent hover:border-border">
+                    <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${a.severity === "critical" ? "bg-red-500" : "bg-amber-500"}`} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{a.message}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-muted-foreground font-mono">{a.device_name}</span>
-                        <span className="text-[10px] text-muted-foreground">{a.client_name}</span>
-                      </div>
+                      <p className="text-xs font-medium truncate">{a.message}</p>
+                      <span className="text-[10px] text-muted-foreground">{a.device_name}</span>
                     </div>
-                    <Badge variant="outline" className={`text-[9px] ${a.severity === "critical" ? "text-red-500 border-red-500/30" : "text-amber-500 border-amber-500/30"}`}>{a.severity}</Badge>
                   </div>
                 )) : (
-                  <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">No active alerts</p></div>
+                  <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">No alerts</p></div>
                 )}
               </div>
             </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Email Security Compliance Widget */}
-        <Card className="col-span-3 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate("/dmarc-compliance")} data-testid="email-security-widget">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-blue-500" />Email Security</CardTitle>
-            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {compliance ? (
-              <div className="space-y-4">
-                {/* Score Ring */}
-                <div className="flex items-center justify-center">
-                  <div className={`w-20 h-20 rounded-full flex items-center justify-center border-4 ${
-                    compliance.overall_score >= 80 ? "border-emerald-500/40" : compliance.overall_score >= 50 ? "border-amber-500/40" : "border-red-500/40"
-                  }`}>
-                    <p className={`text-2xl font-black ${
-                      compliance.overall_score >= 80 ? "text-emerald-400" : compliance.overall_score >= 50 ? "text-amber-400" : "text-red-400"
-                    }`}>{compliance.overall_score}%</p>
-                  </div>
-                </div>
-                <p className="text-center text-xs text-muted-foreground">Fleet Compliance</p>
-
-                <Separator />
-
-                {/* Quick Stats */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs">Protected</span></div>
-                    <span className="text-sm font-bold text-emerald-400">{compliance.fully_protected}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /><span className="text-xs">Partial</span></div>
-                    <span className="text-sm font-bold text-amber-400">{compliance.partially_protected}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2"><ShieldX className="w-3.5 h-3.5 text-red-400" /><span className="text-xs">Unprotected</span></div>
-                    <span className="text-sm font-bold text-red-400">{compliance.unprotected}</span>
-                  </div>
-                </div>
-
-                {compliance.at_risk.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">At Risk</p>
-                      {compliance.at_risk.slice(0, 3).map(c => (
-                        <div key={c.client_id} className="flex items-center justify-between py-1">
-                          <span className="text-xs truncate max-w-[120px]">{c.client_name}</span>
-                          <Badge className={`text-[9px] ${c.score === 0 ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}>{c.score}%</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <Shield className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs">No compliance data</p>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -430,7 +467,7 @@ export default function DashboardPage() {
             <Badge variant="outline" className="text-[10px] text-muted-foreground">Live</Badge>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[240px]">
+            <ScrollArea className="h-[220px]">
               <div className="space-y-1">
                 {activityFeed.length > 0 ? activityFeed.map(item => {
                   const iconMap = { ticket_note: MessageSquare, ticket_created: Ticket, alert: AlertTriangle };
@@ -438,7 +475,7 @@ export default function DashboardPage() {
                   const IconComp = iconMap[item.type] || Activity;
                   const color = colorMap[item.type] || "text-gray-400 bg-muted";
                   return (
-                    <div key={item.id} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-muted/50">
+                    <div key={item.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50">
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${color}`}><IconComp className="w-3.5 h-3.5" /></div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{item.title}</p>

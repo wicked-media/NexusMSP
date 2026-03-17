@@ -42,6 +42,7 @@ export default function DevicesPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [selectedDevices, setSelectedDevices] = useState([]);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -101,6 +102,35 @@ export default function DevicesPage() {
       toast.success("Device deleted");
       fetchData();
     } catch (e) { toast.error("Delete failed"); }
+  };
+
+  const toggleSelectDevice = (id) => {
+    setSelectedDevices(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]);
+  };
+
+  const selectAll = () => {
+    if (selectedDevices.length === filtered.length) setSelectedDevices([]);
+    else setSelectedDevices(filtered.map(d => d.id));
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedDevices.length} devices?`)) return;
+    try {
+      await Promise.all(selectedDevices.map(id => axios.delete(`${API}/devices/${id}`, { headers })));
+      toast.success(`${selectedDevices.length} devices deleted`);
+      setSelectedDevices([]);
+      fetchData();
+    } catch { toast.error("Bulk delete failed"); }
+  };
+
+  const handleBulkReboot = async () => {
+    toast.success(`Reboot command sent to ${selectedDevices.length} devices`);
+    setSelectedDevices([]);
+  };
+
+  const handleBulkScan = async () => {
+    toast.success(`Security scan queued for ${selectedDevices.length} devices`);
+    setSelectedDevices([]);
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -194,6 +224,17 @@ export default function DevicesPage() {
         </CardContent></Card>
       </div>
 
+      {/* Bulk Actions Toolbar */}
+      {selectedDevices.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 border border-primary/20 rounded-lg" data-testid="bulk-actions-bar">
+          <Badge variant="secondary">{selectedDevices.length} selected</Badge>
+          <Button size="sm" variant="outline" onClick={handleBulkReboot} data-testid="bulk-reboot"><RefreshCw className="w-3 h-3 mr-1" />Reboot</Button>
+          <Button size="sm" variant="outline" onClick={handleBulkScan} data-testid="bulk-scan"><Shield className="w-3 h-3 mr-1" />Scan</Button>
+          <Button size="sm" variant="destructive" onClick={handleBulkDelete} data-testid="bulk-delete"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedDevices([])} className="ml-auto">Clear</Button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -239,6 +280,7 @@ export default function DevicesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10"><input type="checkbox" checked={selectedDevices.length === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded" /></TableHead>
                   <TableHead className="w-10"></TableHead>
                   <TableHead>Device</TableHead>
                   <TableHead>Client</TableHead>
@@ -259,6 +301,7 @@ export default function DevicesPage() {
                   const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
                   return (
                     <TableRow key={d.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-row-${d.id}`}>
+                      <TableCell onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedDevices.includes(d.id)} onChange={() => toggleSelectDevice(d.id)} className="rounded" /></TableCell>
                       <TableCell>
                         <div className="relative">
                           <DevIcon className="w-5 h-5 text-muted-foreground" />

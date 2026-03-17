@@ -17,10 +17,30 @@ import { toast } from "sonner";
 import {
   Terminal, Plus, Search, Play, Clock, RefreshCw, Loader2, Code, Cpu,
   CheckCircle, XCircle, MoreVertical, Copy, Trash2, BookOpen, Calendar,
-  Shield, Download, Zap, Settings, AlertTriangle, Server
+  Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
+
+function CodeBlock({ content, language }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="relative group rounded-lg overflow-hidden border bg-[#1a1b26]">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#24283b] border-b border-[#2f3348]">
+        <span className="text-[10px] text-[#565f89] uppercase tracking-wider font-mono">{language || "script"}</span>
+        <button onClick={handleCopy} className="flex items-center gap-1 text-[10px] text-[#565f89] hover:text-[#a9b1d6] transition-colors" data-testid="copy-code-btn">
+          {copied ? <><Check className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied!</span></> : <><Clipboard className="w-3 h-3" /><span>Copy</span></>}
+        </button>
+      </div>
+      <pre className="p-3 overflow-x-auto text-xs font-mono leading-relaxed text-[#a9b1d6] max-h-[300px] overflow-y-auto"><code>{content}</code></pre>
+    </div>
+  );
+}
 
 const scriptTypes = {
   powershell: { label: "PowerShell", color: "bg-blue-500" },
@@ -267,35 +287,39 @@ export default function ScriptingPage() {
           {loading ? (
             <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
           ) : filteredScripts.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-4">
               {filteredScripts.map(script => (
                 <Card key={script.id} className="hover:border-primary/30 transition-all" data-testid={`script-card-${script.id}`}>
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center"><Terminal className="w-5 h-5 text-muted-foreground" /></div>
-                        <div><h3 className="font-semibold">{script.name}</h3><p className="text-xs text-muted-foreground">{categories[script.category]}</p></div>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${scriptTypes[script.script_type]?.color || "bg-muted"}/10`}><Terminal className="w-5 h-5 text-muted-foreground" /></div>
+                        <div>
+                          <h3 className="font-semibold">{script.name}</h3>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <Badge variant="outline" className="text-[10px]">{scriptTypes[script.script_type]?.label}</Badge>
+                            <Badge variant="outline" className="text-[10px]">{script.os_target}</Badge>
+                            <span className="text-[10px] text-muted-foreground">{categories[script.category]}</span>
+                          </div>
+                        </div>
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openRunDialog(script)}><Play className="w-4 h-4 mr-2" />Run Script</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openEditDialog(script)}>Edit</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigator.clipboard.writeText(script.content)}><Copy className="w-4 h-4 mr-2" />Copy Code</DropdownMenuItem>
-                          {!script.is_built_in && (<DropdownMenuItem className="text-destructive" onClick={() => handleDelete(script.id)}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>)}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" onClick={() => openRunDialog(script)} data-testid={`run-script-${script.id}`}><Play className="w-3 h-3 mr-1" />Run</Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEditDialog(script)}>Edit</DropdownMenuItem>
+                            {!script.is_built_in && (<DropdownMenuItem className="text-destructive" onClick={() => handleDelete(script.id)}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>)}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
-                    {script.description && <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{script.description}</p>}
-                    <div className="flex items-center gap-2 mb-3">
-                      <Badge variant="outline">{scriptTypes[script.script_type]?.label}</Badge>
-                      <Badge variant="outline">{script.os_target}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    {script.description && <p className="text-sm text-muted-foreground mb-3">{script.description}</p>}
+                    <CodeBlock content={script.content} language={script.script_type} />
+                    <div className="flex items-center justify-between text-xs text-muted-foreground mt-3">
                       <span>Runs: {script.run_count || 0}</span>
                       {script.last_run && <span>Last: {formatDistanceToNow(new Date(script.last_run), { addSuffix: true })}</span>}
                     </div>
-                    <Button className="w-full mt-4" size="sm" onClick={() => openRunDialog(script)} data-testid={`run-script-${script.id}`}><Play className="w-4 h-4 mr-2" />Run Script</Button>
                   </CardContent>
                 </Card>
               ))}
@@ -316,20 +340,26 @@ export default function ScriptingPage() {
             <Badge variant="secondary">{scriptLibrary.length} templates</Badge>
           </div>
           <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Click "Import" to add to your scripts.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
             {scriptLibrary.map((template, i) => (
               <Card key={i} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
                 <CardContent className="p-5">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><Zap className="w-5 h-5 text-primary" /></div>
-                    <div><h3 className="font-semibold text-sm">{template.name}</h3><p className="text-[11px] text-muted-foreground">{categories[template.category]}</p></div>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><Zap className="w-5 h-5 text-primary" /></div>
+                      <div>
+                        <h3 className="font-semibold">{template.name}</h3>
+                        <p className="text-xs text-muted-foreground">{template.description}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-[10px]">{scriptTypes[template.script_type]?.label}</Badge>
+                          <Badge variant="outline" className="text-[10px]">{template.os_target}</Badge>
+                          <Badge variant="outline" className="text-[10px]">{categories[template.category]}</Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <Button size="sm" onClick={() => importFromLibrary(template)} data-testid={`import-template-${i}`}><Download className="w-4 h-4 mr-1" />Import</Button>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{template.description}</p>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Badge variant="outline" className="text-[10px]">{scriptTypes[template.script_type]?.label}</Badge>
-                    <Badge variant="outline" className="text-[10px]">{template.os_target}</Badge>
-                  </div>
-                  <Button size="sm" className="w-full" onClick={() => importFromLibrary(template)} data-testid={`import-template-${i}`}><Download className="w-4 h-4 mr-2" />Import & Customize</Button>
+                  <CodeBlock content={template.content} language={template.script_type} />
                 </CardContent>
               </Card>
             ))}
