@@ -22,7 +22,8 @@ import {
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
-  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users
+  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
+  Download, BellRing, ChevronDown
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -69,9 +70,12 @@ export default function TicketsPage() {
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
+  const [conversationType, setConversationType] = useState("note"); // "note" or "email"
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [emailSignature, setEmailSignature] = useState("");
   const [emailForm, setEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
+  const [isClientNotifyOpen, setIsClientNotifyOpen] = useState(false);
+  const [notifyForm, setNotifyForm] = useState({ email: "", subject: "", message: "" });
   const [isChildOpen, setIsChildOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isTimeOpen, setIsTimeOpen] = useState(false);
@@ -236,10 +240,39 @@ export default function TicketsPage() {
         body: bodyWithSig
       }, { headers });
       setIsEmailOpen(false);
-      const res = await axios.get(`${API}/tickets/${viewingTicket.id}/emails`, { headers });
-      setTicketEmails(res.data);
+      setConversationType("note");
+      const [nRes, eRes] = await Promise.all([
+        axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers }),
+        axios.get(`${API}/tickets/${viewingTicket.id}/emails`, { headers }),
+      ]);
+      setTicketNotes(nRes.data);
+      setTicketEmails(eRes.data);
       toast.success("Email sent");
     } catch { toast.error("Failed to send email"); }
+  };
+
+  const handleNotifyClient = async () => {
+    try {
+      await axios.post(`${API}/tickets/${viewingTicket.id}/notify-client`, notifyForm, { headers });
+      setIsClientNotifyOpen(false);
+      setNotifyForm({ email: "", subject: "", message: "" });
+      toast.success("Client notification sent with PDF attachment");
+    } catch { toast.error("Failed to send notification"); }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      const res = await axios.get(`${API}/tickets/${viewingTicket.id}/download-pdf`, {
+        headers, responseType: "blob"
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ticket_${viewingTicket.ticket_number}_conversation.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
+    } catch { toast.error("Failed to download PDF"); }
   };
 
   const handleCreateChild = async () => {
@@ -414,6 +447,12 @@ export default function TicketsPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setIsTimeOpen(true)} data-testid="log-time-btn"><Timer className="w-4 h-4 mr-1" />Log Time</Button>
             <Button variant="outline" size="sm" onClick={() => setIsEmailOpen(true)} data-testid="send-email-btn"><Mail className="w-4 h-4 mr-1" />Email</Button>
+            <Button variant="outline" size="sm" className="text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => {
+              const client = clients.find(c => c.id === viewingTicket.client_id);
+              setNotifyForm({ email: client?.email || "", subject: `Ticket Update: ${viewingTicket.ticket_number} - ${viewingTicket.title}`, message: `You have a new update on your ticket ${viewingTicket.ticket_number}.` });
+              setIsClientNotifyOpen(true);
+            }} data-testid="notify-client-btn"><BellRing className="w-4 h-4 mr-1" />Notify Client</Button>
+            <Button variant="outline" size="sm" onClick={handleDownloadPdf} data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
           </div>
@@ -577,10 +616,9 @@ export default function TicketsPage() {
 
             {/* Tabs: Notes, Emails, Children, Time, Audit */}
             <Tabs defaultValue="suggestions">
-              <TabsList className="w-full grid grid-cols-6">
+              <TabsList className="w-full grid grid-cols-5">
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
-                <TabsTrigger value="notes"><MessageSquare className="w-3 h-3 mr-1" />Notes ({ticketNotes.length})</TabsTrigger>
-                <TabsTrigger value="emails"><Mail className="w-3 h-3 mr-1" />Emails ({ticketEmails.length})</TabsTrigger>
+                <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
@@ -701,74 +739,137 @@ export default function TicketsPage() {
                 ) : null}
               </TabsContent>
 
-              {/* NOTES TAB */}
-              <TabsContent value="notes" className="space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Textarea className="flex-1" placeholder="Add a note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Checkbox checked={isInternalNote} onCheckedChange={setIsInternalNote} id="internal" data-testid="internal-note-check" />
-                      <Label htmlFor="internal" className="text-sm">Internal note</Label>
-                    </div>
-                    {/* Spell Check */}
-                    <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
-                      onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
-                      data-testid="proofread-note-btn">
-                      {proofreadLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <SpellCheck className="w-3 h-3 mr-1" />}
-                      Proofread
-                    </Button>
-                    <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add</Button>
-                  </div>
-                  {/* Proofread result */}
-                  {proofreadResult && proofreadResult.target === "note" && (
-                    <div className="p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20" data-testid="proofread-result">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-semibold text-cyan-400">Proofread Suggestion</span>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => { setNewNote(proofreadResult.corrected); setProofreadResult(null); }}>Apply</Button>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setProofreadResult(null)}><X className="w-3 h-3" /></Button>
-                        </div>
-                      </div>
-                      <p className="text-sm mb-1">{proofreadResult.corrected}</p>
-                      {proofreadResult.changes?.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {proofreadResult.changes.map((c, i) => <Badge key={i} variant="outline" className="text-[9px] bg-cyan-500/5">{c}</Badge>)}
-                        </div>
-                      )}
-                    </div>
-                  )}
+              {/* UNIFIED CONVERSATION TAB */}
+              <TabsContent value="conversation" className="space-y-3">
+                {/* Message Type Selector */}
+                <div className="flex items-center gap-3 pb-2 border-b border-border/50">
+                  <Select value={conversationType} onValueChange={setConversationType}>
+                    <SelectTrigger className="w-[200px]" data-testid="conversation-type-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="note"><div className="flex items-center gap-2"><MessageSquare className="w-3 h-3" />Internal Note</div></SelectItem>
+                      <SelectItem value="email"><div className="flex items-center gap-2"><Mail className="w-3 h-3" />Public Email</div></SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">
+                    {conversationType === "note" ? "Internal notes are only visible to your team" : "Emails will be sent to the client"}
+                  </span>
                 </div>
-                <ScrollArea className="h-[300px]">
-                  {ticketNotes.map(note => (
-                    <div key={note.id} className={`p-3 rounded-lg mb-2 border ${note.is_internal ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-muted/30 border-border'}`} data-testid={`note-${note.id}`}>
-                      <div className="flex justify-between items-start mb-1">
-                        <div className="flex items-center gap-2">
-                          <User className="w-3 h-3" /><span className="text-sm font-medium">{note.user_name}</span>
-                          {note.is_internal && <Badge variant="outline" className="text-yellow-500 text-[10px] h-4">Internal</Badge>}
-                        </div>
-                        <span className="text-xs text-muted-foreground">{note.created_at && formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}</span>
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap">{note.content}</p>
-                    </div>
-                  ))}
-                </ScrollArea>
-              </TabsContent>
 
-              {/* EMAILS TAB */}
-              <TabsContent value="emails">
-                <ScrollArea className="h-[350px]">
-                  {ticketEmails.length > 0 ? ticketEmails.map(email => (
-                    <div key={email.id} className="p-3 rounded-lg mb-2 border bg-muted/30" data-testid={`email-${email.id}`}>
-                      <div className="flex justify-between mb-1">
-                        <span className="text-sm font-medium">{email.subject}</span>
-                        <span className="text-xs text-muted-foreground">{email.created_at && formatDistanceToNow(new Date(email.created_at), { addSuffix: true })}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">To: {email.to_addresses?.join(", ")}</p>
-                      <p className="text-sm mt-1 whitespace-pre-wrap">{email.body?.substring(0, 200)}</p>
+                {/* Internal Note Form */}
+                {conversationType === "note" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Textarea className="flex-1" placeholder="Add a note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
                     </div>
-                  )) : <p className="text-center py-8 text-muted-foreground">No emails</p>}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Checkbox checked={isInternalNote} onCheckedChange={setIsInternalNote} id="internal" data-testid="internal-note-check" />
+                        <Label htmlFor="internal" className="text-sm">Internal note</Label>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
+                        onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
+                        data-testid="proofread-note-btn">
+                        {proofreadLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <SpellCheck className="w-3 h-3 mr-1" />}
+                        Proofread
+                      </Button>
+                      <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add</Button>
+                    </div>
+                    {proofreadResult && proofreadResult.target === "note" && (
+                      <div className="p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20" data-testid="proofread-result">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-semibold text-cyan-400">Proofread Suggestion</span>
+                          <div className="flex gap-1">
+                            <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => { setNewNote(proofreadResult.corrected); setProofreadResult(null); }}>Apply</Button>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setProofreadResult(null)}><X className="w-3 h-3" /></Button>
+                          </div>
+                        </div>
+                        <p className="text-sm mb-1">{proofreadResult.corrected}</p>
+                        {proofreadResult.changes?.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {proofreadResult.changes.map((c, i) => <Badge key={i} variant="outline" className="text-[9px] bg-cyan-500/5">{c}</Badge>)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Inline Email Form */}
+                {conversationType === "email" && (
+                  <div className="space-y-3 p-3 rounded-lg border bg-blue-500/[0.02] border-blue-500/20">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><Label className="text-xs">To</Label><Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="inline-email-to" /></div>
+                      <div><Label className="text-xs">CC</Label><Input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="cc@email.com" /></div>
+                      <div><Label className="text-xs">BCC</Label><Input value={emailForm.bcc} onChange={e => setEmailForm({ ...emailForm, bcc: e.target.value })} placeholder="bcc@email.com" /></div>
+                    </div>
+                    <div><Label className="text-xs">Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="inline-email-subject" /></div>
+                    <div><Label className="text-xs">Body</Label><Textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={4} data-testid="inline-email-body" />
+                      <div className="flex items-center gap-2 mt-1">
+                        <Button variant="outline" size="sm" className="h-7 text-[11px] text-cyan-400 border-cyan-500/30"
+                          onClick={() => handleProofread(emailForm.body, "email")} disabled={proofreadLoading || !emailForm.body} data-testid="proofread-email-btn">
+                          <SpellCheck className="w-3 h-3 mr-1" />Proofread
+                        </Button>
+                        {proofreadResult && proofreadResult.target === "email" && (
+                          <Button variant="outline" size="sm" className="h-7 text-[11px] text-green-400"
+                            onClick={() => { setEmailForm({...emailForm, body: proofreadResult.corrected}); setProofreadResult(null); }}>
+                            Apply Corrections
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: emailSignature }} /></div>}
+                    <div className="flex justify-end">
+                      <Button size="sm" onClick={handleSendEmail} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Unified Conversation Timeline */}
+                <ScrollArea className="h-[300px]">
+                  {(() => {
+                    const allItems = [
+                      ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
+                      ...ticketEmails.map(e => ({ ...e, _type: "email", _sort: e.created_at })),
+                    ].sort((a, b) => (b._sort || "").localeCompare(a._sort || ""));
+
+                    if (allItems.length === 0) return <p className="text-center py-8 text-muted-foreground">No conversation items yet</p>;
+
+                    return allItems.map(item => {
+                      if (item._type === "note") {
+                        return (
+                          <div key={`note-${item.id}`} className={`p-3 rounded-lg mb-2 border ${item.is_internal ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-muted/30 border-border'}`} data-testid={`note-${item.id}`}>
+                            <div className="flex justify-between items-start mb-1">
+                              <div className="flex items-center gap-2">
+                                <MessageSquare className="w-3 h-3 text-blue-400" />
+                                <User className="w-3 h-3" /><span className="text-sm font-medium">{item.user_name}</span>
+                                {item.is_internal && <Badge variant="outline" className="text-yellow-500 text-[10px] h-4">Internal</Badge>}
+                                <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
+                              </div>
+                              <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap">{item.content}</p>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div key={`email-${item.id}`} className="p-3 rounded-lg mb-2 border bg-blue-500/[0.03] border-blue-500/20" data-testid={`email-${item.id}`}>
+                            <div className="flex justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <Mail className="w-3 h-3 text-blue-400" />
+                                <span className="text-sm font-medium">{item.subject}</span>
+                                <Badge variant="outline" className="text-blue-400 text-[10px] h-4">Email</Badge>
+                              </div>
+                              <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">To: {item.to_addresses?.join(", ")}</p>
+                            <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
+                          </div>
+                        );
+                      }
+                    });
+                  })()}
                 </ScrollArea>
               </TabsContent>
 
@@ -1032,6 +1133,20 @@ export default function TicketsPage() {
               <div className="flex items-center gap-2"><Checkbox checked={timeForm.billable} onCheckedChange={v => setTimeForm({ ...timeForm, billable: v })} id="billable" /><Label htmlFor="billable">Billable</Label></div>
             </div>
             <DialogFooter><Button onClick={handleAddTime} data-testid="log-time-submit"><Timer className="w-4 h-4 mr-1" />Log Time</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* NOTIFY CLIENT DIALOG */}
+        <Dialog open={isClientNotifyOpen} onOpenChange={setIsClientNotifyOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Notify Client with PDF</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Send an email notification to the client with a branded PDF of the conversation history attached.</p>
+            <div className="space-y-3">
+              <div><Label>Client Email</Label><Input value={notifyForm.email} onChange={e => setNotifyForm({ ...notifyForm, email: e.target.value })} placeholder="client@email.com" data-testid="notify-email" /></div>
+              <div><Label>Subject</Label><Input value={notifyForm.subject} onChange={e => setNotifyForm({ ...notifyForm, subject: e.target.value })} data-testid="notify-subject" /></div>
+              <div><Label>Message</Label><Textarea value={notifyForm.message} onChange={e => setNotifyForm({ ...notifyForm, message: e.target.value })} rows={3} data-testid="notify-message" /></div>
+            </div>
+            <DialogFooter><Button onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
           </DialogContent>
         </Dialog>
 

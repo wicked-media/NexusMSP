@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -43,6 +43,13 @@ export default function DevicesPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [selectedDevices, setSelectedDevices] = useState([]);
+  const [isDiscoveryOpen, setIsDiscoveryOpen] = useState(false);
+  const [discoveryClientId, setDiscoveryClientId] = useState("");
+  const [discoverySubnet, setDiscoverySubnet] = useState("192.168.1.0/24");
+  const [discoveryResults, setDiscoveryResults] = useState(null);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [selectedDiscovered, setSelectedDiscovered] = useState([]);
+  const [importLoading, setImportLoading] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -133,6 +140,37 @@ export default function DevicesPage() {
     setSelectedDevices([]);
   };
 
+  const handleDiscoverDevices = async () => {
+    if (!discoveryClientId) { toast.error("Select a client first"); return; }
+    setDiscoveryLoading(true);
+    setDiscoveryResults(null);
+    setSelectedDiscovered([]);
+    try {
+      const res = await axios.post(`${API}/devices/discover`, { client_id: discoveryClientId, subnet: discoverySubnet }, { headers });
+      setDiscoveryResults(res.data);
+    } catch { toast.error("Discovery failed"); }
+    finally { setDiscoveryLoading(false); }
+  };
+
+  const handleImportDiscovered = async () => {
+    if (!selectedDiscovered.length) { toast.error("Select devices to import"); return; }
+    setImportLoading(true);
+    try {
+      const devicesToImport = discoveryResults.devices.filter(d => selectedDiscovered.includes(d.id));
+      const res = await axios.post(`${API}/devices/import-discovered`, { client_id: discoveryClientId, devices: devicesToImport }, { headers });
+      toast.success(res.data.message);
+      setSelectedDiscovered([]);
+      fetchData();
+      // Re-run discovery to update already_imported flags
+      handleDiscoverDevices();
+    } catch { toast.error("Import failed"); }
+    finally { setImportLoading(false); }
+  };
+
+  const toggleDiscoveredSelect = (id) => {
+    setSelectedDiscovered(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   const formDialog = (
@@ -198,6 +236,7 @@ export default function DevicesPage() {
         </div>
         <div className="flex gap-2">
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn"><Radar className="w-4 h-4 mr-1" />Discover</Button>
           <Button onClick={openCreate} data-testid="add-device-btn"><Plus className="w-4 h-4 mr-1" />Add Device</Button>
         </div>
       </div>
@@ -411,6 +450,81 @@ export default function DevicesPage() {
       )}
 
       {formDialog}
+
+      {/* DEVICE DISCOVERY DIALOG */}
+      <Dialog open={isDiscoveryOpen} onOpenChange={setIsDiscoveryOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader><DialogTitle>Network Device Discovery</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Scan a client's network to discover devices and import them with one click.</p>
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label>Client</Label>
+              <Select value={discoveryClientId} onValueChange={setDiscoveryClientId}>
+                <SelectTrigger data-testid="discovery-client-select"><SelectValue placeholder="Select client" /></SelectTrigger>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="w-48">
+              <Label>Subnet</Label>
+              <Input value={discoverySubnet} onChange={e => setDiscoverySubnet(e.target.value)} placeholder="192.168.1.0/24" data-testid="discovery-subnet" />
+            </div>
+            <Button onClick={handleDiscoverDevices} disabled={discoveryLoading || !discoveryClientId} data-testid="run-discovery-btn">
+              {discoveryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Radar className="w-4 h-4 mr-1" />}
+              Scan Network
+            </Button>
+          </div>
+
+          {discoveryResults && (
+            <div className="space-y-3 mt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{discoveryResults.discovered_count} devices found</Badge>
+                  <span className="text-xs text-muted-foreground">on {discoveryResults.subnet}</span>
+                </div>
+                {selectedDiscovered.length > 0 && (
+                  <Button size="sm" onClick={handleImportDiscovered} disabled={importLoading} data-testid="import-discovered-btn">
+                    {importLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}
+                    Import {selectedDiscovered.length} Device{selectedDiscovered.length > 1 ? "s" : ""}
+                  </Button>
+                )}
+              </div>
+              <div className="max-h-[400px] overflow-y-auto space-y-1.5">
+                {discoveryResults.devices.map(dev => (
+                  <div key={dev.id} className={`flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${
+                    dev.already_imported ? "bg-muted/20 opacity-60" : selectedDiscovered.includes(dev.id) ? "bg-primary/5 border-primary/30" : "hover:bg-muted/50"
+                  }`} data-testid={`discovered-device-${dev.id}`}>
+                    {!dev.already_imported ? (
+                      <input type="checkbox" checked={selectedDiscovered.includes(dev.id)} onChange={() => toggleDiscoveredSelect(dev.id)} className="rounded" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    )}
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${dev.status === "online" ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
+                      <Monitor className={`w-4 h-4 ${dev.status === "online" ? "text-emerald-500" : "text-red-500"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{dev.hostname}</span>
+                        <Badge variant="outline" className="text-[9px] capitalize">{dev.device_type}</Badge>
+                        {dev.already_imported && <Badge className="bg-emerald-500/20 text-emerald-400 text-[9px]">Already imported</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span className="font-mono">{dev.ip_address}</span>
+                        <span>{dev.manufacturer}</span>
+                        <span>{dev.os}</span>
+                        <span className="font-mono">{dev.mac_address}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <Badge className={`text-[9px] ${dev.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}`}>{dev.status}</Badge>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{dev.response_time_ms}ms</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

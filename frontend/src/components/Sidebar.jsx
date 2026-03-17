@@ -58,11 +58,36 @@ import { API } from "@/App";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   const headers = { Authorization: `Bearer ${token}` };
+
+  const getNotificationLink = (n) => {
+    const refType = n.ref_type;
+    const refId = n.ref_id;
+    if (!refType || !refId) return null;
+    switch (refType) {
+      case "ticket": return "/tickets";
+      case "contract": return "/contracts";
+      case "device": return `/devices/${refId}`;
+      default: return null;
+    }
+  };
+
+  const handleNotificationClick = (n) => {
+    const link = getNotificationLink(n);
+    if (link) {
+      // Mark this notification as read
+      axios.post(`${API}/notifications/mark-read`, { ids: [n.id] }, { headers }).catch(() => {});
+      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+      setUnreadCount(prev => Math.max(0, prev - (n.read ? 0 : 1)));
+      setIsOpen(false);
+      navigate(link);
+    }
+  };
 
   const fetchNotifications = async () => {
     try {
@@ -117,7 +142,8 @@ function NotificationBell({ token, collapsed }) {
           </div>
           <div className="max-h-80 overflow-y-auto">
             {notifications.length > 0 ? notifications.map(n => (
-              <div key={n.id} className={`flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/50 transition-colors ${!n.read ? "bg-primary/5" : ""}`}>
+              <div key={n.id} className={`flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/50 transition-colors cursor-pointer ${!n.read ? "bg-primary/5" : ""}`}
+                onClick={() => handleNotificationClick(n)} data-testid={`notification-item-${n.id}`}>
                 <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${severityColor[n.severity] || "bg-blue-500"}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

@@ -18,7 +18,7 @@ from app.routers import (
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping
+    whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,8 +30,9 @@ app = FastAPI(title="NexusOps API", version="3.0.0")
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 # Include all routers with /api prefix
+# Note: device_discovery must come BEFORE devices so /devices/discover and /devices/scans are matched first
 all_routers = [
-    auth, clients, clients_contacts, tickets, devices, assets, contracts,
+    auth, clients, clients_contacts, tickets, device_discovery, devices, assets, contracts,
     invoices, time_entries, knowledge_base, integrations, dashboard,
     technicians, scheduling, products, networking, purchase_orders,
     remote, crm, scripting, it_docs, portal, projects, admin,
@@ -39,7 +40,7 @@ all_routers = [
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping
+    whitelabel, ticket_ping, rustdesk, ticket_email_notifications
 ]
 
 for router_module in all_routers:

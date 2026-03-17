@@ -17,7 +17,7 @@ import {
   Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
   ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw,
   ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck,
-  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink, Trophy, Award
+  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink, Trophy, Award, Laptop, Link2
 } from "lucide-react";
 
 const roleColors = {
@@ -57,6 +57,9 @@ export default function ClientsPage() {
   const [clientAchievements, setClientAchievements] = useState(null);
   const [clientReadiness, setClientReadiness] = useState(null);
   const [clientLoyalty, setClientLoyalty] = useState(null);
+  const [rustdeskDevices, setRustdeskDevices] = useState([]);
+  const [isRustdeskOpen, setIsRustdeskOpen] = useState(false);
+  const [rustdeskForm, setRustdeskForm] = useState({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -96,8 +99,9 @@ export default function ClientsPage() {
     setClientAchievements(null);
     setClientReadiness(null);
     setClientLoyalty(null);
+    setRustdeskDevices([]);
     try {
-      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
@@ -106,6 +110,7 @@ export default function ClientsPage() {
         axios.get(`${API}/clients/${client.id}/achievements`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/portal-readiness`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/loyalty`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/rustdesk/clients/${client.id}/devices`, { headers }).catch(() => ({ data: [] })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
@@ -116,6 +121,7 @@ export default function ClientsPage() {
       setClientAchievements(achRes.data);
       setClientReadiness(readRes.data);
       setClientLoyalty(loyRes.data);
+      setRustdeskDevices(rdRes.data || []);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -231,6 +237,35 @@ export default function ClientsPage() {
     } catch { toast.error("Failed to delete contact"); }
   };
 
+  const handleAddRustdeskDevice = async () => {
+    try {
+      await axios.post(`${API}/rustdesk/clients/${viewingClient.id}/devices`, rustdeskForm, { headers });
+      toast.success("RustDesk device added");
+      setIsRustdeskOpen(false);
+      setRustdeskForm({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
+      const res = await axios.get(`${API}/rustdesk/clients/${viewingClient.id}/devices`, { headers });
+      setRustdeskDevices(res.data || []);
+    } catch { toast.error("Failed to add RustDesk device"); }
+  };
+
+  const handleDeleteRustdeskDevice = async (id) => {
+    try {
+      await axios.delete(`${API}/rustdesk/devices/${id}`, { headers });
+      toast.success("RustDesk device removed");
+      setRustdeskDevices(prev => prev.filter(d => d.id !== id));
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  const handleConnectRustdesk = async (id) => {
+    try {
+      const res = await axios.post(`${API}/rustdesk/devices/${id}/connect`, {}, { headers });
+      if (res.data.connection_url) {
+        window.open(res.data.connection_url, "_blank");
+      }
+      toast.success("Connection initiated");
+    } catch { toast.error("Failed to connect"); }
+  };
+
   const openEditClient = (client) => {
     setEditingClient(client);
     setFormData({
@@ -316,11 +351,12 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-10 w-full">
+              <TabsList className="grid grid-cols-11 w-full">
                 <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts</TabsTrigger>
                 <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets</TabsTrigger>
                 <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices</TabsTrigger>
                 <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts</TabsTrigger>
+                <TabsTrigger value="remote" data-testid="client-remote-tab"><Laptop className="w-3 h-3 mr-1" />Remote</TabsTrigger>
                 <TabsTrigger value="achievements" data-testid="client-achievements-tab"><Trophy className="w-3 h-3 mr-1" />Awards</TabsTrigger>
                 <TabsTrigger value="readiness" data-testid="client-readiness-tab"><CheckCircle className="w-3 h-3 mr-1" />Ready</TabsTrigger>
                 <TabsTrigger value="timeline" data-testid="client-timeline-tab">Timeline</TabsTrigger>
@@ -429,6 +465,70 @@ export default function ClientsPage() {
                 ) : <p className="text-center py-8 text-muted-foreground">No contracts</p>}
               </TabsContent>
 
+
+              {/* REMOTE ACCESS TAB */}
+              <TabsContent value="remote" className="space-y-4" data-testid="client-remote-tab-content">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Laptop className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-medium">RustDesk Remote Access</span>
+                    <Badge variant="outline" className="text-[10px]">{rustdeskDevices.length} configured</Badge>
+                  </div>
+                  <Button size="sm" onClick={() => { setRustdeskForm({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" }); setIsRustdeskOpen(true); }} data-testid="add-rustdesk-btn">
+                    <Plus className="w-3 h-3 mr-1" />Add Device
+                  </Button>
+                </div>
+
+                {rustdeskDevices.length > 0 ? (
+                  <div className="space-y-2">
+                    {rustdeskDevices.map(rd => (
+                      <div key={rd.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors" data-testid={`rustdesk-device-${rd.id}`}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                            <Laptop className="w-5 h-5 text-blue-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{rd.device_name}</p>
+                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                              <span className="font-mono">ID: {rd.rustdesk_id}</span>
+                              {rd.os && <Badge variant="outline" className="text-[9px] h-4">{rd.os}</Badge>}
+                              {rd.last_connected && <span>Last: {new Date(rd.last_connected).toLocaleDateString()}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700" onClick={() => handleConnectRustdesk(rd.id)} data-testid={`connect-rustdesk-${rd.id}`}>
+                            <ExternalLink className="w-3 h-3 mr-1" />Connect
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteRustdeskDevice(rd.id)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <Card className="border-dashed">
+                    <CardContent className="py-8 text-center">
+                      <Laptop className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-30" />
+                      <p className="text-sm text-muted-foreground mb-1">No RustDesk devices configured</p>
+                      <p className="text-xs text-muted-foreground">Add a RustDesk device to enable remote access for this client's systems</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <Card className="bg-blue-500/[0.02] border-blue-500/20">
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-start gap-2">
+                      <Shield className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-blue-400">How it works</p>
+                        <p className="text-[11px] text-muted-foreground">Install the RustDesk client on the remote machine, note the Device ID and password, then add them here. You can then initiate remote sessions directly from NexusOps.</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               {/* ACTIVITY TIMELINE TAB */}
               <TabsContent value="timeline" className="space-y-2" data-testid="client-timeline">
@@ -951,6 +1051,32 @@ export default function ClientsPage() {
         </Dialog>
 
         {clientFormDialog}
+
+        {/* RUSTDESK DEVICE DIALOG */}
+        <Dialog open={isRustdeskOpen} onOpenChange={setIsRustdeskOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add RustDesk Device</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>Device Name</Label><Input value={rustdeskForm.device_name} onChange={e => setRustdeskForm({ ...rustdeskForm, device_name: e.target.value })} placeholder="e.g., Reception PC" data-testid="rustdesk-device-name" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>RustDesk ID</Label><Input value={rustdeskForm.rustdesk_id} onChange={e => setRustdeskForm({ ...rustdeskForm, rustdesk_id: e.target.value })} placeholder="e.g., 123456789" data-testid="rustdesk-id" /></div>
+                <div><Label>Password</Label><Input value={rustdeskForm.rustdesk_password} onChange={e => setRustdeskForm({ ...rustdeskForm, rustdesk_password: e.target.value })} placeholder="RustDesk password" data-testid="rustdesk-password" /></div>
+              </div>
+              <div><Label>Operating System</Label><Input value={rustdeskForm.os} onChange={e => setRustdeskForm({ ...rustdeskForm, os: e.target.value })} placeholder="e.g., Windows 11" /></div>
+              <div><Label>Link to Existing Device (optional)</Label>
+                <Select value={rustdeskForm.linked_device_id || "none"} onValueChange={v => setRustdeskForm({ ...rustdeskForm, linked_device_id: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Select device" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- No linked device --</SelectItem>
+                    {clientDetail?.devices?.map(d => <SelectItem key={d.id} value={d.id}>{d.name} ({d.ip_address || d.os})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Notes</Label><Input value={rustdeskForm.notes} onChange={e => setRustdeskForm({ ...rustdeskForm, notes: e.target.value })} placeholder="Additional notes" /></div>
+            </div>
+            <DialogFooter><Button onClick={handleAddRustdeskDevice} data-testid="save-rustdesk-btn"><Laptop className="w-4 h-4 mr-1" />Add Device</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
