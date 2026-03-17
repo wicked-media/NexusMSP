@@ -46,6 +46,18 @@ async def get_ticket_note_counts(current_user: dict = Depends(get_current_user))
         result[t["id"]] = nc
     return result
 
+# Import the ticket viewers from event_bus module
+from app.routers.event_bus import _ticket_viewers
+
+@router.get("/tickets/active-viewers")
+async def get_active_viewers_proxy(current_user: dict = Depends(get_current_user)):
+    """Get all tickets currently being viewed and by whom"""
+    result = {}
+    for ticket_id, viewers in _ticket_viewers.items():
+        if viewers:
+            result[ticket_id] = list(viewers.values())
+    return result
+
 @router.get("/tickets/{ticket_id}")
 async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})

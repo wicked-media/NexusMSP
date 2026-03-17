@@ -16,7 +16,8 @@ from app.routers import (
     remote, crm, scripting, it_docs, portal, projects, admin,
     infrastructure, yeastar, activity_logs, achievements,
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
-    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro
+    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
+    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -35,7 +36,8 @@ all_routers = [
     remote, crm, scripting, it_docs, portal, projects, admin,
     infrastructure, yeastar, activity_logs, achievements,
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
-    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro
+    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
+    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar
 ]
 
 for router_module in all_routers:
@@ -87,6 +89,17 @@ async def stripe_webhook(request: FastAPIRequest):
 @app.on_event("startup")
 async def startup_event():
     await seed_data()
+    # Assign ticket numbers to existing tickets that don't have one
+    from app.routers.ticket_suggestions import generate_ticket_number
+    tickets_without_number = await db.tickets.find(
+        {"$or": [{"ticket_number": None}, {"ticket_number": {"$exists": False}}, {"ticket_number": ""}]},
+        {"_id": 0, "id": 1, "ticket_type": 1}
+    ).to_list(1000)
+    for t in tickets_without_number:
+        tn = await generate_ticket_number(t.get("ticket_type", "incident"))
+        await db.tickets.update_one({"id": t["id"]}, {"$set": {"ticket_number": tn}})
+    if tickets_without_number:
+        logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
     logger.info("NexusOps API v3.0.0 started successfully")
 
 # Shutdown event

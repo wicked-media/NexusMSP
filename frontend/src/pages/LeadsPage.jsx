@@ -207,20 +207,32 @@ export default function LeadsPage() {
 
         {/* Action Buttons - Syncro Style */}
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => { setTicketForm({ title: `Inquiry from ${detailLead.company_name}`, description: `Lead inquiry from ${detailLead.contact_name}.\n\n${detailLead.notes || ""}`, priority: "medium", category: "support" }); setIsTicketDialogOpen(true); }}
-            data-testid="create-ticket-from-lead-btn">
-            <Ticket className="w-4 h-4 mr-1" />Create Ticket
-          </Button>
           {!detailLead.converted_to_client && (
             <>
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
+                if (!confirm("This will convert the lead to a client AND open a ticket creation form. Continue?")) return;
+                try {
+                  await axios.post(`${API}/leads/${detailLead.id}/convert`, {}, { headers });
+                  toast.success("Lead converted to client");
+                  setTicketForm({ title: `Inquiry from ${detailLead.company_name}`, description: `Lead inquiry from ${detailLead.contact_name}.\n\n${detailLead.notes || ""}`, priority: "medium", category: "support" });
+                  setIsTicketDialogOpen(true);
+                  fetchData();
+                } catch (error) { toast.error(error.response?.data?.detail || "Failed to convert lead"); }
+              }} data-testid="convert-and-create-ticket-btn">
+                <UserCheck className="w-4 h-4 mr-1" />Convert to Client & Create Ticket
+              </Button>
               <Button size="sm" variant="outline" onClick={() => handleConvert(detailLead.id)} data-testid="convert-lead-btn">
-                <UserCheck className="w-4 h-4 mr-1" />Convert to Client
+                <UserCheck className="w-4 h-4 mr-1" />Convert to Client Only
               </Button>
               <Button size="sm" variant="outline" onClick={() => setIsAssignClientDialogOpen(true)} data-testid="assign-client-btn">
                 <Link2 className="w-4 h-4 mr-1" />Assign Existing Client
               </Button>
             </>
           )}
+          <Button size="sm" variant="outline" onClick={() => { setTicketForm({ title: `Inquiry from ${detailLead.company_name}`, description: `Lead inquiry from ${detailLead.contact_name}.\n\n${detailLead.notes || ""}`, priority: "medium", category: "support" }); setIsTicketDialogOpen(true); }}
+            data-testid="create-ticket-from-lead-btn">
+            <Ticket className="w-4 h-4 mr-1" />Create Ticket
+          </Button>
           {detailLead.converted_to_client && (
             <Badge variant="outline" className="text-green-400 border-green-500/30">Linked to Client</Badge>
           )}

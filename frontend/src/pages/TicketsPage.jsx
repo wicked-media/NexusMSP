@@ -22,7 +22,7 @@ import {
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
-  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu
+  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -92,6 +92,7 @@ export default function TicketsPage() {
   const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true });
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [noteCounts, setNoteCounts] = useState({});
+  const [ticketViewers, setTicketViewers] = useState({});
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -112,6 +113,11 @@ export default function TicketsPage() {
       setCannedResponses(crRes.data);
       setNoteCounts(ncRes.data);
       setDevices(dRes.data);
+      // Fetch active viewers for tickets
+      try {
+        const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
+        setTicketViewers(vRes.data);
+      } catch { setTicketViewers({}); }
     } catch { toast.error("Failed to fetch tickets"); }
     finally { setLoading(false); }
   }, [token]);
@@ -132,6 +138,8 @@ export default function TicketsPage() {
     setSuggestions(null);
     setAiAnalysis(null);
     setDeviceStatus(null);
+    // Mark viewing
+    axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
       const [nRes, eRes, cRes, tRes, aRes, sRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
@@ -370,7 +378,7 @@ export default function TicketsPage() {
       <div className="space-y-4" data-testid="ticket-detail-view">
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setViewingTicket(null)} data-testid="back-to-list"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+          <Button variant="ghost" size="sm" onClick={() => { if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {}); setViewingTicket(null); }} data-testid="back-to-list"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
           <Badge className={priorityConfig[viewingTicket.priority]?.class}>{priorityConfig[viewingTicket.priority]?.label}</Badge>
           <span className="text-sm text-muted-foreground font-mono">{viewingTicket.ticket_number}</span>
           {viewingTicket.merged_into && <Badge variant="outline" className="text-red-400">Merged</Badge>}
@@ -411,39 +419,60 @@ export default function TicketsPage() {
           </div>
         </div>
 
-        {/* Color-Coded Progress Tracker */}
+        {/* Progress Tracker - Card Style */}
         {(() => {
           const stages = [
-            { key: "open", label: "Open", color: "bg-blue-500" },
-            { key: "in_progress", label: "In Progress", color: "bg-yellow-500" },
-            { key: "on_hold", label: "On Hold", color: "bg-orange-500" },
-            { key: "resolved", label: "Resolved", color: "bg-green-500" },
-            { key: "closed", label: "Closed", color: "bg-gray-500" },
+            { key: "open", label: "Open", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30", icon: "1" },
+            { key: "in_progress", label: "In Progress", color: "from-yellow-500 to-amber-500", bg: "bg-yellow-500/10", text: "text-yellow-400", border: "border-yellow-500/30", icon: "2" },
+            { key: "on_hold", label: "On Hold", color: "from-orange-500 to-orange-600", bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/30", icon: "3" },
+            { key: "resolved", label: "Resolved", color: "from-emerald-500 to-green-600", bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", icon: "4" },
+            { key: "closed", label: "Closed", color: "from-slate-500 to-slate-600", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30", icon: "5" },
           ];
           const currentStatus = viewingTicket.status;
           const currentIdx = stages.findIndex(s => s.key === currentStatus);
           const activeIdx = currentIdx >= 0 ? currentIdx : 0;
+          const progressPercent = Math.round((activeIdx / (stages.length - 1)) * 100);
           return (
-            <div className="flex items-center gap-0 w-full" data-testid="ticket-progress-bar">
-              {stages.map((stage, i) => {
-                const isActive = i === activeIdx;
-                const isPast = i < activeIdx;
-                const dotColor = isActive ? stage.color : isPast ? "bg-green-500" : "bg-muted-foreground/20";
-                const lineColor = i < activeIdx ? "bg-green-500" : "bg-muted-foreground/15";
-                return (
-                  <div key={stage.key} className="flex items-center flex-1">
-                    <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                      <div className={`w-5 h-5 rounded-full ${dotColor} flex items-center justify-center transition-all ${isActive ? "ring-2 ring-offset-2 ring-offset-background ring-current scale-110" : ""}`}>
-                        {isPast && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
-                        {isActive && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                      <span className={`text-[10px] font-medium whitespace-nowrap ${isActive ? "text-foreground" : isPast ? "text-green-500" : "text-muted-foreground/50"}`}>{stage.label}</span>
-                    </div>
-                    {i < stages.length - 1 && <div className={`h-0.5 flex-1 mx-1 rounded-full ${lineColor} transition-all`} />}
-                  </div>
-                );
-              })}
-            </div>
+            <Card className="overflow-hidden" data-testid="ticket-progress-bar">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ticket Progress</span>
+                  <span className="text-xs font-mono text-muted-foreground">{progressPercent}% complete</span>
+                </div>
+                {/* Progress bar */}
+                <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
+                  <div className={`h-full rounded-full bg-gradient-to-r ${stages[activeIdx].color} transition-all duration-700 ease-out`} style={{ width: `${Math.max(5, progressPercent)}%` }} />
+                </div>
+                {/* Stage cards */}
+                <div className="grid grid-cols-5 gap-2">
+                  {stages.map((stage, i) => {
+                    const isActive = i === activeIdx;
+                    const isPast = i < activeIdx;
+                    return (
+                      <button
+                        key={stage.key}
+                        onClick={() => handleUpdateTicket("status", stage.key)}
+                        className={`relative rounded-lg p-2.5 text-center transition-all duration-300 border ${
+                          isActive
+                            ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg`
+                            : isPast
+                            ? "bg-emerald-500/5 border-emerald-500/20"
+                            : "bg-muted/20 border-border/50 hover:bg-muted/40"
+                        }`}
+                        data-testid={`progress-stage-${stage.key}`}
+                      >
+                        <div className={`w-6 h-6 rounded-full mx-auto mb-1.5 flex items-center justify-center text-[10px] font-bold ${
+                          isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
+                        }`}>
+                          {isPast ? <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : stage.icon}
+                        </div>
+                        <span className={`text-[10px] font-semibold block ${isActive ? stage.text : isPast ? "text-emerald-400" : "text-muted-foreground/60"}`}>{stage.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
           );
         })()}
 
@@ -1085,6 +1114,8 @@ export default function TicketsPage() {
           const hasNoNotes = noteCounts[ticket.id] === 0 && ticket.status !== "closed" && ticket.status !== "resolved";
           const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && ticket.status !== "closed" && ticket.status !== "resolved";
           const priorityBorder = ticket.priority === "critical" ? "border-l-red-500" : ticket.priority === "high" ? "border-l-orange-500" : ticket.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
+          const viewers = ticketViewers[ticket.id] || [];
+          const isBeingViewed = viewers.length > 0;
 
           return (
             <Card
@@ -1095,9 +1126,24 @@ export default function TicketsPage() {
             >
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
-                  {/* Priority Dot + Ticket Number */}
-                  <div className="flex flex-col items-center gap-1 w-16 flex-shrink-0">
-                    <span className="font-mono text-xs text-muted-foreground">{ticket.ticket_number}</span>
+                  {/* Ticket Number Badge with Viewer Indicator */}
+                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0" data-testid={`ticket-badge-${ticket.id}`}>
+                    <div className={`relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider transition-all
+                      ${isBeingViewed 
+                        ? "bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 border border-cyan-500/40 text-cyan-300 animate-pulse shadow-[0_0_12px_rgba(34,211,238,0.3)]" 
+                        : "bg-muted/40 border border-border/50 text-muted-foreground"
+                      }`}
+                      title={isBeingViewed ? `Currently being viewed by: ${viewers.map(v => v.user_name).join(", ")}` : ""}
+                    >
+                      {ticket.ticket_number}
+                      {isBeingViewed && (
+                        <div className="absolute -top-1.5 -right-1.5 flex items-center" title={`Viewed by: ${viewers.map(v => v.user_name).join(", ")}`}>
+                          <div className="w-4 h-4 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg shadow-cyan-500/50">
+                            <Eye className="w-2.5 h-2.5 text-white" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     {ticket.parent_id && <GitBranch className="w-3 h-3 text-indigo-400" />}
                     {ticket.merged_into && <Merge className="w-3 h-3 text-red-400" />}
                   </div>
@@ -1108,6 +1154,7 @@ export default function TicketsPage() {
                       <p className="font-medium text-sm truncate">{ticket.title}</p>
                       {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
                       {hasNoNotes && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">AWAITING RESPONSE</Badge>}
+                      {isBeingViewed && <Badge className="bg-cyan-500/10 text-cyan-400 text-[9px] border-cyan-500/30 gap-1"><Eye className="w-2.5 h-2.5" />{viewers.length} viewing</Badge>}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span>{ticket.client_name}</span>

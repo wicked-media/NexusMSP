@@ -38,7 +38,11 @@ import {
   ShieldCheck,
   Activity,
   CreditCard,
-  Bell
+  Bell,
+  Cpu,
+  Heart,
+  Wrench,
+  Radar
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -150,6 +154,8 @@ const navGroups = [
       { path: "/dmarc-compliance", icon: ShieldCheck, label: "Email Security" },
       { path: "/splynx-dashboard", icon: Activity, label: "ISP Health" },
       { path: "/assets", icon: Package, label: "Assets" },
+      { path: "/asset-lifecycle", icon: Wrench, label: "Asset Lifecycle" },
+      { path: "/predictive-maintenance", icon: Cpu, label: "Predictive AI" },
       { path: "/scripting", icon: Terminal, label: "Scripting" },
       { path: "/remote-access", icon: Laptop, label: "Remote Access" },
     ]
@@ -174,6 +180,7 @@ const navGroups = [
     title: "Communication",
     items: [
       { path: "/email", icon: Mail, label: "Email" },
+      { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
       { path: "/documentation", icon: Key, label: "IT Docs" },
       { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
     ]
@@ -190,6 +197,7 @@ const navGroups = [
   {
     title: "System",
     items: [
+      { path: "/health-radar", icon: Radar, label: "Health Radar" },
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
       { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },

@@ -43,6 +43,10 @@ import TicketSettingsPage from "@/pages/TicketSettingsPage";
 import DmarcCompliancePage from "@/pages/DmarcCompliancePage";
 import SplynxDashboardPage from "@/pages/SplynxDashboardPage";
 import XeroDashboardPage from "@/pages/XeroDashboardPage";
+import O365SetupPage from "@/pages/O365SetupPage";
+import AssetLifecyclePage from "@/pages/AssetLifecyclePage";
+import PredictiveMaintenancePage from "@/pages/PredictiveMaintenancePage";
+import HealthRadarPage from "@/pages/HealthRadarPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -533,6 +537,46 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <XeroDashboardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/o365-setup"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <O365SetupPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/asset-lifecycle"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <AssetLifecyclePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/predictive-maintenance"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <PredictiveMaintenancePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/health-radar"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <HealthRadarPage />
                 </MainLayout>
               </ProtectedRoute>
             }
