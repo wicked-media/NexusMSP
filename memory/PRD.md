@@ -2,50 +2,45 @@
 ## Product Requirements Document
 
 ### Original Problem Statement
-Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps" - a comprehensive, feature-rich platform to surpass competitors, including modules for Ticketing, Client Management, Scripting, Reporting, Invoicing, and CRM.
+Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps" - a comprehensive, feature-rich platform to surpass competitors.
 
 ### Core Architecture
 - **Frontend**: React + Shadcn UI + TailwindCSS
 - **Backend**: FastAPI + MongoDB
 - **Auth**: JWT-based authentication
-- **AI**: Multi-LLM support via Emergent LLM Key (Claude, GPT, Gemini)
-- **Email**: Resend integration (real sending with valid key, demo mode with placeholder)
+- **AI**: Multi-LLM via Emergent LLM Key (Claude, GPT, Gemini)
+- **Email**: Resend integration
 
-### What's Been Implemented
+### Credentials
+- **Email**: admin@nexusops.io | **Password**: admin123
 
-#### Core Modules (All Production-Ready)
-- Dashboard with SLA countdown, device fleet overview, quick search (Ctrl+K), auto-refresh, operational alerts
-- Ticketing system (full CRUD, SLA, priorities, categories, email from tickets via Resend)
-- Client management with contacts
-- Technician management with scheduling
-- Device/asset management with bulk actions (select all, reboot, scan, delete)
-- Contract management
-- Invoice management with Stripe
-- Knowledge base with article pinning, public/internal visibility, Hudu sync, related articles
-- Time entries with live timer, weekly chart, by-technician/client billing, CSV export
-- Products and purchase orders
-- Vendor management
-- Phone/rental management
-- Projects module
-- Admin panel
-- Activity logs and gamification/achievements
-- Reports with 7 tabs (Overview, Technicians, Tickets, SLA Compliance, Revenue, Profitability, Devices) + CSV export
+---
 
-#### Advanced Features
-- **Technician Co-Pilot**: AI-powered chat with code block rendering + copy
-- **AI Diagnostics & Proofreading**: Backend AI service for device diagnosis and email proofreading
-- **UniFi Integration (Phase 1)**: Real-time sync, WLAN management, DPI traffic analytics
-- **Xero Dashboard**: Mocked accounting integration with revenue charts
-- **Feature-Rich Ticket View**: Device status, remote actions, AI diagnosis, script execution, multi-tab layout
-- **Per-Technician Settings**: Email signatures and canned responses
-- **Enhanced Leads/CRM**: Syncro-style with create-ticket-from-lead, assign-client, activity timeline, pipeline view
-- **Syncro RMM Import**: Settings, test connection, import clients/contacts/assets
-- **Feature-Rich Scripting**: 5 tabs (Scripts, Library, History, Scheduling, Patches) with CodeBlock component
-- **Resend Email Integration**: Emails from tickets with demo/production mode
+## Implemented Features (All Tested & Working)
 
-### Session History
-- **March 17, 2026 (Session 1)**: 5 parallel features (Resend email, enhanced leads, Syncro import, scripting, Co-Pilot)
-- **March 17, 2026 (Session 2)**: 6 module enhancements (Dashboard, Reports, Time Tracking, KB, Devices, Scripting cleanup)
+### Core Modules
+- Dashboard (SLA countdown, device fleet overview, quick search Ctrl+K, auto-refresh 60s, operational alerts)
+- Ticketing (full CRUD, SLA, priorities, email via Resend, Co-Pilot AI, device status)
+- Client Management (health scores 0-100, activity timeline, contacts, M365, Splynx, subscriptions)
+- Technicians (profiles, scheduling, per-tech email signatures, canned responses)
+- Devices (bulk select/actions, CPU/RAM/Disk monitoring, compliance scores)
+- Contracts (renewal alerts 30/60/90 day, SLA tiers platinum/gold/silver/standard, auto-renew)
+- Invoicing (Stripe integration, overdue tracking)
+- Knowledge Base (pinning, public/internal visibility, Hudu sync, related articles, helpful votes)
+- Time Tracking (live timer, weekly chart, by-technician/client billing, CSV export)
+- Reports (7 tabs: Overview, Technicians, Tickets, SLA Compliance, Revenue, Profitability, Devices + CSV)
+- Scripting (code blocks with copy, 8 library templates, scheduling, patch management)
+- Projects (milestones, time budget vs actual tracking, tasks)
+- Products, Purchase Orders, Vendors, Assets, Phone/Rentals, Admin, Activity Logs, Achievements
+
+### Advanced Features
+- **Client Health Score Engine**: Auto-calculated (Tickets/30 + SLA/20 + Devices/20 + Payments/20 + Contracts/10 = 100)
+- **Global Notification Bell**: SLA breach, contract renewal, device offline alerts with unread count
+- **Technician Co-Pilot**: AI chat with code block rendering
+- **AI Diagnostics & Proofreading**: Device diagnosis, email proofreading
+- **Enhanced Leads/CRM**: Syncro-style pipeline, create ticket from lead, assign client
+- **Syncro RMM Import**: Import clients/contacts/assets from Syncro
+- **UniFi Integration Phase 1**: WLAN management, DPI analytics
 
 ### Integration Status
 | Integration | Status |
@@ -57,26 +52,24 @@ Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps" - 
 | Syncro Import | Implemented (needs API key) |
 | Hudu | Implemented (needs API key) |
 | Xero | MOCKED |
-| Pax8 | MOCKED |
-| Domotz | MOCKED |
-| Acronis | MOCKED |
-| Proxmox | MOCKED |
+| Pax8/Domotz/Acronis/Proxmox | MOCKED |
 
-### Credentials
-- **Email**: admin@nexusops.io
-- **Password**: admin123
+### Session History
+- **Session 1**: 5 parallel features (Resend email, leads, Syncro import, scripting, CoPilot)
+- **Session 2**: 6 module enhancements (Dashboard, Reports, Time Tracking, KB, Devices, Scripting)
+- **Session 3**: 5 major features (Health Scores, Contracts, Projects, Clients, Notifications)
 
 ---
 
 ## Prioritized Backlog
 
 ### P1 - Upcoming
-- Enhance remaining modules: Contracts (renewal alerts, auto-invoicing), Projects (Gantt view, milestones), Clients (health score, document uploads)
+- Enhanced Projects page frontend (milestones UI, Gantt timeline, task dependencies)
 - Full UniFi Integration Phase 2 (active device management, provisioning)
-- Real Xero integration (move from mocked to live)
+- Real Xero integration (move from mocked)
 
 ### P2 - Future
-- Real backend for Pax8, Domotz, Acronis, Proxmox integrations
-- Client portal for end-user self-service
-- Standalone database seeding mechanism
-- Real-time toast notifications for critical events
+- Real Pax8/Domotz/Acronis/Proxmox backends
+- Client self-service portal
+- Document upload system for clients
+- Real-time WebSocket notifications
