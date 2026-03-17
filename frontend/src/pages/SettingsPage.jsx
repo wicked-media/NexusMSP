@@ -27,7 +27,8 @@ import {
   FileText,
   AlertTriangle,
   Wifi,
-  BookOpen
+  BookOpen,
+  Brain
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -53,13 +54,15 @@ export default function SettingsPage() {
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
   const [huduSaving, setHuduSaving] = useState(false);
+  const [aiConfig, setAiConfig] = useState({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" });
+  const [aiSaving, setAiSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -67,6 +70,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/suped`, { headers }),
           axios.get(`${API}/settings/splynx`, { headers }),
           axios.get(`${API}/settings/hudu`, { headers }),
+          axios.get(`${API}/ai/config`, { headers }),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -75,6 +79,7 @@ export default function SettingsPage() {
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
+        if (aiRes.data.provider) setAiConfig(aiRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -558,6 +563,70 @@ export default function SettingsPage() {
               </Button>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Model Configuration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-purple-500" />
+            <CardTitle>AI Model Configuration</CardTitle>
+          </div>
+          <CardDescription>Select the AI provider and model for ticket analysis, spell check, and auto-categorization</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Provider</Label>
+              <Select value={aiConfig.provider} onValueChange={v => {
+                const models = { anthropic: "claude-sonnet-4-5-20250929", openai: "gpt-5.2", gemini: "gemini-3-flash-preview" };
+                setAiConfig({ provider: v, model: models[v] || aiConfig.model });
+              }}>
+                <SelectTrigger data-testid="ai-provider-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                  <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                  <SelectItem value="gemini">Google (Gemini)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Model</Label>
+              <Select value={aiConfig.model} onValueChange={v => setAiConfig({ ...aiConfig, model: v })}>
+                <SelectTrigger data-testid="ai-model-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {aiConfig.provider === "anthropic" && <>
+                    <SelectItem value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</SelectItem>
+                    <SelectItem value="claude-4-sonnet-20250514">Claude 4 Sonnet</SelectItem>
+                    <SelectItem value="claude-haiku-4-5-20251001">Claude Haiku 4.5</SelectItem>
+                  </>}
+                  {aiConfig.provider === "openai" && <>
+                    <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
+                    <SelectItem value="gpt-5.1">GPT-5.1</SelectItem>
+                    <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
+                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                  </>}
+                  {aiConfig.provider === "gemini" && <>
+                    <SelectItem value="gemini-3-flash-preview">Gemini 3 Flash</SelectItem>
+                    <SelectItem value="gemini-3-pro-preview">Gemini 3 Pro</SelectItem>
+                    <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                  </>}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">AI is used for ticket auto-categorization, spell check/grammar, and device diagnostics. Powered by Emergent Universal Key.</p>
+          <Button onClick={async () => {
+            setAiSaving(true);
+            try {
+              await axios.put(`${API}/ai/config`, aiConfig, { headers });
+              toast.success(`AI model set to ${aiConfig.provider} / ${aiConfig.model}`);
+            } catch { toast.error("Failed to save AI config"); }
+            finally { setAiSaving(false); }
+          }} data-testid="save-ai-config-btn" disabled={aiSaving}>
+            {aiSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save AI Config
+          </Button>
         </CardContent>
       </Card>
 

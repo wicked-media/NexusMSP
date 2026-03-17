@@ -36,7 +36,8 @@ import {
   Building2,
   Tags,
   ShieldCheck,
-  Activity
+  Activity,
+  CreditCard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -79,6 +80,7 @@ const navGroups = [
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
+      { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
     ]
   },

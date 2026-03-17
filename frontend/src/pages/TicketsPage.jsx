@@ -20,7 +20,8 @@ import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
-  Lightbulb, BookOpen, Sparkles, ThumbsUp
+  Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
+  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -58,6 +59,13 @@ export default function TicketsPage() {
   const [cannedResponses, setCannedResponses] = useState([]);
   const [suggestions, setSuggestions] = useState(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  // AI enhanced features
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [proofreadResult, setProofreadResult] = useState(null);
+  const [proofreadLoading, setProofreadLoading] = useState(false);
+  const [scripts, setScripts] = useState([]);
+  const [deviceStatus, setDeviceStatus] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [isEmailOpen, setIsEmailOpen] = useState(false);
@@ -121,22 +129,33 @@ export default function TicketsPage() {
   const fetchTicketDetail = async (ticket) => {
     setViewingTicket(ticket);
     setSuggestions(null);
+    setAiAnalysis(null);
+    setDeviceStatus(null);
     try {
-      const [nRes, eRes, cRes, tRes, aRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/time-entries`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/audit-log`, { headers }),
+        axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
       setChildTickets(cRes.data);
       setTimeEntries(tRes.data);
       setAuditLog(aRes.data);
+      setScripts(sRes.data);
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
+      // Fetch device status if device linked
+      if (ticket.device_id) {
+        try {
+          const dRes = await axios.get(`${API}/devices/${ticket.device_id}`, { headers });
+          setDeviceStatus(dRes.data);
+        } catch { setDeviceStatus(null); }
+      }
       // Fetch AI suggestions
       setSuggestionsLoading(true);
       try {
@@ -297,6 +316,41 @@ export default function TicketsPage() {
     return true;
   });
 
+  // AI Analysis
+  const handleAiAnalysis = async () => {
+    if (!viewingTicket) return;
+    setAiAnalyzing(true);
+    try {
+      const res = await axios.post(`${API}/ai/analyze-device`, {
+        device_id: viewingTicket.device_id || "",
+        ticket_title: viewingTicket.title,
+        ticket_description: viewingTicket.description,
+      }, { headers });
+      setAiAnalysis(res.data);
+    } catch { toast.error("AI analysis failed"); }
+    finally { setAiAnalyzing(false); }
+  };
+
+  // Proofread text
+  const handleProofread = async (text, target) => {
+    if (!text || text.length < 3) return;
+    setProofreadLoading(true);
+    try {
+      const res = await axios.post(`${API}/ai/proofread`, { text }, { headers });
+      setProofreadResult({ ...res.data, target });
+    } catch { toast.error("Proofread failed"); }
+    finally { setProofreadLoading(false); }
+  };
+
+  // Run script on device
+  const handleRunScript = async (scriptId) => {
+    if (!viewingTicket?.device_id) { toast.error("No device linked to this ticket"); return; }
+    try {
+      await axios.post(`${API}/scripts/${scriptId}/execute`, [viewingTicket.device_id], { headers });
+      toast.success("Script queued for execution");
+    } catch { toast.error("Failed to run script"); }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   // ============ DETAIL VIEW ============
@@ -313,6 +367,30 @@ export default function TicketsPage() {
           {viewingTicket.merged_into && <Badge variant="outline" className="text-red-400">Merged</Badge>}
           {parent && <Badge variant="outline" className="text-indigo-400"><GitBranch className="w-3 h-3 mr-1" />Child of {parent.ticket_number}</Badge>}
           <div className="ml-auto flex items-center gap-2">
+            {/* Device status */}
+            {viewingTicket.device_id && deviceStatus && (
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${
+                deviceStatus.status === "online" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" :
+                "bg-red-500/10 text-red-400 border-red-500/30"
+              }`} data-testid="device-status-indicator">
+                {deviceStatus.status === "online" ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                {deviceStatus.name} - {deviceStatus.status === "online" ? "Online" : "Offline"}
+              </div>
+            )}
+            {/* Remote Connect */}
+            {viewingTicket.device_id && (
+              <Button variant="outline" size="sm" className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10" 
+                onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}`, '_blank')} 
+                data-testid="remote-connect-btn">
+                <ExternalLink className="w-3 h-3 mr-1" />Remote
+              </Button>
+            )}
+            {/* AI Analysis */}
+            <Button variant="outline" size="sm" className="text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
+              onClick={handleAiAnalysis} disabled={aiAnalyzing} data-testid="ai-analysis-btn">
+              {aiAnalyzing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
+              AI Diagnose
+            </Button>
             {/* Timer */}
             <Button variant={isTimerRunning ? "destructive" : "outline"} size="sm" onClick={toggleTimer} data-testid="timer-btn">
               {isTimerRunning ? <><Square className="w-3 h-3 mr-1" />{fmtTime(timerElapsed)}</> : <><Play className="w-3 h-3 mr-1" />Timer</>}
@@ -391,6 +469,73 @@ export default function TicketsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* AI ANALYSIS PANEL */}
+            {aiAnalysis && (
+              <Card className="border-purple-500/20 bg-purple-500/[0.02]" data-testid="ai-analysis-panel">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-purple-400" />
+                      <CardTitle className="text-base text-purple-400">AI Diagnosis</CardTitle>
+                      <Badge className={`text-[10px] ${aiAnalysis.severity === "critical" ? "bg-red-500/20 text-red-400" : aiAnalysis.severity === "high" ? "bg-orange-500/20 text-orange-400" : aiAnalysis.severity === "medium" ? "bg-yellow-500/20 text-yellow-400" : "bg-green-500/20 text-green-400"}`}>
+                        {aiAnalysis.severity} severity
+                      </Badge>
+                      {aiAnalysis.estimated_time_minutes > 0 && (
+                        <Badge variant="outline" className="text-[10px]"><Clock className="w-2.5 h-2.5 mr-0.5" />Est. {aiAnalysis.estimated_time_minutes}m</Badge>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAiAnalysis(null)}><X className="w-3 h-3" /></Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <p className="text-sm">{aiAnalysis.diagnosis}</p>
+                  </div>
+                  {aiAnalysis.potential_causes?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Potential Causes</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {aiAnalysis.potential_causes.map((cause, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] bg-orange-500/5 border-orange-500/20">{cause}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {aiAnalysis.steps?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Recommended Fix Steps</p>
+                      <div className="space-y-1.5">
+                        {aiAnalysis.steps.map((step, i) => (
+                          <div key={i} className="flex items-start gap-2 py-1 px-2 rounded bg-muted/30">
+                            <span className="text-xs font-bold text-purple-400 mt-0.5">{i + 1}.</span>
+                            <span className="text-xs">{step}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {aiAnalysis.recommended_scripts?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Scripts / Commands</p>
+                      {aiAnalysis.recommended_scripts.map((script, i) => (
+                        <code key={i} className="block text-[11px] bg-muted/50 px-2 py-1 rounded font-mono mb-1">{script}</code>
+                      ))}
+                    </div>
+                  )}
+                  {aiAnalysis.kb_references?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Related KB Articles</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {aiAnalysis.kb_references.map((ref, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] text-blue-400 border-blue-500/20"><BookOpen className="w-2.5 h-2.5 mr-0.5" />{ref}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Tabs: Notes, Emails, Children, Time, Audit */}
             <Tabs defaultValue="suggestions">
@@ -524,7 +669,7 @@ export default function TicketsPage() {
                   <div className="flex items-center gap-2">
                     <Textarea className="flex-1" placeholder="Add a note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <div className="flex items-center gap-2">
                       <Checkbox checked={isInternalNote} onCheckedChange={setIsInternalNote} id="internal" data-testid="internal-note-check" />
                       <Label htmlFor="internal" className="text-sm">Internal note</Label>
@@ -538,8 +683,33 @@ export default function TicketsPage() {
                         </SelectContent>
                       </Select>
                     )}
+                    {/* Spell Check */}
+                    <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
+                      onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
+                      data-testid="proofread-note-btn">
+                      {proofreadLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <SpellCheck className="w-3 h-3 mr-1" />}
+                      Proofread
+                    </Button>
                     <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add</Button>
                   </div>
+                  {/* Proofread result */}
+                  {proofreadResult && proofreadResult.target === "note" && (
+                    <div className="p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20" data-testid="proofread-result">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-cyan-400">Proofread Suggestion</span>
+                        <div className="flex gap-1">
+                          <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => { setNewNote(proofreadResult.corrected); setProofreadResult(null); }}>Apply</Button>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setProofreadResult(null)}><X className="w-3 h-3" /></Button>
+                        </div>
+                      </div>
+                      <p className="text-sm mb-1">{proofreadResult.corrected}</p>
+                      {proofreadResult.changes?.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {proofreadResult.changes.map((c, i) => <Badge key={i} variant="outline" className="text-[9px] bg-cyan-500/5">{c}</Badge>)}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <ScrollArea className="h-[300px]">
                   {ticketNotes.map(note => (
@@ -690,9 +860,69 @@ export default function TicketsPage() {
                       View {viewingTicket.device_name} details
                     </Button>
                   )}
+                  {/* Device info panel */}
+                  {deviceStatus && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30 border border-border/50 space-y-1" data-testid="device-info-panel">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <MonitorCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium">{deviceStatus.name}</span>
+                        </div>
+                        <div className={`flex items-center gap-1 text-[10px] ${deviceStatus.status === "online" ? "text-emerald-400" : "text-red-400"}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${deviceStatus.status === "online" ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
+                          {deviceStatus.status}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 text-[10px] text-muted-foreground">
+                        <span>OS: {deviceStatus.os_name || "N/A"}</span>
+                        <span>IP: {deviceStatus.ip_address || "N/A"}</span>
+                        <span>Type: {deviceStatus.device_type || "N/A"}</span>
+                        {deviceStatus.last_seen && <span>Seen: {formatDistanceToNow(new Date(deviceStatus.last_seen), { addSuffix: true })}</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Quick Actions */}
+                <Separator />
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Quick Actions</Label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={handleAiAnalysis} disabled={aiAnalyzing} data-testid="quick-ai-btn">
+                      <Brain className="w-3 h-3 mr-1 text-purple-400" />{aiAnalyzing ? "Analyzing..." : "AI Diagnose"}
+                    </Button>
+                    {viewingTicket.device_id && (
+                      <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start"
+                        onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}`, '_blank')} data-testid="quick-remote-btn">
+                        <ExternalLink className="w-3 h-3 mr-1 text-blue-400" />Remote
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
+
+            {/* Run Scripts */}
+            {viewingTicket.device_id && scripts.length > 0 && (
+              <Card data-testid="run-scripts-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-1.5"><Terminal className="w-4 h-4 text-green-400" />Run Script on Device</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[120px]">
+                    {scripts.slice(0, 10).map(script => (
+                      <div key={script.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50 transition-colors" data-testid={`script-${script.id}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Zap className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                          <span className="text-xs truncate">{script.name}</span>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-green-400 flex-shrink-0"
+                          onClick={() => handleRunScript(script.id)}>Run</Button>
+                      </div>
+                    ))}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Email Signature */}
             <Card>
@@ -732,7 +962,20 @@ export default function TicketsPage() {
                 <div><Label>BCC</Label><Input value={emailForm.bcc} onChange={e => setEmailForm({ ...emailForm, bcc: e.target.value })} placeholder="bcc@email.com" data-testid="email-bcc" /></div>
               </div>
               <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="email-subject" /></div>
-              <div><Label>Body</Label><Textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6} data-testid="email-body" /></div>
+              <div><Label>Body</Label><Textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6} data-testid="email-body" />
+                <div className="flex items-center gap-2 mt-1">
+                  <Button variant="outline" size="sm" className="h-7 text-[11px] text-cyan-400 border-cyan-500/30"
+                    onClick={() => handleProofread(emailForm.body, "email")} disabled={proofreadLoading || !emailForm.body} data-testid="proofread-email-btn">
+                    <SpellCheck className="w-3 h-3 mr-1" />Proofread Email
+                  </Button>
+                  {proofreadResult && proofreadResult.target === "email" && (
+                    <Button variant="outline" size="sm" className="h-7 text-[11px] text-green-400" 
+                      onClick={() => { setEmailForm({...emailForm, body: proofreadResult.corrected}); setProofreadResult(null); }}>
+                      Apply Corrections
+                    </Button>
+                  )}
+                </div>
+              </div>
               {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: emailSignature }} /></div>}
             </div>
             <DialogFooter><Button onClick={handleSendEmail} data-testid="send-email-submit"><Send className="w-4 h-4 mr-1" />Send</Button></DialogFooter>

@@ -42,6 +42,7 @@ import VendorsPage from "@/pages/VendorsPage";
 import TicketSettingsPage from "@/pages/TicketSettingsPage";
 import DmarcCompliancePage from "@/pages/DmarcCompliancePage";
 import SplynxDashboardPage from "@/pages/SplynxDashboardPage";
+import XeroDashboardPage from "@/pages/XeroDashboardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -522,6 +523,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <SplynxDashboardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/xero"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <XeroDashboardPage />
                 </MainLayout>
               </ProtectedRoute>
             }
