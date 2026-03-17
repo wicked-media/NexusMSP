@@ -89,6 +89,73 @@ async def get_contracts_summary(current_user: dict = Depends(get_current_user)):
         "by_tier": tiers,
     }
 
+@router.get("/contracts/auto-renewal-proposals")
+async def get_auto_renewal_proposals(current_user: dict = Depends(get_current_user)):
+    """Get auto-renewal proposals with upsell opportunities for contracts expiring within 60 days"""
+    now = datetime.now(timezone.utc)
+    cutoff = (now + timedelta(days=60)).strftime("%Y-%m-%d")
+    
+    contracts = await db.contracts.find({
+        "status": "active",
+        "end_date": {"$lte": cutoff, "$ne": "", "$exists": True},
+    }, {"_id": 0}).to_list(100)
+    
+    proposals = []
+    for c in contracts:
+        client = await db.clients.find_one({"id": c.get("client_id")}, {"_id": 0})
+        devices = await db.devices.count_documents({"client_id": c.get("client_id")})
+        tickets_30d = await db.tickets.count_documents({
+            "client_id": c.get("client_id"),
+            "created_at": {"$gte": (now - timedelta(days=30)).isoformat()}
+        })
+        
+        upsell = []
+        current_value = float(c.get("value", 0))
+        sla_tier = c.get("sla_tier", "standard")
+        
+        if sla_tier == "standard":
+            upsell.append({"type": "sla_upgrade", "description": "Upgrade to Silver SLA (8h response)", "additional_mrr": current_value * 0.15})
+        elif sla_tier == "silver":
+            upsell.append({"type": "sla_upgrade", "description": "Upgrade to Gold SLA (4h response)", "additional_mrr": current_value * 0.2})
+        elif sla_tier == "gold":
+            upsell.append({"type": "sla_upgrade", "description": "Upgrade to Platinum SLA (1h response)", "additional_mrr": current_value * 0.3})
+        
+        if devices < 10:
+            upsell.append({"type": "device_expansion", "description": f"Currently managing {devices} devices - room for fleet expansion", "additional_mrr": 15 * (10 - devices)})
+        
+        if tickets_30d > 5:
+            upsell.append({"type": "proactive", "description": "High ticket volume - suggest proactive monitoring package", "additional_mrr": 200})
+        
+        try:
+            end = datetime.strptime(c["end_date"][:10], "%Y-%m-%d")
+            days_remaining = (end - now.replace(tzinfo=None)).days
+        except:
+            days_remaining = 30
+        
+        proposals.append({
+            "contract_id": c["id"],
+            "contract_name": c.get("name", ""),
+            "client_id": c.get("client_id", ""),
+            "client_name": c.get("client_name", client.get("name", "") if client else ""),
+            "current_value": current_value,
+            "sla_tier": sla_tier,
+            "end_date": c.get("end_date", ""),
+            "days_remaining": days_remaining,
+            "auto_renew": c.get("auto_renew", False),
+            "upsell_opportunities": upsell,
+            "total_upsell_potential": sum(u.get("additional_mrr", 0) for u in upsell),
+            "recommended_new_value": current_value + sum(u.get("additional_mrr", 0) for u in upsell),
+        })
+    
+    proposals.sort(key=lambda x: x["days_remaining"])
+    
+    return {
+        "proposals": proposals,
+        "total_current_mrr": sum(p["current_value"] for p in proposals),
+        "total_potential_mrr": sum(p["recommended_new_value"] for p in proposals),
+        "total_upsell_potential": sum(p["total_upsell_potential"] for p in proposals),
+    }
+
 @router.get("/contracts/{contract_id}")
 async def get_contract(contract_id: str, current_user: dict = Depends(get_current_user)):
     contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})

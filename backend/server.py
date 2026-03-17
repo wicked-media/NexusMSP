@@ -17,7 +17,8 @@ from app.routers import (
     infrastructure, yeastar, activity_logs, achievements,
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
-    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar
+    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
+    whitelabel
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -37,7 +38,8 @@ all_routers = [
     infrastructure, yeastar, activity_logs, achievements,
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
-    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar
+    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
+    whitelabel
 ]
 
 for router_module in all_routers:

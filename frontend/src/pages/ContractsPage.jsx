@@ -22,9 +22,36 @@ import {
   Loader2,
   DollarSign,
   Calendar,
-  RefreshCw
+  RefreshCw,
+  Shield
 } from "lucide-react";
 import { format } from "date-fns";
+
+const slaShieldConfig = {
+  platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
+  gold: { label: "Gold", color: "text-yellow-400", bg: "bg-gradient-to-b from-yellow-300 to-yellow-500", border: "border-yellow-500/50", fill: "#fbbf24" },
+  silver: { label: "Silver", color: "text-slate-400", bg: "bg-gradient-to-b from-slate-300 to-slate-500", border: "border-slate-500/50", fill: "#94a3b8" },
+  bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-gradient-to-b from-amber-400 to-amber-700", border: "border-amber-600/50", fill: "#d97706" },
+  standard: { label: "Standard", color: "text-gray-500", bg: "bg-gradient-to-b from-gray-400 to-gray-600", border: "border-gray-500/50", fill: "#6b7280" },
+};
+
+const SLAShieldBadge = ({ tier, size = "sm" }) => {
+  const config = slaShieldConfig[tier] || slaShieldConfig.standard;
+  const s = size === "lg" ? "w-8 h-8" : "w-5 h-5";
+  const textSize = size === "lg" ? "text-[8px]" : "text-[5px]";
+  return (
+    <div className="relative inline-flex items-center gap-1.5" title={`${config.label} SLA`}>
+      <div className="relative">
+        <svg className={s} viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill={config.fill} opacity="0.2" />
+          <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" stroke={config.fill} strokeWidth="1.5" fill="none" />
+          <path d="M9 12l2 2 4-4" stroke={config.fill} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <span className={`font-semibold capitalize ${config.color} ${size === "lg" ? "text-sm" : "text-[10px]"}`}>{config.label}</span>
+    </div>
+  );
+};
 
 const contractTypes = {
   managed_services: { label: "Managed Services", class: "bg-blue-500/10 text-blue-500" },
@@ -434,7 +461,7 @@ export default function ContractsPage() {
                   </div>
                   <div className="text-right">
                     <p className="font-mono text-sm">${(alert.value || 0).toLocaleString()}/mo</p>
-                    <Badge variant="outline" className="text-[9px] capitalize">{alert.sla_tier}</Badge>
+                    <Badge variant="outline" className="text-[9px] capitalize"><SLAShieldBadge tier={alert.sla_tier} /></Badge>
                   </div>
                 </div>
               ))}
@@ -526,6 +553,7 @@ export default function ContractsPage() {
                     <TableHead>Contract</TableHead>
                     <TableHead>Client</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead>SLA</TableHead>
                     <TableHead>Value</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Line Items</TableHead>
@@ -550,6 +578,9 @@ export default function ContractsPage() {
                           <Badge variant="outline" className={contractTypes[contract.contract_type]?.class}>
                             {contractTypes[contract.contract_type]?.label}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <SLAShieldBadge tier={contract.sla_tier || "standard"} />
                         </TableCell>
                         <TableCell>
                           <span className="font-semibold text-green-500">
@@ -591,7 +622,7 @@ export default function ContractsPage() {
                     );
                   }) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12">
+                      <TableCell colSpan={8} className="text-center py-12">
                         <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                         <p className="text-muted-foreground">No contracts found</p>
                       </TableCell>

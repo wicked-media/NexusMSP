@@ -207,9 +207,13 @@ export default function LeadsPage() {
 
         {/* Action Buttons - Syncro Style */}
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => { setTicketForm({ title: `Inquiry from ${detailLead.company_name}`, description: `Lead inquiry from ${detailLead.contact_name}.\n\n${detailLead.notes || ""}`, priority: "medium", category: "support" }); setIsTicketDialogOpen(true); }}
+            data-testid="create-ticket-from-lead-btn">
+            <Ticket className="w-4 h-4 mr-1" />Create Ticket
+          </Button>
           {!detailLead.converted_to_client && (
             <>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
+              <Button size="sm" className="bg-purple-600 hover:bg-purple-700 text-white" onClick={async () => {
                 if (!confirm("This will convert the lead to a client AND open a ticket creation form. Continue?")) return;
                 try {
                   await axios.post(`${API}/leads/${detailLead.id}/convert`, {}, { headers });
@@ -229,10 +233,6 @@ export default function LeadsPage() {
               </Button>
             </>
           )}
-          <Button size="sm" variant="outline" onClick={() => { setTicketForm({ title: `Inquiry from ${detailLead.company_name}`, description: `Lead inquiry from ${detailLead.contact_name}.\n\n${detailLead.notes || ""}`, priority: "medium", category: "support" }); setIsTicketDialogOpen(true); }}
-            data-testid="create-ticket-from-lead-btn">
-            <Ticket className="w-4 h-4 mr-1" />Create Ticket
-          </Button>
           {detailLead.converted_to_client && (
             <Badge variant="outline" className="text-green-400 border-green-500/30">Linked to Client</Badge>
           )}

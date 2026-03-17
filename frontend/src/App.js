@@ -47,6 +47,8 @@ import O365SetupPage from "@/pages/O365SetupPage";
 import AssetLifecyclePage from "@/pages/AssetLifecyclePage";
 import PredictiveMaintenancePage from "@/pages/PredictiveMaintenancePage";
 import HealthRadarPage from "@/pages/HealthRadarPage";
+import WhiteLabelPage from "@/pages/WhiteLabelPage";
+import LoyaltyDashboardPage from "@/pages/LoyaltyDashboardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -577,6 +579,26 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <HealthRadarPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/white-label"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <WhiteLabelPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/loyalty"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <LoyaltyDashboardPage />
                 </MainLayout>
               </ProtectedRoute>
             }

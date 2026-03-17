@@ -17,7 +17,7 @@ import {
   Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
   ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw,
   ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck,
-  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink
+  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink, Trophy, Award
 } from "lucide-react";
 
 const roleColors = {
@@ -54,6 +54,9 @@ export default function ClientsPage() {
   const [splynxLoading, setSplynxLoading] = useState(false);
   const [healthScores, setHealthScores] = useState({});
   const [clientTimeline, setClientTimeline] = useState([]);
+  const [clientAchievements, setClientAchievements] = useState(null);
+  const [clientReadiness, setClientReadiness] = useState(null);
+  const [clientLoyalty, setClientLoyalty] = useState(null);
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -90,13 +93,19 @@ export default function ClientsPage() {
     setSplynxLink(null);
     setSplynxServices(null);
     setClientTimeline([]);
+    setClientAchievements(null);
+    setClientReadiness(null);
+    setClientLoyalty(null);
     try {
-      const [detailRes, m365Res, subsRes, splynxRes, timelineRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/splynx`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/clients/${client.id}/achievements`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/clients/${client.id}/portal-readiness`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/clients/${client.id}/loyalty`, { headers }).catch(() => ({ data: null })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
@@ -104,6 +113,9 @@ export default function ClientsPage() {
       setSubscriptions(subsRes.data);
       setSplynxLink(splynxRes.data);
       setClientTimeline(timelineRes.data || []);
+      setClientAchievements(achRes.data);
+      setClientReadiness(readRes.data);
+      setClientLoyalty(loyRes.data);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -304,11 +316,13 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-8 w-full">
-                <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts ({contacts.length})</TabsTrigger>
-                <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
-                <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
-                <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts ({contracts.length})</TabsTrigger>
+              <TabsList className="grid grid-cols-10 w-full">
+                <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts</TabsTrigger>
+                <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets</TabsTrigger>
+                <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices</TabsTrigger>
+                <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts</TabsTrigger>
+                <TabsTrigger value="achievements" data-testid="client-achievements-tab"><Trophy className="w-3 h-3 mr-1" />Awards</TabsTrigger>
+                <TabsTrigger value="readiness" data-testid="client-readiness-tab"><CheckCircle className="w-3 h-3 mr-1" />Ready</TabsTrigger>
                 <TabsTrigger value="timeline" data-testid="client-timeline-tab">Timeline</TabsTrigger>
                 <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subs</TabsTrigger>
                 <TabsTrigger value="splynx" data-testid="client-splynx-tab"><Wifi className="w-3 h-3 mr-1" />Splynx</TabsTrigger>
@@ -761,6 +775,105 @@ export default function ClientsPage() {
                   </div>
                 )}
               </TabsContent>
+
+              {/* ACHIEVEMENTS TAB */}
+              <TabsContent value="achievements" className="space-y-4">
+                {clientAchievements ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">{clientAchievements.total_earned} of {clientAchievements.total_available} achievements earned</p>
+                      {clientLoyalty && (
+                        <Badge className={`text-xs ${clientLoyalty.tier === "platinum" ? "bg-slate-300/20 text-slate-300 border-slate-400/30" : clientLoyalty.tier === "gold" ? "bg-yellow-400/20 text-yellow-400 border-yellow-500/30" : clientLoyalty.tier === "silver" ? "bg-slate-400/20 text-slate-400 border-slate-500/30" : "bg-amber-600/20 text-amber-600 border-amber-600/30"}`}>
+                          <Trophy className="w-3 h-3 mr-1" />{clientLoyalty.tier?.toUpperCase()} - {clientLoyalty.loyalty_points} pts
+                        </Badge>
+                      )}
+                    </div>
+                    {/* SLA Shields */}
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">SLA Shields</h4>
+                      <div className="grid grid-cols-5 gap-2">
+                        {clientAchievements.achievements.filter(a => a.type === "sla").map(ach => (
+                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current opacity-100" : "opacity-30 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
+                            <svg className="w-10 h-10 mx-auto mb-1" viewBox="0 0 24 24" fill="none">
+                              <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill={ach.color} opacity={ach.earned ? "0.2" : "0.05"} />
+                              <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" stroke={ach.color} strokeWidth="1.5" fill="none" />
+                              {ach.earned && <path d="M9 12l2 2 4-4" stroke={ach.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+                            </svg>
+                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
+                            <p className="text-[8px] text-muted-foreground">{ach.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Tenure */}
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Tenure Milestones</h4>
+                      <div className="grid grid-cols-4 gap-2">
+                        {clientAchievements.achievements.filter(a => a.type === "tenure").map(ach => (
+                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current" : "opacity-40 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
+                            <div className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-1 ${ach.earned ? "" : "bg-muted/30"}`}
+                              style={ach.earned ? { background: ach.color + "20" } : {}}>
+                              <Award className="w-6 h-6" style={{ color: ach.earned ? ach.color : undefined }} />
+                            </div>
+                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
+                            {!ach.earned && ach.progress !== undefined && (
+                              <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${ach.progress}%`, background: ach.color }} />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Loyalty */}
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Loyalty Badges</h4>
+                      <div className="grid grid-cols-4 gap-2">
+                        {clientAchievements.achievements.filter(a => a.type === "loyalty").map(ach => (
+                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current" : "opacity-40 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
+                            <Star className="w-8 h-8 mx-auto mb-1" style={{ color: ach.earned ? ach.color : undefined }} />
+                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
+                            <p className="text-[8px] text-muted-foreground">{ach.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : <div className="text-center py-12 text-muted-foreground"><Trophy className="w-12 h-12 mx-auto opacity-30 mb-2" /><p className="text-sm">Loading achievements...</p></div>}
+              </TabsContent>
+
+              {/* READINESS TAB */}
+              <TabsContent value="readiness" className="space-y-4">
+                {clientReadiness ? (
+                  <>
+                    <div className="flex items-center gap-4">
+                      <div className="relative w-20 h-20">
+                        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
+                          <path d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted/30" />
+                          <path d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${clientReadiness.readiness_score}, 100`} className={clientReadiness.readiness_score >= 80 ? "text-emerald-400" : clientReadiness.readiness_score >= 50 ? "text-amber-400" : "text-red-400"} />
+                        </svg>
+                        <span className={`absolute inset-0 flex items-center justify-center text-xl font-black ${clientReadiness.readiness_score >= 80 ? "text-emerald-400" : clientReadiness.readiness_score >= 50 ? "text-amber-400" : "text-red-400"}`}>{clientReadiness.readiness_score}%</span>
+                      </div>
+                      <div>
+                        <p className="font-semibold">Portal Readiness Score</p>
+                        <p className="text-sm text-muted-foreground">{clientReadiness.completed} of {clientReadiness.total} checks completed</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {clientReadiness.checks.map((check, i) => (
+                        <div key={i} className={`flex items-center gap-3 p-2.5 rounded-lg border ${check.done ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/20 bg-red-500/5"}`}>
+                          {check.done ? <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" /> : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
+                          <div>
+                            <p className="text-sm font-medium">{check.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{check.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-12 h-12 mx-auto opacity-30 mb-2" /><p className="text-sm">Loading readiness...</p></div>}
+              </TabsContent>
+
             </Tabs>
           </div>
 

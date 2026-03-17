@@ -42,7 +42,9 @@ import {
   Cpu,
   Heart,
   Wrench,
-  Radar
+  Radar,
+  Paintbrush,
+  Gift
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -165,6 +167,7 @@ const navGroups = [
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
+      { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
       { path: "/products", icon: Package, label: "Products" },
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
       { path: "/vendors", icon: Building2, label: "Vendors" },
@@ -198,6 +201,7 @@ const navGroups = [
     title: "System",
     items: [
       { path: "/health-radar", icon: Radar, label: "Health Radar" },
+      { path: "/white-label", icon: Paintbrush, label: "White Label" },
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
       { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },
