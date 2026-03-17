@@ -37,12 +37,98 @@ import {
   Tags,
   ShieldCheck,
   Activity,
-  CreditCard
+  CreditCard,
+  Bell
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { useState, useEffect, useRef } from "react";
+import axios from "axios";
+import { API } from "@/App";
+
+// Notification Bell Component
+function NotificationBell({ token, collapsed }) {
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef(null);
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const fetchNotifications = async () => {
+    try {
+      const [nRes, cRes] = await Promise.all([
+        axios.get(`${API}/notifications`, { headers }),
+        axios.get(`${API}/notifications/unread-count`, { headers }),
+      ]);
+      setNotifications(nRes.data.slice(0, 15));
+      setUnreadCount(cRes.data.count);
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    // Also generate new ones
+    axios.post(`${API}/notifications/generate`, {}, { headers }).then(() => fetchNotifications()).catch(() => {});
+    const iv = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const markAllRead = async () => {
+    try {
+      await axios.post(`${API}/notifications/mark-read`, {}, { headers });
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch {}
+  };
+
+  const severityColor = { critical: "bg-red-500", warning: "bg-amber-500", info: "bg-blue-500" };
+  const typeIcon = { sla_breach: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT" };
+
+  return (
+    <div className="relative px-3 py-2" ref={ref}>
+      <button onClick={() => setIsOpen(!isOpen)} className={`relative flex items-center gap-2 w-full px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 transition-all ${collapsed ? "justify-center" : ""}`} data-testid="notification-bell">
+        <Bell className="w-[18px] h-[18px]" />
+        {!collapsed && <span className="text-[13px] font-medium">Notifications</span>}
+        {unreadCount > 0 && (
+          <span className="absolute top-1 right-2 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">{unreadCount > 9 ? "9+" : unreadCount}</span>
+        )}
+      </button>
+      {isOpen && (
+        <div className="absolute left-full top-0 ml-2 w-80 bg-card border rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-dropdown">
+          <div className="flex items-center justify-between px-4 py-3 border-b">
+            <span className="font-semibold text-sm">Notifications</span>
+            {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length > 0 ? notifications.map(n => (
+              <div key={n.id} className={`flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/50 transition-colors ${!n.read ? "bg-primary/5" : ""}`}>
+                <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${severityColor[n.severity] || "bg-blue-500"}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-muted-foreground bg-muted px-1 rounded">{typeIcon[n.type] || "SYS"}</span>
+                    <p className="text-xs font-medium truncate">{n.title}</p>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{n.message}</p>
+                </div>
+              </div>
+            )) : (
+              <div className="text-center py-8 text-muted-foreground text-sm">No notifications</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Grouped navigation for better organization
 const navGroups = [
@@ -113,7 +199,7 @@ const navGroups = [
 ];
 
 export const Sidebar = ({ collapsed, onToggle }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -154,6 +240,9 @@ export const Sidebar = ({ collapsed, onToggle }) => {
             <ChevronLeft className="h-4 w-4" />
           </Button>
         </div>
+
+        {/* Notification Bell */}
+        <NotificationBell token={token} collapsed={collapsed} />
 
         {/* Navigation */}
         <ScrollArea className="flex-1">

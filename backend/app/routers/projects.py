@@ -140,3 +140,73 @@ async def delete_project_task(project_id: str, task_id: str, current_user: dict 
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task deleted"}
 
+# ============== PROJECT MILESTONES ==============
+
+@router.get("/projects/{project_id}/milestones")
+async def get_milestones(project_id: str, current_user: dict = Depends(get_current_user)):
+    milestones = await db.project_milestones.find({"project_id": project_id}, {"_id": 0}).sort("due_date", 1).to_list(100)
+    return milestones
+
+@router.post("/projects/{project_id}/milestones")
+async def create_milestone(project_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    milestone = {
+        "id": str(uuid.uuid4()),
+        "project_id": project_id,
+        "title": data.get("title"),
+        "description": data.get("description", ""),
+        "due_date": data.get("due_date"),
+        "status": data.get("status", "pending"),
+        "completed_at": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.project_milestones.insert_one(milestone)
+    return {k: v for k, v in milestone.items() if k != "_id"}
+
+@router.put("/projects/{project_id}/milestones/{milestone_id}")
+async def update_milestone(project_id: str, milestone_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    if data.get("status") == "completed":
+        data["completed_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.project_milestones.update_one({"id": milestone_id, "project_id": project_id}, {"$set": data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Milestone not found")
+    return {"message": "Milestone updated"}
+
+@router.delete("/projects/{project_id}/milestones/{milestone_id}")
+async def delete_milestone(project_id: str, milestone_id: str, current_user: dict = Depends(get_current_user)):
+    await db.project_milestones.delete_one({"id": milestone_id, "project_id": project_id})
+    return {"message": "Milestone deleted"}
+
+@router.get("/projects/{project_id}/time-summary")
+async def get_project_time_summary(project_id: str, current_user: dict = Depends(get_current_user)):
+    """Get actual vs budgeted time for a project"""
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).to_list(100)
+    total_estimated = sum(t.get("estimated_hours", 0) or 0 for t in tasks)
+    completed_tasks = sum(1 for t in tasks if t.get("status") == "completed")
+    
+    # Get actual time from time entries linked to project tickets
+    actual_minutes = 0
+    # Get tickets linked via project tasks or direct linking
+    ticket_ids = [t.get("ticket_id") for t in tasks if t.get("ticket_id")]
+    if ticket_ids:
+        time_result = await db.time_entries.aggregate([
+            {"$match": {"ticket_id": {"$in": ticket_ids}}},
+            {"$group": {"_id": None, "total": {"$sum": "$minutes"}}}
+        ]).to_list(1)
+        actual_minutes = time_result[0]["total"] if time_result else 0
+    
+    return {
+        "budget_hours": project.get("budget_hours", 0),
+        "estimated_hours": total_estimated,
+        "actual_hours": round(actual_minutes / 60, 1),
+        "total_tasks": len(tasks),
+        "completed_tasks": completed_tasks,
+        "completion_pct": round(completed_tasks / len(tasks) * 100) if tasks else 0,
+    }
+

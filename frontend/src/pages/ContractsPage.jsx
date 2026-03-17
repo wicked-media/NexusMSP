@@ -47,6 +47,8 @@ export default function ContractsPage() {
   const [lineItems, setLineItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [renewalAlerts, setRenewalAlerts] = useState([]);
+  const [contractSummary, setContractSummary] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLineItemDialogOpen, setIsLineItemDialogOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState(null);
@@ -59,6 +61,7 @@ export default function ContractsPage() {
     end_date: "",
     value: "",
     auto_renew: true,
+    sla_tier: "standard",
     notes: ""
   });
   const [lineItemForm, setLineItemForm] = useState({
@@ -76,14 +79,18 @@ export default function ContractsPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [contractsRes, clientsRes, lineItemsRes] = await Promise.all([
+      const [contractsRes, clientsRes, lineItemsRes, renewalsRes, summaryRes] = await Promise.all([
         axios.get(`${API}/contracts`, { headers }),
         axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/line-items`, { headers })
+        axios.get(`${API}/line-items`, { headers }),
+        axios.get(`${API}/contracts/renewal-alerts`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/contracts/summary`, { headers }).catch(() => ({ data: null })),
       ]);
       setContracts(contractsRes.data);
       setClients(clientsRes.data);
       setLineItems(lineItemsRes.data);
+      setRenewalAlerts(renewalsRes.data);
+      setContractSummary(summaryRes.data);
     } catch (error) {
       toast.error("Failed to fetch contracts");
     } finally {
@@ -321,6 +328,18 @@ export default function ContractsPage() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>SLA Tier</Label>
+                <Select value={formData.sla_tier || "standard"} onValueChange={(v) => setFormData({ ...formData, sla_tier: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="platinum">Platinum - 1h Response</SelectItem>
+                    <SelectItem value="gold">Gold - 4h Response</SelectItem>
+                    <SelectItem value="silver">Silver - 8h Response</SelectItem>
+                    <SelectItem value="standard">Standard - 24h Response</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
                 <Label>Notes</Label>
                 <Textarea
                   value={formData.notes}
@@ -340,7 +359,7 @@ export default function ContractsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -359,7 +378,7 @@ export default function ContractsPage() {
             </div>
             <div>
               <p className="text-2xl font-bold">${totalValue.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Monthly Contract Value</p>
+              <p className="text-xs text-muted-foreground">Monthly Value</p>
             </div>
           </CardContent>
         </Card>
@@ -370,11 +389,59 @@ export default function ContractsPage() {
             </div>
             <div>
               <p className="text-2xl font-bold">{contracts.filter(c => c.status === 'active').length}</p>
-              <p className="text-xs text-muted-foreground">Active Contracts</p>
+              <p className="text-xs text-muted-foreground">Active</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "border-red-500/30" : ""}>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "bg-red-500/10" : "bg-amber-500/10"}`}>
+              <Calendar className={`w-5 h-5 ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "text-red-500" : "text-amber-500"}`} />
+            </div>
+            <div>
+              <p className={`text-2xl font-bold ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "text-red-500" : ""}`}>{renewalAlerts.length}</p>
+              <p className="text-xs text-muted-foreground">Expiring (90d)</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <FileText className="w-5 h-5 text-purple-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{lineItems.length}</p>
+              <p className="text-xs text-muted-foreground">Line Items</p>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Renewal Alerts */}
+      {renewalAlerts.length > 0 && (
+        <Card className="border-amber-500/20" data-testid="renewal-alerts">
+          <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4 text-amber-500" />Contract Renewal Alerts</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {renewalAlerts.slice(0, 5).map(alert => (
+                <div key={alert.contract_id} className={`flex items-center justify-between p-3 rounded-lg border ${alert.urgency === "critical" ? "bg-red-500/5 border-red-500/20" : alert.urgency === "warning" ? "bg-amber-500/5 border-amber-500/20" : "bg-blue-500/5 border-blue-500/20"}`}>
+                  <div className="flex items-center gap-3">
+                    <Badge className={`text-[10px] ${alert.urgency === "critical" ? "bg-red-500/20 text-red-400" : alert.urgency === "warning" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}`}>{alert.days_remaining} days</Badge>
+                    <div>
+                      <p className="text-sm font-medium">{alert.contract_name}</p>
+                      <p className="text-xs text-muted-foreground">{alert.client_name} | Expires: {alert.end_date?.split("T")[0]}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono text-sm">${(alert.value || 0).toLocaleString()}/mo</p>
+                    <Badge variant="outline" className="text-[9px] capitalize">{alert.sla_tier}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Search */}
       <Card>

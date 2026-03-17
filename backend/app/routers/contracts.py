@@ -29,6 +29,66 @@ async def get_contracts(
             c['created_at'] = datetime.fromisoformat(c['created_at'])
     return contracts
 
+@router.get("/contracts/renewal-alerts")
+async def get_renewal_alerts(current_user: dict = Depends(get_current_user)):
+    """Get contracts expiring within 90 days"""
+    now = datetime.now(timezone.utc)
+    alerts = []
+    for days, urgency in [(30, "critical"), (60, "warning"), (90, "info")]:
+        cutoff = (now + timedelta(days=days)).isoformat()
+        contracts = await db.contracts.find({
+            "status": "active",
+            "end_date": {"$lte": cutoff, "$gte": now.isoformat()}
+        }, {"_id": 0}).to_list(100)
+        for c in contracts:
+            end = c.get("end_date", "")
+            if end:
+                try:
+                    end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=timezone.utc)
+                    days_left = (end_dt - now).days
+                except:
+                    days_left = 0
+            else:
+                days_left = 0
+            alerts.append({
+                "contract_id": c["id"],
+                "contract_name": c.get("name"),
+                "client_name": c.get("client_name"),
+                "client_id": c.get("client_id"),
+                "end_date": end,
+                "days_remaining": days_left,
+                "urgency": urgency,
+                "value": c.get("value", 0),
+                "sla_tier": c.get("sla_tier", "standard"),
+            })
+    alerts.sort(key=lambda x: x["days_remaining"])
+    return alerts
+
+@router.get("/contracts/summary")
+async def get_contracts_summary(current_user: dict = Depends(get_current_user)):
+    """Get contracts summary with value and SLA tier breakdown"""
+    now = datetime.now(timezone.utc)
+    active = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(1000)
+    total_value = sum(c.get("value", 0) for c in active)
+    expiring_30 = sum(1 for c in active if c.get("end_date") and c["end_date"] <= (now + timedelta(days=30)).isoformat() and c["end_date"] >= now.isoformat())
+    expiring_60 = sum(1 for c in active if c.get("end_date") and c["end_date"] <= (now + timedelta(days=60)).isoformat() and c["end_date"] >= now.isoformat())
+    tiers = {}
+    for c in active:
+        tier = c.get("sla_tier", "standard")
+        if tier not in tiers:
+            tiers[tier] = {"count": 0, "value": 0}
+        tiers[tier]["count"] += 1
+        tiers[tier]["value"] += c.get("value", 0)
+    return {
+        "total_active": len(active),
+        "total_value": total_value,
+        "expiring_30": expiring_30,
+        "expiring_60": expiring_60,
+        "by_tier": tiers,
+    }
+
 @router.get("/contracts/{contract_id}")
 async def get_contract(contract_id: str, current_user: dict = Depends(get_current_user)):
     contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})

@@ -52,6 +52,8 @@ export default function ClientsPage() {
   const [splynxLink, setSplynxLink] = useState(null);
   const [splynxServices, setSplynxServices] = useState(null);
   const [splynxLoading, setSplynxLoading] = useState(false);
+  const [healthScores, setHealthScores] = useState({});
+  const [clientTimeline, setClientTimeline] = useState([]);
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -69,6 +71,12 @@ export default function ClientsPage() {
       setClients(res.data);
       setSubsSummary(subsRes.data);
       setSupedServices(servicesRes.data);
+      // Fetch health scores in background
+      axios.get(`${API}/clients/health/all`, { headers }).then(hRes => {
+        const map = {};
+        (hRes.data || []).forEach(h => { map[h.client_id] = h; });
+        setHealthScores(map);
+      }).catch(() => {});
     } catch { toast.error("Failed to fetch clients"); }
     finally { setLoading(false); }
   };
@@ -81,18 +89,21 @@ export default function ClientsPage() {
     setDmarcRecords(null);
     setSplynxLink(null);
     setSplynxServices(null);
+    setClientTimeline([]);
     try {
-      const [detailRes, m365Res, subsRes, splynxRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes, timelineRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/splynx`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/clients/${client.id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
       setM365Config(m365Res.data.config || null);
       setSubscriptions(subsRes.data);
       setSplynxLink(splynxRes.data);
+      setClientTimeline(timelineRes.data || []);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -259,6 +270,8 @@ export default function ClientsPage() {
   if (viewingClient && clientDetail) {
     const { client, tickets, devices, contracts } = clientDetail;
     const contacts = client.contacts || [];
+    const health = healthScores[client.id];
+    const healthColor = health ? (health.risk_level === "healthy" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : health.risk_level === "attention" ? "bg-amber-500/20 text-amber-400 border-amber-500/30" : "bg-red-500/20 text-red-400 border-red-500/30") : "";
     return (
       <div className="space-y-4" data-testid="client-detail-view">
         <div className="flex items-center gap-3">
@@ -266,11 +279,21 @@ export default function ClientsPage() {
           <Building2 className="w-5 h-5" />
           <h1 className="text-2xl font-bold">{client.name}</h1>
           <Badge variant="outline" className="ml-2">{client.contract_type}</Badge>
+          {health && <Badge className={healthColor} data-testid="client-health-badge">Health: {health.health_score}/100</Badge>}
           <div className="ml-auto"><Button variant="outline" size="sm" onClick={() => openEditClient(client)}><Edit className="w-4 h-4 mr-1" />Edit</Button></div>
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          {health && (
+            <Card className={`border ${health.risk_level === "healthy" ? "border-emerald-500/30" : health.risk_level === "attention" ? "border-amber-500/30" : "border-red-500/30"}`} data-testid="health-score-card">
+              <CardContent className="pt-4">
+                <p className="text-xs text-muted-foreground">Health Score</p>
+                <p className={`text-xl font-bold ${health.risk_level === "healthy" ? "text-emerald-500" : health.risk_level === "attention" ? "text-amber-500" : "text-red-500"}`}>{health.health_score}/100</p>
+                <p className="text-[10px] text-muted-foreground capitalize">{health.risk_level}</p>
+              </CardContent>
+            </Card>
+          )}
           <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">MRR</p><p className="text-xl font-bold text-green-500">${client.mrr?.toLocaleString()}</p></CardContent></Card>
           <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Tickets</p><p className="text-xl font-bold">{tickets.length}</p></CardContent></Card>
           <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Devices</p><p className="text-xl font-bold">{devices.length}</p></CardContent></Card>
@@ -281,12 +304,13 @@ export default function ClientsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-7 w-full">
+              <TabsList className="grid grid-cols-8 w-full">
                 <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts ({contacts.length})</TabsTrigger>
                 <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
                 <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
                 <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts ({contracts.length})</TabsTrigger>
-                <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subscriptions</TabsTrigger>
+                <TabsTrigger value="timeline" data-testid="client-timeline-tab">Timeline</TabsTrigger>
+                <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subs</TabsTrigger>
                 <TabsTrigger value="splynx" data-testid="client-splynx-tab"><Wifi className="w-3 h-3 mr-1" />Splynx</TabsTrigger>
                 <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />M365</TabsTrigger>
               </TabsList>
@@ -389,6 +413,38 @@ export default function ClientsPage() {
                     </TableBody>
                   </Table>
                 ) : <p className="text-center py-8 text-muted-foreground">No contracts</p>}
+              </TabsContent>
+
+
+              {/* ACTIVITY TIMELINE TAB */}
+              <TabsContent value="timeline" className="space-y-2" data-testid="client-timeline">
+                {clientTimeline.length > 0 ? (
+                  <ScrollArea className="h-[400px]">
+                    <div className="space-y-2">
+                      {clientTimeline.map((item, i) => {
+                        const typeColors = { ticket: "bg-blue-500/10 text-blue-500", invoice: "bg-green-500/10 text-green-500", time_entry: "bg-purple-500/10 text-purple-500" };
+                        const typeLabels = { ticket: "Ticket", invoice: "Invoice", time_entry: "Time" };
+                        return (
+                          <div key={`${item.type}-${item.id || i}`} className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50">
+                            <Badge className={`text-[9px] ${typeColors[item.type] || "bg-muted"}`}>{typeLabels[item.type] || item.type}</Badge>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                                {item.ticket_number && <span>#{item.ticket_number}</span>}
+                                {item.status && <Badge variant="outline" className="text-[9px]">{item.status}</Badge>}
+                                {item.amount != null && <span className="font-mono">${item.amount.toLocaleString()}</span>}
+                                {item.minutes != null && <span>{item.minutes} min {item.billable ? "(billable)" : ""}</span>}
+                              </div>
+                            </div>
+                            {item.timestamp && <span className="text-[10px] text-muted-foreground">{item.timestamp.split("T")[0]}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground"><p>No activity recorded yet</p></div>
+                )}
               </TabsContent>
 
 
@@ -722,6 +778,18 @@ export default function ClientsPage() {
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">MRR</span><span className="font-bold text-green-500">${client.mrr?.toLocaleString()}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Open Tickets</span><span>{tickets.filter(t => t.status === "open").length}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Online Devices</span><span>{devices.filter(d => d.status === "online").length}/{devices.length}</span></div>
+              {health && (
+                <>
+                  <Separator />
+                  <h3 className="font-semibold text-sm">Health Breakdown</h3>
+                  {Object.entries(health.breakdown || {}).map(([key, val]) => (
+                    <div key={key} className="flex justify-between text-xs">
+                      <span className="text-muted-foreground capitalize">{key}</span>
+                      <span className="font-mono">{val}/{key === "tickets" ? 30 : key === "sla" || key === "devices" || key === "payments" ? 20 : 10}</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -792,7 +860,7 @@ export default function ClientsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Client</TableHead><TableHead>Contacts</TableHead><TableHead>Industry</TableHead>
+                <TableHead>Client</TableHead><TableHead>Health</TableHead><TableHead>Contacts</TableHead><TableHead>Industry</TableHead>
                 <TableHead>Contract</TableHead><TableHead>MRR</TableHead><TableHead>Subscriptions</TableHead>
                 <TableHead>Devices</TableHead><TableHead>Tickets</TableHead><TableHead>Actions</TableHead>
               </TableRow>
@@ -810,6 +878,14 @@ export default function ClientsPage() {
                         <p className="text-xs text-muted-foreground">{client.email}</p>
                       </div>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      const h = healthScores[client.id];
+                      if (!h) return <span className="text-xs text-muted-foreground">-</span>;
+                      const color = h.risk_level === "healthy" ? "bg-emerald-500/10 text-emerald-500" : h.risk_level === "attention" ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500";
+                      return <Badge className={`${color} text-[10px]`} data-testid={`health-${client.id}`}>{h.health_score}</Badge>;
+                    })()}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{(client.contacts || []).length} contacts</Badge>

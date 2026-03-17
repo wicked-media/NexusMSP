@@ -264,6 +264,7 @@ class ContractCreate(BaseModel):
     end_date: Optional[str] = None
     value: float = 0.0
     auto_renew: bool = True
+    sla_tier: str = "standard"  # platinum/gold/silver/standard
     notes: Optional[str] = None
 
 class Contract(BaseModel):
@@ -278,6 +279,7 @@ class Contract(BaseModel):
     end_date: Optional[str] = None
     value: float = 0.0
     auto_renew: bool = True
+    sla_tier: str = "standard"  # platinum/gold/silver/standard
     status: str = "active"
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
