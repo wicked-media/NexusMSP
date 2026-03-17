@@ -1,75 +1,96 @@
-# NexusOps - RMM/PSA Platform
-## Product Requirements Document
+# NexusOps - RMM/PSA Platform PRD
 
-### Original Problem Statement
-Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps" - a comprehensive, feature-rich platform to surpass competitors.
+## Original Problem Statement
+Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps". The application should be "fully feature-rich" and "better than the competition," incorporating a mix of the best features from other platforms while also introducing unique capabilities.
 
-### Core Architecture
-- **Frontend**: React + Shadcn UI + TailwindCSS
+## Core Architecture
 - **Backend**: FastAPI + MongoDB
-- **Auth**: JWT-based authentication
-- **AI**: Multi-LLM via Emergent LLM Key (Claude, GPT, Gemini)
-- **Email**: Resend integration
+- **Frontend**: React + Shadcn/UI + TailwindCSS
+- **Auth**: JWT-based
 
-### Credentials
-- **Email**: admin@nexusops.io | **Password**: admin123
-
----
-
-## Implemented Features (All Tested & Working)
+## What's Been Implemented (Complete)
 
 ### Core Modules
-- Dashboard (SLA countdown, device fleet overview, quick search Ctrl+K, auto-refresh 60s, operational alerts)
-- Ticketing (full CRUD, SLA, priorities, email via Resend, Co-Pilot AI, device status)
-- Client Management (health scores 0-100, activity timeline, contacts, M365, Splynx, subscriptions)
-- Technicians (profiles, scheduling, per-tech email signatures, canned responses)
-- Devices (bulk select/actions, CPU/RAM/Disk monitoring, compliance scores)
-- Contracts (renewal alerts 30/60/90 day, SLA tiers platinum/gold/silver/standard, auto-renew)
-- Invoicing (Stripe integration, overdue tracking)
-- Knowledge Base (pinning, public/internal visibility, Hudu sync, related articles, helpful votes)
-- Time Tracking (live timer, weekly chart, by-technician/client billing, CSV export)
-- Reports (7 tabs: Overview, Technicians, Tickets, SLA Compliance, Revenue, Profitability, Devices + CSV)
-- Scripting (code blocks with copy, 8 library templates, scheduling, patch management)
-- Projects (milestones, time budget vs actual tracking, tasks)
-- Products, Purchase Orders, Vendors, Assets, Phone/Rentals, Admin, Activity Logs, Achievements
+- Dashboard with KPI cards
+- Ticketing system with SLA, child tickets, merging, progress tracker
+- Client Management with health scores & activity timeline
+- Device Management with bulk actions
+- Asset Management
+- Contract Management with SLA tiers
+- Invoice Management
+- Time Tracking
+- Knowledge Base with Hudu sync
+- Scripting with code blocks and copy functionality
+- CRM/Leads with pipeline management
+- Remote Access
+- Reporting (Recharts)
+- IT Documentation
+- Email Management
+- Scheduling
+- Technician Management with profiles & achievements
+- Vendor Management
+- Rental Management
+- Project Management with milestones
+- Admin Settings
+- Notification System (bell + unread count)
+- Purchase Orders
+- Products
+- Networking (UniFi analytics)
+- Infrastructure monitoring
 
-### Advanced Features
-- **Client Health Score Engine**: Auto-calculated (Tickets/30 + SLA/20 + Devices/20 + Payments/20 + Contracts/10 = 100)
-- **Global Notification Bell**: SLA breach, contract renewal, device offline alerts with unread count
-- **Technician Co-Pilot**: AI chat with code block rendering
-- **AI Diagnostics & Proofreading**: Device diagnosis, email proofreading
-- **Enhanced Leads/CRM**: Syncro-style pipeline, create ticket from lead, assign client
-- **Syncro RMM Import**: Import clients/contacts/assets from Syncro
-- **UniFi Integration Phase 1**: WLAN management, DPI analytics
+### Integrations
+- **Active**: Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, Multi-LLM (Emergent LLM Key)
+- **Mocked**: Xero, Pax8, Domotz, Acronis, Proxmox, Office 365
 
-### Integration Status
-| Integration | Status |
-|---|---|
-| Stripe | Implemented |
-| Multi-LLM (Emergent Key) | Implemented |
-| UniFi | Phase 1 Complete |
-| Resend Email | Implemented |
-| Syncro Import | Implemented (needs API key) |
-| Hudu | Implemented (needs API key) |
-| Xero | MOCKED |
-| Pax8/Domotz/Acronis/Proxmox | MOCKED |
+### New Features (Current Session - March 17, 2026)
+1. **Leads Bug Fix** - Added "Convert to Client & Create Ticket" combined button
+2. **Office 365 One-Click Mailbox Setup** - Full O365 integration UI with Azure AD credentials, ready for real registration
+3. **Email-to-Lead** - Webhook endpoint auto-creates leads from incoming emails
+4. **Asset Lifecycle Management** - Track IT assets from procurement to disposal with lifecycle stages
+5. **Predictive Maintenance AI** - Rule-based hardware failure prediction with risk scores
+6. **Real-Time Event Bus** - SSE-based event system with ticket viewer tracking
+7. **Client Health & Opportunity Radar** - Identifies at-risk clients and upsell opportunities
+8. **Ticket Number Badges** - Prominent ticket numbers (INC-xxxx, SR-xxxx, CHG-xxxx) on left of each ticket
+9. **Ticket Viewer Tracking** - Color-flashing badges when a tech has a ticket open, with hover tooltip
+10. **Enhanced Progress Bar** - Card-style progress tracker with gradient stages and click-to-change
 
-### Session History
-- **Session 1**: 5 parallel features (Resend email, leads, Syncro import, scripting, CoPilot)
-- **Session 2**: 6 module enhancements (Dashboard, Reports, Time Tracking, KB, Devices, Scripting)
-- **Session 3**: 5 major features (Health Scores, Contracts, Projects, Clients, Notifications)
+## API Endpoints (New)
+- `GET/PUT /api/settings/o365-mailbox` - O365 settings
+- `POST /api/o365/connect|disconnect|test-connection|sync-emails` - O365 management
+- `POST /api/o365/webhook/incoming-email` - Email-to-lead webhook
+- `GET /api/o365/email-leads` - Email-generated leads
+- `GET/POST/PUT/DELETE /api/asset-lifecycle` - Asset lifecycle CRUD
+- `GET /api/asset-lifecycle/dashboard` - Lifecycle dashboard stats
+- `POST /api/asset-lifecycle/{id}/transition` - Stage transitions
+- `GET /api/predictive-maintenance/dashboard` - Fleet-wide risk analysis
+- `GET /api/predictive-maintenance/device/{id}` - Per-device prediction
+- `POST /api/events/publish` - Publish event to bus
+- `GET /api/events/stream` - SSE event stream
+- `GET /api/events/recent` - Recent events
+- `POST /api/tickets/{id}/viewing|stop-viewing` - Viewer tracking
+- `GET /api/tickets/active-viewers` - All active viewers
+- `GET /api/health-radar/dashboard` - Client health & opportunity analysis
 
----
+## DB Collections (New)
+- `asset_lifecycle` - Asset lifecycle tracking
+- `events` - Event bus events
+- `settings` (type: "o365_mailbox") - O365 configuration
 
-## Prioritized Backlog
+## Credentials
+- Admin: admin@nexusops.io / admin123
 
-### P1 - Upcoming
-- Enhanced Projects page frontend (milestones UI, Gantt timeline, task dependencies)
-- Full UniFi Integration Phase 2 (active device management, provisioning)
-- Real Xero integration (move from mocked)
+## Backlog
+
+### P1 - Next Up
+- Full UniFi Integration Phase 2 (active device management)
+- Full Xero Integration (real invoice syncing)
 
 ### P2 - Future
-- Real Pax8/Domotz/Acronis/Proxmox backends
-- Client self-service portal
-- Document upload system for clients
-- Real-time WebSocket notifications
+- Full backend for mocked integrations (Pax8, Domotz, Acronis, Proxmox)
+- Real Office 365 Azure AD OAuth flow
+- Client portal for end-user self-service
+- Database seeding mechanism
+- Fix recharts console warnings
+
+## Testing
+- Latest test: iteration_30.json - 100% pass rate (21/21 backend, all frontend verified)
