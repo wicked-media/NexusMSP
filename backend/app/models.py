@@ -178,20 +178,27 @@ class Device(BaseModel):
     assigned_user: Optional[str] = None
     last_logged_in_user: Optional[str] = None
     uptime_hours: Optional[float] = None
+    uptime_display: Optional[str] = None
     last_reboot: Optional[str] = None
+    last_heartbeat: Optional[str] = None
     agent_version: Optional[str] = None
     antivirus: Optional[str] = None
     antivirus_status: Optional[str] = None
     firewall_enabled: Optional[bool] = True
+    bitlocker_enabled: Optional[bool] = None
     edr_status: Optional[str] = None
     encryption_status: Optional[str] = None
     compliance_score: Optional[int] = None
     patch_status: Optional[str] = None
     pending_patches: Optional[int] = 0
+    last_patch_date: Optional[str] = None
     installed_software_count: Optional[int] = 0
     tags: List[str] = []
     notes: Optional[str] = None
     rustdesk_id: Optional[str] = None
+    bios_version: Optional[str] = None
+    architecture: Optional[str] = None
+    cpu_temp: Optional[float] = None
     status: str = "online"
     last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     cpu_usage: float = 0.0

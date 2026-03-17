@@ -30,6 +30,19 @@ async def get_devices(
                 d[field] = datetime.fromisoformat(d[field])
     return devices
 
+# Static path routes - MUST be defined before {device_id} dynamic route
+@router.get("/devices/stale")
+async def get_stale_devices_route(hours: int = 24, current_user: dict = Depends(get_current_user)):
+    """Get devices that haven't reported in within the specified hours"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    stale = await db.devices.find({
+        "$or": [
+            {"last_heartbeat": {"$lt": cutoff}},
+            {"last_heartbeat": {"$exists": False}},
+        ]
+    }, {"_id": 0}).to_list(500)
+    return stale
+
 @router.get("/devices/{device_id}")
 async def get_device(device_id: str, current_user: dict = Depends(get_current_user)):
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
@@ -144,6 +157,151 @@ async def get_devices_stats(current_user: dict = Depends(get_current_user)):
         "needs_patching": needs_patching,
         "avg_cpu": round(avg_cpu, 1), "avg_ram": round(avg_ram, 1), "avg_disk": round(avg_disk, 1)
     }
+
+# ============== RMM AGENT HEARTBEAT / REAL-TIME REPORTING ==============
+
+@router.post("/devices/{device_id}/heartbeat")
+async def device_heartbeat(device_id: str, data: dict):
+    """RMM Agent heartbeat endpoint. Updates device info in real-time.
+    Called periodically by the remote agent installed on client devices."""
+    device = await db.devices.find_one({"id": device_id})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "last_seen": now,
+        "status": "online",
+        "last_heartbeat": now,
+    }
+    
+    # System info - map to model field names
+    if "hostname" in data:
+        update["name"] = data["hostname"]
+    if "os_name" in data:
+        update["os"] = data["os_name"]
+    if "os_version" in data:
+        update["os_version"] = data["os_version"]
+    if "os_build" in data:
+        update["os_build"] = data["os_build"]
+    if "architecture" in data:
+        update["architecture"] = data["architecture"]
+    if "domain" in data:
+        update["domain"] = data["domain"]
+    if "serial_number" in data:
+        update["serial_number"] = data["serial_number"]
+    if "manufacturer" in data:
+        update["manufacturer"] = data["manufacturer"]
+    if "model" in data:
+        update["model"] = data["model"]
+    if "bios_version" in data:
+        update["bios_version"] = data["bios_version"]
+    
+    # Performance metrics
+    if "cpu_usage" in data:
+        update["cpu_usage"] = float(data["cpu_usage"])
+    if "memory_usage" in data:
+        update["memory_usage"] = float(data["memory_usage"])
+    if "disk_usage" in data:
+        update["disk_usage"] = float(data["disk_usage"])
+    if "cpu_temp" in data:
+        update["cpu_temp"] = float(data["cpu_temp"])
+    
+    # Hardware details - map to model fields
+    if "total_ram_gb" in data:
+        update["ram_gb"] = float(data["total_ram_gb"])
+    if "cpu_name" in data:
+        update["processor"] = data["cpu_name"]
+    if "cpu_cores" in data:
+        update["processor_cores"] = int(data["cpu_cores"])
+    if "total_disk_gb" in data:
+        update["storage_total_gb"] = float(data["total_disk_gb"])
+    if "free_disk_gb" in data:
+        update["storage_used_gb"] = round(float(data.get("total_disk_gb", 0)) - float(data["free_disk_gb"]), 1)
+    
+    # Network
+    if "ip_address" in data:
+        update["ip_address"] = data["ip_address"]
+    if "mac_address" in data:
+        update["mac_address"] = data["mac_address"]
+    if "public_ip" in data:
+        update["public_ip"] = data["public_ip"]
+    
+    # Uptime
+    if "uptime_seconds" in data:
+        secs = int(data["uptime_seconds"])
+        update["uptime_hours"] = round(secs / 3600, 1)
+        days = secs // 86400
+        hours = (secs % 86400) // 3600
+        update["uptime_display"] = f"{days}d {hours}h"
+    
+    # Logged-in user
+    if "logged_in_user" in data:
+        update["last_logged_in_user"] = data["logged_in_user"]
+    
+    # Antivirus / security
+    if "antivirus_status" in data:
+        update["antivirus_status"] = data["antivirus_status"]
+    if "antivirus_name" in data:
+        update["antivirus"] = data["antivirus_name"]
+    if "firewall_enabled" in data:
+        update["firewall_enabled"] = data["firewall_enabled"]
+    if "bitlocker_enabled" in data:
+        update["bitlocker_enabled"] = data["bitlocker_enabled"]
+    
+    # Pending updates
+    if "pending_patches" in data:
+        update["pending_patches"] = int(data["pending_patches"])
+    if "last_patch_date" in data:
+        update["last_patch_date"] = data["last_patch_date"]
+    
+    # Installed software count
+    if "installed_software_count" in data:
+        update["installed_software_count"] = int(data["installed_software_count"])
+    
+    await db.devices.update_one({"id": device_id}, {"$set": update})
+    
+    # Store performance snapshot
+    perf_entry = {
+        "id": str(uuid.uuid4()),
+        "device_id": device_id,
+        "cpu_usage": data.get("cpu_usage", 0),
+        "memory_usage": data.get("memory_usage", 0),
+        "disk_usage": data.get("disk_usage", 0),
+        "timestamp": now,
+    }
+    await db.device_performance.insert_one(perf_entry)
+    
+    # Check for warning thresholds
+    status = "online"
+    if float(data.get("cpu_usage", 0)) > 90 or float(data.get("memory_usage", 0)) > 90 or float(data.get("disk_usage", 0)) > 95:
+        status = "warning"
+        update["status"] = "warning"
+        await db.devices.update_one({"id": device_id}, {"$set": {"status": "warning"}})
+    
+    return {"status": "ok", "device_status": status, "next_heartbeat_seconds": 300}
+
+@router.post("/devices/heartbeat/bulk")
+async def bulk_device_heartbeat(data: dict):
+    """Bulk heartbeat for multiple devices from a single RMM server"""
+    devices = data.get("devices", [])
+    results = []
+    for d in devices:
+        device_id = d.get("device_id")
+        if not device_id:
+            continue
+        device = await db.devices.find_one({"id": device_id})
+        if not device:
+            results.append({"device_id": device_id, "status": "not_found"})
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        update = {"last_seen": now, "status": "online", "last_heartbeat": now}
+        for key in ["cpu_usage", "memory_usage", "disk_usage", "ip_address", "logged_in_user", "uptime_seconds", "os_name", "hostname"]:
+            if key in d:
+                update[key] = d[key]
+        await db.devices.update_one({"id": device_id}, {"$set": update})
+        results.append({"device_id": device_id, "status": "ok"})
+    return {"processed": len(results), "results": results}
 
 
 # ============== ASSETS ENDPOINTS ==============

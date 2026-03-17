@@ -92,7 +92,7 @@ export default function TicketsPage() {
   const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true });
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [noteCounts, setNoteCounts] = useState({});
-  const [ticketViewers, setTicketViewers] = useState({});
+  const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -1114,32 +1114,56 @@ export default function TicketsPage() {
           const hasNoNotes = noteCounts[ticket.id] === 0 && ticket.status !== "closed" && ticket.status !== "resolved";
           const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && ticket.status !== "closed" && ticket.status !== "resolved";
           const priorityBorder = ticket.priority === "critical" ? "border-l-red-500" : ticket.priority === "high" ? "border-l-orange-500" : ticket.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
+          const isClosed = ticket.status === "closed" || ticket.status === "resolved";
           const viewers = ticketViewers[ticket.id] || [];
           const isBeingViewed = viewers.length > 0;
 
           return (
             <Card
               key={ticket.id}
-              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""}`}
+              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""} ${isClosed ? "opacity-60" : ""}`}
               onClick={() => fetchTicketDetail(ticket)}
               data-testid={`ticket-row-${ticket.id}`}
             >
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
-                  {/* Ticket Number Badge with Viewer Indicator */}
+                  {/* Ticket Number Badge */}
                   <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0" data-testid={`ticket-badge-${ticket.id}`}>
                     <div className={`relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider transition-all
-                      ${isBeingViewed 
-                        ? "bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 border border-cyan-500/40 text-cyan-300 animate-pulse shadow-[0_0_12px_rgba(34,211,238,0.3)]" 
+                      ${isBeingViewed
+                        ? "border border-cyan-400/60 text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.35),inset_0_0_15px_rgba(34,211,238,0.08)]"
+                        : isClosed
+                        ? "bg-muted/20 border border-border/30 text-muted-foreground/50"
+                        : ticket.escalated
+                        ? "bg-red-500/10 border border-red-500/30 text-red-400 animate-pulse"
                         : "bg-muted/40 border border-border/50 text-muted-foreground"
                       }`}
-                      title={isBeingViewed ? `Currently being viewed by: ${viewers.map(v => v.user_name).join(", ")}` : ""}
+                      style={isBeingViewed ? {
+                        background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))",
+                        backgroundSize: "200% 200%",
+                        animation: "viewerShimmer 2s ease-in-out infinite, pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
+                      } : undefined}
+                      title={isBeingViewed ? `Viewed by: ${viewers.map(v => v.user_name).join(", ")}` : ""}
                     >
                       {ticket.ticket_number}
                       {isBeingViewed && (
-                        <div className="absolute -top-1.5 -right-1.5 flex items-center" title={`Viewed by: ${viewers.map(v => v.user_name).join(", ")}`}>
-                          <div className="w-4 h-4 rounded-full bg-cyan-500 flex items-center justify-center shadow-lg shadow-cyan-500/50">
-                            <Eye className="w-2.5 h-2.5 text-white" />
+                        <div className="absolute -top-2 -right-2 flex items-center" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} viewing: ${viewers.map(v => v.user_name).join(", ")}`}>
+                          <div className="relative">
+                            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                              {viewers.length > 1 ? (
+                                <span className="text-[8px] font-black text-white">{viewers.length}</span>
+                              ) : (
+                                <Eye className="w-2.5 h-2.5 text-white" />
+                              )}
+                            </div>
+                            <div className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
+                          </div>
+                        </div>
+                      )}
+                      {!isBeingViewed && ticket.escalated && (
+                        <div className="absolute -top-1.5 -right-1.5">
+                          <div className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shadow-lg shadow-red-500/50">
+                            <AlertCircle className="w-2.5 h-2.5 text-white" />
                           </div>
                         </div>
                       )}
@@ -1154,7 +1178,15 @@ export default function TicketsPage() {
                       <p className="font-medium text-sm truncate">{ticket.title}</p>
                       {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
                       {hasNoNotes && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">AWAITING RESPONSE</Badge>}
-                      {isBeingViewed && <Badge className="bg-cyan-500/10 text-cyan-400 text-[9px] border-cyan-500/30 gap-1"><Eye className="w-2.5 h-2.5" />{viewers.length} viewing</Badge>}
+                      {isBeingViewed && (
+                        <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]">
+                          <Eye className="w-2.5 h-2.5" />
+                          <Users className="w-2.5 h-2.5" />
+                          {viewers.length} {viewers.length === 1 ? "viewer" : "viewers"}: {viewers.map(v => v.user_name).join(", ")}
+                        </Badge>
+                      )}
+                      {ticket.escalated && !isBeingViewed && <Badge className="bg-red-500/10 text-red-400 text-[9px] border-red-500/30">ESCALATED</Badge>}
+                      {!ticket.assigned_to && !isClosed && !isBeingViewed && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">UNASSIGNED</Badge>}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span>{ticket.client_name}</span>

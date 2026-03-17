@@ -49,6 +49,7 @@ import PredictiveMaintenancePage from "@/pages/PredictiveMaintenancePage";
 import HealthRadarPage from "@/pages/HealthRadarPage";
 import WhiteLabelPage from "@/pages/WhiteLabelPage";
 import LoyaltyDashboardPage from "@/pages/LoyaltyDashboardPage";
+import TicketPingSettingsPage from "@/pages/TicketPingSettingsPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -599,6 +600,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <LoyaltyDashboardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ticket-ping-settings"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TicketPingSettingsPage />
                 </MainLayout>
               </ProtectedRoute>
             }

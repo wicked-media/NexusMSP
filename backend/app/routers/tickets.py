@@ -103,6 +103,17 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     await db.tickets.insert_one(doc)
     await db.clients.update_one({"id": ticket_data.client_id}, {"$inc": {"ticket_count": 1}})
     await log_activity(current_user, "created", "ticket", ticket.id, ticket.title, f"Created ticket {ticket_number} for {client_name}", metadata={"ticket_number": ticket_number, "client_name": client_name, "priority": ticket_data.priority})
+    
+    # Auto-ping relevant team members
+    try:
+        from app.routers.ticket_ping import get_team_for_ticket, send_ping_notification
+        if not ticket_data.assigned_to:
+            team = await get_team_for_ticket(doc)
+            if team:
+                await send_ping_notification(team, doc, "new_ticket")
+    except Exception as e:
+        logger.warning(f"Failed to send ticket ping: {e}")
+    
     return ticket
 
 @router.put("/tickets/{ticket_id}")
