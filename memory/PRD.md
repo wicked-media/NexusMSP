@@ -12,20 +12,20 @@ Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps". T
 
 ### Core Modules
 - Dashboard with KPI cards
-- Ticketing system with SLA, child tickets, merging, progress tracker
-- Client Management with health scores & activity timeline
+- Ticketing system with SLA, child tickets, merging, progress tracker, ticket number badges, viewer tracking
+- Client Management with health scores, activity timeline, achievements, readiness scores
 - Device Management with bulk actions
-- Asset Management
-- Contract Management with SLA tiers
+- Asset Management + Asset Lifecycle (procurement → disposal)
+- Contract Management with SLA tiers + SLA shield badges
 - Invoice Management
 - Time Tracking
 - Knowledge Base with Hudu sync
 - Scripting with code blocks and copy functionality
-- CRM/Leads with pipeline management
+- CRM/Leads with pipeline management, convert-to-client-and-create-ticket flow
 - Remote Access
 - Reporting (Recharts)
 - IT Documentation
-- Email Management
+- Email Management + Office 365 one-click setup
 - Scheduling
 - Technician Management with profiles & achievements
 - Vendor Management
@@ -33,48 +33,41 @@ Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps". T
 - Project Management with milestones
 - Admin Settings
 - Notification System (bell + unread count)
-- Purchase Orders
-- Products
-- Networking (UniFi analytics)
-- Infrastructure monitoring
+- Purchase Orders, Products, Networking (UniFi), Infrastructure monitoring
+- **White Label & Branding** - Logo uploads for invoices, contracts, letterheads, color customization
+- **Client Loyalty & Renewals Dashboard** - Loyalty tiers, points, smart auto-renewal proposals with upsell
+- **Client Tenure Achievements** - 1yr/3yr/5yr/10yr/15yr/20yr badges
+- **SLA Shield Achievements** - Gold/Silver/Bronze/Platinum/Standard shields
+- **Client Portal Readiness Score** - Gamified readiness checklist
+- **Predictive Maintenance AI** - Hardware failure risk prediction
+- **Client Health & Opportunity Radar** - At-risk identification + upsell opportunities
+- **Real-Time Event Bus** - SSE events + ticket viewer tracking
 
 ### Integrations
 - **Active**: Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, Multi-LLM (Emergent LLM Key)
-- **Mocked**: Xero, Pax8, Domotz, Acronis, Proxmox, Office 365
+- **Planned**: Office 365 (architecture ready, needs Azure AD credentials)
+- **Mocked**: Xero, Pax8, Domotz, Acronis, Proxmox
 
-### New Features (Current Session - March 17, 2026)
-1. **Leads Bug Fix** - Added "Convert to Client & Create Ticket" combined button
-2. **Office 365 One-Click Mailbox Setup** - Full O365 integration UI with Azure AD credentials, ready for real registration
-3. **Email-to-Lead** - Webhook endpoint auto-creates leads from incoming emails
-4. **Asset Lifecycle Management** - Track IT assets from procurement to disposal with lifecycle stages
-5. **Predictive Maintenance AI** - Rule-based hardware failure prediction with risk scores
-6. **Real-Time Event Bus** - SSE-based event system with ticket viewer tracking
-7. **Client Health & Opportunity Radar** - Identifies at-risk clients and upsell opportunities
-8. **Ticket Number Badges** - Prominent ticket numbers (INC-xxxx, SR-xxxx, CHG-xxxx) on left of each ticket
-9. **Ticket Viewer Tracking** - Color-flashing badges when a tech has a ticket open, with hover tooltip
-10. **Enhanced Progress Bar** - Card-style progress tracker with gradient stages and click-to-change
+### Session 2 Changes (March 17, 2026)
+**Batch 1:**
+1. Fix Leads module "Create Client & Create Ticket" bug
+2. Office 365 one-click mailbox setup
+3. Email-to-Lead webhook
+4. Asset Lifecycle Management
+5. Predictive Maintenance AI
+6. Real-Time Event Bus with ticket viewer tracking
+7. Client Health & Opportunity Radar
+8. Ticket number badges + viewer color-flashing
+9. Enhanced card-style progress bar
 
-## API Endpoints (New)
-- `GET/PUT /api/settings/o365-mailbox` - O365 settings
-- `POST /api/o365/connect|disconnect|test-connection|sync-emails` - O365 management
-- `POST /api/o365/webhook/incoming-email` - Email-to-lead webhook
-- `GET /api/o365/email-leads` - Email-generated leads
-- `GET/POST/PUT/DELETE /api/asset-lifecycle` - Asset lifecycle CRUD
-- `GET /api/asset-lifecycle/dashboard` - Lifecycle dashboard stats
-- `POST /api/asset-lifecycle/{id}/transition` - Stage transitions
-- `GET /api/predictive-maintenance/dashboard` - Fleet-wide risk analysis
-- `GET /api/predictive-maintenance/device/{id}` - Per-device prediction
-- `POST /api/events/publish` - Publish event to bus
-- `GET /api/events/stream` - SSE event stream
-- `GET /api/events/recent` - Recent events
-- `POST /api/tickets/{id}/viewing|stop-viewing` - Viewer tracking
-- `GET /api/tickets/active-viewers` - All active viewers
-- `GET /api/health-radar/dashboard` - Client health & opportunity analysis
-
-## DB Collections (New)
-- `asset_lifecycle` - Asset lifecycle tracking
-- `events` - Event bus events
-- `settings` (type: "o365_mailbox") - O365 configuration
+**Batch 2:**
+1. Button color swap - Create Ticket (green), Convert to Client & Create Ticket (purple)
+2. White Label & Branding (logo uploads for invoices/contracts/letterheads, colors)
+3. SLA Shield symbols on contracts (Gold/Silver/Bronze/Platinum)
+4. Client Tenure Achievements (1yr-20yr milestones)
+5. Client Loyalty Rewards Dashboard with tier rankings
+6. Smart Contract Auto-Renewal Proposals with upsell recommendations
+7. Gamified Client Portal Readiness Score
 
 ## Credentials
 - Admin: admin@nexusops.io / admin123
@@ -93,4 +86,5 @@ Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps". T
 - Fix recharts console warnings
 
 ## Testing
-- Latest test: iteration_30.json - 100% pass rate (21/21 backend, all frontend verified)
+- iteration_30.json - 100% pass (21 backend, all frontend) - Batch 1
+- iteration_31.json - 100% pass (10 backend, all frontend) - Batch 2
