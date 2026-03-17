@@ -1,90 +1,46 @@
 # NexusOps - RMM/PSA Platform PRD
 
 ## Original Problem Statement
-Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps". The application should be "fully feature-rich" and "better than the competition," incorporating a mix of the best features from other platforms while also introducing unique capabilities.
+Build a "rich and elegant RMM/PSA like Syncro and Super Ops" named "NexusOps" - fully feature-rich, better than competition.
 
 ## Core Architecture
-- **Backend**: FastAPI + MongoDB
-- **Frontend**: React + Shadcn/UI + TailwindCSS
-- **Auth**: JWT-based
+- **Backend**: FastAPI + MongoDB | **Frontend**: React + Shadcn/UI + TailwindCSS | **Auth**: JWT-based
 
-## What's Been Implemented (Complete)
+## What's Been Implemented
 
 ### Core Modules
-- Dashboard with KPI cards
-- Ticketing system with SLA, child tickets, merging, progress tracker, ticket number badges, viewer tracking
-- Client Management with health scores, activity timeline, achievements, readiness scores
-- Device Management with bulk actions
-- Asset Management + Asset Lifecycle (procurement → disposal)
-- Contract Management with SLA tiers + SLA shield badges
-- Invoice Management
-- Time Tracking
-- Knowledge Base with Hudu sync
-- Scripting with code blocks and copy functionality
-- CRM/Leads with pipeline management, convert-to-client-and-create-ticket flow
-- Remote Access
-- Reporting (Recharts)
-- IT Documentation
-- Email Management + Office 365 one-click setup
-- Scheduling
-- Technician Management with profiles & achievements
-- Vendor Management
-- Rental Management
-- Project Management with milestones
-- Admin Settings
-- Notification System (bell + unread count)
-- Purchase Orders, Products, Networking (UniFi), Infrastructure monitoring
-- **White Label & Branding** - Logo uploads for invoices, contracts, letterheads, color customization
-- **Client Loyalty & Renewals Dashboard** - Loyalty tiers, points, smart auto-renewal proposals with upsell
-- **Client Tenure Achievements** - 1yr/3yr/5yr/10yr/15yr/20yr badges
-- **SLA Shield Achievements** - Gold/Silver/Bronze/Platinum/Standard shields
-- **Client Portal Readiness Score** - Gamified readiness checklist
-- **Predictive Maintenance AI** - Hardware failure risk prediction
-- **Client Health & Opportunity Radar** - At-risk identification + upsell opportunities
-- **Real-Time Event Bus** - SSE events + ticket viewer tracking
+Dashboard, Ticketing (SLA, child tickets, merging, progress tracker, viewer tracking, auto-ping, escalation), Client Mgmt (health scores, timeline, achievements, readiness, loyalty), Device Mgmt (bulk actions, RMM heartbeat), Asset Mgmt + Lifecycle, Contract Mgmt (SLA shields), Invoice, Time Tracking, Knowledge Base (Hudu sync), Scripting, CRM/Leads, Remote Access, Reporting, IT Docs, Email + O365 Setup, Scheduling, Technician Mgmt, Vendor/Rental Mgmt, Project Mgmt, Admin Settings, Notifications, Purchase Orders, Products, Networking (UniFi), Infrastructure, White Label & Branding, Loyalty Dashboard, Predictive Maintenance AI, Health Radar, Event Bus
 
-### Integrations
-- **Active**: Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, Multi-LLM (Emergent LLM Key)
-- **Planned**: Office 365 (architecture ready, needs Azure AD credentials)
-- **Mocked**: Xero, Pax8, Domotz, Acronis, Proxmox
+### Session Changes (March 17, 2026)
 
-### Session 2 Changes (March 17, 2026)
-**Batch 1:**
-1. Fix Leads module "Create Client & Create Ticket" bug
-2. Office 365 one-click mailbox setup
-3. Email-to-Lead webhook
-4. Asset Lifecycle Management
-5. Predictive Maintenance AI
-6. Real-Time Event Bus with ticket viewer tracking
-7. Client Health & Opportunity Radar
-8. Ticket number badges + viewer color-flashing
-9. Enhanced card-style progress bar
+**Batch 1:** Leads bug fix, O365 mailbox setup, Email-to-Lead, Asset Lifecycle, Predictive Maintenance AI, Event Bus, Health Radar, Ticket number badges, Viewer tracking, Enhanced progress bar
 
-**Batch 2:**
-1. Button color swap - Create Ticket (green), Convert to Client & Create Ticket (purple)
-2. White Label & Branding (logo uploads for invoices/contracts/letterheads, colors)
-3. SLA Shield symbols on contracts (Gold/Silver/Bronze/Platinum)
-4. Client Tenure Achievements (1yr-20yr milestones)
-5. Client Loyalty Rewards Dashboard with tier rankings
-6. Smart Contract Auto-Renewal Proposals with upsell recommendations
-7. Gamified Client Portal Readiness Score
+**Batch 2:** Button color swap (Create Ticket=green, Convert=purple), White Label/Branding, SLA Shields, Client Tenure Achievements, Loyalty Dashboard, Auto-Renewal Proposals, Portal Readiness Score
+
+**Batch 3:**
+1. **RMM Device Heartbeat** - Real-time reporting: CPU, RAM, disk, OS, IP, uptime, hardware, security status, logged-in user, patches. Fields map correctly to Device model.
+2. **Smart Ticket Auto-Ping** - Auto-notify team by category (workshop, retail, network, etc.) and SLA/priority when tickets created. Pings until picked up.
+3. **24-Hour Auto-Escalation** - Unassigned tickets auto-escalate to senior staff/admin after configurable timeout
+4. **Ticket Ping & Escalation Settings** - Full config page: ping interval, escalation timeout, category→team mapping, SLA→team mapping, escalation contacts
+5. **Enhanced Viewer Badge** - Cyan/purple gradient shimmer with ping animation, viewer count badge (1 viewer = eye icon, 2+ = count), viewer names shown
+
+## Key API Endpoints (New - Batch 3)
+- `POST /api/devices/{id}/heartbeat` - RMM agent real-time reporting
+- `POST /api/devices/heartbeat/bulk` - Bulk heartbeat for multiple devices
+- `GET /api/devices/stale?hours=N` - Devices not reporting in
+- `GET/PUT /api/settings/ticket-ping` - Ping configuration
+- `GET/PUT /api/settings/ticket-ping/team-mappings` - Category/SLA team mappings
+- `POST /api/tickets/check-escalations` - Manual escalation check
+- `POST /api/tickets/{id}/pick-up` - Tech claims a ticket
+- `POST /api/tickets/trigger-ping/{id}` - Manual ping
+- `GET /api/tickets/{id}/ping-history` - Ping log
 
 ## Credentials
 - Admin: admin@nexusops.io / admin123
 
 ## Backlog
-
-### P1 - Next Up
-- Full UniFi Integration Phase 2 (active device management)
-- Full Xero Integration (real invoice syncing)
-
-### P2 - Future
-- Full backend for mocked integrations (Pax8, Domotz, Acronis, Proxmox)
-- Real Office 365 Azure AD OAuth flow
-- Client portal for end-user self-service
-- Database seeding mechanism
-- Fix recharts console warnings
+### P1: Full UniFi Phase 2, Full Xero Integration
+### P2: Real integrations (Pax8, Domotz, Acronis, Proxmox), Real O365 OAuth, Client portal, recharts warnings
 
 ## Testing
-- iteration_30.json - 100% pass (21 backend, all frontend) - Batch 1
-- iteration_31.json - 100% pass (10 backend, all frontend) - Batch 2
+- iter 30: 100% (21 backend) | iter 31: 100% (10 backend) | iter 32: 100% (14 backend)
