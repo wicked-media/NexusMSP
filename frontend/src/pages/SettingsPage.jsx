@@ -58,6 +58,8 @@ export default function SettingsPage() {
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
   const [huduSaving, setHuduSaving] = useState(false);
+  const [syncro, setSyncro] = useState({ subdomain: "", api_key: "", enabled: false });
+  const [syncroSaving, setSyncroSaving] = useState(false);
   const [aiConfig, setAiConfig] = useState({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" });
   const [aiSaving, setAiSaving] = useState(false);
   const [emailSig, setEmailSig] = useState("");
@@ -79,6 +81,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/splynx`, { headers }),
           axios.get(`${API}/settings/hudu`, { headers }),
           axios.get(`${API}/ai/config`, { headers }),
+          axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -88,6 +91,7 @@ export default function SettingsPage() {
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
         if (aiRes.data.provider) setAiConfig(aiRes.data);
+        setSyncro(syncroRes.data);
         // Load email signature and canned responses
         try {
           const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
@@ -774,6 +778,82 @@ export default function SettingsPage() {
               }} data-testid="test-hudu-btn">
                 Test Connection
               </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Syncro RMM Integration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-orange-500" />
+            <CardTitle>Syncro RMM - Client Import</CardTitle>
+          </div>
+          <CardDescription>Connect to Syncro to import clients, contacts, and devices</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={syncro.enabled ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {syncro.enabled ? "Connected" : "Not Configured"}
+            </Badge>
+          </div>
+          <div>
+            <Label>Syncro Subdomain</Label>
+            <Input
+              value={syncro.subdomain}
+              onChange={(e) => setSyncro({ ...syncro, subdomain: e.target.value })}
+              placeholder="your-company"
+              data-testid="syncro-subdomain"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Your Syncro subdomain (e.g., if your URL is https://your-company.syncromsp.com, enter "your-company")</p>
+          </div>
+          <div>
+            <Label>API Key</Label>
+            <Input
+              type="password"
+              value={syncro.api_key}
+              onChange={(e) => setSyncro({ ...syncro, api_key: e.target.value })}
+              placeholder="Syncro API Key"
+              data-testid="syncro-api-key"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Generate an API key in Syncro under <strong>Admin &gt; API Tokens</strong>.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={async () => {
+              if (!syncro.subdomain || !syncro.api_key) { toast.error("Subdomain and API key required"); return; }
+              setSyncroSaving(true);
+              try {
+                await axios.put(`${API}/syncro/settings`, { subdomain: syncro.subdomain, api_key: syncro.api_key, enabled: true }, { headers });
+                toast.success("Syncro settings saved");
+                setSyncro({ ...syncro, enabled: true });
+              } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+              finally { setSyncroSaving(false); }
+            }} data-testid="save-syncro-btn" disabled={syncroSaving}>
+              {syncroSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Syncro Settings
+            </Button>
+            {syncro.enabled && (
+              <>
+                <Button variant="outline" onClick={async () => {
+                  try {
+                    const res = await axios.post(`${API}/syncro/test-connection`, {}, { headers });
+                    if (res.data.status === "connected") toast.success(res.data.message);
+                    else toast.error(res.data.message);
+                  } catch (e) { toast.error("Connection test failed"); }
+                }} data-testid="test-syncro-btn">
+                  Test Connection
+                </Button>
+                <Button variant="default" onClick={async () => {
+                  if (!confirm("Import all clients from Syncro? This may take a moment.")) return;
+                  try {
+                    toast.info("Importing clients from Syncro...");
+                    const res = await axios.post(`${API}/syncro/import-clients`, {}, { headers });
+                    toast.success(res.data.message);
+                  } catch (e) { toast.error(e.response?.data?.detail || "Import failed"); }
+                }} data-testid="import-syncro-btn">
+                  Import Clients
+                </Button>
+              </>
             )}
           </div>
         </CardContent>

@@ -117,6 +117,108 @@ async def convert_lead_to_client(lead_id: str, current_user: dict = Depends(get_
     
     return {"message": "Lead converted to client", "client_id": client.id}
 
+@router.post("/leads/{lead_id}/create-ticket")
+async def create_ticket_from_lead(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Create a ticket directly from a lead (Syncro-style)"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    # Find or create client for this lead
+    client_id = lead.get('converted_to_client')
+    client_name = lead.get('company_name', '')
+    if not client_id:
+        # Use a temporary/prospect client or create one
+        existing = await db.clients.find_one({"name": lead['company_name']}, {"_id": 0})
+        if existing:
+            client_id = existing['id']
+            client_name = existing['name']
+        else:
+            client_doc = Client(
+                name=lead['company_name'],
+                email=lead.get('email'),
+                phone=lead.get('phone'),
+                industry=lead.get('industry'),
+            )
+            cd = client_doc.model_dump()
+            cd['created_at'] = cd['created_at'].isoformat()
+            await db.clients.insert_one(cd)
+            client_id = client_doc.id
+            client_name = client_doc.name
+    
+    # Create ticket
+    from app.routers.ticket_suggestions import generate_ticket_number
+    ticket_number = await generate_ticket_number(data.get("ticket_type", "service_request"))
+    
+    ticket = Ticket(
+        title=data.get('title', f"Inquiry from {lead['company_name']}"),
+        description=data.get('description', f"Lead inquiry from {lead['contact_name']} at {lead['company_name']}.\n\nNotes: {lead.get('notes', '')}"),
+        client_id=client_id,
+        client_name=client_name,
+        priority=data.get('priority', 'medium'),
+        category=data.get('category', 'support'),
+        ticket_type=data.get('ticket_type', 'service_request'),
+        assigned_to=lead.get('assigned_to') or current_user['id'],
+        assigned_name=lead.get('assigned_name') or current_user['name'],
+        ticket_number=ticket_number,
+    )
+    tdoc = ticket.model_dump()
+    tdoc['created_at'] = tdoc['created_at'].isoformat()
+    tdoc['updated_at'] = tdoc['updated_at'].isoformat()
+    if tdoc.get('sla_due'):
+        tdoc['sla_due'] = tdoc['sla_due'].isoformat()
+    await db.tickets.insert_one(tdoc)
+    
+    # Log activity on lead
+    activity = LeadActivity(
+        lead_id=lead_id,
+        lead_name=lead['company_name'],
+        user_id=current_user['id'],
+        user_name=current_user['name'],
+        activity_type="task",
+        subject=f"Ticket created: {ticket.title}",
+        description=f"Ticket #{ticket_number} created from this lead",
+        outcome="positive"
+    )
+    adoc = activity.model_dump()
+    adoc['created_at'] = adoc['created_at'].isoformat()
+    await db.lead_activities.insert_one(adoc)
+    
+    # Update lead last contact
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {"last_contact": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"message": "Ticket created from lead", "ticket_id": ticket.id, "ticket_number": ticket_number}
+
+@router.post("/leads/{lead_id}/assign-client")
+async def assign_client_to_lead(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Assign an existing client to a lead"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    client_id = data.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id required")
+    
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {
+            "converted_to_client": client_id,
+            "status": "won",
+            "pipeline_stage": 6,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {"message": f"Lead assigned to client: {client['name']}", "client_id": client_id}
+
 # ============== LEAD ACTIVITIES ENDPOINTS ==============
 
 @router.get("/leads/{lead_id}/activities")

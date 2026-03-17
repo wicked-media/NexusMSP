@@ -2,11 +2,15 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
+import os
+import asyncio
+import logging
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ============== TICKETS ENDPOINTS ==============
@@ -340,25 +344,35 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         status="pending"
     )
     
-    # Try to send via Office 365 if configured
-    try:
-        status = await get_office365_status(current_user)
-        if status.get('configured'):
-            await office365_service.send_email(
-                from_address=ticket_email.from_address,
-                to_addresses=ticket_email.to_addresses,
-                subject=ticket_email.subject,
-                body=ticket_email.body,
-                body_type=ticket_email.body_type
-            )
+    # Send via Resend if configured
+    import resend
+    resend_key = os.environ.get("RESEND_API_KEY", "")
+    sender_email = os.environ.get("SENDER_EMAIL", "tickets@nexusops.io")
+    
+    if resend_key and not resend_key.startswith("re_test_placeholder"):
+        resend.api_key = resend_key
+        try:
+            params = {
+                "from": f"NexusOps <{sender_email}>",
+                "to": ticket_email.to_addresses,
+                "subject": ticket_email.subject,
+                "html": ticket_email.body if ticket_email.body_type == "html" else f"<pre>{ticket_email.body}</pre>",
+            }
+            if ticket_email.cc_addresses:
+                params["cc"] = ticket_email.cc_addresses
+            result = await asyncio.to_thread(resend.Emails.send, params)
             ticket_email.status = "sent"
+            ticket_email.message_id = result.get("id") if isinstance(result, dict) else None
             ticket_email.sent_at = datetime.now(timezone.utc)
-        else:
-            ticket_email.status = "sent"  # Mark as sent even in demo mode
-            ticket_email.sent_at = datetime.now(timezone.utc)
-    except Exception as e:
-        ticket_email.status = "failed"
-        logger.error(f"Failed to send ticket email: {e}")
+            logger.info(f"Email sent via Resend to {ticket_email.to_addresses}, id={ticket_email.message_id}")
+        except Exception as e:
+            ticket_email.status = "failed"
+            logger.error(f"Resend email failed: {e}")
+    else:
+        # Demo mode - mark as sent without actually sending
+        ticket_email.status = "sent"
+        ticket_email.sent_at = datetime.now(timezone.utc)
+        logger.info(f"Email marked as sent (demo mode) to {ticket_email.to_addresses}")
     
     doc = ticket_email.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
