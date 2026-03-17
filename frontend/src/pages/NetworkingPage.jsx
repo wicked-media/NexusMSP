@@ -17,8 +17,11 @@ import { toast } from "sonner";
 import {
   Wifi, Router, Server, Monitor, Globe, Search, Loader2, RefreshCw, ChevronRight,
   Plus, Users, Smartphone, Download, Upload, Shield, AlertTriangle, CheckCircle2,
-  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap
+  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap, BarChart3, Lock, Eye, EyeOff
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
+} from "recharts";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -41,6 +44,151 @@ const StatusDot = ({ status }) => {
 
 const emptySiteForm = { name: "", client_id: "", client_name: "", controller_url: "", site_id: "default", location: "", wan_ip: "", isp: "", download_speed_mbps: "", upload_speed_mbps: "", api_key: "", username: "", password: "", verify_ssl: false, notes: "" };
 const emptyDeviceForm = { name: "", mac: "", model: "", device_type: "ap", ip_address: "", firmware: "" };
+
+const DPI_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
+
+function WlanTab({ siteId, headers }) {
+  const [wlans, setWlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fetch = async () => {
+      setLoading(true);
+      try { const r = await axios.get(`${API}/networking/sites/${siteId}/wlans`, { headers }); setWlans(r.data); }
+      catch {} finally { setLoading(false); }
+    };
+    fetch();
+  }, [siteId]);
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  return (
+    <div className="space-y-3" data-testid="wlan-tab">
+      {wlans.map(w => (
+        <Card key={w.id} className={`${w.enabled ? "" : "opacity-50"}`} data-testid={`wlan-${w.id}`}>
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${w.guest ? "bg-amber-500/10" : "bg-blue-500/10"}`}>
+                  <Wifi className={`w-5 h-5 ${w.guest ? "text-amber-400" : "text-blue-400"}`} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold">{w.ssid}</p>
+                    {w.guest && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">Guest</Badge>}
+                    {!w.enabled && <Badge variant="secondary" className="text-[9px]">Disabled</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{w.security} | VLAN {w.vlan_id} | {w.band}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="text-[10px]"><Lock className="w-2.5 h-2.5 mr-0.5" />{w.security}</Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+      {wlans.length === 0 && <p className="text-center text-muted-foreground py-8">No WLANs configured</p>}
+    </div>
+  );
+}
+
+function DpiTab({ siteId, headers }) {
+  const [dpi, setDpi] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fetch = async () => {
+      setLoading(true);
+      try { const r = await axios.get(`${API}/networking/sites/${siteId}/dpi`, { headers }); setDpi(r.data); }
+      catch {} finally { setLoading(false); }
+    };
+    fetch();
+  }, [siteId]);
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  if (!dpi || !dpi.categories) return <p className="text-center text-muted-foreground py-8">No traffic data</p>;
+  
+  const chartData = dpi.categories.map(c => ({
+    name: c.name, Download: Math.round(c.rx_bytes / 1_000_000_000), Upload: Math.round(c.tx_bytes / 1_000_000_000),
+  }));
+  const pieData = dpi.categories.map((c, i) => ({
+    name: c.name, value: c.rx_bytes + c.tx_bytes, color: DPI_COLORS[i % DPI_COLORS.length],
+  }));
+  const totalBytes = dpi.categories.reduce((a, c) => a + c.rx_bytes + c.tx_bytes, 0);
+
+  return (
+    <div className="space-y-4" data-testid="dpi-tab">
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Traffic by Category (GB)</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={chartData} layout="vertical">
+                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={v => `${v}GB`} />
+                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10 }} />
+                <Tooltip formatter={v => [`${v} GB`]} />
+                <Legend />
+                <Bar dataKey="Download" fill="#10b981" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="Upload" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Traffic Distribution</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value">
+                  {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                </Pie>
+                <Tooltip formatter={(v) => [`${(v / 1_000_000_000).toFixed(1)} GB`]} />
+                <Legend formatter={(v) => <span className="text-xs">{v}</span>} />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Category Breakdown</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Category</TableHead><TableHead>Clients</TableHead><TableHead className="text-right">Download</TableHead>
+                <TableHead className="text-right">Upload</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="text-right">Share</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dpi.categories.sort((a, b) => (b.rx_bytes + b.tx_bytes) - (a.rx_bytes + a.tx_bytes)).map((c, i) => {
+                const total = c.rx_bytes + c.tx_bytes;
+                const pct = totalBytes > 0 ? ((total / totalBytes) * 100).toFixed(1) : 0;
+                return (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: DPI_COLORS[i % DPI_COLORS.length] }} />
+                        {c.name}
+                      </div>
+                    </TableCell>
+                    <TableCell>{c.clients}</TableCell>
+                    <TableCell className="text-right font-mono text-emerald-400">{(c.rx_bytes / 1_000_000_000).toFixed(1)} GB</TableCell>
+                    <TableCell className="text-right font-mono text-amber-400">{(c.tx_bytes / 1_000_000_000).toFixed(1)} GB</TableCell>
+                    <TableCell className="text-right font-mono">{(total / 1_000_000_000).toFixed(1)} GB</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: DPI_COLORS[i % DPI_COLORS.length] }} />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export default function NetworkingPage() {
   const { token } = useAuth();
@@ -341,6 +489,14 @@ export default function NetworkingPage() {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
             <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
+            <Button variant="default" size="sm" onClick={async () => {
+              toast.info("Syncing from controller...");
+              try {
+                const res = await axios.post(`${API}/networking/sites/${selectedSite.id}/sync`, {}, { headers });
+                if (res.data.success) { toast.success(res.data.message); fetchSiteData(selectedSite.id); fetchData(); }
+                else toast.error(res.data.message);
+              } catch { toast.error("Sync failed"); }
+            }} data-testid="sync-site-btn"><RefreshCw className="w-3 h-3 mr-1" />Sync from Controller</Button>
           </div>
         </div>
 
@@ -400,6 +556,8 @@ export default function NetworkingPage() {
             <TabsList>
               <TabsTrigger value="devices" data-testid="tab-devices">Devices ({siteDevices.length})</TabsTrigger>
               <TabsTrigger value="clients" data-testid="tab-clients">Clients ({siteClients.length})</TabsTrigger>
+              <TabsTrigger value="wlans" data-testid="tab-wlans">WLANs</TabsTrigger>
+              <TabsTrigger value="dpi" data-testid="tab-dpi">Traffic</TabsTrigger>
             </TabsList>
             <div className="flex items-center gap-2">
               {tab === "devices" && (
@@ -494,6 +652,16 @@ export default function NetworkingPage() {
                 </Table>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* WLAN Tab */}
+          <TabsContent value="wlans" className="space-y-3 mt-4">
+            <WlanTab siteId={selectedSite.id} headers={headers} />
+          </TabsContent>
+
+          {/* DPI / Traffic Tab */}
+          <TabsContent value="dpi" className="space-y-3 mt-4">
+            <DpiTab siteId={selectedSite.id} headers={headers} />
           </TabsContent>
         </Tabs>
         {siteFormDialog}{adoptDeviceDialog}{editDeviceDlg}

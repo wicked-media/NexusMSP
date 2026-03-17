@@ -49,7 +49,62 @@ async def update_ai_settings(data: dict, current_user: dict = Depends(get_curren
     }}, upsert=True)
     return {"message": "AI config saved", "provider": provider, "model": model}
 
-# ============== SPELL CHECK / GRAMMAR ==============
+# ============== TECHNICIAN CO-PILOT ==============
+
+@router.post("/ai/copilot")
+async def copilot_chat(data: dict, current_user: dict = Depends(get_current_user)):
+    """AI Co-Pilot chat for technicians - context-aware assistant"""
+    message = data.get("message", "")
+    session_id = data.get("session_id", f"copilot-{uuid.uuid4().hex[:8]}")
+    ticket_context = data.get("ticket_context", {})
+    
+    if not message:
+        return {"response": "Please ask me something!", "session_id": session_id}
+    
+    # Build context from ticket
+    context_parts = ["You are the Technician Co-Pilot for NexusOps, an RMM/PSA platform. You help IT technicians diagnose and resolve issues. Be concise, technical, and actionable. Use bullet points for steps."]
+    
+    if ticket_context:
+        context_parts.append(f"\nCurrent Ticket: {ticket_context.get('title', 'N/A')}")
+        if ticket_context.get("description"):
+            context_parts.append(f"Description: {ticket_context['description']}")
+        if ticket_context.get("client_name"):
+            context_parts.append(f"Client: {ticket_context['client_name']}")
+        if ticket_context.get("device_name"):
+            context_parts.append(f"Device: {ticket_context['device_name']} (Status: {ticket_context.get('device_status', 'unknown')})")
+        if ticket_context.get("category"):
+            context_parts.append(f"Category: {ticket_context['category']}")
+        if ticket_context.get("priority"):
+            context_parts.append(f"Priority: {ticket_context['priority']}")
+    
+    # Get KB articles for context
+    from app.routers.ticket_suggestions import extract_keywords, score_match
+    keywords = extract_keywords(message)
+    if keywords:
+        kb_articles = await db.kb_articles.find({}, {"_id": 0, "title": 1, "content": 1}).to_list(20)
+        relevant = []
+        for art in kb_articles:
+            score = score_match(keywords, f"{art.get('title','')} {art.get('content','')}")
+            if score >= 2:
+                relevant.append(f"KB: {art['title']}: {(art.get('content','') or '')[:200]}")
+        if relevant:
+            context_parts.append(f"\nRelevant Knowledge Base Articles:\n" + "\n".join(relevant[:3]))
+    
+    system_msg = "\n".join(context_parts)
+    
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        return {"response": "AI key not configured. Add the Emergent LLM Key in your environment.", "session_id": session_id}
+    
+    config = await get_ai_config()
+    try:
+        chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
+        chat.with_model(config.get("provider", DEFAULT_PROVIDER), config.get("model", DEFAULT_MODEL))
+        response = await chat.send_message(UserMessage(text=message))
+        return {"response": response, "session_id": session_id}
+    except Exception as e:
+        return {"response": f"Sorry, I encountered an error: {str(e)[:100]}", "session_id": session_id}
 
 @router.post("/ai/proofread")
 async def proofread_text(data: dict, current_user: dict = Depends(get_current_user)):

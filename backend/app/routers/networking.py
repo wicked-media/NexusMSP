@@ -7,9 +7,380 @@ from app.auth import get_current_user, hash_password, verify_password, create_to
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
 
+import httpx
+
 router = APIRouter()
 
 # ============== NETWORKING / UNIFI ENDPOINTS ==============
+
+# -------- UNIFI LIVE SYNC --------
+
+async def _unifi_login(site):
+    """Attempt to login to a real UniFi controller and return session"""
+    url = (site.get("controller_url") or "").rstrip("/")
+    username = site.get("username", "")
+    password = site.get("password", "")
+    if not url or not username or not password:
+        return None, None
+    try:
+        client = httpx.AsyncClient(verify=site.get("verify_ssl", False), timeout=15)
+        resp = await client.post(f"{url}/api/login", json={"username": username, "password": password})
+        if resp.status_code == 200:
+            return client, url
+        await client.aclose()
+    except Exception:
+        pass
+    return None, None
+
+async def _unifi_api(client, base_url, path, site_name="default"):
+    """Make a request to the UniFi controller API"""
+    try:
+        resp = await client.get(f"{base_url}/api/s/{site_name}/{path}")
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("data", data)
+    except Exception:
+        pass
+    return None
+
+@router.post("/networking/sites/{site_id}/sync")
+async def sync_site_from_controller(site_id: str, current_user: dict = Depends(get_current_user)):
+    """Sync devices and clients from a real UniFi controller"""
+    site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    
+    client, base_url = await _unifi_login(site)
+    if not client:
+        return {"success": False, "message": "Cannot connect to controller. Check credentials.", "synced_devices": 0, "synced_clients": 0}
+    
+    site_name = site.get("site_id", "default")
+    synced_devices = 0
+    synced_clients = 0
+    
+    try:
+        # Sync devices
+        devices_data = await _unifi_api(client, base_url, "stat/device", site_name)
+        if devices_data:
+            for dev in devices_data:
+                mac = dev.get("mac", "")
+                existing = await db.network_devices.find_one({"site_id": site_id, "mac": mac})
+                device_doc = {
+                    "site_id": site_id,
+                    "name": dev.get("name", dev.get("hostname", mac)),
+                    "mac": mac,
+                    "model": dev.get("model", ""),
+                    "model_name": dev.get("model_in_lts", dev.get("model", "")),
+                    "device_type": dev.get("type", "ap"),
+                    "ip_address": dev.get("ip", ""),
+                    "status": "online" if dev.get("state", 0) == 1 else "offline",
+                    "firmware": dev.get("version", ""),
+                    "uptime_seconds": dev.get("uptime", 0),
+                    "cpu_usage": dev.get("system-stats", {}).get("cpu", 0) if isinstance(dev.get("system-stats"), dict) else 0,
+                    "mem_usage": dev.get("system-stats", {}).get("mem", 0) if isinstance(dev.get("system-stats"), dict) else 0,
+                    "satisfaction": dev.get("satisfaction", 0),
+                    "num_sta": dev.get("num_sta", 0),
+                    "tx_bytes": dev.get("tx_bytes", 0),
+                    "rx_bytes": dev.get("rx_bytes", 0),
+                    "port_table": dev.get("port_table", []),
+                    "radio_table": dev.get("radio_table", []),
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if existing:
+                    await db.network_devices.update_one({"_id": existing["_id"]}, {"$set": device_doc})
+                else:
+                    device_doc["id"] = str(uuid.uuid4())
+                    device_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                    await db.network_devices.insert_one(device_doc)
+                synced_devices += 1
+        
+        # Sync clients
+        clients_data = await _unifi_api(client, base_url, "stat/sta", site_name)
+        if clients_data:
+            for cli in clients_data:
+                mac = cli.get("mac", "")
+                existing = await db.network_clients.find_one({"site_id": site_id, "mac": mac})
+                client_doc = {
+                    "site_id": site_id,
+                    "mac": mac,
+                    "hostname": cli.get("hostname", cli.get("name", mac)),
+                    "ip": cli.get("ip", ""),
+                    "is_wireless": cli.get("is_wired", False) == False,
+                    "is_connected": True,
+                    "network": cli.get("essid", cli.get("network", "")),
+                    "signal": cli.get("signal", 0),
+                    "rssi": cli.get("rssi", 0),
+                    "tx_bytes": cli.get("tx_bytes", 0),
+                    "rx_bytes": cli.get("rx_bytes", 0),
+                    "tx_rate": cli.get("tx_rate", 0),
+                    "rx_rate": cli.get("rx_rate", 0),
+                    "uptime": cli.get("uptime", 0),
+                    "channel": cli.get("channel", 0),
+                    "radio": cli.get("radio", ""),
+                    "satisfaction": cli.get("satisfaction", 0),
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if existing:
+                    await db.network_clients.update_one({"_id": existing["_id"]}, {"$set": client_doc})
+                else:
+                    client_doc["id"] = str(uuid.uuid4())
+                    client_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                    await db.network_clients.insert_one(client_doc)
+                synced_clients += 1
+        
+        # Update site health
+        health_data = await _unifi_api(client, base_url, "stat/health", site_name)
+        if health_data:
+            health = {}
+            for h in health_data:
+                subsystem = h.get("subsystem", "")
+                health[subsystem] = h.get("status", "unknown")
+            await db.network_sites.update_one({"id": site_id}, {"$set": {
+                "health": health, "status": "online",
+                "last_sync": datetime.now(timezone.utc).isoformat(),
+            }})
+        
+        await client.aclose()
+        return {"success": True, "message": f"Synced {synced_devices} devices, {synced_clients} clients", "synced_devices": synced_devices, "synced_clients": synced_clients}
+    except Exception as e:
+        try: await client.aclose()
+        except: pass
+        return {"success": False, "message": str(e)[:200], "synced_devices": synced_devices, "synced_clients": synced_clients}
+
+# -------- WLAN MANAGEMENT --------
+
+@router.get("/networking/sites/{site_id}/wlans")
+async def get_site_wlans(site_id: str, current_user: dict = Depends(get_current_user)):
+    wlans = await db.network_wlans.find({"site_id": site_id}, {"_id": 0}).to_list(50)
+    if not wlans:
+        # Seed demo WLANs
+        demo = [
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Corporate-5G", "ssid": "Corporate-5G", "enabled": True, "security": "WPA3-Enterprise", "vlan_id": 10, "band": "5GHz", "client_count": 0, "guest": False},
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Guest-WiFi", "ssid": "Guest-WiFi", "enabled": True, "security": "WPA2-PSK", "vlan_id": 50, "band": "Both", "client_count": 0, "guest": True},
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "IoT-Network", "ssid": "IoT-Devices", "enabled": True, "security": "WPA2-PSK", "vlan_id": 100, "band": "2.4GHz", "client_count": 0, "guest": False},
+        ]
+        for w in demo:
+            await db.network_wlans.insert_one(w)
+        wlans = demo
+    for w in wlans:
+        w.pop("_id", None)
+    return wlans
+
+@router.post("/networking/sites/{site_id}/wlans")
+async def create_wlan(site_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    wlan = {
+        "id": str(uuid.uuid4()), "site_id": site_id,
+        "name": data.get("name", ""), "ssid": data.get("ssid", data.get("name", "")),
+        "enabled": data.get("enabled", True), "security": data.get("security", "WPA2-PSK"),
+        "vlan_id": data.get("vlan_id", 0), "band": data.get("band", "Both"),
+        "client_count": 0, "guest": data.get("guest", False),
+        "password": data.get("password", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.network_wlans.insert_one(wlan)
+    wlan.pop("_id", None)
+    return wlan
+
+@router.put("/networking/wlans/{wlan_id}")
+async def update_wlan(wlan_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "ssid", "enabled", "security", "vlan_id", "band", "guest", "password"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    await db.network_wlans.update_one({"id": wlan_id}, {"$set": update})
+    return {"message": "WLAN updated"}
+
+@router.delete("/networking/wlans/{wlan_id}")
+async def delete_wlan(wlan_id: str, current_user: dict = Depends(get_current_user)):
+    await db.network_wlans.delete_one({"id": wlan_id})
+    return {"message": "WLAN deleted"}
+
+# -------- PORT PROFILES --------
+
+@router.get("/networking/sites/{site_id}/port-profiles")
+async def get_port_profiles(site_id: str, current_user: dict = Depends(get_current_user)):
+    profiles = await db.network_port_profiles.find({"site_id": site_id}, {"_id": 0}).to_list(50)
+    if not profiles:
+        demo = [
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "All", "native_vlan": 1, "tagged_vlans": [], "poe": True},
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "VoIP", "native_vlan": 20, "tagged_vlans": [1], "poe": True},
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Security Cameras", "native_vlan": 30, "tagged_vlans": [], "poe": True},
+            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Guest VLAN", "native_vlan": 50, "tagged_vlans": [], "poe": False},
+        ]
+        for p in demo:
+            await db.network_port_profiles.insert_one(p)
+        profiles = demo
+    for p in profiles:
+        p.pop("_id", None)
+    return profiles
+
+# -------- DPI / TRAFFIC ANALYTICS --------
+
+@router.get("/networking/sites/{site_id}/dpi")
+async def get_site_dpi(site_id: str, current_user: dict = Depends(get_current_user)):
+    """Deep packet inspection / traffic analytics"""
+    dpi = await db.network_dpi.find_one({"site_id": site_id}, {"_id": 0})
+    if not dpi:
+        dpi = {
+            "site_id": site_id,
+            "categories": [
+                {"name": "Web Browsing", "rx_bytes": 45_000_000_000, "tx_bytes": 3_200_000_000, "clients": 28},
+                {"name": "Video Streaming", "rx_bytes": 120_000_000_000, "tx_bytes": 800_000_000, "clients": 15},
+                {"name": "Social Media", "rx_bytes": 18_000_000_000, "tx_bytes": 5_000_000_000, "clients": 22},
+                {"name": "Cloud Services", "rx_bytes": 35_000_000_000, "tx_bytes": 28_000_000_000, "clients": 30},
+                {"name": "VoIP", "rx_bytes": 2_000_000_000, "tx_bytes": 2_100_000_000, "clients": 8},
+                {"name": "Gaming", "rx_bytes": 8_000_000_000, "tx_bytes": 1_500_000_000, "clients": 4},
+                {"name": "Email", "rx_bytes": 5_000_000_000, "tx_bytes": 3_000_000_000, "clients": 25},
+                {"name": "File Sharing", "rx_bytes": 15_000_000_000, "tx_bytes": 12_000_000_000, "clients": 10},
+            ],
+            "top_clients": [],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.network_dpi.insert_one(dpi)
+        dpi.pop("_id", None)
+    return dpi
+
+# -------- SEED UNIFI DEMO DATA --------
+
+@router.post("/networking/seed-demo")
+async def seed_unifi_demo(current_user: dict = Depends(get_current_user)):
+    """Seed comprehensive demo data for UniFi networking"""
+    existing_sites = await db.network_sites.count_documents({})
+    if existing_sites > 0:
+        return {"message": f"Demo data already exists ({existing_sites} sites)"}
+    
+    clients_list = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
+    
+    sites_data = [
+        {"name": "Main Office", "location": "Level 3, 100 Collins St", "wan_ip": "203.45.67.89", "isp": "Telstra Business", "download": 500, "upload": 100},
+        {"name": "Warehouse", "location": "12 Industrial Rd", "wan_ip": "203.45.67.90", "isp": "ABB", "download": 100, "upload": 40},
+        {"name": "Branch Office - Sydney", "location": "55 Pitt St", "wan_ip": "110.23.45.67", "isp": "Optus Business", "download": 250, "upload": 50},
+    ]
+    
+    device_templates = {
+        "gateway": [
+            {"name": "USG-Pro-4", "model": "UGW4", "firmware": "6.0.41", "cpu": 12, "mem": 45},
+            {"name": "UDM-Pro", "model": "UDMPRO", "firmware": "3.2.7", "cpu": 8, "mem": 52},
+            {"name": "USG-3P", "model": "UGW3", "firmware": "4.4.56", "cpu": 22, "mem": 61},
+        ],
+        "switch": [
+            {"name": "USW-Pro-48-PoE", "model": "USPPOE48", "firmware": "6.6.65", "ports": 48, "poe_power": 600},
+            {"name": "USW-Pro-24-PoE", "model": "USPPOE24", "firmware": "6.6.65", "ports": 24, "poe_power": 400},
+            {"name": "USW-Lite-16-PoE", "model": "USLPOE16", "firmware": "6.6.65", "ports": 16, "poe_power": 45},
+        ],
+        "ap": [
+            {"name": "U6-Pro", "model": "U6PRO", "firmware": "6.6.77", "band": "WiFi 6", "clients_max": 300},
+            {"name": "U6-Enterprise", "model": "U6ENT", "firmware": "6.6.77", "band": "WiFi 6E", "clients_max": 500},
+            {"name": "U6-Lite", "model": "U6LITE", "firmware": "6.6.77", "band": "WiFi 6", "clients_max": 200},
+            {"name": "U6-LR", "model": "U6LR", "firmware": "6.6.77", "band": "WiFi 6", "clients_max": 350},
+        ],
+    }
+    
+    import random
+    all_site_ids = []
+    for idx, sd in enumerate(sites_data):
+        site_id = str(uuid.uuid4())
+        all_site_ids.append(site_id)
+        client = clients_list[idx] if idx < len(clients_list) else {"id": "", "name": ""}
+        site = {
+            "id": site_id, "name": sd["name"], "client_id": client["id"], "client_name": client["name"],
+            "controller_url": "", "site_id": "default", "status": "online",
+            "location": sd["location"], "wan_ip": sd["wan_ip"], "isp": sd["isp"],
+            "download_speed_mbps": sd["download"], "upload_speed_mbps": sd["upload"],
+            "health": {"wan": "ok", "lan": "ok", "wlan": "ok"},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.network_sites.insert_one(site)
+        
+        # Add devices
+        gw = device_templates["gateway"][idx]
+        sw_templates = device_templates["switch"]
+        ap_templates = device_templates["ap"]
+        
+        # Gateway
+        await db.network_devices.insert_one({
+            "id": str(uuid.uuid4()), "site_id": site_id,
+            "name": gw["name"], "mac": f"f0:9f:c2:{random.randint(10,99):02x}:{random.randint(10,99):02x}:{random.randint(10,99):02x}",
+            "model": gw["model"], "device_type": "gateway", "ip_address": "192.168.1.1",
+            "status": "online", "firmware": gw["firmware"],
+            "uptime_seconds": random.randint(100000, 5000000),
+            "cpu_usage": gw["cpu"], "mem_usage": gw["mem"],
+            "satisfaction": random.randint(85, 100), "num_sta": 0,
+            "tx_bytes": random.randint(50_000_000_000, 500_000_000_000),
+            "rx_bytes": random.randint(200_000_000_000, 2_000_000_000_000),
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        
+        # Switches
+        num_switches = 2 if idx == 0 else 1
+        for si in range(num_switches):
+            sw = sw_templates[si % len(sw_templates)]
+            await db.network_devices.insert_one({
+                "id": str(uuid.uuid4()), "site_id": site_id,
+                "name": f"{sw['name']}-{si+1}" if num_switches > 1 else sw["name"],
+                "mac": f"f0:9f:c2:{random.randint(10,99):02x}:{random.randint(10,99):02x}:{random.randint(10,99):02x}",
+                "model": sw["model"], "device_type": "switch", "ip_address": f"192.168.1.{10+si}",
+                "status": "online", "firmware": sw["firmware"],
+                "uptime_seconds": random.randint(100000, 5000000),
+                "cpu_usage": random.randint(3, 20), "mem_usage": random.randint(20, 50),
+                "satisfaction": random.randint(90, 100), "num_sta": 0,
+                "ports": sw.get("ports", 24), "poe_power": sw.get("poe_power", 0),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        
+        # APs
+        num_aps = 4 if idx == 0 else (2 if idx == 2 else 1)
+        for ai in range(num_aps):
+            ap = ap_templates[ai % len(ap_templates)]
+            is_online = random.random() > 0.1
+            await db.network_devices.insert_one({
+                "id": str(uuid.uuid4()), "site_id": site_id,
+                "name": f"{ap['name']}-{chr(65+ai)}", 
+                "mac": f"f0:9f:c2:{random.randint(10,99):02x}:{random.randint(10,99):02x}:{random.randint(10,99):02x}",
+                "model": ap["model"], "device_type": "ap", "ip_address": f"192.168.1.{20+ai}",
+                "status": "online" if is_online else "offline", "firmware": ap["firmware"],
+                "uptime_seconds": random.randint(10000, 5000000) if is_online else 0,
+                "cpu_usage": random.randint(5, 30) if is_online else 0,
+                "mem_usage": random.randint(20, 60) if is_online else 0,
+                "satisfaction": random.randint(70, 100) if is_online else 0,
+                "num_sta": random.randint(5, 35) if is_online else 0,
+                "tx_bytes": random.randint(1_000_000_000, 50_000_000_000),
+                "rx_bytes": random.randint(5_000_000_000, 100_000_000_000),
+                "channel_2g": random.choice([1, 6, 11]),
+                "channel_5g": random.choice([36, 40, 44, 48, 149, 153, 157]),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        
+        # Clients
+        client_names = ["MacBook-Pro", "iPhone-14", "Surface-Laptop", "iPad-Air", "Dell-XPS", "Galaxy-S23", "Cisco-Phone", "Printer-HP", "IoT-Sensor", "Camera-Lobby", "ThinkPad-T14", "iMac-Reception"]
+        num_clients = 12 if idx == 0 else (8 if idx == 2 else 5)
+        for ci in range(num_clients):
+            is_wireless = random.random() > 0.3
+            await db.network_clients.insert_one({
+                "id": str(uuid.uuid4()), "site_id": site_id,
+                "mac": f"a0:b1:c2:{random.randint(10,99):02x}:{random.randint(10,99):02x}:{random.randint(10,99):02x}",
+                "hostname": f"{client_names[ci % len(client_names)]}-{idx+1}",
+                "ip": f"192.168.{10+idx}.{100+ci}",
+                "is_wireless": is_wireless, "is_connected": random.random() > 0.15,
+                "network": random.choice(["Corporate-5G", "Guest-WiFi", "IoT-Network"]) if is_wireless else "LAN",
+                "signal": random.randint(-75, -30) if is_wireless else 0,
+                "rssi": random.randint(-75, -30) if is_wireless else 0,
+                "tx_bytes": random.randint(100_000_000, 10_000_000_000),
+                "rx_bytes": random.randint(500_000_000, 50_000_000_000),
+                "tx_rate": random.choice([72, 144, 300, 600, 867, 1200]) if is_wireless else 1000,
+                "rx_rate": random.choice([72, 144, 300, 600, 867, 1200]) if is_wireless else 1000,
+                "uptime": random.randint(1000, 500000),
+                "channel": random.choice([1, 6, 11, 36, 149]) if is_wireless else 0,
+                "radio": random.choice(["ng", "na", "ax"]) if is_wireless else "",
+                "satisfaction": random.randint(60, 100),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    
+    return {"message": f"Seeded {len(sites_data)} sites with devices and clients", "sites": len(sites_data)}
 
 @router.get("/networking/sites")
 async def get_networking_sites(current_user: dict = Depends(get_current_user)):

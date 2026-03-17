@@ -10,6 +10,9 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "sonner";
 import { 
   User, 
@@ -28,7 +31,8 @@ import {
   AlertTriangle,
   Wifi,
   BookOpen,
-  Brain
+  Brain,
+  Trash2
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -56,6 +60,10 @@ export default function SettingsPage() {
   const [huduSaving, setHuduSaving] = useState(false);
   const [aiConfig, setAiConfig] = useState({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" });
   const [aiSaving, setAiSaving] = useState(false);
+  const [emailSig, setEmailSig] = useState("");
+  const [sigSaving, setSigSaving] = useState(false);
+  const [cannedResponses, setCannedResponses] = useState([]);
+  const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -80,6 +88,15 @@ export default function SettingsPage() {
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
         if (aiRes.data.provider) setAiConfig(aiRes.data);
+        // Load email signature and canned responses
+        try {
+          const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
+          if (userRes.data?.email_signature) setEmailSig(userRes.data.email_signature);
+        } catch {}
+        try {
+          const crRes = await axios.get(`${API}/canned-responses`, { headers });
+          setCannedResponses(crRes.data);
+        } catch {}
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -149,6 +166,73 @@ export default function SettingsPage() {
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
             Save Changes
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Email Signature & Canned Responses - Per Technician */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-primary" />
+            <CardTitle>Email Signature & Templates</CardTitle>
+          </div>
+          <CardDescription>Your personal email signature (rich text) auto-appended to emails sent from tickets. Also manage your canned response templates.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Rich Text Email Signature */}
+          <div className="space-y-2">
+            <Label>Email Signature (Rich Text)</Label>
+            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting like Outlook.</p>
+            <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="150px" />
+            <Button onClick={async () => {
+              setSigSaving(true);
+              try {
+                await axios.put(`${API}/users/${user.id}`, { email_signature: emailSig }, { headers });
+                toast.success("Email signature saved");
+              } catch { toast.error("Failed to save signature"); }
+              finally { setSigSaving(false); }
+            }} disabled={sigSaving} data-testid="save-signature-btn">
+              {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Save Signature
+            </Button>
+          </div>
+          <Separator />
+          {/* Canned Responses */}
+          <div className="space-y-3">
+            <Label>Canned Responses</Label>
+            <p className="text-xs text-muted-foreground">Quick reply templates you can use when responding to tickets.</p>
+            <div className="grid grid-cols-3 gap-2">
+              <Input value={cannedForm.title} onChange={e => setCannedForm({ ...cannedForm, title: e.target.value })} placeholder="Title" data-testid="canned-title" />
+              <Input value={cannedForm.content} onChange={e => setCannedForm({ ...cannedForm, content: e.target.value })} placeholder="Response content" className="col-span-2" data-testid="canned-content" />
+            </div>
+            <Button size="sm" onClick={async () => {
+              if (!cannedForm.title || !cannedForm.content) { toast.error("Title and content required"); return; }
+              try {
+                await axios.post(`${API}/canned-responses`, cannedForm, { headers });
+                toast.success("Canned response saved");
+                setCannedForm({ title: "", content: "", category: "general" });
+                const r = await axios.get(`${API}/canned-responses`, { headers });
+                setCannedResponses(r.data);
+              } catch { toast.error("Failed to save"); }
+            }} data-testid="add-canned-btn">Add Response</Button>
+            {cannedResponses.length > 0 && (
+              <ScrollArea className="h-[150px]">
+                {cannedResponses.map(cr => (
+                  <div key={cr.id} className="flex justify-between items-center p-2 border-b border-border/50">
+                    <div><p className="text-sm font-medium">{cr.title}</p><p className="text-xs text-muted-foreground truncate max-w-[400px]">{cr.content}</p></div>
+                    <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
+                      try {
+                        await axios.delete(`${API}/canned-responses/${cr.id}`, { headers });
+                        const r = await axios.get(`${API}/canned-responses`, { headers });
+                        setCannedResponses(r.data);
+                        toast.success("Deleted");
+                      } catch { toast.error("Failed to delete"); }
+                    }} data-testid={`delete-canned-${cr.id}`}><Trash2 className="w-3 h-3" /></Button>
+                  </div>
+                ))}
+              </ScrollArea>
+            )}
+          </div>
         </CardContent>
       </Card>
 

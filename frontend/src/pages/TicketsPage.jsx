@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import CoPilotPanel from "@/components/CoPilotPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -208,8 +209,16 @@ export default function TicketsPage() {
   };
 
   const handleSendEmail = async () => {
+    // Auto-fetch and append the user's rich text signature from settings
+    let sig = emailSignature || "";
+    if (!sig) {
+      try {
+        const sigRes = await axios.get(`${API}/users/${user.id}`, { headers });
+        sig = sigRes.data?.email_signature || "";
+      } catch {}
+    }
+    const bodyWithSig = emailForm.body + (sig ? `\n\n${sig}` : "");
     try {
-      const bodyWithSig = emailForm.body + (emailSignature ? `\n\n${emailSignature}` : "");
       await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
         ticket_id: viewingTicket.id,
         to_addresses: emailForm.to.split(",").map(e => e.trim()).filter(Boolean),
@@ -674,15 +683,6 @@ export default function TicketsPage() {
                       <Checkbox checked={isInternalNote} onCheckedChange={setIsInternalNote} id="internal" data-testid="internal-note-check" />
                       <Label htmlFor="internal" className="text-sm">Internal note</Label>
                     </div>
-                    {/* Canned responses dropdown */}
-                    {cannedResponses.length > 0 && (
-                      <Select onValueChange={v => setNewNote(v)}>
-                        <SelectTrigger className="w-[180px] h-8"><SelectValue placeholder="Canned response" /></SelectTrigger>
-                        <SelectContent>
-                          {cannedResponses.map(cr => <SelectItem key={cr.id} value={cr.content}>{cr.title}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
                     {/* Spell Check */}
                     <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
                       onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
@@ -923,31 +923,6 @@ export default function TicketsPage() {
                 </CardContent>
               </Card>
             )}
-
-            {/* Email Signature */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Email Signature</CardTitle></CardHeader>
-              <CardContent>
-                <RichTextEditor content={emailSignature} onChange={setEmailSignature} minHeight="80px" />
-                <Button size="sm" className="mt-2 w-full" onClick={handleSaveSignature} data-testid="save-signature-btn">Save Signature</Button>
-              </CardContent>
-            </Card>
-
-            {/* Canned Responses Manager */}
-            <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm">Canned Responses</CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setIsCannedOpen(true)} data-testid="manage-canned-btn"><Plus className="w-3 h-3" /></Button>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[100px]">
-                  {cannedResponses.map(cr => (
-                    <div key={cr.id} className="text-sm py-1 px-2 rounded hover:bg-muted/50 cursor-pointer" onClick={() => setNewNote(cr.content)}>{cr.title}</div>
-                  ))}
-                  {!cannedResponses.length && <p className="text-xs text-muted-foreground text-center py-2">No canned responses</p>}
-                </ScrollArea>
-              </CardContent>
-            </Card>
           </div>
         </div>
 
@@ -1031,26 +1006,10 @@ export default function TicketsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* CANNED RESPONSE DIALOG */}
-        <Dialog open={isCannedOpen} onOpenChange={setIsCannedOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Manage Canned Responses</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Title</Label><Input value={cannedForm.title} onChange={e => setCannedForm({ ...cannedForm, title: e.target.value })} /></div>
-              <div><Label>Content</Label><Textarea value={cannedForm.content} onChange={e => setCannedForm({ ...cannedForm, content: e.target.value })} rows={3} /></div>
-              <Button onClick={handleSaveCanned} size="sm"><Plus className="w-3 h-3 mr-1" />Save</Button>
-            </div>
-            <Separator className="my-3" />
-            <ScrollArea className="h-[200px]">
-              {cannedResponses.map(cr => (
-                <div key={cr.id} className="flex justify-between items-center p-2 border-b">
-                  <div><p className="text-sm font-medium">{cr.title}</p><p className="text-xs text-muted-foreground truncate max-w-[300px]">{cr.content}</p></div>
-                  <Button variant="ghost" size="sm" onClick={async () => { await axios.delete(`${API}/canned-responses/${cr.id}`, { headers }); const r = await axios.get(`${API}/canned-responses`, { headers }); setCannedResponses(r.data); }}><X className="w-3 h-3" /></Button>
-                </div>
-              ))}
-            </ScrollArea>
-          </DialogContent>
-        </Dialog>
+        {/* CANNED RESPONSE DIALOG - REMOVED, moved to Settings */}
+
+        {/* Technician Co-Pilot */}
+        <CoPilotPanel ticket={viewingTicket} device={deviceStatus} />
       </div>
     );
   }
@@ -1067,7 +1026,7 @@ export default function TicketsPage() {
     <div className="space-y-5" data-testid="tickets-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Service Desk</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Tickets</h1>
           <p className="text-muted-foreground">{tickets.length} total tickets across {new Set(tickets.map(t => t.client_id)).size} clients</p>
         </div>
         <div className="flex gap-2">
