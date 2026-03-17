@@ -20,7 +20,10 @@ import {
   ThumbsUp,
   Loader2,
   FileText,
-  Tag
+  Tag,
+  RefreshCw,
+  Download,
+  ExternalLink
 } from "lucide-react";
 
 const categories = [
@@ -50,6 +53,7 @@ export default function KnowledgeBasePage() {
     tags: "",
     is_public: false
   });
+  const [syncing, setSyncing] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -145,6 +149,19 @@ export default function KnowledgeBasePage() {
     setIsDialogOpen(true);
   };
 
+  const handleHuduSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await axios.post(`${API}/hudu/sync`, { max_pages: 10 }, { headers });
+      toast.success(`Hudu Sync: ${res.data.imported} imported, ${res.data.updated} updated`);
+      fetchArticles();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Hudu sync failed. Check Settings.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const filteredArticles = articles.filter(article => {
     const matchesSearch = article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           article.content.toLowerCase().includes(searchQuery.toLowerCase());
@@ -160,13 +177,18 @@ export default function KnowledgeBasePage() {
           <h1 className="text-3xl font-bold tracking-tight">Knowledge Base</h1>
           <p className="text-muted-foreground">Documentation and troubleshooting guides</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button data-testid="create-article-button">
-              <Plus className="w-4 h-4 mr-2" />
-              New Article
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleHuduSync} disabled={syncing} data-testid="hudu-sync-button">
+            {syncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+            {syncing ? "Syncing..." : "Sync from Hudu"}
+          </Button>
+          <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
+            <DialogTrigger asChild>
+              <Button data-testid="create-article-button">
+                <Plus className="w-4 h-4 mr-2" />
+                New Article
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{selectedArticle ? "Edit Article" : "Create New Article"}</DialogTitle>
@@ -236,6 +258,7 @@ export default function KnowledgeBasePage() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Stats */}

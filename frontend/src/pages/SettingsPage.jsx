@@ -26,7 +26,8 @@ import {
   CreditCard,
   FileText,
   AlertTriangle,
-  Wifi
+  Wifi,
+  BookOpen
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -50,19 +51,22 @@ export default function SettingsPage() {
   const [supedSaving, setSupedSaving] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
+  const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
+  const [huduSaving, setHuduSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
           axios.get(`${API}/settings/stripe`, { headers }),
           axios.get(`${API}/settings/suped`, { headers }),
           axios.get(`${API}/settings/splynx`, { headers }),
+          axios.get(`${API}/settings/hudu`, { headers }),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -70,6 +74,7 @@ export default function SettingsPage() {
         setStripe(stripeRes.data);
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
+        setHudu(huduRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
@@ -549,6 +554,71 @@ export default function SettingsPage() {
                   else toast.error(res.data.message);
                 } catch (e) { toast.error("Connection test failed"); }
               }} data-testid="test-splynx-btn">
+                Test Connection
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Hudu Integration */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-cyan-500" />
+            <CardTitle>Hudu - IT Documentation</CardTitle>
+          </div>
+          <CardDescription>Connect to Hudu to sync knowledge base articles and IT documentation guides</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={hudu.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {hudu.configured ? "Connected" : "Not Configured"}
+            </Badge>
+          </div>
+          <div>
+            <Label>Hudu URL</Label>
+            <Input
+              value={hudu.url}
+              onChange={(e) => setHudu({ ...hudu, url: e.target.value })}
+              placeholder="https://your-company.huducloud.com"
+              data-testid="hudu-url"
+            />
+          </div>
+          <div>
+            <Label>API Key</Label>
+            <Input
+              type="password"
+              value={hudu.api_key}
+              onChange={(e) => setHudu({ ...hudu, api_key: e.target.value })}
+              placeholder="Hudu API Key"
+              data-testid="hudu-api-key"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Generate an API key in Hudu under <strong>Admin &gt; API Keys</strong>. Articles will sync into your Knowledge Base. Learn more at <a href="https://hudu.com" target="_blank" rel="noreferrer" className="text-primary underline">hudu.com</a>.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={async () => {
+              if (!hudu.url || !hudu.api_key) { toast.error("Hudu URL and API key are required"); return; }
+              setHuduSaving(true);
+              try {
+                await axios.put(`${API}/settings/hudu`, { url: hudu.url, api_key: hudu.api_key }, { headers });
+                toast.success("Hudu settings saved");
+                setHudu({ ...hudu, configured: true });
+              } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+              finally { setHuduSaving(false); }
+            }} data-testid="save-hudu-btn" disabled={huduSaving}>
+              {huduSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Hudu Settings
+            </Button>
+            {hudu.configured && (
+              <Button variant="outline" onClick={async () => {
+                try {
+                  const res = await axios.post(`${API}/settings/hudu/test`, {}, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message);
+                } catch (e) { toast.error("Connection test failed"); }
+              }} data-testid="test-hudu-btn">
                 Test Connection
               </Button>
             )}

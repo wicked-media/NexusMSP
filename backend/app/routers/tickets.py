@@ -68,9 +68,9 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1})
         device_name = device['name'] if device else None
     
-    # Generate ticket number
-    ticket_count = await db.tickets.count_documents({})
-    ticket_number = f"TKT-{str(ticket_count + 1).zfill(3)}"
+    # Generate ticket number using configurable scheme
+    from app.routers.ticket_suggestions import generate_ticket_number
+    ticket_number = await generate_ticket_number(ticket_data.ticket_type)
     
     ticket = Ticket(
         **ticket_data.model_dump(),
@@ -167,9 +167,10 @@ async def create_child_ticket(ticket_id: str, ticket_data: dict, current_user: d
     parent = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not parent:
         raise HTTPException(status_code=404, detail="Parent ticket not found")
-    count = await db.tickets.count_documents({})
+    from app.routers.ticket_suggestions import generate_ticket_number
+    child_number = await generate_ticket_number(ticket_data.get("ticket_type", parent.get("ticket_type", "incident")))
     child = Ticket(
-        ticket_number=f"TKT-{count + 1:03d}",
+        ticket_number=child_number,
         title=ticket_data.get("title", ""),
         description=ticket_data.get("description", ""),
         client_id=parent["client_id"],

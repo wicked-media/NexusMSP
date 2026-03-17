@@ -41,6 +41,7 @@ import RentalsPage from "@/pages/RentalsPage";
 import VendorsPage from "@/pages/VendorsPage";
 import TicketSettingsPage from "@/pages/TicketSettingsPage";
 import DmarcCompliancePage from "@/pages/DmarcCompliancePage";
+import SplynxDashboardPage from "@/pages/SplynxDashboardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -511,6 +512,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <DmarcCompliancePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/splynx-dashboard"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SplynxDashboardPage />
                 </MainLayout>
               </ProtectedRoute>
             }

@@ -19,7 +19,8 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
-  Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square
+  Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
+  Lightbulb, BookOpen, Sparkles, ThumbsUp
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -55,6 +56,8 @@ export default function TicketsPage() {
   const [timeEntries, setTimeEntries] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [cannedResponses, setCannedResponses] = useState([]);
+  const [suggestions, setSuggestions] = useState(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [isEmailOpen, setIsEmailOpen] = useState(false);
@@ -117,6 +120,7 @@ export default function TicketsPage() {
 
   const fetchTicketDetail = async (ticket) => {
     setViewingTicket(ticket);
+    setSuggestions(null);
     try {
       const [nRes, eRes, cRes, tRes, aRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
@@ -133,6 +137,13 @@ export default function TicketsPage() {
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
+      // Fetch AI suggestions
+      setSuggestionsLoading(true);
+      try {
+        const sugRes = await axios.get(`${API}/tickets/${ticket.id}/suggestions`, { headers });
+        setSuggestions(sugRes.data);
+      } catch { setSuggestions({ similar_tickets: [], kb_articles: [], keywords: [] }); }
+      finally { setSuggestionsLoading(false); }
     } catch { toast.error("Failed to load ticket details"); }
   };
 
@@ -382,14 +393,130 @@ export default function TicketsPage() {
             </Card>
 
             {/* Tabs: Notes, Emails, Children, Time, Audit */}
-            <Tabs defaultValue="notes">
-              <TabsList className="w-full grid grid-cols-5">
+            <Tabs defaultValue="suggestions">
+              <TabsList className="w-full grid grid-cols-6">
+                <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="notes"><MessageSquare className="w-3 h-3 mr-1" />Notes ({ticketNotes.length})</TabsTrigger>
                 <TabsTrigger value="emails"><Mail className="w-3 h-3 mr-1" />Emails ({ticketEmails.length})</TabsTrigger>
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
               </TabsList>
+
+              {/* AI SUGGESTIONS TAB */}
+              <TabsContent value="suggestions" className="space-y-4">
+                {suggestionsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
+                    <span className="text-sm text-muted-foreground">Analyzing ticket and finding solutions...</span>
+                  </div>
+                ) : suggestions ? (
+                  <div className="space-y-4">
+                    {/* Keywords */}
+                    {suggestions.keywords?.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Matched keywords:</span>
+                        {suggestions.keywords.map(kw => (
+                          <Badge key={kw} variant="outline" className="text-[10px] bg-primary/5 border-primary/20">{kw}</Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Similar Resolved Tickets */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                        <h4 className="text-sm font-semibold">Similar Resolved Tickets ({suggestions.similar_tickets?.length || 0})</h4>
+                      </div>
+                      {suggestions.similar_tickets?.length > 0 ? (
+                        <ScrollArea className="h-[220px]">
+                          <div className="space-y-2">
+                            {suggestions.similar_tickets.map(st => (
+                              <Card key={st.ticket_id} className="border-amber-500/10 hover:border-amber-500/30 transition-colors cursor-pointer"
+                                onClick={() => { const t = tickets.find(x => x.id === st.ticket_id); if (t) fetchTicketDetail(t); }}
+                                data-testid={`suggestion-ticket-${st.ticket_id}`}>
+                                <CardContent className="py-2.5 px-3">
+                                  <div className="flex items-start justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-xs text-muted-foreground">{st.ticket_number}</span>
+                                      <Badge variant="outline" className="text-[9px] capitalize">{st.category}</Badge>
+                                      <Badge className={`text-[9px] ${priorityConfig[st.priority]?.class || ""}`}>{st.priority}</Badge>
+                                    </div>
+                                    <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+                                      {st.relevance_score} match{st.relevance_score !== 1 ? "es" : ""}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-sm font-medium mb-1">{st.title}</p>
+                                  {st.resolution_notes && (
+                                    <div className="bg-emerald-500/5 border border-emerald-500/10 rounded p-2 mt-1">
+                                      <p className="text-xs text-emerald-400 font-medium mb-0.5">Resolution:</p>
+                                      <p className="text-xs text-muted-foreground">{st.resolution_notes.substring(0, 300)}</p>
+                                    </div>
+                                  )}
+                                  {st.resolution_comments?.length > 0 && !st.resolution_notes && (
+                                    <div className="bg-blue-500/5 border border-blue-500/10 rounded p-2 mt-1">
+                                      <p className="text-xs text-blue-400 font-medium mb-0.5">Last Note by {st.resolution_comments[0].user_name}:</p>
+                                      <p className="text-xs text-muted-foreground">{st.resolution_comments[0].content.substring(0, 300)}</p>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+                                    {st.assigned_name && <span>Resolved by: {st.assigned_name}</span>}
+                                    {st.time_spent > 0 && <span>Time: {st.time_spent}m</span>}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <div className="py-6 text-center border rounded-lg border-dashed">
+                          <p className="text-sm text-muted-foreground">No similar resolved tickets found</p>
+                          <p className="text-xs text-muted-foreground/60">Suggestions improve as more tickets are resolved</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* KB Articles */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <BookOpen className="w-4 h-4 text-blue-400" />
+                        <h4 className="text-sm font-semibold">Knowledge Base Articles ({suggestions.kb_articles?.length || 0})</h4>
+                      </div>
+                      {suggestions.kb_articles?.length > 0 ? (
+                        <ScrollArea className="h-[180px]">
+                          <div className="space-y-2">
+                            {suggestions.kb_articles.map(article => (
+                              <div key={article.article_id} className="flex items-start gap-3 py-2.5 px-3 rounded-lg bg-blue-500/5 border border-blue-500/10 hover:border-blue-500/30 transition-colors"
+                                data-testid={`suggestion-article-${article.article_id}`}>
+                                <BookOpen className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <p className="text-sm font-medium truncate">{article.title}</p>
+                                    <Badge variant="outline" className="text-[9px] text-blue-400 border-blue-500/30 flex-shrink-0">
+                                      {article.relevance_score} match{article.relevance_score !== 1 ? "es" : ""}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground line-clamp-2">{article.content_preview}</p>
+                                  <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                                    <span className="capitalize">{article.category}</span>
+                                    {article.helpful_count > 0 && <span className="flex items-center gap-0.5"><ThumbsUp className="w-2.5 h-2.5" />{article.helpful_count}</span>}
+                                    {article.views > 0 && <span className="flex items-center gap-0.5"><Eye className="w-2.5 h-2.5" />{article.views}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <div className="py-6 text-center border rounded-lg border-dashed">
+                          <p className="text-sm text-muted-foreground">No matching KB articles found</p>
+                          <p className="text-xs text-muted-foreground/60">Add guides to your Knowledge Base for better suggestions</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </TabsContent>
 
               {/* NOTES TAB */}
               <TabsContent value="notes" className="space-y-3">
