@@ -179,7 +179,7 @@ async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(ge
         "keywords": keywords[:10],
     }
 
-@router.get("/tickets/global-search-suggestions")
+@router.get("/ticket-search/suggestions")
 async def global_search_suggestions(q: str = "", current_user: dict = Depends(get_current_user)):
     """Quick search across tickets and KB for resolution hints"""
     if not q or len(q) < 3:

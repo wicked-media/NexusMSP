@@ -29,7 +29,45 @@ Build a comprehensive RMM/PSA platform called "NexusOps" that surpasses Syncro a
 - Scheduling
 - Scripting (UI placeholder)
 
-## Latest Session Implementations (March 2026 - Session 3)
+## Latest Session Implementations (March 2026 - Session 4)
+
+### Splynx ISP Service Health Dashboard (March 17, 2026)
+- Dedicated /splynx-dashboard page with comprehensive ISP service visibility
+- 5 stat cards: Service Health %, Linked Clients, Total Services, Active Services, Suspended
+- Pie chart: Service Status Distribution (Active/Suspended/Other)
+- Bar chart: Services by Type (Active vs Suspended per service type)
+- Clients Needing Attention section with red-highlighted suspended service indicators
+- All Linked Clients section with search, health bars, and status badges per client
+- Sidebar link: "ISP Health" under Infrastructure section
+
+### Configurable Ticket Numbering Scheme (March 17, 2026)
+- Halo PSA / Syncro / Flamingo MSP-style ticket numbering with per-type prefixes
+- 7 configurable types: Incident (INC), Service Request (SR), Problem (PRB), Change Request (CHG), Alert (ALR), Task (TSK), Default (TKT)
+- Configurable separator character (hyphen, hash, or none) and number padding (3-6 digits)
+- Auto-incrementing counters per prefix type stored in ticket_counters collection
+- Live preview examples in Ticket Configuration settings
+- All new tickets automatically get type-based numbering (e.g., INC-0001, SR-0001, PRB-0001)
+- Tabbed Ticket Configuration page with Numbering and Categories tabs
+
+### AI-Powered Ticket Resolution Suggestions (March 17, 2026)
+- Smart keyword extraction from ticket title, description, and category
+- Keyword matching against resolved/closed tickets and Knowledge Base articles
+- Suggestions tab (default) in ticket detail view showing:
+  - Matched keywords as badges
+  - Similar Resolved Tickets with resolution notes, comments, assigned tech, and time spent
+  - Knowledge Base Articles with relevance scores, content preview, views, and helpful count
+- Relevance scoring with bonus for exact word matches
+- Suggestions improve as more tickets are resolved and KB articles are added
+
+### Hudu IT Documentation Integration (March 17, 2026)
+- Hudu API v1 integration for syncing knowledge base articles
+- Settings page: Hudu URL + API Key configuration with masking and Test Connection
+- Sync articles from Hudu into local KB with deduplication (by hudu_id)
+- One-click "Sync from Hudu" button on Knowledge Base page
+- Procedure search endpoint for matching fix guides by query
+- Backend: /api/settings/hudu, /api/hudu/articles, /api/hudu/sync, /api/hudu/procedures/search
+
+## Previous Session Implementations (March 2026 - Session 3)
 
 ### Suped DMARC Integration (March 16, 2026)
 - Integrated Suped API (https://www.suped.com/api) for DMARC monitoring and email security
