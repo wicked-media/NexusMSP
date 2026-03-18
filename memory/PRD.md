@@ -1,67 +1,68 @@
 # NexusOps - Product Requirements Document
 
 ## Original Problem Statement
-Build a rich and elegant RMM/PSA platform named "NexusOps" that is fully feature-rich and better than competitors like Syncro and Super Ops.
+Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro and Super Ops, fully feature-rich with the best features from competitors plus unique capabilities.
 
-## Tech Stack
-- **Frontend**: React + Shadcn/UI + TailwindCSS (dark theme)
-- **Backend**: FastAPI (Python)
-- **Database**: MongoDB
-- **Auth**: JWT-based
+## Core Modules
+1. **Dashboard** - Real-time overview with device health, tickets, alerts
+2. **Ticketing** - Full lifecycle with SLA, conversation view, attachments, itemization
+3. **Devices & RMM** - Device management, remote access, discovery, chat
+4. **Clients & CRM** - Client management, leads, loyalty
+5. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
+6. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
+7. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
+8. **Invoicing** - Invoices with PDF preview/print, white-label branding
+9. **Contracts & Scheduling** - Contract management, scheduling
+10. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
+11. **Reporting** - Financial reports, tech performance, inventory reports
+12. **Settings** - White-label, ticket ping, PO ping
 
----
+## Architecture
+- **Frontend**: React + Shadcn/UI + TailwindCSS
+- **Backend**: FastAPI + MongoDB
+- **Auth**: JWT-based with role support
 
-## Implemented Features
+## Test Credentials
+- Email: admin@nexusops.io
+- Password: admin123
 
-### Phase 1 - Core Platform
-- Full auth, Dashboard, Ticketing (CRUD, SLA, ticket numbers INC-XXXX), Client Management, Device Management, Contracts (SLA shields), Invoicing (Xero mock), CRM/Leads, Technician Management, Scheduling, Knowledge Base, Reporting (recharts), Scripting, Networking, Products, IT Docs, Admin, Activity Logs
+## What's Been Implemented
 
-### Phase 2 - Advanced Modules
-- Asset Management, Predictive AI, Real-Time Event Bus, Client Health Radar, O365 Mailbox, White Labeling, Client Loyalty, Device Heartbeat, Ticket Auto-Ping/Escalation
+### Phase 1-4 (Previous Sessions)
+- Core platform with all major modules
+- Advanced ticketing with SLA, conversation view, PDF notifications
+- Device management with remote access, discovery, chat
+- Invoice system with PDF preview, print, white-label
+- Integrations (Acronis, Proxmox, Gradient, RustDesk, O365)
+- Financial reporting dashboard
+- Ticket attachments system
+- Network device discovery
 
-### Phase 3 - Feature Batch (2026-03-17)
-- Notification Links Fix, Unified Conversation Tab, Email Notifications w/ PDF, RustDesk Remote Access, Network Device Discovery, Invoice PDF Preview/Print, Invoice List Print, Device Remote Viewer Badge
-
-### Phase 4 - Major Feature Batch (2026-03-18)
-- **Invoice PDF Redesign**: Professional branded PDFs with logo, accent colors, gradient header, line items table, payment history, tax summary, branded footer
-- **Invoice White Label Logo Fix**: PDFs now correctly pull logos from branding settings
-- **Ticket Attachments**: File upload/download/delete on tickets (like Syncro), Files tab in ticket detail
-- **Device Chat System**: Full per-device chat with typing indicators, read receipts, message editing/deletion, file attachments, PDF export of chat history
-- **Proxmox VM Management**: VM start/stop/reboot/shutdown, backup creation (full/incremental/differential), backup schedules, action logging, 3 node overview
-- **Acronis Integration**: Customer sync, subscription tracking (8 service types), usage monitoring, link to NexusOps clients, Acronis MRR display in client Subscriptions tab
-- **Gradient MSP**: Billing reconciliation dashboard (matched/under-billed/over-billed), revenue opportunity identification, KPI cards
-- **Comprehensive Financial Reporting**: 8 report types - Revenue Summary (MRR/ARR), Profit & Loss, AR Aging, Client Revenue, Service Revenue, Payment Collections, Tax Summary, Monthly Allocations
-- **Technician Performance Dashboard**: KPIs per tech (resolution rate, utilization, hours), CSAT survey system
-- **Client Satisfaction Surveys**: Auto-send after ticket resolution, NPS scoring
-
-## Active Integrations
-- Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend (demo), Multi-LLM (Emergent), O365, RustDesk
-
-## Mocked Integrations
-- Xero, Pax8, Domotz, Acronis (simulated), Proxmox (simulated), Gradient MSP (simulated), Resend email
-
----
+### Phase 5 - Inventory & Procurement (March 18, 2026)
+- **Purchase Order System**: Full CRUD, vendor linking, line items, stock receiving (partial/full), barcode scanner input, PO ping & auto-escalation, comprehensive audit trail
+- **Stocktake System**: Session-based stocktake with product snapshots, individual & batch counting, barcode scanner integration, variance tracking (loss/gain), finalization with auto stock adjustments, premium reporting (stock in hand cost/retail, net variance, low stock alerts)
+- **Product Bundling**: Link products together (monitors, RAM, cables etc) as bundled packages with cost/retail totals
+- **Ticket Itemization**: Add billable items/products to tickets from inventory, Items tab showing quantities/totals, push items to new or existing invoice
+- **On-Order Indicators**: Cyan truck icon with pulse animation showing ordered quantities on products list, detailed PO references in product detail
+- **Vendor PO Integration**: Create PO button on vendors page (list rows + detail view)
+- **Stock Movements**: Full audit trail of stock in/out/adjustment movements
 
 ## Prioritized Backlog
 
-### P1 - Upcoming
-- UniFi Integration Phase 2 (active management)
-- Full Xero Integration (real API)
-- Device Chat frontend UI (backend complete, frontend chat component pending)
-- UI/UX Revamp across all pages
-- RustDesk connection validation & full setup
+### P0 (Critical)
+- None currently blocking
 
-### P2 - Future
-- Full backend for Pax8, Domotz (real APIs)
-- Client Self-Service Portal
-- SLA Breach Alerting
-- Automated Backup Reports
-- Fix recharts console warnings
+### P1 (High Priority)
+- Full UniFi Integration Phase 2 (active management)
+- Full Xero Integration (real API vs mocked)
 
-### P3 - Refactoring
-- Break down large components (TicketsPage, ClientsPage)
-- Auto-discover routers in server.py
+### P2 (Medium Priority)  
+- Full backend for Pax8, Domotz integrations
+- Client self-service portal
+- Database seeding mechanism
+- Recharts console warnings fix on Reports page
 
-## Credentials
-- Email: admin@nexusops.io
-- Password: admin123
+### P3 (Low Priority)
+- Component refactoring (TicketsPage, ClientsPage, server.py auto-discovery)
+- SLA breach alerting
+- Automated backup reports
