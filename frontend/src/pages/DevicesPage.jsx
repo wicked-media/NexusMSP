@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -50,6 +50,7 @@ export default function DevicesPage() {
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [selectedDiscovered, setSelectedDiscovered] = useState([]);
   const [importLoading, setImportLoading] = useState(false);
+  const [deviceViewers, setDeviceViewers] = useState({});
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -63,10 +64,26 @@ export default function DevicesPage() {
       setDevices(devRes.data);
       setClients(clientRes.data);
       setStats(statsRes.data);
+      // Fetch active remote viewers
+      try {
+        const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
+        setDeviceViewers(vRes.data);
+      } catch { setDeviceViewers({}); }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Poll for active remote viewers every 10 seconds
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
+        setDeviceViewers(vRes.data);
+      } catch {}
+    }, 10000);
+    return () => clearInterval(poll);
+  }, []);
 
   const filtered = devices.filter(d => {
     if (filterStatus !== "all" && d.status !== filterStatus) return false;
@@ -338,13 +355,29 @@ export default function DevicesPage() {
                   <TableRow><TableCell colSpan={11} className="text-center py-12 text-muted-foreground">No devices found</TableCell></TableRow>
                 ) : filtered.map(d => {
                   const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
+                  const viewers = deviceViewers[d.id] || [];
+                  const isRemoted = viewers.length > 0;
                   return (
-                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-row-${d.id}`}>
+                    <TableRow key={d.id} className={`cursor-pointer hover:bg-muted/50 transition-colors ${isRemoted ? "bg-cyan-500/[0.03]" : ""}`} onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-row-${d.id}`}>
                       <TableCell onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedDevices.includes(d.id)} onChange={() => toggleSelectDevice(d.id)} className="rounded" /></TableCell>
                       <TableCell>
                         <div className="relative">
                           <DevIcon className="w-5 h-5 text-muted-foreground" />
                           <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-background ${STATUS_DOT[d.status]}`} />
+                          {isRemoted && (
+                            <div className="absolute -top-2 -right-2" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} remoted: ${viewers.map(v => v.user_name).join(", ")}`}>
+                              <div className="relative">
+                                <div className="w-4 h-4 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                                  {viewers.length > 1 ? (
+                                    <span className="text-[7px] font-black text-white">{viewers.length}</span>
+                                  ) : (
+                                    <Eye className="w-2 h-2 text-white" />
+                                  )}
+                                </div>
+                                <div className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -352,6 +385,15 @@ export default function DevicesPage() {
                           <div className="font-medium flex items-center gap-2">
                             {d.name}
                             <Badge className={STATUS_COLORS[d.status] + " border text-[9px] capitalize px-1.5"}>{d.status}</Badge>
+                            {isRemoted && (
+                              <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
+                                style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}
+                                data-testid={`remote-viewer-badge-${d.id}`}>
+                                <Eye className="w-2.5 h-2.5" />
+                                <Users className="w-2.5 h-2.5" />
+                                {viewers.length} {viewers.length === 1 ? "tech" : "techs"}: {viewers.map(v => v.user_name).join(", ")}
+                              </Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground">{d.manufacturer} {d.model}</div>
                         </div>
@@ -392,13 +434,25 @@ export default function DevicesPage() {
             <div className="col-span-3 text-center py-12 text-muted-foreground">No devices found</div>
           ) : filtered.map(d => {
             const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
+            const viewers = deviceViewers[d.id] || [];
+            const isRemoted = viewers.length > 0;
             return (
-              <Card key={d.id} className="cursor-pointer hover:border-primary/30 transition-colors group" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-card-${d.id}`}>
+              <Card key={d.id} className={`cursor-pointer hover:border-primary/30 transition-colors group ${isRemoted ? "border-cyan-500/30 bg-cyan-500/[0.02]" : ""}`} onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-card-${d.id}`}>
                 <CardContent className="pt-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[d.status]}`}>
+                      <div className={`relative w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[d.status]}`}>
                         <DevIcon className="w-5 h-5" />
+                        {isRemoted && (
+                          <div className="absolute -top-2 -right-2">
+                            <div className="relative">
+                              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                                {viewers.length > 1 ? <span className="text-[8px] font-black text-white">{viewers.length}</span> : <Eye className="w-2.5 h-2.5 text-white" />}
+                              </div>
+                              <div className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <h3 className="font-semibold group-hover:text-primary transition-colors">{d.name}</h3>
@@ -407,6 +461,15 @@ export default function DevicesPage() {
                     </div>
                     <Badge className={STATUS_COLORS[d.status] + " border text-[9px] capitalize"}>{d.status}</Badge>
                   </div>
+                  {isRemoted && (
+                    <div className="mb-3 px-2 py-1.5 rounded-md border border-cyan-500/20"
+                      style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.08), rgba(139,92,246,0.08))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}>
+                      <div className="flex items-center gap-1.5 text-[10px] text-cyan-400">
+                        <Eye className="w-3 h-3" />
+                        <span className="font-medium">{viewers.length} tech{viewers.length > 1 ? "s" : ""} remoted in: {viewers.map(v => v.user_name).join(", ")}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground mb-3">
                     <div><span className="block text-[10px]">OS</span><span className="text-foreground">{d.os}</span></div>
                     <div><span className="block text-[10px]">IP</span><span className="font-mono text-foreground">{d.ip_address || "-"}</span></div>

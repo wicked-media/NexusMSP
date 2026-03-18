@@ -60,6 +60,7 @@ export default function ClientsPage() {
   const [rustdeskDevices, setRustdeskDevices] = useState([]);
   const [isRustdeskOpen, setIsRustdeskOpen] = useState(false);
   const [rustdeskForm, setRustdeskForm] = useState({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
+  const [acronisSubs, setAcronisSubs] = useState([]);
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -101,7 +102,7 @@ export default function ClientsPage() {
     setClientLoyalty(null);
     setRustdeskDevices([]);
     try {
-      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes, acRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
@@ -111,6 +112,7 @@ export default function ClientsPage() {
         axios.get(`${API}/clients/${client.id}/portal-readiness`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/clients/${client.id}/loyalty`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/rustdesk/clients/${client.id}/devices`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/acronis/subscriptions?client_id=${client.id}`, { headers }).catch(() => ({ data: [] })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
@@ -122,6 +124,7 @@ export default function ClientsPage() {
       setClientReadiness(readRes.data);
       setClientLoyalty(loyRes.data);
       setRustdeskDevices(rdRes.data || []);
+      setAcronisSubs(acRes.data || []);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -622,6 +625,26 @@ export default function ClientsPage() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* DMARC Report Data */}
+                {dmarcLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
+                {/* Acronis Subscriptions */}
+                {acronisSubs.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-blue-500" />Acronis Cyber Protect Subscriptions</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {acronisSubs.map((s, i) => (
+                          <div key={i} className="flex items-center justify-between p-2.5 rounded-lg border bg-blue-500/[0.02] border-blue-500/10">
+                            <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" /><div><p className="text-sm font-medium">{s.service_name}</p><p className="text-[10px] text-muted-foreground">{s.quantity} {s.unit} @ ${s.price_per_unit}/{s.unit}</p></div></div>
+                            <div className="text-right"><p className="text-sm font-bold">${s.monthly_cost}/mo</p><Badge className={s.usage_percent > 90 ? "bg-red-500/10 text-red-500 text-[9px]" : "bg-emerald-500/10 text-emerald-500 text-[9px]"}>{s.usage_percent}%</Badge></div>
+                          </div>
+                        ))}
+                        <div className="flex justify-end pt-1 text-sm font-medium">Total Acronis MRR: <span className="text-blue-400 ml-2">${acronisSubs.reduce((a, s) => a + (s.monthly_cost || 0), 0).toFixed(2)}/mo</span></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* DMARC Report Data */}
                 {dmarcLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}

@@ -19,7 +19,7 @@ import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet
+  Building2, Wallet, Printer, Download
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 
@@ -61,6 +61,9 @@ export default function InvoicesPage() {
   const [voidDialog, setVoidDialog] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [voidingInvoice, setVoidingInvoice] = useState(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
+  const [pdfPreviewInvoice, setPdfPreviewInvoice] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", due_date: "", notes: "",
     line_items: [], tax_rate: "0",
@@ -237,6 +240,44 @@ export default function InvoicesPage() {
         setViewInvoice(updated.data);
       }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to void invoice"); }
+  };
+
+  const handlePdfPreview = async (inv) => {
+    setPdfLoading(true);
+    setPdfPreviewInvoice(inv);
+    try {
+      const res = await axios.get(`${API}/invoices/${inv.id}/pdf`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      setPdfPreviewUrl(url);
+    } catch { toast.error("Failed to generate PDF"); }
+    finally { setPdfLoading(false); }
+  };
+
+  const handlePdfPrint = () => {
+    if (!pdfPreviewUrl) return;
+    const printWindow = window.open(pdfPreviewUrl, "_blank");
+    if (printWindow) {
+      printWindow.addEventListener("load", () => { printWindow.print(); });
+    }
+  };
+
+  const handlePdfDownload = async (inv) => {
+    try {
+      const res = await axios.get(`${API}/invoices/${inv.id}/pdf/download`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${inv.invoice_number || "invoice"}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
+    } catch { toast.error("Failed to download PDF"); }
+  };
+
+  const closePdfPreview = () => {
+    if (pdfPreviewUrl) window.URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+    setPdfPreviewInvoice(null);
   };
 
   const filtered = invoices
@@ -435,6 +476,28 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* PDF PREVIEW DIALOG */}
+      <Dialog open={!!pdfPreviewUrl} onOpenChange={v => { if (!v) closePdfPreview(); }}>
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Invoice Preview: {pdfPreviewInvoice?.invoice_number}</DialogTitle>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={handlePdfPrint} data-testid="print-pdf-btn"><Printer className="w-4 h-4 mr-1" />Print</Button>
+                <Button size="sm" variant="outline" onClick={() => pdfPreviewInvoice && handlePdfDownload(pdfPreviewInvoice)} data-testid="download-invoice-pdf-btn"><Download className="w-4 h-4 mr-1" />Download</Button>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 min-h-0">
+            {pdfLoading ? (
+              <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin" /></div>
+            ) : (
+              <iframe src={pdfPreviewUrl} className="w-full h-full rounded-lg border" title="Invoice PDF Preview" />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 
@@ -575,6 +638,15 @@ export default function InvoicesPage() {
                     </Button>
                   </>
                 )}
+                <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handlePdfPreview(inv)} data-testid="preview-pdf-btn">
+                  <Eye className="w-4 h-4 mr-1" />Preview PDF
+                </Button>
+                <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => handlePdfDownload(inv)} data-testid="download-pdf-detail-btn">
+                  <Download className="w-4 h-4 mr-1" />Download PDF
+                </Button>
+                <Button variant="outline" className="w-full text-violet-400 border-violet-500/30 hover:bg-violet-500/10" onClick={() => { handlePdfPreview(inv); }} data-testid="print-invoice-detail-btn">
+                  <Printer className="w-4 h-4 mr-1" />Print Invoice
+                </Button>
                 {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
                 <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
                   <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Different Client
@@ -679,6 +751,8 @@ export default function InvoicesPage() {
                     <TableCell>
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                         {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400" title="Preview & Print" onClick={() => handlePdfPreview(inv)} data-testid={`print-btn-${inv.id}`}><Printer className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-400" title="Download PDF" onClick={() => handlePdfDownload(inv)} data-testid={`download-btn-${inv.id}`}><Download className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Move to client" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }}><ArrowRightLeft className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
                       </div>

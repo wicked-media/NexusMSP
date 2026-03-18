@@ -45,7 +45,9 @@ import {
   Radar,
   Paintbrush,
   Gift,
-  Volume2
+  Volume2,
+  DollarSign,
+  Wallet
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -222,6 +224,7 @@ const navGroups = [
       { path: "/domotz", icon: Network, label: "Domotz" },
       { path: "/acronis", icon: Shield, label: "Acronis" },
       { path: "/pax8", icon: Cloud, label: "Pax8" },
+      { path: "/gradient", icon: DollarSign, label: "Gradient MSP" },
     ]
   },
   {
@@ -231,6 +234,7 @@ const navGroups = [
       { path: "/white-label", icon: Paintbrush, label: "White Label" },
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
+      { path: "/financial-reports", icon: Wallet, label: "Financial Reports" },
       { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },
       { path: "/ticket-ping-settings", icon: Volume2, label: "Ping & Escalation" },
       { path: "/settings", icon: Settings, label: "Settings" },

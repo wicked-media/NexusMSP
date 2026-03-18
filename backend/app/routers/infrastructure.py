@@ -54,6 +54,44 @@ async def get_proxmox_vms(server_id: Optional[str] = None, status: Optional[str]
     if status:
         query["status"] = status
     vms = await db.proxmox_vms.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    # Return demo data if no VMs in database
+    if not vms:
+        import random
+        vm_templates = [
+            {"name": "DC-PRIMARY", "os": "Windows Server 2022", "type": "vm", "vcpu": 4, "ram_gb": 16, "disk_gb": 120, "status": "running"},
+            {"name": "WEB-SERVER-01", "os": "Ubuntu 22.04", "type": "vm", "vcpu": 2, "ram_gb": 8, "disk_gb": 80, "status": "running"},
+            {"name": "SQL-DB-01", "os": "Windows Server 2019", "type": "vm", "vcpu": 8, "ram_gb": 32, "disk_gb": 500, "status": "running"},
+            {"name": "FILE-SERVER", "os": "Windows Server 2022", "type": "vm", "vcpu": 2, "ram_gb": 8, "disk_gb": 2000, "status": "running"},
+            {"name": "EXCHANGE-01", "os": "Windows Server 2019", "type": "vm", "vcpu": 4, "ram_gb": 16, "disk_gb": 250, "status": "stopped"},
+            {"name": "BACKUP-SRV", "os": "Ubuntu 24.04", "type": "vm", "vcpu": 2, "ram_gb": 4, "disk_gb": 4000, "status": "running"},
+            {"name": "DEV-CONTAINER", "os": "Debian 12", "type": "lxc", "vcpu": 1, "ram_gb": 2, "disk_gb": 20, "status": "running"},
+            {"name": "MONITORING", "os": "Ubuntu 22.04", "type": "lxc", "vcpu": 1, "ram_gb": 4, "disk_gb": 50, "status": "running"},
+        ]
+        pve_nodes = ["node-1", "node-2", "node-3"]
+        clients_list = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
+        demo_vms = []
+        for i, t in enumerate(vm_templates):
+            c = clients_list[i % len(clients_list)] if clients_list else {"id": "", "name": ""}
+            vm = {
+                "id": f"vm-{100+i}",
+                "vmid": 100 + i,
+                "node_id": pve_nodes[i % len(pve_nodes)],
+                "node_name": f"pve-node0{(i % 3) + 1}",
+                "client_id": c["id"],
+                "client_name": c.get("name", ""),
+                **t,
+                "cpu_usage": round(random.uniform(5, 85), 1),
+                "memory_usage": round(random.uniform(20, 90), 1),
+                "disk_usage": round(random.uniform(15, 75), 1),
+                "uptime_seconds": random.randint(3600, 2592000),
+                "ip_address": f"10.0.{i+1}.{random.randint(2,200)}",
+                "backup_enabled": random.choice([True, True, True, False]),
+                "last_backup": (datetime.now(timezone.utc).isoformat() if random.random() > 0.3 else None),
+                "backup_schedule": random.choice(["daily", "weekly", "none"]),
+                "tags": random.sample(["production", "development", "staging", "critical", "monitoring"], random.randint(1, 3)),
+            }
+            demo_vms.append(vm)
+        return demo_vms
     return vms
 
 @router.get("/proxmox/dashboard")

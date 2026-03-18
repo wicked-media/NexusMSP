@@ -50,6 +50,8 @@ import HealthRadarPage from "@/pages/HealthRadarPage";
 import WhiteLabelPage from "@/pages/WhiteLabelPage";
 import LoyaltyDashboardPage from "@/pages/LoyaltyDashboardPage";
 import TicketPingSettingsPage from "@/pages/TicketPingSettingsPage";
+import GradientPage from "@/pages/GradientPage";
+import FinancialReportsPage from "@/pages/FinancialReportsPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -610,6 +612,26 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <TicketPingSettingsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/gradient"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <GradientPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/financial-reports"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <FinancialReportsPage />
                 </MainLayout>
               </ProtectedRoute>
             }

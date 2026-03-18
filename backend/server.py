@@ -18,7 +18,9 @@ from app.routers import (
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications
+    whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications,
+    invoice_pdf, device_viewers, device_chat, ticket_attachments,
+    proxmox, acronis, gradient, financial_reports, tech_performance
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,17 +32,22 @@ app = FastAPI(title="NexusOps API", version="3.0.0")
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 # Include all routers with /api prefix
-# Note: device_discovery must come BEFORE devices so /devices/discover and /devices/scans are matched first
+# Note: device_discovery and device_viewers must come BEFORE devices so static routes are matched first
+# Note: invoice_pdf must come BEFORE invoices so /invoices/{id}/pdf is matched first
+# Note: device_chat must come BEFORE devices/{device_id} for chat routes
+# Note: ticket_attachments must come BEFORE tickets for attachment routes
 all_routers = [
-    auth, clients, clients_contacts, tickets, device_discovery, devices, assets, contracts,
-    invoices, time_entries, knowledge_base, integrations, dashboard,
+    auth, clients, clients_contacts, ticket_attachments, ticket_email_notifications, tickets,
+    device_discovery, device_viewers, device_chat, devices,
+    assets, contracts, invoice_pdf, invoices, time_entries, knowledge_base, integrations, dashboard,
     technicians, scheduling, products, networking, purchase_orders,
     remote, crm, scripting, it_docs, portal, projects, admin,
     infrastructure, yeastar, activity_logs, achievements,
     technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping, rustdesk, ticket_email_notifications
+    whitelabel, ticket_ping, rustdesk,
+    proxmox, acronis, gradient, financial_reports, tech_performance
 ]
 
 for router_module in all_routers:

@@ -23,7 +23,7 @@ import {
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
-  Download, BellRing, ChevronDown
+  Download, BellRing, ChevronDown, Paperclip, Trash2
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -76,6 +76,8 @@ export default function TicketsPage() {
   const [emailForm, setEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
   const [isClientNotifyOpen, setIsClientNotifyOpen] = useState(false);
   const [notifyForm, setNotifyForm] = useState({ email: "", subject: "", message: "" });
+  const [ticketAttachments, setTicketAttachments] = useState([]);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [isChildOpen, setIsChildOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isTimeOpen, setIsTimeOpen] = useState(false);
@@ -145,13 +147,14 @@ export default function TicketsPage() {
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/time-entries`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/audit-log`, { headers }),
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/tickets/${ticket.id}/attachments`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
@@ -159,6 +162,7 @@ export default function TicketsPage() {
       setTimeEntries(tRes.data);
       setAuditLog(aRes.data);
       setScripts(sRes.data);
+      setTicketAttachments(attRes.data || []);
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
@@ -273,6 +277,29 @@ export default function TicketsPage() {
       window.URL.revokeObjectURL(url);
       toast.success("PDF downloaded");
     } catch { toast.error("Failed to download PDF"); }
+  };
+
+  const handleAttachmentUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachmentUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      await axios.post(`${API}/tickets/${viewingTicket.id}/attachments`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      toast.success("Attachment uploaded");
+      const res = await axios.get(`${API}/tickets/${viewingTicket.id}/attachments`, { headers });
+      setTicketAttachments(res.data || []);
+    } catch { toast.error("Upload failed"); }
+    finally { setAttachmentUploading(false); e.target.value = ""; }
+  };
+
+  const handleDeleteAttachment = async (attId) => {
+    try {
+      await axios.delete(`${API}/tickets/${viewingTicket.id}/attachments/${attId}`, { headers });
+      setTicketAttachments(prev => prev.filter(a => a.id !== attId));
+      toast.success("Attachment deleted");
+    } catch { toast.error("Failed to delete"); }
   };
 
   const handleCreateChild = async () => {
@@ -616,9 +643,10 @@ export default function TicketsPage() {
 
             {/* Tabs: Notes, Emails, Children, Time, Audit */}
             <Tabs defaultValue="suggestions">
-              <TabsList className="w-full grid grid-cols-5">
+              <TabsList className="w-full grid grid-cols-6">
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
+                <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
@@ -870,6 +898,45 @@ export default function TicketsPage() {
                       }
                     });
                   })()}
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ATTACHMENTS TAB */}
+              <TabsContent value="attachments" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">{ticketAttachments.length} file{ticketAttachments.length !== 1 ? "s" : ""} attached</span>
+                  <div className="relative">
+                    <input type="file" id="attachment-upload" className="hidden" onChange={handleAttachmentUpload} />
+                    <Button size="sm" onClick={() => document.getElementById("attachment-upload").click()} disabled={attachmentUploading} data-testid="upload-attachment-btn">
+                      {attachmentUploading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Paperclip className="w-3 h-3 mr-1" />}Upload File
+                    </Button>
+                  </div>
+                </div>
+                <ScrollArea className="h-[300px]">
+                  {ticketAttachments.length > 0 ? ticketAttachments.map(att => (
+                    <div key={att.id} className="flex items-center justify-between p-3 rounded-lg border mb-2 hover:bg-muted/50 transition-colors" data-testid={`attachment-${att.id}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-4 h-4 text-blue-500" /></div>
+                        <div>
+                          <p className="text-sm font-medium">{att.filename}</p>
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            <span>{(att.size / 1024).toFixed(1)} KB</span>
+                            <span>by {att.uploaded_by_name}</span>
+                            <span>{att.created_at?.substring(0, 16).replace("T", " ")}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`${API}${att.url}`, "_blank")}><Download className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteAttachment(att.id)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="text-center py-8">
+                      <Paperclip className="w-8 h-8 mx-auto text-muted-foreground opacity-30 mb-2" />
+                      <p className="text-sm text-muted-foreground">No attachments yet</p>
+                    </div>
+                  )}
                 </ScrollArea>
               </TabsContent>
 
