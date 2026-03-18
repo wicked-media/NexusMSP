@@ -5,20 +5,21 @@ Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro a
 
 ## Core Modules
 1. **Dashboard** - Real-time overview with device health, tickets, alerts
-2. **Ticketing** - Full lifecycle with SLA, conversation view, attachments, itemization
-3. **Workshop** - Retail/bench repair job management with timer, parts, billing
-4. **Field Jobs** - WISP/Internet field dispatch with checklists, signal/speed testing, zones
-5. **Devices & RMM** - Device management, remote access, discovery, chat
-6. **Clients & CRM** - Client management, leads, loyalty
-7. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
-8. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
-9. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
-10. **Technicians** - Tech management, on-call roster, ping/swap, performance
-11. **Invoicing** - Invoices with PDF preview/print, white-label branding
-12. **Contracts & Scheduling** - Contract management, scheduling
-13. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
-14. **Reporting** - Financial reports, tech performance, inventory reports
-15. **Settings** - White-label, ticket ping, PO ping
+2. **Ticketing** - Unified ticket system (SLA + Workshop + Cabling/WISP) with type icons, worksheets
+3. **Estimates** - Full estimate lifecycle (Draft -> Published -> Sent -> Approved -> Declined -> Converted)
+4. **Workshop** - Retail/bench repair job management with timer, parts, billing
+5. **Field Jobs** - WISP/Internet field dispatch with checklists, signal/speed testing, zones
+6. **Devices & RMM** - Device management, remote access, discovery, chat
+7. **Clients & CRM** - Client management, leads, loyalty
+8. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
+9. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
+10. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
+11. **Technicians** - Tech management, on-call roster, ping/swap, performance
+12. **Invoicing** - Invoices with PDF preview/print, white-label branding
+13. **Contracts & Scheduling** - Contract management, scheduling
+14. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
+15. **Reporting** - Financial reports, tech performance, inventory reports
+16. **Settings** - White-label, ticket ping, PO ping, job numbering prefixes
 
 ## Architecture
 - **Frontend**: React + Shadcn/UI + TailwindCSS
@@ -46,10 +47,17 @@ Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro a
 - Vendor PO Integration, Stock Movements
 
 ### Phase 6 - Technician & Workshop Tools (March 18, 2026)
-- **Auto-Reorder Alerts**: Detects low stock, auto-creates draft POs for preferred vendors, pings procurement team
-- **On-Call Roster**: Schedule shifts by category (general/wisp/workshop/network/emergency), shift types (primary/secondary/backup), swap with notifications to both techs, ping active on-call, flashy green pulsing ON CALL badge
-- **Workshop/Retail Jobs**: Integrated into Tickets page as Workshop tab. Full repair job management with status progression (checked_in → diagnosing → parts_ordered → repairing → ready_for_pickup → collected), labour timer with start/stop, parts usage auto-deducting inventory, billing summary (parts + labour costs)
-- **WISP/Internet Field Jobs**: Integrated into Tickets page as Field Jobs tab. Field dispatch with zone/area assignment, auto-generated installation checklists (6 items), signal strength & speed test logging, status progression (scheduled → en_route → on_site → completed)
+- Auto-Reorder Alerts: Low stock detection, auto PO creation, procurement ping
+- On-Call Roster: Category shifts, swap, ping, pulsing ON CALL badge
+- Workshop/Retail Jobs: Full repair lifecycle with timer, parts, billing
+- WISP/Internet Field Jobs: Zone dispatch, installation checklists, signal/speed testing
+
+### Phase 7 - Unified Tickets & Estimates (March 18, 2026)
+- **Unified Ticket System**: Merged SLA, Workshop, and Cabling/WISP into single view with type filter buttons (All, SLA, Workshop, Cabling/WISP). Type icons: Shield (SLA blue), Wrench (Workshop purple), Wifi (Cabling cyan). All three job types display in one unified list.
+- **Ticket Worksheets**: Auditable checklist feature per ticket. Add items, check/uncheck with technician name and timestamp trail. Completion counter.
+- **Estimates Module**: Full lifecycle management (Draft -> Published -> Sent -> Approved -> Declined -> Converted to Invoice). Stats cards, status filters, audit trail, line items with tax/discount calculations, flashing status indicators for active estimates.
+- **Splynx Non-Payment UI**: Non-payment customer tracking tab with overdue stats, suspension controls, auto-suspend toggle (MOCKED).
+- **Job Numbering Configuration**: Settings card for configurable ticket prefixes (SLA-, WS-, CW-) with live preview.
 
 ## Prioritized Backlog
 
@@ -59,10 +67,15 @@ Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro a
 
 ### P2 (Medium Priority)
 - Full backend for Pax8, Domotz integrations
-- Client self-service portal
+- Client self-service portal with estimate approval
 - Recharts console warnings fix
 
 ### P3 (Low Priority)
-- Component refactoring (TicketsPage, ClientsPage, server.py auto-discovery)
+- Component refactoring (TicketsPage, TechniciansPage decomposition, server.py auto-discovery)
 - Database seeding mechanism
 - SLA breach alerting
+
+## Mocked Integrations
+- Xero, Pax8, Domotz: Fully mocked
+- Splynx non-payment: Mocked data
+- Acronis, Proxmox, Gradient: Partially integrated
