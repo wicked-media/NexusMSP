@@ -6,16 +6,19 @@ Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro a
 ## Core Modules
 1. **Dashboard** - Real-time overview with device health, tickets, alerts
 2. **Ticketing** - Full lifecycle with SLA, conversation view, attachments, itemization
-3. **Devices & RMM** - Device management, remote access, discovery, chat
-4. **Clients & CRM** - Client management, leads, loyalty
-5. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
-6. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
-7. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
-8. **Invoicing** - Invoices with PDF preview/print, white-label branding
-9. **Contracts & Scheduling** - Contract management, scheduling
-10. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
-11. **Reporting** - Financial reports, tech performance, inventory reports
-12. **Settings** - White-label, ticket ping, PO ping
+3. **Workshop** - Retail/bench repair job management with timer, parts, billing
+4. **Field Jobs** - WISP/Internet field dispatch with checklists, signal/speed testing, zones
+5. **Devices & RMM** - Device management, remote access, discovery, chat
+6. **Clients & CRM** - Client management, leads, loyalty
+7. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
+8. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
+9. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
+10. **Technicians** - Tech management, on-call roster, ping/swap, performance
+11. **Invoicing** - Invoices with PDF preview/print, white-label branding
+12. **Contracts & Scheduling** - Contract management, scheduling
+13. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
+14. **Reporting** - Financial reports, tech performance, inventory reports
+15. **Settings** - White-label, ticket ping, PO ping
 
 ## Architecture
 - **Frontend**: React + Shadcn/UI + TailwindCSS
@@ -34,35 +37,32 @@ Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro a
 - Device management with remote access, discovery, chat
 - Invoice system with PDF preview, print, white-label
 - Integrations (Acronis, Proxmox, Gradient, RustDesk, O365)
-- Financial reporting dashboard
-- Ticket attachments system
-- Network device discovery
+- Financial reporting dashboard, Ticket attachments, Network device discovery
 
 ### Phase 5 - Inventory & Procurement (March 18, 2026)
-- **Purchase Order System**: Full CRUD, vendor linking, line items, stock receiving (partial/full), barcode scanner input, PO ping & auto-escalation, comprehensive audit trail
-- **Stocktake System**: Session-based stocktake with product snapshots, individual & batch counting, barcode scanner integration, variance tracking (loss/gain), finalization with auto stock adjustments, premium reporting (stock in hand cost/retail, net variance, low stock alerts)
-- **Product Bundling**: Link products together (monitors, RAM, cables etc) as bundled packages with cost/retail totals
-- **Ticket Itemization**: Add billable items/products to tickets from inventory, Items tab showing quantities/totals, push items to new or existing invoice
-- **On-Order Indicators**: Cyan truck icon with pulse animation showing ordered quantities on products list, detailed PO references in product detail
-- **Vendor PO Integration**: Create PO button on vendors page (list rows + detail view)
-- **Stock Movements**: Full audit trail of stock in/out/adjustment movements
+- Purchase Order System with stock receiving, barcode scanner, PO ping & escalation, audit trail
+- Stocktake System with variance tracking, finalization, premium reporting
+- Product Bundling, Ticket Itemization, On-Order Indicators
+- Vendor PO Integration, Stock Movements
+
+### Phase 6 - Technician & Workshop Tools (March 18, 2026)
+- **Auto-Reorder Alerts**: Detects low stock, auto-creates draft POs for preferred vendors, pings procurement team
+- **On-Call Roster**: Schedule shifts by category (general/wisp/workshop/network/emergency), shift types (primary/secondary/backup), swap with notifications to both techs, ping active on-call, flashy green pulsing ON CALL badge
+- **Workshop/Retail Jobs**: Integrated into Tickets page as Workshop tab. Full repair job management with status progression (checked_in → diagnosing → parts_ordered → repairing → ready_for_pickup → collected), labour timer with start/stop, parts usage auto-deducting inventory, billing summary (parts + labour costs)
+- **WISP/Internet Field Jobs**: Integrated into Tickets page as Field Jobs tab. Field dispatch with zone/area assignment, auto-generated installation checklists (6 items), signal strength & speed test logging, status progression (scheduled → en_route → on_site → completed)
 
 ## Prioritized Backlog
-
-### P0 (Critical)
-- None currently blocking
 
 ### P1 (High Priority)
 - Full UniFi Integration Phase 2 (active management)
 - Full Xero Integration (real API vs mocked)
 
-### P2 (Medium Priority)  
+### P2 (Medium Priority)
 - Full backend for Pax8, Domotz integrations
 - Client self-service portal
-- Database seeding mechanism
-- Recharts console warnings fix on Reports page
+- Recharts console warnings fix
 
 ### P3 (Low Priority)
 - Component refactoring (TicketsPage, ClientsPage, server.py auto-discovery)
+- Database seeding mechanism
 - SLA breach alerting
-- Automated backup reports
