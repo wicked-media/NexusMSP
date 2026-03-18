@@ -199,6 +199,7 @@ const navGroups = [
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
       { path: "/products", icon: Package, label: "Products" },
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
+      { path: "/stocktake", icon: Package, label: "Stocktake" },
       { path: "/vendors", icon: Building2, label: "Vendors" },
       { path: "/rentals", icon: Phone, label: "Phone Rentals" },
       { path: "/projects", icon: FolderKanban, label: "Projects" },

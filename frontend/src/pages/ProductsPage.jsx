@@ -19,7 +19,7 @@ import {
   Plus, Search, Loader2, Package, Edit, Trash2, DollarSign, Tag,
   BarChart3, AlertTriangle, ArrowUpDown, ShoppingCart, RefreshCw,
   Box, Layers, Archive, Printer, QrCode, ArrowDown, ArrowUp,
-  History, Copy, ChevronRight
+  History, Copy, ChevronRight, Link2, Truck, Unlink
 } from "lucide-react";
 
 const CATEGORIES = ["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"];
@@ -38,6 +38,12 @@ export default function ProductsPage() {
   const [detailTab, setDetailTab] = useState("overview");
   const [stockMovements, setStockMovements] = useState([]);
   const [instances, setInstances] = useState([]);
+  const [bundleItems, setBundleItems] = useState([]);
+  const [onOrderInfo, setOnOrderInfo] = useState(null);
+  const [bundleDialog, setBundleDialog] = useState(false);
+  const [bundleAddProduct, setBundleAddProduct] = useState("");
+  const [bundleAddQty, setBundleAddQty] = useState(1);
+  const [onOrderSummary, setOnOrderSummary] = useState([]);
   const [stockDialog, setStockDialog] = useState(false);
   const [instanceDialog, setInstanceDialog] = useState(false);
   const [labelDialog, setLabelDialog] = useState(false);
@@ -57,20 +63,28 @@ export default function ProductsPage() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/products`, { headers });
-      setProducts(res.data);
+      const [prodRes, orderRes] = await Promise.all([
+        axios.get(`${API}/products`, { headers }),
+        axios.get(`${API}/products/inventory/on-order-summary`, { headers }),
+      ]);
+      setProducts(prodRes.data);
+      setOnOrderSummary(orderRes.data || []);
     } catch { toast.error("Failed to load products"); }
     finally { setLoading(false); }
   };
 
   const fetchProductDetails = async (productId) => {
     try {
-      const [movRes, instRes] = await Promise.all([
+      const [movRes, instRes, bundRes, orderRes] = await Promise.all([
         axios.get(`${API}/products/${productId}/stock-movements`, { headers }),
         axios.get(`${API}/products/${productId}/instances`, { headers }),
+        axios.get(`${API}/products/${productId}/bundle`, { headers }),
+        axios.get(`${API}/products/${productId}/on-order`, { headers }),
       ]);
       setStockMovements(movRes.data);
       setInstances(instRes.data);
+      setBundleItems(bundRes.data?.bundle_items || []);
+      setOnOrderInfo(orderRes.data);
     } catch { /* silent */ }
   };
 
@@ -150,6 +164,36 @@ export default function ProductsPage() {
       fetchProducts();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to create instances"); }
   };
+
+  const handleSaveBundle = async (items) => {
+    if (!viewProduct) return;
+    try {
+      await axios.put(`${API}/products/${viewProduct.id}/bundle`, { bundle_items: items }, { headers });
+      toast.success("Bundle updated");
+      fetchProductDetails(viewProduct.id);
+      fetchProducts();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save bundle"); }
+  };
+
+  const addToBundle = () => {
+    if (!bundleAddProduct || bundleAddProduct === viewProduct?.id) return;
+    const existing = bundleItems.find(b => b.product_id === bundleAddProduct);
+    if (existing) { toast.error("Product already in bundle"); return; }
+    const prod = products.find(p => p.id === bundleAddProduct);
+    if (!prod) return;
+    const newItems = [...bundleItems, { product_id: prod.id, name: prod.name, sku: prod.sku, category: prod.category, quantity: bundleAddQty, cost_price: prod.cost_price, retail_price: prod.retail_price, quantity_in_stock: prod.quantity_in_stock }];
+    setBundleItems(newItems);
+    handleSaveBundle(newItems.map(i => ({ product_id: i.product_id, quantity: i.quantity })));
+    setBundleAddProduct("");
+    setBundleAddQty(1);
+  };
+
+  const removeFromBundle = (pid) => {
+    const newItems = bundleItems.filter(b => b.product_id !== pid);
+    setBundleItems(newItems);
+    handleSaveBundle(newItems.map(i => ({ product_id: i.product_id, quantity: i.quantity })));
+  };
+
 
   const handleGenerateBarcode = async () => {
     if (!viewProduct) return;
@@ -327,6 +371,7 @@ export default function ProductsPage() {
           <TabsList>
             <TabsTrigger value="overview" data-testid="tab-product-overview">Overview</TabsTrigger>
             <TabsTrigger value="inventory" data-testid="tab-product-inventory">Inventory</TabsTrigger>
+            <TabsTrigger value="bundles" data-testid="tab-product-bundles">Bundle ({bundleItems.length})</TabsTrigger>
             <TabsTrigger value="barcodes" data-testid="tab-product-barcodes">Barcodes & Labels</TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-product-history">Stock History ({stockMovements.length})</TabsTrigger>
           </TabsList>
@@ -358,6 +403,25 @@ export default function ProductsPage() {
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Reorder Level</p><p className="text-2xl font-bold text-yellow-500">{p.reorder_level}</p></div>
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Stock Value</p><p className="text-2xl font-bold">${(p.retail_price * p.quantity_in_stock).toFixed(2)}</p></div>
                     </div>
+                    {/* On Order Indicator */}
+                    {onOrderInfo && onOrderInfo.on_order_qty > 0 && (
+                      <div className="mt-3 p-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Truck className="w-4 h-4 text-cyan-400 animate-pulse" />
+                          <span className="text-sm font-semibold text-cyan-400">On Order: {onOrderInfo.on_order_qty} units</span>
+                        </div>
+                        <div className="space-y-1">
+                          {onOrderInfo.purchase_orders?.map((po, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs">
+                              <span className="font-mono text-cyan-300">{po.po_number}</span>
+                              <span className="text-muted-foreground">{po.vendor}</span>
+                              <span className="font-medium">{po.quantity} units</span>
+                              {po.expected_delivery && <span className="text-muted-foreground">{po.expected_delivery}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -447,6 +511,69 @@ export default function ProductsPage() {
                       ))}
                     </TableBody>
                   </Table>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* BUNDLES TAB */}
+          <TabsContent value="bundles">
+            <div className="mt-4 space-y-4">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm flex items-center gap-2"><Link2 className="w-4 h-4" />Bundled Products</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground mb-4">Link related products together (e.g. monitor + keyboard + mouse) to offer as a package deal.</p>
+                  {/* Add to bundle */}
+                  <div className="flex items-center gap-2 mb-4 p-3 rounded-lg border bg-muted/20">
+                    <Select value={bundleAddProduct || "__none"} onValueChange={v => setBundleAddProduct(v === "__none" ? "" : v)}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Select product to add" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Choose product...</SelectItem>
+                        {products.filter(pr => pr.id !== p.id && !bundleItems.find(b => b.product_id === pr.id)).map(pr => (
+                          <SelectItem key={pr.id} value={pr.id}>{pr.name} (${pr.retail_price.toFixed(2)})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min="1" className="w-20" value={bundleAddQty} onChange={e => setBundleAddQty(parseInt(e.target.value) || 1)} placeholder="Qty" />
+                    <Button size="sm" onClick={addToBundle} disabled={!bundleAddProduct} data-testid="add-to-bundle-btn"><Plus className="w-4 h-4 mr-1" />Add</Button>
+                  </div>
+                  {bundleItems.length === 0 ? (
+                    <div className="text-center py-8 border rounded-lg border-dashed">
+                      <Link2 className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
+                      <p className="text-muted-foreground text-sm">No bundled products yet</p>
+                      <p className="text-xs text-muted-foreground mt-1">Add monitors, RAM, cables, etc. to create a product bundle</p>
+                    </div>
+                  ) : (
+                    <>
+                      <Table>
+                        <TableHeader><TableRow><TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead>Category</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Stock</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                        <TableBody>
+                          {bundleItems.map(bi => (
+                            <TableRow key={bi.product_id}>
+                              <TableCell className="font-medium">{bi.name}</TableCell>
+                              <TableCell className="font-mono text-xs">{bi.sku || "-"}</TableCell>
+                              <TableCell><Badge variant="outline" className="text-xs">{bi.category}</Badge></TableCell>
+                              <TableCell className="text-right font-mono">{bi.quantity}</TableCell>
+                              <TableCell className="text-right font-mono">${bi.retail_price?.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">
+                                <span className={bi.quantity_in_stock <= 0 ? "text-red-400" : ""}>{bi.quantity_in_stock}</span>
+                              </TableCell>
+                              <TableCell><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => removeFromBundle(bi.product_id)}><Unlink className="w-3 h-3" /></Button></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      <Separator className="my-3" />
+                      <div className="flex justify-end gap-6 text-sm">
+                        <div><span className="text-muted-foreground">Bundle Cost: </span><span className="font-mono font-bold">${bundleItems.reduce((s, b) => s + (b.cost_price || 0) * b.quantity, 0).toFixed(2)}</span></div>
+                        <div><span className="text-muted-foreground">Bundle Retail: </span><span className="font-mono font-bold text-green-400">${bundleItems.reduce((s, b) => s + (b.retail_price || 0) * b.quantity, 0).toFixed(2)}</span></div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -659,6 +786,12 @@ export default function ProductsPage() {
                       {p.quantity_in_stock}
                     </span>
                     {p.quantity_in_stock <= (p.reorder_level || 5) && <AlertTriangle className="w-3 h-3 text-yellow-500 inline ml-1" />}
+                    {(() => { const oo = onOrderSummary.find(o => o.product_id === p.id); return oo ? (
+                      <div className="flex items-center gap-1 justify-end mt-0.5">
+                        <Truck className="w-3 h-3 text-cyan-400 animate-pulse" />
+                        <span className="text-[10px] font-mono text-cyan-400">{oo.on_order_qty} ordered</span>
+                      </div>
+                    ) : null; })()}
                   </TableCell>
                   <TableCell>
                     <Badge variant={p.is_active ? "default" : "secondary"} className="text-[10px]">{p.is_active ? "Active" : "Inactive"}</Badge>

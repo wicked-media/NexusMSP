@@ -52,6 +52,7 @@ import LoyaltyDashboardPage from "@/pages/LoyaltyDashboardPage";
 import TicketPingSettingsPage from "@/pages/TicketPingSettingsPage";
 import GradientPage from "@/pages/GradientPage";
 import FinancialReportsPage from "@/pages/FinancialReportsPage";
+import StocktakePage from "@/pages/StocktakePage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -442,6 +443,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <PurchaseOrdersPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/stocktake"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <StocktakePage />
                 </MainLayout>
               </ProtectedRoute>
             }

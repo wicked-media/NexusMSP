@@ -62,6 +62,8 @@ async def create_product(data: dict, current_user: dict = Depends(get_current_us
         "barcode": barcode_value,
         "barcode_type": barcode_type,
         "barcode_image": barcode_image,
+        "bundle_items": data.get("bundle_items", []),
+        "is_bundle": data.get("is_bundle", False),
         "created_by": current_user["id"],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -81,7 +83,7 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
 async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"name", "sku", "description", "category", "vendor", "cost_price", "retail_price",
                "tax_rate", "quantity_in_stock", "reorder_level", "unit", "is_active", "is_taxable",
-               "is_recurring", "billing_cycle", "barcode", "barcode_type"}
+               "is_recurring", "billing_cycle", "barcode", "barcode_type", "bundle_items", "is_bundle"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "cost_price" in update:
         update["cost_price"] = float(update["cost_price"])
@@ -270,3 +272,154 @@ async def get_ticket_products(ticket_id: str, current_user: dict = Depends(get_c
         raise HTTPException(status_code=404, detail="Ticket not found")
     return ticket.get("products", [])
 
+
+
+# ============== PRODUCT BUNDLING ==============
+
+@router.get("/products/{product_id}/bundle")
+async def get_product_bundle(product_id: str, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    bundle_items = product.get("bundle_items", [])
+    enriched = []
+    for bi in bundle_items:
+        linked = await db.products.find_one({"id": bi.get("product_id")}, {"_id": 0})
+        if linked:
+            enriched.append({
+                "product_id": linked["id"], "name": linked["name"], "sku": linked.get("sku", ""),
+                "category": linked.get("category", ""), "quantity": bi.get("quantity", 1),
+                "cost_price": linked.get("cost_price", 0), "retail_price": linked.get("retail_price", 0),
+                "quantity_in_stock": linked.get("quantity_in_stock", 0),
+            })
+    return {"product_id": product_id, "is_bundle": product.get("is_bundle", False), "bundle_items": enriched}
+
+@router.put("/products/{product_id}/bundle")
+async def update_product_bundle(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    bundle_items = data.get("bundle_items", [])
+    clean_items = []
+    for bi in bundle_items:
+        if bi.get("product_id") and bi["product_id"] != product_id:
+            clean_items.append({"product_id": bi["product_id"], "quantity": int(bi.get("quantity", 1))})
+    await db.products.update_one({"id": product_id}, {"$set": {
+        "bundle_items": clean_items, "is_bundle": len(clean_items) > 0,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    return {"message": "Bundle updated", "bundle_items": clean_items}
+
+# ============== ON-ORDER / STOCK STATUS ==============
+
+@router.get("/products/{product_id}/on-order")
+async def get_product_on_order(product_id: str, current_user: dict = Depends(get_current_user)):
+    open_pos = await db.purchase_orders.find(
+        {"status": {"$in": ["submitted", "partial"]}, "line_items.product_id": product_id}, {"_id": 0}
+    ).to_list(500)
+    on_order_qty = 0
+    po_refs = []
+    for po in open_pos:
+        for li in po.get("line_items", []):
+            if li.get("product_id") == product_id:
+                remaining = li.get("quantity", 0) - li.get("received_qty", 0)
+                if remaining > 0:
+                    on_order_qty += remaining
+                    po_refs.append({"po_id": po["id"], "po_number": po["po_number"], "vendor": po.get("vendor", ""), "quantity": remaining, "expected_delivery": po.get("expected_delivery", "")})
+    return {"product_id": product_id, "on_order_qty": on_order_qty, "purchase_orders": po_refs}
+
+@router.get("/products/inventory/on-order-summary")
+async def get_on_order_summary(current_user: dict = Depends(get_current_user)):
+    open_pos = await db.purchase_orders.find({"status": {"$in": ["submitted", "partial"]}}, {"_id": 0}).to_list(5000)
+    product_orders = {}
+    for po in open_pos:
+        for li in po.get("line_items", []):
+            pid = li.get("product_id")
+            if pid:
+                remaining = li.get("quantity", 0) - li.get("received_qty", 0)
+                if remaining > 0:
+                    if pid not in product_orders:
+                        product_orders[pid] = {"product_id": pid, "product_name": li.get("product_name", ""), "on_order_qty": 0, "pos": []}
+                    product_orders[pid]["on_order_qty"] += remaining
+                    product_orders[pid]["pos"].append({"po_number": po["po_number"], "vendor": po.get("vendor", ""), "qty": remaining})
+    return list(product_orders.values())
+
+# ============== TICKET ITEMS TO INVOICE ==============
+
+@router.post("/tickets/{ticket_id}/products-to-invoice")
+async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    products_on_ticket = ticket.get("products", [])
+    if not products_on_ticket:
+        raise HTTPException(status_code=400, detail="No products on this ticket")
+    invoice_id = data.get("invoice_id")
+    if invoice_id:
+        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        existing_items = invoice.get("line_items", [])
+        for p in products_on_ticket:
+            existing_items.append({
+                "description": p.get("product_name", "Product"),
+                "quantity": p.get("quantity", 1),
+                "unit_price": p.get("unit_price", 0),
+                "amount": p.get("total", 0),
+                "product_id": p.get("product_id", ""),
+                "from_ticket": ticket_id,
+            })
+        new_subtotal = sum(li.get("amount", 0) for li in existing_items)
+        tax_rate = float(invoice.get("tax_rate", 0))
+        new_tax = new_subtotal * tax_rate / 100
+        new_total = new_subtotal + new_tax
+        await db.invoices.update_one({"id": invoice_id}, {"$set": {
+            "line_items": existing_items, "subtotal": round(new_subtotal, 2),
+            "tax_amount": round(new_tax, 2), "total": round(new_total, 2),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }})
+        return {"message": f"Added {len(products_on_ticket)} items to invoice", "invoice_id": invoice_id}
+    else:
+        inv_count = await db.invoices.count_documents({})
+        new_line_items = []
+        for p in products_on_ticket:
+            new_line_items.append({
+                "description": p.get("product_name", "Product"),
+                "quantity": p.get("quantity", 1),
+                "unit_price": p.get("unit_price", 0),
+                "amount": p.get("total", 0),
+                "product_id": p.get("product_id", ""),
+                "from_ticket": ticket_id,
+            })
+        subtotal = sum(li["amount"] for li in new_line_items)
+        invoice = {
+            "id": str(uuid.uuid4()),
+            "invoice_number": f"INV-{inv_count + 1001:04d}",
+            "client_id": ticket.get("client_id", ""),
+            "status": "draft", "payment_status": "unpaid",
+            "line_items": new_line_items,
+            "subtotal": round(subtotal, 2), "tax_rate": 0, "tax_amount": 0,
+            "total": round(subtotal, 2), "amount_paid": 0,
+            "due_date": "", "notes": f"Generated from ticket {ticket.get('ticket_number', ticket_id)}",
+            "from_ticket": ticket_id,
+            "created_by": current_user["id"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.invoices.insert_one(invoice)
+        invoice.pop("_id", None)
+        return {"message": "New invoice created from ticket items", "invoice_id": invoice["id"], "invoice_number": invoice["invoice_number"]}
+
+@router.delete("/tickets/{ticket_id}/products/{item_id}")
+async def remove_product_from_ticket(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    products = ticket.get("products", [])
+    item = next((p for p in products if p.get("id") == item_id), None)
+    if item:
+        product = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0})
+        if product:
+            await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity_in_stock": item.get("quantity", 1)}})
+    await db.tickets.update_one({"id": ticket_id}, {"$pull": {"products": {"id": item_id}}})
+    return {"message": "Product removed from ticket"}

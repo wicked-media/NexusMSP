@@ -136,6 +136,7 @@ export default function VendorsPage() {
             {!v.is_active && <Badge variant="destructive">Inactive</Badge>}
           </div>
           <div className="flex gap-2">
+            <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={() => window.location.href = `/purchase-orders?vendor=${v.id}`} data-testid="create-po-btn"><ShoppingCart className="w-3 h-3 mr-1" />Create PO</Button>
             <Button size="sm" variant="outline" onClick={() => openEdit(v)} data-testid="edit-vendor-btn"><Edit className="w-3 h-3 mr-1" />Edit</Button>
             <Button size="sm" variant="destructive" onClick={() => handleDelete(v.id)}><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
           </div>
@@ -261,6 +262,7 @@ export default function VendorsPage() {
                     <div className="text-center"><p className="text-xs text-muted-foreground">Spent</p><p className="font-medium">${(v.total_spent || 0).toLocaleString()}</p></div>
                     <div className="text-center"><p className="text-xs text-muted-foreground">Terms</p><p className="font-medium text-xs">{v.payment_terms}</p></div>
                     <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-cyan-400" onClick={() => window.location.href = `/purchase-orders?vendor=${v.id}`} data-testid={`create-po-${v.id}`}><ShoppingCart className="w-3 h-3 mr-1" />PO</Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(v)} data-testid={`edit-vendor-${v.id}`}><Edit className="w-3 h-3" /></Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(v.id)} data-testid={`delete-vendor-${v.id}`}><Trash2 className="w-3 h-3" /></Button>
                     </div>

@@ -23,7 +23,7 @@ import {
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
-  Download, BellRing, ChevronDown, Paperclip, Trash2
+  Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -78,6 +78,14 @@ export default function TicketsPage() {
   const [notifyForm, setNotifyForm] = useState({ email: "", subject: "", message: "" });
   const [ticketAttachments, setTicketAttachments] = useState([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [ticketProducts, setTicketProducts] = useState([]);
+  const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [addItemProduct, setAddItemProduct] = useState("");
+  const [addItemQty, setAddItemQty] = useState(1);
+  const [allProducts, setAllProducts] = useState([]);
+  const [isPushInvoiceOpen, setIsPushInvoiceOpen] = useState(false);
+  const [invoicesList, setInvoicesList] = useState([]);
+  const [pushToExisting, setPushToExisting] = useState("");
   const [isChildOpen, setIsChildOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isTimeOpen, setIsTimeOpen] = useState(false);
@@ -105,13 +113,14 @@ export default function TicketsPage() {
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes, ncRes, dRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
         axios.get(`${API}/canned-responses`, { headers }),
         axios.get(`${API}/tickets/note-counts`, { headers }),
         axios.get(`${API}/devices`, { headers }),
+        axios.get(`${API}/products`, { headers }),
       ]);
       setTickets(tRes.data);
       setClients(cRes.data);
@@ -119,6 +128,7 @@ export default function TicketsPage() {
       setCannedResponses(crRes.data);
       setNoteCounts(ncRes.data);
       setDevices(dRes.data);
+      setAllProducts(pRes.data);
       // Fetch active viewers for tickets
       try {
         const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
@@ -147,7 +157,7 @@ export default function TicketsPage() {
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
@@ -155,6 +165,7 @@ export default function TicketsPage() {
         axios.get(`${API}/tickets/${ticket.id}/audit-log`, { headers }),
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/attachments`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/tickets/${ticket.id}/products`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
@@ -163,6 +174,7 @@ export default function TicketsPage() {
       setAuditLog(aRes.data);
       setScripts(sRes.data);
       setTicketAttachments(attRes.data || []);
+      setTicketProducts(prodRes.data || []);
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
@@ -262,6 +274,39 @@ export default function TicketsPage() {
       setNotifyForm({ email: "", subject: "", message: "" });
       toast.success("Client notification sent with PDF attachment");
     } catch { toast.error("Failed to send notification"); }
+  };
+
+  const handleAddItemToTicket = async () => {
+    if (!addItemProduct || !viewingTicket) return;
+    try {
+      const res = await axios.post(`${API}/tickets/${viewingTicket.id}/products`, {
+        product_id: addItemProduct, quantity: addItemQty
+      }, { headers });
+      setTicketProducts(prev => [...prev, res.data]);
+      setAddItemProduct("");
+      setAddItemQty(1);
+      toast.success("Item added to ticket");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to add item"); }
+  };
+
+  const handleRemoveItemFromTicket = async (itemId) => {
+    if (!viewingTicket) return;
+    try {
+      await axios.delete(`${API}/tickets/${viewingTicket.id}/products/${itemId}`, { headers });
+      setTicketProducts(prev => prev.filter(p => p.id !== itemId));
+      toast.success("Item removed");
+    } catch { toast.error("Failed to remove item"); }
+  };
+
+  const handlePushToInvoice = async (invoiceId) => {
+    if (!viewingTicket) return;
+    try {
+      const res = await axios.post(`${API}/tickets/${viewingTicket.id}/products-to-invoice`, {
+        invoice_id: invoiceId || null
+      }, { headers });
+      toast.success(res.data.message);
+      setIsPushInvoiceOpen(false);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to push to invoice"); }
   };
 
   const handleDownloadPdf = async () => {
@@ -474,11 +519,8 @@ export default function TicketsPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setIsTimeOpen(true)} data-testid="log-time-btn"><Timer className="w-4 h-4 mr-1" />Log Time</Button>
             <Button variant="outline" size="sm" onClick={() => setIsEmailOpen(true)} data-testid="send-email-btn"><Mail className="w-4 h-4 mr-1" />Email</Button>
-            <Button variant="outline" size="sm" className="text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => {
-              const client = clients.find(c => c.id === viewingTicket.client_id);
-              setNotifyForm({ email: client?.email || "", subject: `Ticket Update: ${viewingTicket.ticket_number} - ${viewingTicket.title}`, message: `You have a new update on your ticket ${viewingTicket.ticket_number}.` });
-              setIsClientNotifyOpen(true);
-            }} data-testid="notify-client-btn"><BellRing className="w-4 h-4 mr-1" />Notify Client</Button>
+            <Button variant="outline" size="sm" className="text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => setIsAddItemOpen(true)} data-testid="add-items-btn"><ShoppingCart className="w-4 h-4 mr-1" />Add Items</Button>
+            {ticketProducts.length > 0 && <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setInvoicesList([]); axios.get(`${API}/invoices`, { headers }).then(r => setInvoicesList(r.data)).catch(() => {}); setIsPushInvoiceOpen(true); }} data-testid="push-to-invoice-btn"><Receipt className="w-4 h-4 mr-1" />To Invoice ({ticketProducts.length})</Button>}
             <Button variant="outline" size="sm" onClick={handleDownloadPdf} data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
@@ -647,6 +689,7 @@ export default function TicketsPage() {
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
                 <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
+                <TabsTrigger value="items" data-testid="items-tab"><ShoppingCart className="w-3 h-3 mr-1" />Items ({ticketProducts.length})</TabsTrigger>
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
@@ -940,6 +983,50 @@ export default function TicketsPage() {
                 </ScrollArea>
               </TabsContent>
 
+
+              {/* ITEMS TAB */}
+              <TabsContent value="items" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">Billable products & items used on this ticket</p>
+                  <Button size="sm" onClick={() => setIsAddItemOpen(true)} data-testid="tab-add-item-btn"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                </div>
+                {ticketProducts.length > 0 ? (
+                  <Card>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader><TableRow><TableHead>Product</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Unit Price</TableHead><TableHead className="text-right">Total</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                        <TableBody>
+                          {ticketProducts.map(p => (
+                            <TableRow key={p.id} data-testid={`ticket-item-${p.id}`}>
+                              <TableCell className="font-medium">{p.product_name}</TableCell>
+                              <TableCell className="text-right font-mono">{p.quantity}</TableCell>
+                              <TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell>
+                              <TableCell><Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemoveItemFromTicket(p.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="bg-muted/30">
+                            <TableCell colSpan={3} className="text-right font-semibold">Total</TableCell>
+                            <TableCell className="text-right font-mono font-bold text-green-400">${ticketProducts.reduce((s, p) => s + (p.total || 0), 0).toFixed(2)}</TableCell>
+                            <TableCell></TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="border-dashed"><CardContent className="py-8 text-center">
+                    <ShoppingCart className="w-8 h-8 mx-auto text-muted-foreground mb-2 opacity-30" />
+                    <p className="text-muted-foreground text-sm">No items added yet</p>
+                  </CardContent></Card>
+                )}
+                {ticketProducts.length > 0 && (
+                  <Button variant="outline" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { axios.get(`${API}/invoices`, { headers }).then(r => setInvoicesList(r.data)).catch(() => {}); setIsPushInvoiceOpen(true); }} data-testid="items-to-invoice-btn">
+                    <Receipt className="w-4 h-4 mr-1" />Push All Items to Invoice
+                  </Button>
+                )}
+              </TabsContent>
+
               {/* CHILDREN TAB */}
               <TabsContent value="children">
                 {childTickets.length > 0 ? (
@@ -1218,6 +1305,90 @@ export default function TicketsPage() {
         </Dialog>
 
         {/* CANNED RESPONSE DIALOG - REMOVED, moved to Settings */}
+
+        {/* ADD ITEMS TO TICKET DIALOG */}
+        <Dialog open={isAddItemOpen} onOpenChange={setIsAddItemOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-cyan-400" />Add Billable Items</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">Add products/items used on this ticket. Stock will be deducted automatically.</p>
+              <div className="flex items-center gap-2">
+                <Select value={addItemProduct || "__none"} onValueChange={v => setAddItemProduct(v === "__none" ? "" : v)}>
+                  <SelectTrigger className="flex-1" data-testid="add-item-product-select"><SelectValue placeholder="Select product..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Choose product...</SelectItem>
+                    {allProducts.filter(p => p.is_active !== false).map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name} - ${p.retail_price?.toFixed(2)} ({p.quantity_in_stock} in stock)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" min="1" className="w-20" value={addItemQty} onChange={e => setAddItemQty(parseInt(e.target.value) || 1)} />
+                <Button onClick={handleAddItemToTicket} disabled={!addItemProduct} data-testid="confirm-add-item"><Plus className="w-4 h-4 mr-1" />Add</Button>
+              </div>
+              {ticketProducts.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {ticketProducts.map(p => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium text-sm">{p.product_name}</TableCell>
+                          <TableCell className="text-right font-mono">{p.quantity}</TableCell>
+                          <TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell>
+                          <TableCell><Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemoveItemFromTicket(p.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-right font-semibold">Total</TableCell>
+                        <TableCell className="text-right font-mono font-bold text-green-400">${ticketProducts.reduce((s, p) => s + (p.total || 0), 0).toFixed(2)}</TableCell>
+                        <TableCell></TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddItemOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* PUSH TO INVOICE DIALOG */}
+        <Dialog open={isPushInvoiceOpen} onOpenChange={setIsPushInvoiceOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><Receipt className="w-5 h-5 text-green-400" />Push Items to Invoice</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Push {ticketProducts.length} item(s) totalling <span className="font-bold text-green-400">${ticketProducts.reduce((s, p) => s + (p.total || 0), 0).toFixed(2)}</span> to an invoice.
+              </p>
+              <div className="space-y-3">
+                <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handlePushToInvoice(null)} data-testid="create-new-invoice-btn">
+                  <Plus className="w-4 h-4 mr-1" />Create New Invoice
+                </Button>
+                {invoicesList.length > 0 && (
+                  <>
+                    <Separator />
+                    <Label>Or add to existing invoice:</Label>
+                    <Select value={pushToExisting || "__none"} onValueChange={v => setPushToExisting(v === "__none" ? "" : v)}>
+                      <SelectTrigger><SelectValue placeholder="Select invoice..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Choose...</SelectItem>
+                        {invoicesList.filter(inv => inv.status !== "paid" && inv.status !== "cancelled").map(inv => (
+                          <SelectItem key={inv.id} value={inv.id}>{inv.invoice_number} - {inv.client_name || "No client"} (${inv.total?.toFixed(2)})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {pushToExisting && <Button className="w-full" onClick={() => handlePushToInvoice(pushToExisting)} data-testid="push-to-existing-btn">Add to {invoicesList.find(i => i.id === pushToExisting)?.invoice_number}</Button>}
+                  </>
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Technician Co-Pilot */}
         <CoPilotPanel ticket={viewingTicket} device={deviceStatus} />

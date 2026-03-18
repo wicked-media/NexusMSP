@@ -20,7 +20,8 @@ from app.routers import (
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
     whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications,
     invoice_pdf, device_viewers, device_chat, ticket_attachments,
-    proxmox, acronis, gradient, financial_reports, tech_performance
+    proxmox, acronis, gradient, financial_reports, tech_performance,
+    stocktake
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -47,7 +48,8 @@ all_routers = [
     suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
     whitelabel, ticket_ping, rustdesk,
-    proxmox, acronis, gradient, financial_reports, tech_performance
+    proxmox, acronis, gradient, financial_reports, tech_performance,
+    stocktake
 ]
 
 for router_module in all_routers:
