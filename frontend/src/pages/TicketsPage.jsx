@@ -23,7 +23,8 @@ import {
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
-  Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt
+  Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
+  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -86,6 +87,20 @@ export default function TicketsPage() {
   const [isPushInvoiceOpen, setIsPushInvoiceOpen] = useState(false);
   const [invoicesList, setInvoicesList] = useState([]);
   const [pushToExisting, setPushToExisting] = useState("");
+  const [topTab, setTopTab] = useState("tickets");
+  const [workshopJobs, setWorkshopJobs] = useState([]);
+  const [workshopStats, setWorkshopStats] = useState({});
+  const [fieldJobs, setFieldJobs] = useState([]);
+  const [fieldStats, setFieldStats] = useState({});
+  const [wsDialog, setWsDialog] = useState(false);
+  const [wsForm, setWsForm] = useState({ customer_name: "", customer_phone: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+  const [fjDialog, setFjDialog] = useState(false);
+  const [fjForm, setFjForm] = useState({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
+  const [viewWsJob, setViewWsJob] = useState(null);
+  const [viewFjJob, setViewFjJob] = useState(null);
+  const [wsPartDialog, setWsPartDialog] = useState(false);
+  const [wsPartProduct, setWsPartProduct] = useState("");
+  const [wsPartQty, setWsPartQty] = useState(1);
   const [isChildOpen, setIsChildOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isTimeOpen, setIsTimeOpen] = useState(false);
@@ -424,6 +439,93 @@ export default function TicketsPage() {
       await axios.put(`${API}/users/${user.id}`, { email_signature: emailSignature }, { headers });
       toast.success("Signature saved");
     } catch { toast.error("Failed to save signature"); }
+  };
+
+  const fetchWorkshop = async () => {
+    try {
+      const [jRes, sRes] = await Promise.all([
+        axios.get(`${API}/workshop/jobs`, { headers }),
+        axios.get(`${API}/workshop/stats`, { headers }),
+      ]);
+      setWorkshopJobs(jRes.data);
+      setWorkshopStats(sRes.data);
+    } catch {}
+  };
+
+  const fetchFieldJobs = async () => {
+    try {
+      const [jRes, sRes] = await Promise.all([
+        axios.get(`${API}/field-jobs`, { headers }),
+        axios.get(`${API}/field-jobs/stats/summary`, { headers }),
+      ]);
+      setFieldJobs(jRes.data);
+      setFieldStats(sRes.data);
+    } catch {}
+  };
+
+  useEffect(() => { if (topTab === "workshop") fetchWorkshop(); if (topTab === "field") fetchFieldJobs(); }, [topTab]);
+
+  const handleCreateWsJob = async () => {
+    try {
+      const res = await axios.post(`${API}/workshop/jobs`, wsForm, { headers });
+      toast.success(`Workshop job ${res.data.job_number} created`);
+      setWsDialog(false); setWsForm({ customer_name: "", customer_phone: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+      fetchWorkshop();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleWsStatus = async (jobId, status) => {
+    try { await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchWorkshop(); if (viewWsJob?.id === jobId) { const r = await axios.get(`${API}/workshop/jobs/${jobId}`, { headers }); setViewWsJob(r.data); } } catch { toast.error("Failed"); }
+  };
+
+  const handleWsTimer = async (jobId, action) => {
+    try { const r = await axios.put(`${API}/workshop/jobs/${jobId}/timer`, { action }, { headers }); toast.success(r.data.message); if (viewWsJob?.id === jobId) { const r2 = await axios.get(`${API}/workshop/jobs/${jobId}`, { headers }); setViewWsJob(r2.data); } } catch { toast.error("Timer failed"); }
+  };
+
+  const handleAddWsPart = async () => {
+    if (!viewWsJob || !wsPartProduct) return;
+    const prod = allProducts.find(p => p.id === wsPartProduct);
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/add-part`, { product_id: wsPartProduct, product_name: prod?.name || "", quantity: wsPartQty, unit_price: prod?.retail_price || 0 }, { headers });
+      toast.success("Part added & stock deducted");
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}`, { headers });
+      setViewWsJob(r.data); setWsPartDialog(false); setWsPartProduct(""); setWsPartQty(1);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleCreateFjJob = async () => {
+    try {
+      const res = await axios.post(`${API}/field-jobs`, fjForm, { headers });
+      toast.success(`Field job ${res.data.job_number} created`);
+      setFjDialog(false); setFjForm({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
+      fetchFieldJobs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleFjStatus = async (jobId, status) => {
+    try { await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchFieldJobs(); if (viewFjJob?.id === jobId) { const r = await axios.get(`${API}/field-jobs/${jobId}`, { headers }); setViewFjJob(r.data); } } catch { toast.error("Failed"); }
+  };
+
+  const handleFjChecklist = async (jobId, checklist) => {
+    try { await axios.put(`${API}/field-jobs/${jobId}`, { checklist }, { headers }); } catch {}
+  };
+
+  const WS_STATUSES = {
+    checked_in: { label: "Checked In", class: "bg-blue-500/20 text-blue-400", icon: "inbox" },
+    diagnosing: { label: "Diagnosing", class: "bg-purple-500/20 text-purple-400", icon: "search" },
+    parts_ordered: { label: "Parts Ordered", class: "bg-cyan-500/20 text-cyan-400", icon: "truck" },
+    repairing: { label: "Repairing", class: "bg-amber-500/20 text-amber-400", icon: "wrench" },
+    ready_for_pickup: { label: "Ready for Pickup", class: "bg-green-500/20 text-green-400", icon: "check" },
+    collected: { label: "Collected", class: "bg-gray-500/20 text-gray-400", icon: "package" },
+    cancelled: { label: "Cancelled", class: "bg-red-500/20 text-red-400", icon: "x" },
+  };
+
+  const FJ_STATUSES = {
+    scheduled: { label: "Scheduled", class: "bg-blue-500/20 text-blue-400" },
+    en_route: { label: "En Route", class: "bg-cyan-500/20 text-cyan-400" },
+    on_site: { label: "On Site", class: "bg-amber-500/20 text-amber-400" },
+    completed: { label: "Completed", class: "bg-green-500/20 text-green-400" },
+    cancelled: { label: "Cancelled", class: "bg-red-500/20 text-red-400" },
   };
 
   const fmtTime = (s) => { const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${sec.toString().padStart(2, '0')}`; };
@@ -1408,14 +1510,26 @@ export default function TicketsPage() {
     <div className="space-y-5" data-testid="tickets-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Tickets</h1>
-          <p className="text-muted-foreground">{tickets.length} total tickets across {new Set(tickets.map(t => t.client_id)).size} clients</p>
+          <h1 className="text-3xl font-bold tracking-tight">Tickets & Jobs</h1>
+          <p className="text-muted-foreground">{tickets.length} tickets, {workshopJobs.length} workshop, {fieldJobs.length} field</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New Ticket</Button>
+          {topTab === "tickets" && <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New Ticket</Button>}
+          {topTab === "workshop" && <Button onClick={() => setWsDialog(true)} data-testid="create-ws-btn" className="bg-purple-600 hover:bg-purple-700"><Wrench className="w-4 h-4 mr-1" />New Workshop Job</Button>}
+          {topTab === "field" && <Button onClick={() => setFjDialog(true)} data-testid="create-fj-btn" className="bg-cyan-600 hover:bg-cyan-700"><MapPin className="w-4 h-4 mr-1" />New Field Job</Button>}
         </div>
       </div>
+
+      {/* Top-level tabs */}
+      <Tabs value={topTab} onValueChange={setTopTab}>
+        <TabsList>
+          <TabsTrigger value="tickets" data-testid="tab-tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
+          <TabsTrigger value="workshop" data-testid="tab-workshop"><Wrench className="w-3 h-3 mr-1" />Workshop</TabsTrigger>
+          <TabsTrigger value="field" data-testid="tab-field"><MapPin className="w-3 h-3 mr-1" />Field Jobs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="tickets">
 
       {/* Stats Row */}
       <div className="grid grid-cols-6 gap-3">
@@ -1577,6 +1691,223 @@ export default function TicketsPage() {
         )}
       </div>
 
+      </TabsContent>
+
+      {/* ============ WORKSHOP TAB ============ */}
+      <TabsContent value="workshop">
+        {viewWsJob ? (
+          <div className="space-y-4 mt-4" data-testid="ws-job-detail">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="sm" onClick={() => setViewWsJob(null)}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+              <span className="font-mono font-semibold">{viewWsJob.job_number}</span>
+              <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
+            </div>
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-8 space-y-4">
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
+                      <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
+                      <div><span className="text-muted-foreground block">Device</span><span className="font-medium">{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "-"}</span></div>
+                    </div>
+                    <Separator />
+                    <div><span className="text-muted-foreground block">Serial</span><span className="font-mono">{viewWsJob.serial_number || "-"}</span></div>
+                    <div><span className="text-muted-foreground block">Fault</span><span>{viewWsJob.fault_description || "-"}</span></div>
+                  </CardContent>
+                </Card>
+                {/* Parts Used */}
+                <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-sm">Parts Used ({viewWsJob.parts_used?.length || 0})</CardTitle><Button size="sm" variant="outline" onClick={() => setWsPartDialog(true)} data-testid="add-ws-part"><Plus className="w-3 h-3 mr-1" />Add Part</Button></div></CardHeader>
+                  <CardContent className="p-0">
+                    {(viewWsJob.parts_used || []).length > 0 ? (
+                      <Table><TableHeader><TableRow><TableHead>Part</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+                        <TableBody>{(viewWsJob.parts_used || []).map(p => (
+                          <TableRow key={p.id}><TableCell className="font-medium">{p.product_name}</TableCell><TableCell className="text-right font-mono">{p.quantity}</TableCell><TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell><TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell></TableRow>
+                        ))}</TableBody>
+                      </Table>
+                    ) : <div className="text-center py-6 text-muted-foreground text-sm">No parts added yet</div>}
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="col-span-4 space-y-4">
+                {/* Billing */}
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Billing</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0} min @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
+                    <Separator />
+                    <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
+                  </CardContent>
+                </Card>
+                {/* Timer */}
+                <Card className="border-amber-500/20"><CardContent className="py-3">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
+                  <div className="flex items-center gap-2">
+                    <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
+                      {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
+                    </Button>
+                    <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
+                    {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
+                  </div>
+                </CardContent></Card>
+                {/* Status Actions */}
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    {Object.entries(WS_STATUSES).filter(([k]) => k !== viewWsJob.repair_status).map(([k, v]) => (
+                      <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)}>{v.label}</Button>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 mt-4" data-testid="workshop-list">
+            {/* Workshop Stats */}
+            <div className="grid grid-cols-5 gap-3">
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wrench className="w-5 h-5 text-purple-400" /></div><div><p className="text-xs text-muted-foreground">Total Jobs</p><p className="text-xl font-bold">{workshopStats.total_jobs || 0}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Active</p><p className="text-xl font-bold">{workshopStats.active_jobs || 0}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Revenue</p><p className="text-xl font-bold">${(workshopStats.revenue_collected || 0).toLocaleString()}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Pending Rev</p><p className="text-xl font-bold">${(workshopStats.pending_revenue || 0).toLocaleString()}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Package className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Checked In</p><p className="text-xl font-bold">{workshopStats.statuses?.checked_in || 0}</p></div></div></CardContent></Card>
+            </div>
+            {/* Job List */}
+            <Card><CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>Job #</TableHead><TableHead>Customer</TableHead><TableHead>Device</TableHead><TableHead>Fault</TableHead><TableHead>Status</TableHead><TableHead>Tech</TableHead><TableHead className="text-right">Cost</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {workshopJobs.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No workshop jobs yet</TableCell></TableRow> : workshopJobs.map(j => (
+                    <TableRow key={j.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewWsJob(j)} data-testid={`ws-job-${j.id}`}>
+                      <TableCell className="font-mono font-medium">{j.job_number}</TableCell>
+                      <TableCell className="font-medium">{j.customer_name}</TableCell>
+                      <TableCell className="text-sm">{[j.device_brand, j.device_model].filter(Boolean).join(" ") || j.device_type || "-"}</TableCell>
+                      <TableCell className="text-sm max-w-[200px] truncate">{j.fault_description || "-"}</TableCell>
+                      <TableCell><Badge className={WS_STATUSES[j.repair_status]?.class + " text-xs"}>{WS_STATUSES[j.repair_status]?.label}</Badge></TableCell>
+                      <TableCell className="text-sm">{j.assigned_to_name || "-"}</TableCell>
+                      <TableCell className="text-right font-mono">${(j.total_cost || 0).toFixed(2)}</TableCell>
+                      <TableCell onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={async () => { await axios.delete(`${API}/workshop/jobs/${j.id}`, { headers }); fetchWorkshop(); }}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent></Card>
+          </div>
+        )}
+      </TabsContent>
+
+      {/* ============ FIELD JOBS TAB ============ */}
+      <TabsContent value="field">
+        {viewFjJob ? (
+          <div className="space-y-4 mt-4" data-testid="fj-detail">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="sm" onClick={() => setViewFjJob(null)}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+              <span className="font-mono font-semibold">{viewFjJob.job_number}</span>
+              <Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge>
+              <Badge variant="outline" className="text-xs capitalize">{viewFjJob.job_category}</Badge>
+            </div>
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-8 space-y-4">
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
+                      <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
+                      <div><span className="text-muted-foreground block">Zone</span><Badge variant="outline">{viewFjJob.zone || "Unassigned"}</Badge></div>
+                    </div>
+                    <Separator />
+                    <div><span className="text-muted-foreground block">Address</span><span>{viewFjJob.service_address || "-"}</span></div>
+                    <div><span className="text-muted-foreground block">Description</span><span>{viewFjJob.description || "-"}</span></div>
+                    <div className="grid grid-cols-2 gap-3 mt-2">
+                      <div><span className="text-muted-foreground block">Scheduled</span><span className="font-medium">{viewFjJob.scheduled_date} {viewFjJob.scheduled_time}</span></div>
+                      <div><span className="text-muted-foreground block">Est. Duration</span><span>{viewFjJob.estimated_duration} min</span></div>
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Installation Checklist */}
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Installation Checklist</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    {(viewFjJob.checklist || []).map((c, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 hover:bg-muted/30 cursor-pointer" onClick={() => {
+                        const newCl = [...viewFjJob.checklist]; newCl[i] = { ...c, checked: !c.checked };
+                        setViewFjJob({ ...viewFjJob, checklist: newCl }); handleFjChecklist(viewFjJob.id, newCl);
+                      }} data-testid={`checklist-${i}`}>
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${c.checked ? "bg-green-500 border-green-500" : "border-muted-foreground"}`}>
+                          {c.checked && <CheckCircle className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={`text-sm ${c.checked ? "line-through text-muted-foreground" : ""}`}>{c.item}</span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+                {/* Signal & Speed Test */}
+                <Card className="border-cyan-500/20"><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed Test</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
+                      <div><Label className="text-xs">Download (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
+                      <div><Label className="text-xs">Upload (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="col-span-4 space-y-4">
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    {Object.entries(FJ_STATUSES).filter(([k]) => k !== viewFjJob.field_status).map(([k, v]) => (
+                      <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)}>{v.label}</Button>
+                    ))}
+                  </CardContent>
+                </Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Info</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div><span className="text-muted-foreground block">Assigned</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
+                    <div><span className="text-muted-foreground block">Category</span><Badge variant="outline" className="capitalize">{viewFjJob.job_category}</Badge></div>
+                    <div><span className="text-muted-foreground block">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 mt-4" data-testid="field-jobs-list">
+            {/* Field Stats */}
+            <div className="grid grid-cols-5 gap-3">
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><MapPin className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Total Jobs</p><p className="text-xl font-bold">{fieldStats.total_jobs || 0}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Calendar className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Today</p><p className="text-xl font-bold">{fieldStats.today_jobs || 0}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Completed</p><p className="text-xl font-bold">{fieldStats.statuses?.completed || 0}</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Radio className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Avg Signal</p><p className="text-xl font-bold">{fieldStats.avg_signal_strength || "N/A"} dBm</p></div></div></CardContent></Card>
+              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wifi className="w-5 h-5 text-purple-400" /></div><div><p className="text-xs text-muted-foreground">Zones</p><p className="text-xl font-bold">{Object.keys(fieldStats.zones || {}).length}</p></div></div></CardContent></Card>
+            </div>
+            {/* Zone badges */}
+            {fieldStats.zones && Object.keys(fieldStats.zones).length > 0 && (
+              <div className="flex gap-2 flex-wrap">{Object.entries(fieldStats.zones).map(([z, c]) => <Badge key={z} variant="outline" className="text-xs"><MapPin className="w-3 h-3 mr-1" />{z}: {c}</Badge>)}</div>
+            )}
+            {/* Job List */}
+            <Card><CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>Job #</TableHead><TableHead>Customer</TableHead><TableHead>Category</TableHead><TableHead>Address</TableHead><TableHead>Zone</TableHead><TableHead>Scheduled</TableHead><TableHead>Status</TableHead><TableHead>Tech</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {fieldJobs.length === 0 ? <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No field jobs yet</TableCell></TableRow> : fieldJobs.map(j => (
+                    <TableRow key={j.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewFjJob(j)} data-testid={`fj-job-${j.id}`}>
+                      <TableCell className="font-mono font-medium">{j.job_number}</TableCell>
+                      <TableCell className="font-medium">{j.customer_name}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs capitalize">{j.job_category}</Badge></TableCell>
+                      <TableCell className="text-sm max-w-[180px] truncate">{j.service_address || "-"}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs">{j.zone || "-"}</Badge></TableCell>
+                      <TableCell className="text-sm">{j.scheduled_date} {j.scheduled_time}</TableCell>
+                      <TableCell><Badge className={FJ_STATUSES[j.field_status]?.class + " text-xs"}>{FJ_STATUSES[j.field_status]?.label}</Badge></TableCell>
+                      <TableCell className="text-sm">{j.assigned_to_name || "-"}</TableCell>
+                      <TableCell onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={async () => { await axios.delete(`${API}/field-jobs/${j.id}`, { headers }); fetchFieldJobs(); }}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent></Card>
+          </div>
+        )}
+      </TabsContent>
+      </Tabs>
+
       {/* CREATE TICKET DIALOG - Syncro/SuperOps Style */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh]">
@@ -1729,6 +2060,106 @@ export default function TicketsPage() {
             </div>
           </div>
           <DialogFooter><Button onClick={handleCreateTicket} data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1" />Create Ticket</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CREATE WORKSHOP JOB DIALOG */}
+      <Dialog open={wsDialog} onOpenChange={setWsDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-purple-400" />New Workshop Job</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Customer Name</Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} data-testid="ws-customer" /></div>
+              <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Device Type</Label>
+                <Select value={wsForm.device_type || "laptop"} onValueChange={v => setWsForm({ ...wsForm, device_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="laptop">Laptop</SelectItem><SelectItem value="desktop">Desktop</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="tablet">Tablet</SelectItem><SelectItem value="printer">Printer</SelectItem><SelectItem value="network">Network Device</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Brand</Label><Input value={wsForm.device_brand} onChange={e => setWsForm({ ...wsForm, device_brand: e.target.value })} placeholder="Dell, HP..." /></div>
+              <div><Label>Model</Label><Input value={wsForm.device_model} onChange={e => setWsForm({ ...wsForm, device_model: e.target.value })} /></div>
+            </div>
+            <div><Label>Serial Number</Label><Input value={wsForm.serial_number} onChange={e => setWsForm({ ...wsForm, serial_number: e.target.value })} className="font-mono" /></div>
+            <div><Label>Fault Description</Label><Textarea value={wsForm.fault_description} onChange={e => setWsForm({ ...wsForm, fault_description: e.target.value })} rows={3} data-testid="ws-fault" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Priority</Label>
+                <Select value={wsForm.priority} onValueChange={v => setWsForm({ ...wsForm, priority: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Assign Tech</Label>
+                <Select value={wsForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setWsForm({ ...wsForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
+                  <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={handleCreateWsJob} data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Create Job</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CREATE FIELD JOB DIALOG */}
+      <Dialog open={fjDialog} onOpenChange={setFjDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><MapPin className="w-5 h-5 text-cyan-400" />New Field Job</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Customer Name</Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} data-testid="fj-customer" /></div>
+              <div><Label>Phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} /></div>
+            </div>
+            <div><Label>Service Address</Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} data-testid="fj-address" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Zone / Area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div>
+              <div><Label>Job Category</Label>
+                <Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site Survey</SelectItem></SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div><Label>Description</Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={2} data-testid="fj-description" /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div>
+              <div><Label>Time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div>
+              <div><Label>Duration (min)</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Priority</Label>
+                <Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Assign Tech</Label>
+                <Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
+                  <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={handleCreateFjJob} data-testid="create-fj-submit"><MapPin className="w-4 h-4 mr-1" />Create Field Job</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* WORKSHOP ADD PART DIALOG */}
+      <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">Stock will be deducted automatically.</p>
+            <Select value={wsPartProduct || "__none"} onValueChange={v => setWsPartProduct(v === "__none" ? "" : v)}>
+              <SelectTrigger data-testid="ws-part-select"><SelectValue placeholder="Select product" /></SelectTrigger>
+              <SelectContent><SelectItem value="__none">Choose...</SelectItem>{allProducts.filter(p => p.is_active !== false).map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price?.toFixed(2)} ({p.quantity_in_stock} in stock)</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
+          </div>
+          <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

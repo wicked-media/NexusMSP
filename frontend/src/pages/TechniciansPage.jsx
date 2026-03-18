@@ -22,7 +22,7 @@ import {
   AlertCircle, ExternalLink, Shield, Trophy, History, BarChart3, Award,
   Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff,
   Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
-  Layers, MessageSquare, Image
+  Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
@@ -97,6 +97,13 @@ export default function TechniciansPage() {
   const [awardTarget, setAwardTarget] = useState(null);
   const [teamsStatusDialog, setTeamsStatusDialog] = useState(false);
   const [teamsData, setTeamsData] = useState({ availability: "Available", status_message: "" });
+  const [onCallRoster, setOnCallRoster] = useState([]);
+  const [activeOnCall, setActiveOnCall] = useState([]);
+  const [onCallDialog, setOnCallDialog] = useState(false);
+  const [onCallForm, setOnCallForm] = useState({ tech_id: "", tech_name: "", shift_type: "primary", category: "general", start_time: "", end_time: "", notes: "" });
+  const [swapDialog, setSwapDialog] = useState(false);
+  const [swapShift, setSwapShift] = useState(null);
+  const [swapTechId, setSwapTechId] = useState("");
   const [formData, setFormData] = useState({
     name: "", email: "", password: "nexusops123", role: "technician", job_title: "",
     hourly_rate: "75", phone: "", specialties: [], is_admin: false
@@ -107,12 +114,16 @@ export default function TechniciansPage() {
   const fetchTechs = async () => {
     setLoading(true);
     try {
-      const [res, presetsRes] = await Promise.all([
+      const [res, presetsRes, rosterRes, activeRes] = await Promise.all([
         axios.get(`${API}/technicians/overview`, { headers }),
         axios.get(`${API}/technicians/permission-presets`, { headers }),
+        axios.get(`${API}/on-call/roster`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/on-call/active`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTechs(res.data);
       setPermPresets(presetsRes.data);
+      setOnCallRoster(rosterRes.data || []);
+      setActiveOnCall(activeRes.data || []);
     } catch { toast.error("Failed to fetch technicians"); }
     finally { setLoading(false); }
   };
@@ -306,6 +317,41 @@ export default function TechniciansPage() {
   };
 
   const addSpecialty = () => { if (specialtyInput.trim()) { setFormData(p => ({ ...p, specialties: [...p.specialties, specialtyInput.trim()] })); setSpecialtyInput(""); } };
+
+  const handleCreateOnCallShift = async () => {
+    if (!onCallForm.tech_id || !onCallForm.start_time || !onCallForm.end_time) { toast.error("Tech, start and end required"); return; }
+    try {
+      await axios.post(`${API}/on-call/roster`, onCallForm, { headers });
+      toast.success("On-call shift created & tech notified");
+      setOnCallDialog(false);
+      setOnCallForm({ tech_id: "", tech_name: "", shift_type: "primary", category: "general", start_time: "", end_time: "", notes: "" });
+      fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to create shift"); }
+  };
+
+  const handleDeleteShift = async (id) => {
+    try { await axios.delete(`${API}/on-call/roster/${id}`, { headers }); toast.success("Shift deleted"); fetchTechs(); } catch { toast.error("Failed to delete"); }
+  };
+
+  const handleSwapShift = async () => {
+    if (!swapShift || !swapTechId) return;
+    const newTech = techs.find(t => t.id === swapTechId);
+    try {
+      await axios.post(`${API}/on-call/roster/${swapShift.id}/swap`, { new_tech_id: swapTechId, new_tech_name: newTech?.name || "" }, { headers });
+      toast.success("Shift swapped & both techs notified");
+      setSwapDialog(false); setSwapShift(null); setSwapTechId(""); fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to swap"); }
+  };
+
+  const handlePingOnCall = async () => {
+    try { const r = await axios.post(`${API}/on-call/ping-active`, {}, { headers }); toast.success(r.data.message); } catch { toast.error("Failed to ping"); }
+  };
+
+  const handleCheckReorder = async () => {
+    try { const r = await axios.post(`${API}/inventory/check-reorder`, {}, { headers }); toast.success(r.data.message); } catch { toast.error("Reorder check failed"); }
+  };
+
+  const isOnCall = (techId) => activeOnCall.some(s => s.tech_id === techId);
 
   const filtered = techs.filter(t => !searchQuery || t.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.email?.toLowerCase().includes(searchQuery.toLowerCase()) || (t.job_title || "").toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -547,6 +593,7 @@ export default function TechniciansPage() {
       <div className="flex items-center justify-between">
         <div><h1 className="text-3xl font-bold tracking-tight">Technicians</h1><p className="text-muted-foreground">{techs.length} team members</p></div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleCheckReorder} data-testid="check-reorder-btn"><RefreshCw className="w-4 h-4 mr-1" />Check Reorder</Button>
           <Button variant="outline" onClick={() => setShowLeaderboard(true)} data-testid="leaderboard-btn"><Trophy className="w-4 h-4 mr-1 text-yellow-500" />Leaderboard</Button>
           <Button onClick={() => { setEditingTech(null); resetForm(); setIsCreateOpen(true); }} data-testid="add-tech-btn"><Plus className="w-4 h-4 mr-1" />Add Technician</Button>
         </div>
@@ -556,6 +603,79 @@ export default function TechniciansPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input className="pl-9" placeholder="Search by name, email, or title..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="tech-search" />
       </div>
+
+      {/* ON-CALL ROSTER */}
+      {activeOnCall.length > 0 && (
+        <Card className="border-emerald-500/30 bg-emerald-500/5">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                  <PhoneCall className="w-5 h-5 text-emerald-400 animate-pulse" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-emerald-400">Currently On Call</p>
+                  <div className="flex gap-3 mt-1">
+                    {activeOnCall.map(s => (
+                      <Badge key={s.id} className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse">
+                        <PhoneCall className="w-3 h-3 mr-1" />{s.tech_name} ({s.category})
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handlePingOnCall} data-testid="ping-on-call-btn"><BellRing className="w-3 h-3 mr-1" />Ping</Button>
+                <Button size="sm" onClick={() => setOnCallDialog(true)} data-testid="schedule-on-call-btn"><Plus className="w-3 h-3 mr-1" />Schedule</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {activeOnCall.length === 0 && (
+        <Card className="border-dashed border-muted-foreground/20">
+          <CardContent className="py-3 px-4 flex items-center justify-between">
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <PhoneCall className="w-5 h-5" />
+              <span className="text-sm">No one currently on call</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setOnCallDialog(true)} data-testid="schedule-on-call-empty-btn"><Plus className="w-3 h-3 mr-1" />Schedule On-Call</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* On-Call Roster List (collapsed) */}
+      {onCallRoster.length > 0 && (
+        <details className="group">
+          <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2">
+            <Calendar className="w-4 h-4" />View Full Roster ({onCallRoster.length} shifts)
+            <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+          </summary>
+          <div className="mt-2 space-y-2">
+            {onCallRoster.slice(0, 10).map(shift => {
+              const isActive = new Date(shift.start_time) <= new Date() && new Date(shift.end_time) >= new Date();
+              return (
+                <div key={shift.id} className={`flex items-center justify-between p-3 rounded-lg border ${isActive ? "border-emerald-500/30 bg-emerald-500/5" : "bg-muted/20"}`} data-testid={`roster-shift-${shift.id}`}>
+                  <div className="flex items-center gap-3">
+                    {isActive && <PhoneCall className="w-4 h-4 text-emerald-400 animate-pulse" />}
+                    <div>
+                      <p className="text-sm font-medium">{shift.tech_name}</p>
+                      <p className="text-xs text-muted-foreground">{shift.start_time?.slice(0, 16)} - {shift.end_time?.slice(0, 16)}</p>
+                    </div>
+                    <Badge variant="outline" className="text-xs capitalize">{shift.category}</Badge>
+                    <Badge variant="outline" className="text-xs capitalize">{shift.shift_type}</Badge>
+                    {shift.swapped_from && <Badge className="bg-amber-500/20 text-amber-400 text-xs"><ArrowRightLeft className="w-3 h-3 mr-1" />Swapped</Badge>}
+                  </div>
+                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setSwapShift(shift); setSwapTechId(""); setSwapDialog(true); }}><ArrowRightLeft className="w-3 h-3 mr-1" />Swap</Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteShift(shift.id)}><XCircle className="w-3 h-3" /></Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map(tech => (
@@ -611,10 +731,11 @@ export default function TechniciansPage() {
                   <div>
                     <p className="font-semibold">{tech.name}</p>
                     <p className="text-xs text-muted-foreground">{tech.email}</p>
-                    <div className="flex gap-1 mt-1">
+                    <div className="flex gap-1 mt-1 flex-wrap">
                       {tech.job_title && <Badge variant="secondary" className="text-[10px]">{tech.job_title}</Badge>}
                       <Badge variant="outline" className="text-[10px] capitalize">{tech.role}</Badge>
                       {tech.is_admin && <Badge className="bg-amber-600 text-[10px]"><Crown className="w-2 h-2 mr-0.5" />Admin</Badge>}
+                      {isOnCall(tech.id) && <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/40 text-[10px] animate-pulse ring-1 ring-emerald-500/50" data-testid={`on-call-badge-${tech.id}`}><PhoneCall className="w-2.5 h-2.5 mr-0.5" />ON CALL</Badge>}
                     </div>
                   </div>
                 </div>
@@ -736,6 +857,69 @@ export default function TechniciansPage() {
             <div><Label>Status Message</Label><Input value={teamsData.status_message} onChange={e => setTeamsData({...teamsData, status_message: e.target.value})} placeholder="What are you working on?" data-testid="teams-status-msg" /></div>
           </div>
           <DialogFooter><Button onClick={updateTeamsStatus} data-testid="save-teams-status"><MessageSquare className="w-4 h-4 mr-1" />Update Status</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ON-CALL SCHEDULE DIALOG */}
+      <Dialog open={onCallDialog} onOpenChange={setOnCallDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" />Schedule On-Call Shift</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Technician</Label>
+              <Select value={onCallForm.tech_id || "__none"} onValueChange={v => { const t = techs.find(x => x.id === v); setOnCallForm(f => ({ ...f, tech_id: v === "__none" ? "" : v, tech_name: t?.name || "" })); }}>
+                <SelectTrigger data-testid="on-call-tech-select"><SelectValue placeholder="Select technician" /></SelectTrigger>
+                <SelectContent>{techs.map(t => <SelectItem key={t.id} value={t.id}>{t.name} - {t.job_title || t.role}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Category</Label>
+                <Select value={onCallForm.category} onValueChange={v => setOnCallForm(f => ({ ...f, category: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="general">General</SelectItem>
+                    <SelectItem value="wisp">WISP/Internet</SelectItem>
+                    <SelectItem value="workshop">Workshop/Retail</SelectItem>
+                    <SelectItem value="network">Network</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Shift Type</Label>
+                <Select value={onCallForm.shift_type} onValueChange={v => setOnCallForm(f => ({ ...f, shift_type: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="primary">Primary</SelectItem>
+                    <SelectItem value="secondary">Secondary</SelectItem>
+                    <SelectItem value="backup">Backup</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Start</Label><Input type="datetime-local" value={onCallForm.start_time} onChange={e => setOnCallForm(f => ({ ...f, start_time: e.target.value }))} data-testid="on-call-start" /></div>
+              <div><Label>End</Label><Input type="datetime-local" value={onCallForm.end_time} onChange={e => setOnCallForm(f => ({ ...f, end_time: e.target.value }))} data-testid="on-call-end" /></div>
+            </div>
+            <div><Label>Notes</Label><Input value={onCallForm.notes} onChange={e => setOnCallForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" /></div>
+          </div>
+          <DialogFooter><Button onClick={handleCreateOnCallShift} data-testid="confirm-on-call-btn"><PhoneCall className="w-4 h-4 mr-1" />Schedule & Notify</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SWAP DIALOG */}
+      <Dialog open={swapDialog} onOpenChange={setSwapDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-amber-400" />Swap On-Call Shift</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {swapShift && <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-sm">Current: <span className="font-semibold">{swapShift.tech_name}</span></p><p className="text-xs text-muted-foreground">{swapShift.start_time?.slice(0, 16)} - {swapShift.end_time?.slice(0, 16)} ({swapShift.category})</p></div>}
+            <div><Label>Swap To</Label>
+              <Select value={swapTechId || "__none"} onValueChange={v => setSwapTechId(v === "__none" ? "" : v)}>
+                <SelectTrigger data-testid="swap-tech-select"><SelectValue placeholder="Select new tech" /></SelectTrigger>
+                <SelectContent>{techs.filter(t => t.id !== swapShift?.tech_id).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">Both technicians will be notified of the swap.</p>
+          </div>
+          <DialogFooter><Button onClick={handleSwapShift} disabled={!swapTechId} data-testid="confirm-swap-btn"><ArrowRightLeft className="w-4 h-4 mr-1" />Confirm Swap</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
@@ -1019,8 +1203,6 @@ function ActivityLogTab({ activity, techName, navigate }) {
     </div>
   );
 }
-
-
 // ========== ACHIEVEMENT ICON MAPPER ==========
 const ICON_MAP = { trophy: Trophy, target: Target, zap: Zap, award: Award, crown: Crown, gem: Gem, "dollar-sign": DollarSign, "credit-card": CreditCard, banknote: DollarSign, monitor: Monitor, wifi: Wifi, calendar: Calendar, shield: Shield, star: Star, cake: Cake, rocket: Rocket, layers: Layers };
 function AchievementIcon({ icon, className = "w-4 h-4" }) {
