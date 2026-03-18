@@ -14,7 +14,7 @@ import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://nexusops-dev-1.preview.emergentagent.com"
+    BASE_URL = "https://inventory-hub-1096.preview.emergentagent.com"
 
 
 class TestAuth:
