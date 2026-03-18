@@ -88,6 +88,7 @@ export default function TicketsPage() {
   const [invoicesList, setInvoicesList] = useState([]);
   const [pushToExisting, setPushToExisting] = useState("");
   const [topTab, setTopTab] = useState("tickets");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [workshopJobs, setWorkshopJobs] = useState([]);
   const [workshopStats, setWorkshopStats] = useState({});
   const [fieldJobs, setFieldJobs] = useState([]);
@@ -122,13 +123,15 @@ export default function TicketsPage() {
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [noteCounts, setNoteCounts] = useState({});
   const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
+  const [worksheetItems, setWorksheetItems] = useState([]);
+  const [newWorksheetItem, setNewWorksheetItem] = useState("");
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, wsSRes, fjRes, fjSRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
@@ -136,6 +139,10 @@ export default function TicketsPage() {
         axios.get(`${API}/tickets/note-counts`, { headers }),
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/products`, { headers }),
+        axios.get(`${API}/workshop/jobs`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop/stats`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/field-jobs`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/stats/summary`, { headers }).catch(() => ({ data: {} })),
       ]);
       setTickets(tRes.data);
       setClients(cRes.data);
@@ -144,6 +151,10 @@ export default function TicketsPage() {
       setNoteCounts(ncRes.data);
       setDevices(dRes.data);
       setAllProducts(pRes.data);
+      setWorkshopJobs(wsRes.data || []);
+      setWorkshopStats(wsSRes.data || {});
+      setFieldJobs(fjRes.data || []);
+      setFieldStats(fjSRes.data || {});
       // Fetch active viewers for tickets
       try {
         const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
@@ -190,6 +201,11 @@ export default function TicketsPage() {
       setScripts(sRes.data);
       setTicketAttachments(attRes.data || []);
       setTicketProducts(prodRes.data || []);
+      // Fetch worksheets
+      try {
+        const wsRes2 = await axios.get(`${API}/tickets/${ticket.id}/worksheet`, { headers });
+        setWorksheetItems(wsRes2.data || []);
+      } catch { setWorksheetItems([]); }
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
@@ -441,41 +457,19 @@ export default function TicketsPage() {
     } catch { toast.error("Failed to save signature"); }
   };
 
-  const fetchWorkshop = async () => {
-    try {
-      const [jRes, sRes] = await Promise.all([
-        axios.get(`${API}/workshop/jobs`, { headers }),
-        axios.get(`${API}/workshop/stats`, { headers }),
-      ]);
-      setWorkshopJobs(jRes.data);
-      setWorkshopStats(sRes.data);
-    } catch {}
-  };
-
-  const fetchFieldJobs = async () => {
-    try {
-      const [jRes, sRes] = await Promise.all([
-        axios.get(`${API}/field-jobs`, { headers }),
-        axios.get(`${API}/field-jobs/stats/summary`, { headers }),
-      ]);
-      setFieldJobs(jRes.data);
-      setFieldStats(sRes.data);
-    } catch {}
-  };
-
-  useEffect(() => { if (topTab === "workshop") fetchWorkshop(); if (topTab === "field") fetchFieldJobs(); }, [topTab]);
+  // Workshop + Field data is now loaded in fetchTickets
 
   const handleCreateWsJob = async () => {
     try {
       const res = await axios.post(`${API}/workshop/jobs`, wsForm, { headers });
       toast.success(`Workshop job ${res.data.job_number} created`);
       setWsDialog(false); setWsForm({ customer_name: "", customer_phone: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
-      fetchWorkshop();
+      fetchTickets();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
   const handleWsStatus = async (jobId, status) => {
-    try { await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchWorkshop(); if (viewWsJob?.id === jobId) { const r = await axios.get(`${API}/workshop/jobs/${jobId}`, { headers }); setViewWsJob(r.data); } } catch { toast.error("Failed"); }
+    try { await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchTickets(); if (viewWsJob?.id === jobId) { const r = await axios.get(`${API}/workshop/jobs/${jobId}`, { headers }); setViewWsJob(r.data); } } catch { toast.error("Failed"); }
   };
 
   const handleWsTimer = async (jobId, action) => {
@@ -498,12 +492,12 @@ export default function TicketsPage() {
       const res = await axios.post(`${API}/field-jobs`, fjForm, { headers });
       toast.success(`Field job ${res.data.job_number} created`);
       setFjDialog(false); setFjForm({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
-      fetchFieldJobs();
+      fetchTickets();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
   const handleFjStatus = async (jobId, status) => {
-    try { await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchFieldJobs(); if (viewFjJob?.id === jobId) { const r = await axios.get(`${API}/field-jobs/${jobId}`, { headers }); setViewFjJob(r.data); } } catch { toast.error("Failed"); }
+    try { await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchTickets(); if (viewFjJob?.id === jobId) { const r = await axios.get(`${API}/field-jobs/${jobId}`, { headers }); setViewFjJob(r.data); } } catch { toast.error("Failed"); }
   };
 
   const handleFjChecklist = async (jobId, checklist) => {
@@ -787,9 +781,10 @@ export default function TicketsPage() {
 
             {/* Tabs: Notes, Emails, Children, Time, Audit */}
             <Tabs defaultValue="suggestions">
-              <TabsList className="w-full grid grid-cols-6">
+              <TabsList className="w-full grid grid-cols-8">
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
+                <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
                 <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
                 <TabsTrigger value="items" data-testid="items-tab"><ShoppingCart className="w-3 h-3 mr-1" />Items ({ticketProducts.length})</TabsTrigger>
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
@@ -911,6 +906,63 @@ export default function TicketsPage() {
                   </div>
                 ) : null}
               </TabsContent>
+
+              {/* WORKSHEETS TAB */}
+              <TabsContent value="worksheets" className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Add a checklist item..." value={newWorksheetItem} onChange={e => setNewWorksheetItem(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === "Enter" && newWorksheetItem.trim()) {
+                        try {
+                          await axios.post(`${API}/tickets/${viewingTicket.id}/worksheet`, { item: newWorksheetItem.trim() }, { headers });
+                          setNewWorksheetItem("");
+                          const r = await axios.get(`${API}/tickets/${viewingTicket.id}/worksheet`, { headers });
+                          setWorksheetItems(r.data || []);
+                          toast.success("Worksheet item added");
+                        } catch { toast.error("Failed to add item"); }
+                      }
+                    }} data-testid="worksheet-input" />
+                  <Button size="sm" onClick={async () => {
+                    if (!newWorksheetItem.trim()) return;
+                    try {
+                      await axios.post(`${API}/tickets/${viewingTicket.id}/worksheet`, { item: newWorksheetItem.trim() }, { headers });
+                      setNewWorksheetItem("");
+                      const r = await axios.get(`${API}/tickets/${viewingTicket.id}/worksheet`, { headers });
+                      setWorksheetItems(r.data || []);
+                      toast.success("Worksheet item added");
+                    } catch { toast.error("Failed"); }
+                  }} data-testid="add-worksheet-btn"><Plus className="w-3 h-3 mr-1" />Add</Button>
+                </div>
+                {worksheetItems.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <CheckCircle className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p>No worksheet items yet. Add checklist items to track work.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {worksheetItems.map(wi => (
+                      <div key={wi.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer ${wi.checked ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/30"}`}
+                        onClick={async () => {
+                          try {
+                            await axios.post(`${API}/tickets/${viewingTicket.id}/worksheet/check`, { item_id: wi.id, checked: !wi.checked }, { headers });
+                            const r = await axios.get(`${API}/tickets/${viewingTicket.id}/worksheet`, { headers });
+                            setWorksheetItems(r.data || []);
+                          } catch { toast.error("Failed"); }
+                        }} data-testid={`worksheet-item-${wi.id}`}>
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${wi.checked ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>
+                          {wi.checked && <CheckCircle className="w-3 h-3 text-white" />}
+                        </div>
+                        <div className="flex-1">
+                          <span className={`text-sm ${wi.checked ? "line-through text-muted-foreground" : ""}`}>{wi.item}</span>
+                          {wi.checked_by_name && <span className="text-[10px] text-muted-foreground ml-2">by {wi.checked_by_name} {wi.checked_at?.slice(0, 16)}</span>}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="text-xs text-muted-foreground pt-2">{worksheetItems.filter(w => w.checked).length} / {worksheetItems.length} completed</div>
+                  </div>
+                )}
+              </TabsContent>
+
 
               {/* UNIFIED CONVERSATION TAB */}
               <TabsContent value="conversation" className="space-y-3">
@@ -1498,6 +1550,165 @@ export default function TicketsPage() {
     );
   }
 
+  // ============ WORKSHOP DETAIL VIEW ============
+  if (viewWsJob) {
+    return (
+      <div className="space-y-4" data-testid="ws-job-detail">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => setViewWsJob(null)} data-testid="ws-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+          <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wrench className="w-4 h-4 text-purple-400" /></div>
+          <span className="font-mono font-semibold">{viewWsJob.job_number}</span>
+          <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
+        </div>
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-8 space-y-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="grid grid-cols-3 gap-3">
+                  <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
+                  <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
+                  <div><span className="text-muted-foreground block">Device</span><span className="font-medium">{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "-"}</span></div>
+                </div>
+                <Separator />
+                <div><span className="text-muted-foreground block">Serial</span><span className="font-mono">{viewWsJob.serial_number || "-"}</span></div>
+                <div><span className="text-muted-foreground block">Fault</span><span>{viewWsJob.fault_description || "-"}</span></div>
+              </CardContent>
+            </Card>
+            <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-sm">Parts Used ({viewWsJob.parts_used?.length || 0})</CardTitle><Button size="sm" variant="outline" onClick={() => setWsPartDialog(true)} data-testid="add-ws-part"><Plus className="w-3 h-3 mr-1" />Add Part</Button></div></CardHeader>
+              <CardContent className="p-0">
+                {(viewWsJob.parts_used || []).length > 0 ? (
+                  <Table><TableHeader><TableRow><TableHead>Part</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
+                    <TableBody>{(viewWsJob.parts_used || []).map(p => (
+                      <TableRow key={p.id}><TableCell className="font-medium">{p.product_name}</TableCell><TableCell className="text-right font-mono">{p.quantity}</TableCell><TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell><TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell></TableRow>
+                    ))}</TableBody>
+                  </Table>
+                ) : <div className="text-center py-6 text-muted-foreground text-sm">No parts added yet</div>}
+              </CardContent>
+            </Card>
+          </div>
+          <div className="col-span-4 space-y-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Billing</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0} min @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
+                <Separator />
+                <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
+              </CardContent>
+            </Card>
+            <Card className="border-amber-500/20"><CardContent className="py-3">
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
+              <div className="flex items-center gap-2">
+                <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
+                  {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
+                </Button>
+                <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
+                {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
+              </div>
+            </CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {Object.entries(WS_STATUSES).filter(([k]) => k !== viewWsJob.repair_status).map(([k, v]) => (
+                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)}>{v.label}</Button>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        {/* Workshop Add Part Dialog */}
+        <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">Stock will be deducted automatically.</p>
+              <Select value={wsPartProduct || "__none"} onValueChange={v => setWsPartProduct(v === "__none" ? "" : v)}>
+                <SelectTrigger data-testid="ws-part-select"><SelectValue placeholder="Select product" /></SelectTrigger>
+                <SelectContent><SelectItem value="__none">Choose...</SelectItem>{allProducts.filter(p => p.is_active !== false).map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price?.toFixed(2)} ({p.quantity_in_stock} in stock)</SelectItem>)}</SelectContent>
+              </Select>
+              <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
+            </div>
+            <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  // ============ FIELD JOB DETAIL VIEW ============
+  if (viewFjJob) {
+    return (
+      <div className="space-y-4" data-testid="fj-detail">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => setViewFjJob(null)} data-testid="fj-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+          <div className="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Wifi className="w-4 h-4 text-cyan-400" /></div>
+          <span className="font-mono font-semibold">{viewFjJob.job_number}</span>
+          <Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge>
+          <Badge variant="outline" className="text-xs capitalize">{viewFjJob.job_category}</Badge>
+        </div>
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-8 space-y-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="grid grid-cols-3 gap-3">
+                  <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
+                  <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
+                  <div><span className="text-muted-foreground block">Zone</span><Badge variant="outline">{viewFjJob.zone || "Unassigned"}</Badge></div>
+                </div>
+                <Separator />
+                <div><span className="text-muted-foreground block">Address</span><span>{viewFjJob.service_address || "-"}</span></div>
+                <div><span className="text-muted-foreground block">Description</span><span>{viewFjJob.description || "-"}</span></div>
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div><span className="text-muted-foreground block">Scheduled</span><span className="font-medium">{viewFjJob.scheduled_date} {viewFjJob.scheduled_time}</span></div>
+                  <div><span className="text-muted-foreground block">Est. Duration</span><span>{viewFjJob.estimated_duration} min</span></div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Installation Checklist</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {(viewFjJob.checklist || []).map((c, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 hover:bg-muted/30 cursor-pointer" onClick={() => {
+                    const newCl = [...viewFjJob.checklist]; newCl[i] = { ...c, checked: !c.checked };
+                    setViewFjJob({ ...viewFjJob, checklist: newCl }); handleFjChecklist(viewFjJob.id, newCl);
+                  }} data-testid={`checklist-${i}`}>
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${c.checked ? "bg-green-500 border-green-500" : "border-muted-foreground"}`}>
+                      {c.checked && <CheckCircle className="w-3 h-3 text-white" />}
+                    </div>
+                    <span className={`text-sm ${c.checked ? "line-through text-muted-foreground" : ""}`}>{c.item}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <Card className="border-cyan-500/20"><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed Test</CardTitle></CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
+                  <div><Label className="text-xs">Download (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
+                  <div><Label className="text-xs">Upload (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="col-span-4 space-y-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {Object.entries(FJ_STATUSES).filter(([k]) => k !== viewFjJob.field_status).map(([k, v]) => (
+                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)}>{v.label}</Button>
+                ))}
+              </CardContent>
+            </Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Info</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div><span className="text-muted-foreground block">Assigned</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
+                <div><span className="text-muted-foreground block">Category</span><Badge variant="outline" className="capitalize">{viewFjJob.job_category}</Badge></div>
+                <div><span className="text-muted-foreground block">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+
   // ============ LIST VIEW ============
   const openCount = tickets.filter(t => t.status === "open").length;
   const inProgressCount = tickets.filter(t => t.status === "in_progress").length;
@@ -1511,25 +1722,33 @@ export default function TicketsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Tickets & Jobs</h1>
-          <p className="text-muted-foreground">{tickets.length} tickets, {workshopJobs.length} workshop, {fieldJobs.length} field</p>
+          <p className="text-muted-foreground">{tickets.length} SLA, {workshopJobs.length} workshop, {fieldJobs.length} cabling/WISP</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
-          {topTab === "tickets" && <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New Ticket</Button>}
-          {topTab === "workshop" && <Button onClick={() => setWsDialog(true)} data-testid="create-ws-btn" className="bg-purple-600 hover:bg-purple-700"><Wrench className="w-4 h-4 mr-1" />New Workshop Job</Button>}
-          {topTab === "field" && <Button onClick={() => setFjDialog(true)} data-testid="create-fj-btn" className="bg-cyan-600 hover:bg-cyan-700"><MapPin className="w-4 h-4 mr-1" />New Field Job</Button>}
+          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New SLA Job</Button>
+          <Button onClick={() => setWsDialog(true)} data-testid="create-ws-btn" className="bg-purple-600 hover:bg-purple-700"><Wrench className="w-4 h-4 mr-1" />Workshop</Button>
+          <Button onClick={() => setFjDialog(true)} data-testid="create-fj-btn" className="bg-cyan-600 hover:bg-cyan-700"><Radio className="w-4 h-4 mr-1" />Cabling / WISP</Button>
         </div>
       </div>
 
-      {/* Top-level tabs */}
-      <Tabs value={topTab} onValueChange={setTopTab}>
-        <TabsList>
-          <TabsTrigger value="tickets" data-testid="tab-tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
-          <TabsTrigger value="workshop" data-testid="tab-workshop"><Wrench className="w-3 h-3 mr-1" />Workshop</TabsTrigger>
-          <TabsTrigger value="field" data-testid="tab-field"><MapPin className="w-3 h-3 mr-1" />Field Jobs</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="tickets">
+      {/* Type Filter Tabs */}
+      <div className="flex items-center gap-2">
+        {[
+          { val: "all", label: "All", icon: Ticket, count: tickets.length + workshopJobs.length + fieldJobs.length },
+          { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
+          { val: "workshop", label: "Workshop", icon: Wrench, count: workshopJobs.length, color: "text-purple-400" },
+          { val: "cabling_wisp", label: "Cabling / WISP", icon: Wifi, count: fieldJobs.length, color: "text-cyan-400" },
+        ].map(t => (
+          <Button key={t.val} variant={typeFilter === t.val ? "default" : "outline"} size="sm"
+            onClick={() => setTypeFilter(t.val)}
+            className={`gap-1.5 ${typeFilter === t.val ? "" : "text-muted-foreground"}`}
+            data-testid={`type-filter-${t.val}`}>
+            <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? "" : t.color || ""}`} />
+            {t.label} <span className="text-xs opacity-70">({t.count})</span>
+          </Button>
+        ))}
+      </div>
 
       {/* Stats Row */}
       <div className="grid grid-cols-6 gap-3">
@@ -1575,7 +1794,8 @@ export default function TicketsPage() {
 
       {/* Ticket Cards */}
       <div className="space-y-2">
-        {filteredTickets.map(ticket => {
+        {/* SLA Tickets */}
+        {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.map(ticket => {
           const pc = priorityConfig[ticket.priority] || priorityConfig.medium;
           const sc = statusConfig[ticket.status] || statusConfig.open;
           const hasNoNotes = noteCounts[ticket.id] === 0 && ticket.status !== "closed" && ticket.status !== "resolved";
@@ -1594,6 +1814,10 @@ export default function TicketsPage() {
             >
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
+                  {/* Type Icon */}
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
+                    <Shield className="w-4 h-4 text-blue-400" />
+                  </div>
                   {/* Ticket Number Badge */}
                   <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0" data-testid={`ticket-badge-${ticket.id}`}>
                     <div className={`relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider transition-all
@@ -1689,224 +1913,90 @@ export default function TicketsPage() {
             <Button onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); setSearchQuery(""); }}>Clear Filters</Button>
           </CardContent></Card>
         )}
-      </div>
 
-      </TabsContent>
-
-      {/* ============ WORKSHOP TAB ============ */}
-      <TabsContent value="workshop">
-        {viewWsJob ? (
-          <div className="space-y-4 mt-4" data-testid="ws-job-detail">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => setViewWsJob(null)}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-              <span className="font-mono font-semibold">{viewWsJob.job_number}</span>
-              <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
-            </div>
-            <div className="grid grid-cols-12 gap-4">
-              <div className="col-span-8 space-y-4">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div className="grid grid-cols-3 gap-3">
-                      <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
-                      <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
-                      <div><span className="text-muted-foreground block">Device</span><span className="font-medium">{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "-"}</span></div>
-                    </div>
-                    <Separator />
-                    <div><span className="text-muted-foreground block">Serial</span><span className="font-mono">{viewWsJob.serial_number || "-"}</span></div>
-                    <div><span className="text-muted-foreground block">Fault</span><span>{viewWsJob.fault_description || "-"}</span></div>
-                  </CardContent>
-                </Card>
-                {/* Parts Used */}
-                <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-sm">Parts Used ({viewWsJob.parts_used?.length || 0})</CardTitle><Button size="sm" variant="outline" onClick={() => setWsPartDialog(true)} data-testid="add-ws-part"><Plus className="w-3 h-3 mr-1" />Add Part</Button></div></CardHeader>
-                  <CardContent className="p-0">
-                    {(viewWsJob.parts_used || []).length > 0 ? (
-                      <Table><TableHeader><TableRow><TableHead>Part</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
-                        <TableBody>{(viewWsJob.parts_used || []).map(p => (
-                          <TableRow key={p.id}><TableCell className="font-medium">{p.product_name}</TableCell><TableCell className="text-right font-mono">{p.quantity}</TableCell><TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell><TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell></TableRow>
-                        ))}</TableBody>
-                      </Table>
-                    ) : <div className="text-center py-6 text-muted-foreground text-sm">No parts added yet</div>}
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="col-span-4 space-y-4">
-                {/* Billing */}
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Billing</CardTitle></CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0} min @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
-                    <Separator />
-                    <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
-                  </CardContent>
-                </Card>
-                {/* Timer */}
-                <Card className="border-amber-500/20"><CardContent className="py-3">
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
-                  <div className="flex items-center gap-2">
-                    <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
-                      {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
-                    </Button>
-                    <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
-                    {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
+        {/* Workshop Job Cards (inline in unified list) */}
+        {(typeFilter === "all" || typeFilter === "workshop") && workshopJobs.map(j => {
+          const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
+          return (
+            <Card key={`ws-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-purple-500"
+              onClick={() => setViewWsJob(j)} data-testid={`ws-job-${j.id}`}>
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-purple-500/10">
+                    <Wrench className="w-4 h-4 text-purple-400" />
                   </div>
-                </CardContent></Card>
-                {/* Status Actions */}
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {Object.entries(WS_STATUSES).filter(([k]) => k !== viewWsJob.repair_status).map(([k, v]) => (
-                      <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)}>{v.label}</Button>
-                    ))}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4 mt-4" data-testid="workshop-list">
-            {/* Workshop Stats */}
-            <div className="grid grid-cols-5 gap-3">
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wrench className="w-5 h-5 text-purple-400" /></div><div><p className="text-xs text-muted-foreground">Total Jobs</p><p className="text-xl font-bold">{workshopStats.total_jobs || 0}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Active</p><p className="text-xl font-bold">{workshopStats.active_jobs || 0}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Revenue</p><p className="text-xl font-bold">${(workshopStats.revenue_collected || 0).toLocaleString()}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Pending Rev</p><p className="text-xl font-bold">${(workshopStats.pending_revenue || 0).toLocaleString()}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Package className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Checked In</p><p className="text-xl font-bold">{workshopStats.statuses?.checked_in || 0}</p></div></div></CardContent></Card>
-            </div>
-            {/* Job List */}
-            <Card><CardContent className="p-0">
-              <Table>
-                <TableHeader><TableRow><TableHead>Job #</TableHead><TableHead>Customer</TableHead><TableHead>Device</TableHead><TableHead>Fault</TableHead><TableHead>Status</TableHead><TableHead>Tech</TableHead><TableHead className="text-right">Cost</TableHead><TableHead></TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {workshopJobs.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No workshop jobs yet</TableCell></TableRow> : workshopJobs.map(j => (
-                    <TableRow key={j.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewWsJob(j)} data-testid={`ws-job-${j.id}`}>
-                      <TableCell className="font-mono font-medium">{j.job_number}</TableCell>
-                      <TableCell className="font-medium">{j.customer_name}</TableCell>
-                      <TableCell className="text-sm">{[j.device_brand, j.device_model].filter(Boolean).join(" ") || j.device_type || "-"}</TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">{j.fault_description || "-"}</TableCell>
-                      <TableCell><Badge className={WS_STATUSES[j.repair_status]?.class + " text-xs"}>{WS_STATUSES[j.repair_status]?.label}</Badge></TableCell>
-                      <TableCell className="text-sm">{j.assigned_to_name || "-"}</TableCell>
-                      <TableCell className="text-right font-mono">${(j.total_cost || 0).toFixed(2)}</TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={async () => { await axios.delete(`${API}/workshop/jobs/${j.id}`, { headers }); fetchWorkshop(); }}><Trash2 className="w-3 h-3" /></Button></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent></Card>
-          </div>
-        )}
-      </TabsContent>
+                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0">
+                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-purple-500/10 border border-purple-500/30 text-purple-300">{j.job_number}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-medium text-sm truncate">{j.fault_description || "Workshop Job"}</p>
+                      <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">WORKSHOP</Badge>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{j.customer_name}</span>
+                      {j.device_brand && <><span className="text-muted-foreground/30">|</span><span>{j.device_brand} {j.device_model}</span></>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <Badge className={wsStatus.class + " text-[10px]"}>{wsStatus.label}</Badge>
+                    <div className="text-right w-20">
+                      <p className="text-xs text-muted-foreground">{j.assigned_to_name || <span className="text-red-400">Unassigned</span>}</p>
+                      <p className="font-mono text-xs text-green-400">${(j.total_cost || 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
 
-      {/* ============ FIELD JOBS TAB ============ */}
-      <TabsContent value="field">
-        {viewFjJob ? (
-          <div className="space-y-4 mt-4" data-testid="fj-detail">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => setViewFjJob(null)}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-              <span className="font-mono font-semibold">{viewFjJob.job_number}</span>
-              <Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge>
-              <Badge variant="outline" className="text-xs capitalize">{viewFjJob.job_category}</Badge>
-            </div>
-            <div className="grid grid-cols-12 gap-4">
-              <div className="col-span-8 space-y-4">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div className="grid grid-cols-3 gap-3">
-                      <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
-                      <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
-                      <div><span className="text-muted-foreground block">Zone</span><Badge variant="outline">{viewFjJob.zone || "Unassigned"}</Badge></div>
+        {/* Cabling/WISP Job Cards (inline in unified list) */}
+        {(typeFilter === "all" || typeFilter === "cabling_wisp") && fieldJobs.map(j => {
+          const fjStatus = FJ_STATUSES[j.field_status] || FJ_STATUSES.scheduled;
+          return (
+            <Card key={`fj-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-cyan-500"
+              onClick={() => setViewFjJob(j)} data-testid={`fj-job-${j.id}`}>
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-cyan-500/10">
+                    <Wifi className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0">
+                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">{j.job_number}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-medium text-sm truncate">{j.description || "Cabling / WISP Job"}</p>
+                      <Badge className="bg-cyan-500/10 text-cyan-400 text-[9px] border-cyan-500/30">CABLING / WISP</Badge>
                     </div>
-                    <Separator />
-                    <div><span className="text-muted-foreground block">Address</span><span>{viewFjJob.service_address || "-"}</span></div>
-                    <div><span className="text-muted-foreground block">Description</span><span>{viewFjJob.description || "-"}</span></div>
-                    <div className="grid grid-cols-2 gap-3 mt-2">
-                      <div><span className="text-muted-foreground block">Scheduled</span><span className="font-medium">{viewFjJob.scheduled_date} {viewFjJob.scheduled_time}</span></div>
-                      <div><span className="text-muted-foreground block">Est. Duration</span><span>{viewFjJob.estimated_duration} min</span></div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{j.customer_name}</span>
+                      {j.zone && <><span className="text-muted-foreground/30">|</span><span>{j.zone}</span></>}
+                      {j.service_address && <><span className="text-muted-foreground/30">|</span><span className="truncate max-w-[180px]">{j.service_address}</span></>}
                     </div>
-                  </CardContent>
-                </Card>
-                {/* Installation Checklist */}
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Installation Checklist</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {(viewFjJob.checklist || []).map((c, i) => (
-                      <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 hover:bg-muted/30 cursor-pointer" onClick={() => {
-                        const newCl = [...viewFjJob.checklist]; newCl[i] = { ...c, checked: !c.checked };
-                        setViewFjJob({ ...viewFjJob, checklist: newCl }); handleFjChecklist(viewFjJob.id, newCl);
-                      }} data-testid={`checklist-${i}`}>
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${c.checked ? "bg-green-500 border-green-500" : "border-muted-foreground"}`}>
-                          {c.checked && <CheckCircle className="w-3 h-3 text-white" />}
-                        </div>
-                        <span className={`text-sm ${c.checked ? "line-through text-muted-foreground" : ""}`}>{c.item}</span>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-                {/* Signal & Speed Test */}
-                <Card className="border-cyan-500/20"><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed Test</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
-                      <div><Label className="text-xs">Download (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
-                      <div><Label className="text-xs">Upload (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <Badge className={fjStatus.class + " text-[10px]"}>{fjStatus.label}</Badge>
+                    <div className="text-right w-20">
+                      <p className="text-xs text-muted-foreground">{j.assigned_to_name || <span className="text-red-400">Unassigned</span>}</p>
+                      <p className="text-xs text-muted-foreground/60">{j.scheduled_date || ""}</p>
                     </div>
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="col-span-4 space-y-4">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {Object.entries(FJ_STATUSES).filter(([k]) => k !== viewFjJob.field_status).map(([k, v]) => (
-                      <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)}>{v.label}</Button>
-                    ))}
-                  </CardContent>
-                </Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Info</CardTitle></CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div><span className="text-muted-foreground block">Assigned</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
-                    <div><span className="text-muted-foreground block">Category</span><Badge variant="outline" className="capitalize">{viewFjJob.job_category}</Badge></div>
-                    <div><span className="text-muted-foreground block">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4 mt-4" data-testid="field-jobs-list">
-            {/* Field Stats */}
-            <div className="grid grid-cols-5 gap-3">
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><MapPin className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Total Jobs</p><p className="text-xl font-bold">{fieldStats.total_jobs || 0}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Calendar className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Today</p><p className="text-xl font-bold">{fieldStats.today_jobs || 0}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Completed</p><p className="text-xl font-bold">{fieldStats.statuses?.completed || 0}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Radio className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Avg Signal</p><p className="text-xl font-bold">{fieldStats.avg_signal_strength || "N/A"} dBm</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wifi className="w-5 h-5 text-purple-400" /></div><div><p className="text-xs text-muted-foreground">Zones</p><p className="text-xl font-bold">{Object.keys(fieldStats.zones || {}).length}</p></div></div></CardContent></Card>
-            </div>
-            {/* Zone badges */}
-            {fieldStats.zones && Object.keys(fieldStats.zones).length > 0 && (
-              <div className="flex gap-2 flex-wrap">{Object.entries(fieldStats.zones).map(([z, c]) => <Badge key={z} variant="outline" className="text-xs"><MapPin className="w-3 h-3 mr-1" />{z}: {c}</Badge>)}</div>
-            )}
-            {/* Job List */}
-            <Card><CardContent className="p-0">
-              <Table>
-                <TableHeader><TableRow><TableHead>Job #</TableHead><TableHead>Customer</TableHead><TableHead>Category</TableHead><TableHead>Address</TableHead><TableHead>Zone</TableHead><TableHead>Scheduled</TableHead><TableHead>Status</TableHead><TableHead>Tech</TableHead><TableHead></TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {fieldJobs.length === 0 ? <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No field jobs yet</TableCell></TableRow> : fieldJobs.map(j => (
-                    <TableRow key={j.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewFjJob(j)} data-testid={`fj-job-${j.id}`}>
-                      <TableCell className="font-mono font-medium">{j.job_number}</TableCell>
-                      <TableCell className="font-medium">{j.customer_name}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs capitalize">{j.job_category}</Badge></TableCell>
-                      <TableCell className="text-sm max-w-[180px] truncate">{j.service_address || "-"}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs">{j.zone || "-"}</Badge></TableCell>
-                      <TableCell className="text-sm">{j.scheduled_date} {j.scheduled_time}</TableCell>
-                      <TableCell><Badge className={FJ_STATUSES[j.field_status]?.class + " text-xs"}>{FJ_STATUSES[j.field_status]?.label}</Badge></TableCell>
-                      <TableCell className="text-sm">{j.assigned_to_name || "-"}</TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={async () => { await axios.delete(`${API}/field-jobs/${j.id}`, { headers }); fetchFieldJobs(); }}><Trash2 className="w-3 h-3" /></Button></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent></Card>
-          </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {/* Empty state */}
+        {typeFilter !== "all" && filteredTickets.length === 0 && workshopJobs.length === 0 && fieldJobs.length === 0 && (
+          <Card className="border-dashed"><CardContent className="py-12 text-center">
+            <Ticket className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
+            <p className="text-muted-foreground mb-3">No items match your filters</p>
+          </CardContent></Card>
         )}
-      </TabsContent>
-      </Tabs>
+      </div>
 
       {/* CREATE TICKET DIALOG - Syncro/SuperOps Style */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -2106,7 +2196,7 @@ export default function TicketsPage() {
       {/* CREATE FIELD JOB DIALOG */}
       <Dialog open={fjDialog} onOpenChange={setFjDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><MapPin className="w-5 h-5 text-cyan-400" />New Field Job</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Radio className="w-5 h-5 text-cyan-400" />New Cabling / WISP Job</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Customer Name</Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} data-testid="fj-customer" /></div>
@@ -2143,25 +2233,10 @@ export default function TicketsPage() {
               </div>
             </div>
           </div>
-          <DialogFooter><Button onClick={handleCreateFjJob} data-testid="create-fj-submit"><MapPin className="w-4 h-4 mr-1" />Create Field Job</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleCreateFjJob} data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Create Cabling / WISP Job</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* WORKSHOP ADD PART DIALOG */}
-      <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">Stock will be deducted automatically.</p>
-            <Select value={wsPartProduct || "__none"} onValueChange={v => setWsPartProduct(v === "__none" ? "" : v)}>
-              <SelectTrigger data-testid="ws-part-select"><SelectValue placeholder="Select product" /></SelectTrigger>
-              <SelectContent><SelectItem value="__none">Choose...</SelectItem>{allProducts.filter(p => p.is_active !== false).map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price?.toFixed(2)} ({p.quantity_in_stock} in stock)</SelectItem>)}</SelectContent>
-            </Select>
-            <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
-          </div>
-          <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

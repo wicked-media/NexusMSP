@@ -32,7 +32,9 @@ import {
   Wifi,
   BookOpen,
   Brain,
-  Trash2
+  Trash2,
+  Tag,
+  Wrench
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -62,6 +64,8 @@ export default function SettingsPage() {
   const [syncroSaving, setSyncroSaving] = useState(false);
   const [aiConfig, setAiConfig] = useState({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" });
   const [aiSaving, setAiSaving] = useState(false);
+  const [jobNumbering, setJobNumbering] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
+  const [jnSaving, setJnSaving] = useState(false);
   const [emailSig, setEmailSig] = useState("");
   const [sigSaving, setSigSaving] = useState(false);
   const [cannedResponses, setCannedResponses] = useState([]);
@@ -72,7 +76,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -82,6 +86,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/hudu`, { headers }),
           axios.get(`${API}/ai/config`, { headers }),
           axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
+          axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" } })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -92,6 +97,7 @@ export default function SettingsPage() {
         setHudu(huduRes.data);
         if (aiRes.data.provider) setAiConfig(aiRes.data);
         setSyncro(syncroRes.data);
+        if (jnRes.data) setJobNumbering(jnRes.data);
         // Load email signature and canned responses
         try {
           const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
@@ -112,6 +118,15 @@ export default function SettingsPage() {
     await new Promise(resolve => setTimeout(resolve, 500));
     toast.success("Profile updated successfully");
     setLoading(false);
+  };
+
+  const handleSaveJobNumbering = async () => {
+    setJnSaving(true);
+    try {
+      await axios.put(`${API}/settings/job-numbering`, jobNumbering, { headers });
+      toast.success("Job numbering settings saved");
+    } catch { toast.error("Failed to save job numbering"); }
+    finally { setJnSaving(false); }
   };
 
   return (
@@ -856,6 +871,39 @@ export default function SettingsPage() {
               </>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Job Numbering */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Tag className="w-5 h-5 text-primary" />
+            <CardTitle>Job Numbering</CardTitle>
+          </div>
+          <CardDescription>Configure the prefix for ticket numbers across different job types</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" />SLA Prefix</Label>
+              <Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.sla_prefix || "SLA-"}00001</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Workshop Prefix</Label>
+              <Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.workshop_prefix || "WS-"}00001</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Cabling / WISP Prefix</Label>
+              <Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.cabling_prefix || "CW-"}00001</p>
+            </div>
+          </div>
+          <Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">
+            {jnSaving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : "Save Prefixes"}
+          </Button>
         </CardContent>
       </Card>
     </div>

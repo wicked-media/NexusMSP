@@ -254,3 +254,247 @@ async def get_splynx_overview(current_user: dict = Depends(get_current_user)):
         "suspended_services": suspended_services,
         "clients": clients_data,
     }
+
+
+# ============== NON-PAYMENT SYNC & AUTO-SUSPEND ==============
+
+@router.get("/splynx/non-payment")
+async def get_non_payment_customers(current_user: dict = Depends(get_current_user)):
+    """Get all linked customers with overdue invoices or suspended services"""
+    config = await get_splynx_config()
+    links = await db.splynx_links.find({"linked": True}, {"_id": 0}).to_list(1000)
+    if not config or not links:
+        return {"customers": [], "total_overdue": 0, "total_suspended": 0, "auto_suspend_enabled": False}
+
+    settings = await db.settings.find_one({"type": "splynx_suspend"}, {"_id": 0})
+    auto_enabled = settings.get("auto_suspend_enabled", False) if settings else False
+    grace_days = settings.get("grace_days", 14) if settings else 14
+
+    overdue_customers = []
+    total_overdue_amount = 0
+    total_suspended = 0
+
+    for link in links:
+        client = await db.clients.find_one({"id": link["client_id"]}, {"_id": 0, "id": 1, "name": 1, "email": 1})
+        if not client:
+            continue
+        sid = link["splynx_customer_id"]
+        try:
+            invoices = await splynx_get(config, "admin/finance/invoices", params={
+                "main_attributes[customer_id]": sid,
+                "main_attributes[status]": "unpaid",
+                "limit": "50"
+            })
+            if not invoices or not isinstance(invoices, list):
+                invoices = []
+            unpaid = [inv for inv in invoices if inv.get("status", "").lower() in ("unpaid", "overdue")]
+            if not unpaid:
+                continue
+
+            overdue_amount = sum(float(inv.get("total", 0)) for inv in unpaid)
+            oldest_due = min((inv.get("date_due", "") for inv in unpaid if inv.get("date_due")), default="")
+
+            # Check suspension state
+            local_record = await db.splynx_suspensions.find_one({"client_id": client["id"]}, {"_id": 0})
+            is_suspended = local_record.get("suspended", False) if local_record else False
+
+            overdue_customers.append({
+                "client_id": client["id"],
+                "client_name": client["name"],
+                "client_email": client.get("email", ""),
+                "splynx_id": sid,
+                "unpaid_invoices": len(unpaid),
+                "overdue_amount": round(overdue_amount, 2),
+                "oldest_due_date": oldest_due,
+                "is_suspended": is_suspended,
+                "suspended_at": local_record.get("suspended_at") if local_record else None,
+                "suspended_by": local_record.get("suspended_by") if local_record else None,
+            })
+            total_overdue_amount += overdue_amount
+            if is_suspended:
+                total_suspended += 1
+        except Exception:
+            pass
+
+    overdue_customers.sort(key=lambda x: (-x["overdue_amount"]))
+    return {
+        "customers": overdue_customers,
+        "total_overdue": round(total_overdue_amount, 2),
+        "total_overdue_count": len(overdue_customers),
+        "total_suspended": total_suspended,
+        "auto_suspend_enabled": auto_enabled,
+        "grace_days": grace_days,
+    }
+
+@router.post("/splynx/suspend/{client_id}")
+async def suspend_client(client_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+    """Suspend a client's services in Splynx and record locally"""
+    config = await get_splynx_config()
+    link = await db.splynx_links.find_one({"client_id": client_id}, {"_id": 0})
+    if not link or not link.get("splynx_customer_id"):
+        raise HTTPException(status_code=400, detail="Client not linked to Splynx")
+    sid = link["splynx_customer_id"]
+
+    # Try to suspend in Splynx
+    suspended_in_splynx = False
+    try:
+        if config:
+            url = config["url"].rstrip("/")
+            headers = build_auth_header(config)
+            import httpx as hx
+            async with hx.AsyncClient(timeout=30, verify=False) as cl:
+                resp = await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
+                    headers=headers, json={"status": "disabled"})
+                suspended_in_splynx = resp.status_code == 200
+    except Exception:
+        pass
+
+    await db.splynx_suspensions.update_one({"client_id": client_id}, {"$set": {
+        "client_id": client_id, "splynx_id": sid,
+        "suspended": True, "suspended_in_splynx": suspended_in_splynx,
+        "suspended_at": datetime.now(timezone.utc).isoformat(),
+        "suspended_by": current_user.get("name", ""),
+        "reason": data.get("reason", "Non-payment"),
+    }}, upsert=True)
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    import uuid
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": current_user["id"],
+        "title": f"Service Suspended: {client.get('name', client_id) if client else client_id}",
+        "message": f"Client suspended for non-payment.{' Synced to Splynx.' if suspended_in_splynx else ' Manual sync to Splynx may be needed.'}",
+        "severity": "critical", "type": "service_suspend", "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"message": "Client suspended", "synced_to_splynx": suspended_in_splynx}
+
+@router.post("/splynx/unsuspend/{client_id}")
+async def unsuspend_client(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Unsuspend a client's services"""
+    config = await get_splynx_config()
+    link = await db.splynx_links.find_one({"client_id": client_id}, {"_id": 0})
+    sid = link.get("splynx_customer_id", "") if link else ""
+
+    unsuspended_in_splynx = False
+    try:
+        if config and sid:
+            url = config["url"].rstrip("/")
+            headers = build_auth_header(config)
+            import httpx as hx
+            async with hx.AsyncClient(timeout=30, verify=False) as cl:
+                resp = await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
+                    headers=headers, json={"status": "active"})
+                unsuspended_in_splynx = resp.status_code == 200
+    except Exception:
+        pass
+
+    await db.splynx_suspensions.update_one({"client_id": client_id}, {"$set": {
+        "suspended": False, "unsuspended_at": datetime.now(timezone.utc).isoformat(),
+        "unsuspended_by": current_user.get("name", ""),
+    }})
+    return {"message": "Client unsuspended", "synced_to_splynx": unsuspended_in_splynx}
+
+@router.get("/settings/splynx-suspend")
+async def get_suspend_settings(current_user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"type": "splynx_suspend"}, {"_id": 0})
+    return doc or {"type": "splynx_suspend", "auto_suspend_enabled": False, "grace_days": 14, "notify_before_suspend_days": 7, "notify_client": True}
+
+@router.put("/settings/splynx-suspend")
+async def update_suspend_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    data["type"] = "splynx_suspend"
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one({"type": "splynx_suspend"}, {"$set": data}, upsert=True)
+    return {"message": "Suspend settings updated"}
+
+@router.post("/splynx/auto-suspend-check")
+async def auto_suspend_check(current_user: dict = Depends(get_current_user)):
+    """Check all overdue customers and auto-suspend if enabled and past grace period"""
+    settings = await db.settings.find_one({"type": "splynx_suspend"}, {"_id": 0})
+    if not settings or not settings.get("auto_suspend_enabled"):
+        return {"message": "Auto-suspend disabled", "suspended": 0, "warned": 0}
+
+    grace_days = settings.get("grace_days", 14)
+    warn_days = settings.get("notify_before_suspend_days", 7)
+    config = await get_splynx_config()
+    links = await db.splynx_links.find({"linked": True}, {"_id": 0}).to_list(1000)
+
+    suspended_count = 0
+    warned_count = 0
+
+    for link in links:
+        client = await db.clients.find_one({"id": link["client_id"]}, {"_id": 0, "id": 1, "name": 1})
+        if not client:
+            continue
+        sid = link["splynx_customer_id"]
+        already = await db.splynx_suspensions.find_one({"client_id": client["id"], "suspended": True}, {"_id": 0})
+        if already:
+            continue
+
+        try:
+            if not config:
+                continue
+            invoices = await splynx_get(config, "admin/finance/invoices", params={
+                "main_attributes[customer_id]": sid,
+                "main_attributes[status]": "unpaid",
+                "limit": "10"
+            })
+            if not invoices or not isinstance(invoices, list):
+                continue
+            unpaid = [inv for inv in invoices if inv.get("status", "").lower() in ("unpaid", "overdue")]
+            if not unpaid:
+                continue
+
+            oldest_due = min((inv.get("date_due", "") for inv in unpaid if inv.get("date_due")), default="")
+            if not oldest_due:
+                continue
+
+            from datetime import datetime as dt
+            try:
+                due_date = dt.strptime(oldest_due, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            days_overdue = (datetime.now(timezone.utc) - due_date).days
+
+            import uuid
+            if days_overdue >= grace_days:
+                # Auto-suspend
+                try:
+                    url = config["url"].rstrip("/")
+                    headers = build_auth_header(config)
+                    import httpx as hx
+                    async with hx.AsyncClient(timeout=30, verify=False) as cl:
+                        await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
+                            headers=headers, json={"status": "disabled"})
+                except Exception:
+                    pass
+                await db.splynx_suspensions.update_one({"client_id": client["id"]}, {"$set": {
+                    "client_id": client["id"], "splynx_id": sid, "suspended": True,
+                    "suspended_at": datetime.now(timezone.utc).isoformat(),
+                    "suspended_by": "Auto-Suspend System", "reason": f"Overdue {days_overdue} days",
+                }}, upsert=True)
+                admins = await db.users.find({"$or": [{"role": "admin"}, {"is_admin": True}]}, {"_id": 0, "id": 1}).to_list(50)
+                for a in admins:
+                    await db.notifications.insert_one({
+                        "id": str(uuid.uuid4()), "user_id": a["id"],
+                        "title": f"AUTO-SUSPENDED: {client['name']}",
+                        "message": f"Services suspended after {days_overdue} days overdue. Total unpaid: {len(unpaid)} invoices.",
+                        "severity": "critical", "type": "auto_suspend", "read": False,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                suspended_count += 1
+            elif days_overdue >= (grace_days - warn_days):
+                # Send warning
+                admins = await db.users.find({"$or": [{"role": "admin"}, {"is_admin": True}]}, {"_id": 0, "id": 1}).to_list(50)
+                for a in admins:
+                    await db.notifications.insert_one({
+                        "id": str(uuid.uuid4()), "user_id": a["id"],
+                        "title": f"Payment Warning: {client['name']}",
+                        "message": f"Client is {days_overdue} days overdue. Auto-suspend in {grace_days - days_overdue} days.",
+                        "severity": "warning", "type": "payment_warning", "read": False,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                warned_count += 1
+        except Exception:
+            pass
+
+    return {"message": f"Auto-suspend check complete. {suspended_count} suspended, {warned_count} warned.", "suspended": suspended_count, "warned": warned_count}

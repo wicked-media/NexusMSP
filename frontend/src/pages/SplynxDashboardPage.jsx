@@ -8,12 +8,21 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, Wifi, WifiOff, AlertTriangle, CheckCircle, Search,
-  Activity, Users, Server, RefreshCw, ArrowDownRight
+  Activity, Users, Server, RefreshCw, ArrowDownRight, DollarSign,
+  Ban, ShieldAlert, Settings, Bell, Play
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend
 } from "recharts";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 
 const STATUS_COLORS = {
   active: "#10b981",
@@ -29,18 +38,60 @@ export default function SplynxDashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [mainTab, setMainTab] = useState("overview");
+  const [nonPayment, setNonPayment] = useState(null);
+  const [suspendSettings, setSuspendSettings] = useState(null);
+  const [settingsDialog, setSettingsDialog] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/splynx/overview`, { headers });
+      const [res, npRes, ssRes] = await Promise.all([
+        axios.get(`${API}/splynx/overview`, { headers }),
+        axios.get(`${API}/splynx/non-payment`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/settings/splynx-suspend`, { headers }).catch(() => ({ data: null })),
+      ]);
       setData(res.data);
+      setNonPayment(npRes.data);
+      setSuspendSettings(ssRes.data);
     } catch {
       setData({ linked_clients: 0, total_services: 0, active_services: 0, suspended_services: 0, clients: [] });
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSuspend = async (clientId) => {
+    try {
+      const r = await axios.post(`${API}/splynx/suspend/${clientId}`, { reason: "Non-payment" }, { headers });
+      toast.success(r.data.message);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleUnsuspend = async (clientId) => {
+    try {
+      const r = await axios.post(`${API}/splynx/unsuspend/${clientId}`, {}, { headers });
+      toast.success(r.data.message);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleAutoSuspendCheck = async () => {
+    try {
+      const r = await axios.post(`${API}/splynx/auto-suspend-check`, {}, { headers });
+      toast.success(r.data.message);
+      fetchData();
+    } catch { toast.error("Auto-suspend check failed"); }
+  };
+
+  const handleSaveSuspendSettings = async () => {
+    try {
+      await axios.put(`${API}/settings/splynx-suspend`, suspendSettings, { headers });
+      toast.success("Settings saved");
+      setSettingsDialog(false);
+    } catch { toast.error("Failed"); }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -89,10 +140,26 @@ export default function SplynxDashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight">ISP Service Health</h1>
           <p className="text-muted-foreground">Splynx integration overview across all linked clients</p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-splynx">
-          <RefreshCw className="w-4 h-4 mr-1" />Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-splynx">
+            <RefreshCw className="w-4 h-4 mr-1" />Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setSettingsDialog(true)} data-testid="suspend-settings-btn">
+            <Settings className="w-4 h-4 mr-1" />Suspend Settings
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleAutoSuspendCheck} className="border-red-500/30 text-red-400 hover:bg-red-500/10" data-testid="auto-suspend-check-btn">
+            <ShieldAlert className="w-4 h-4 mr-1" />Auto-Suspend Check
+          </Button>
+        </div>
       </div>
+
+      <Tabs value={mainTab} onValueChange={setMainTab}>
+        <TabsList>
+          <TabsTrigger value="overview" data-testid="tab-splynx-overview"><Activity className="w-3 h-3 mr-1" />Service Health</TabsTrigger>
+          <TabsTrigger value="nonpayment" data-testid="tab-splynx-nonpayment"><DollarSign className="w-3 h-3 mr-1" />Non-Payment {nonPayment?.total_overdue_count > 0 && <Badge className="ml-1 bg-red-500/20 text-red-400 text-[10px] px-1">{nonPayment.total_overdue_count}</Badge>}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
 
       {/* Top Stats */}
       <div className="grid grid-cols-5 gap-3">
@@ -319,6 +386,101 @@ export default function SplynxDashboardPage() {
           </ScrollArea>
         </CardContent>
       </Card>
+
+      </TabsContent>
+
+      {/* NON-PAYMENT TAB */}
+      <TabsContent value="nonpayment">
+        <div className="space-y-4 mt-4">
+          {/* Stats */}
+          <div className="grid grid-cols-4 gap-3">
+            <Card className="border-red-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Total Overdue</p><p className="text-xl font-bold text-red-400">${nonPayment?.total_overdue?.toLocaleString() || 0}</p></div></div></CardContent></Card>
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Overdue Customers</p><p className="text-xl font-bold">{nonPayment?.total_overdue_count || 0}</p></div></div></CardContent></Card>
+            <Card className="border-red-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><Ban className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Suspended</p><p className="text-xl font-bold text-red-400">{nonPayment?.total_suspended || 0}</p></div></div></CardContent></Card>
+            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><ShieldAlert className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Auto-Suspend</p><p className="text-xl font-bold">{nonPayment?.auto_suspend_enabled ? "ON" : "OFF"}</p></div></div></CardContent></Card>
+          </div>
+
+          {/* Customer Table */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-red-400" />Overdue Customers — Non-Payment Tracker</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow><TableHead>Customer</TableHead><TableHead>Email</TableHead><TableHead className="text-right">Unpaid Invoices</TableHead><TableHead className="text-right">Overdue Amount</TableHead><TableHead>Oldest Due</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(nonPayment?.customers || []).length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No overdue customers</TableCell></TableRow>
+                  ) : (nonPayment?.customers || []).map(c => (
+                    <TableRow key={c.client_id} className={c.is_suspended ? "bg-red-500/5" : ""} data-testid={`np-customer-${c.client_id}`}>
+                      <TableCell className="font-medium">{c.client_name}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{c.client_email || "-"}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-amber-400">{c.unpaid_invoices}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-red-400">${c.overdue_amount?.toFixed(2)}</TableCell>
+                      <TableCell className="text-sm">{c.oldest_due_date || "-"}</TableCell>
+                      <TableCell>
+                        {c.is_suspended ? (
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><Ban className="w-3 h-3 mr-1" />Suspended</Badge>
+                        ) : (
+                          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {c.is_suspended ? (
+                          <Button size="sm" variant="outline" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => handleUnsuspend(c.client_id)} data-testid={`unsuspend-${c.client_id}`}>
+                            <Play className="w-3 h-3 mr-1" />Unsuspend
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="text-red-400 border-red-500/30 hover:bg-red-500/10" onClick={() => handleSuspend(c.client_id)} data-testid={`suspend-${c.client_id}`}>
+                            <Ban className="w-3 h-3 mr-1" />Suspend
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card className="border-blue-500/20">
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">
+                <strong>How it works:</strong> Non-payment data is synced from Splynx invoices. When auto-suspend is enabled,
+                customers past the grace period are automatically suspended in Splynx and notifications are sent to admins.
+                Grace period: <strong>{nonPayment?.grace_days || 14} days</strong>.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+      </Tabs>
+
+      {/* SUSPEND SETTINGS DIALOG */}
+      <Dialog open={settingsDialog} onOpenChange={setSettingsDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings className="w-5 h-5" />Auto-Suspend Settings</DialogTitle></DialogHeader>
+          {suspendSettings && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/20">
+                <div><Label>Auto-Suspend Enabled</Label><p className="text-xs text-muted-foreground">Automatically suspend overdue customers past grace period</p></div>
+                <Switch checked={suspendSettings.auto_suspend_enabled || false} onCheckedChange={v => setSuspendSettings({ ...suspendSettings, auto_suspend_enabled: v })} data-testid="auto-suspend-toggle" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Grace Period (days)</Label><Input type="number" value={suspendSettings.grace_days || 14} onChange={e => setSuspendSettings({ ...suspendSettings, grace_days: parseInt(e.target.value) || 14 })} data-testid="grace-days-input" /></div>
+                <div><Label>Warn Before (days)</Label><Input type="number" value={suspendSettings.notify_before_suspend_days || 7} onChange={e => setSuspendSettings({ ...suspendSettings, notify_before_suspend_days: parseInt(e.target.value) || 7 })} /></div>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/20">
+                <div><Label>Notify Client</Label><p className="text-xs text-muted-foreground">Send notification to client before suspension</p></div>
+                <Switch checked={suspendSettings.notify_client || false} onCheckedChange={v => setSuspendSettings({ ...suspendSettings, notify_client: v })} />
+              </div>
+            </div>
+          )}
+          <DialogFooter><Button onClick={handleSaveSuspendSettings} data-testid="save-suspend-settings"><CheckCircle className="w-4 h-4 mr-1" />Save Settings</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -125,9 +125,11 @@ async def get_workshop_jobs(status: Optional[str] = None, current_user: dict = D
 @router.post("/workshop/jobs")
 async def create_workshop_job(data: dict, current_user: dict = Depends(get_current_user)):
     count = await db.workshop_jobs.count_documents({})
+    numbering = await db.settings.find_one({"type": "job_numbering"}, {"_id": 0})
+    ws_prefix = numbering.get("workshop_prefix", "WS-") if numbering else "WS-"
     job = {
         "id": str(uuid.uuid4()),
-        "job_number": f"WS-{count + 1001:04d}",
+        "job_number": f"{ws_prefix}{count + 1001:04d}",
         "job_type": "workshop",
         "customer_name": data.get("customer_name", ""),
         "customer_phone": data.get("customer_phone", ""),
@@ -366,9 +368,11 @@ async def get_field_job_stats(current_user: dict = Depends(get_current_user)):
 @router.post("/field-jobs")
 async def create_field_job(data: dict, current_user: dict = Depends(get_current_user)):
     count = await db.field_jobs.count_documents({})
+    numbering = await db.settings.find_one({"type": "job_numbering"}, {"_id": 0})
+    cw_prefix = numbering.get("cabling_prefix", "CW-") if numbering else "CW-"
     job = {
         "id": str(uuid.uuid4()),
-        "job_number": f"FJ-{count + 1001:04d}",
+        "job_number": f"{cw_prefix}{count + 1001:04d}",
         "job_type": "field",
         "job_category": data.get("job_category", "installation"),
         "customer_name": data.get("customer_name", ""),
@@ -518,3 +522,28 @@ async def check_reorder_alerts(current_user: dict = Depends(get_current_user)):
             await db.purchase_orders.insert_one(po)
             draft_pos_created += 1
     return {"message": f"Reorder check complete. {alerts_created} alerts, {draft_pos_created} draft POs created."}
+
+
+# ============== JOB NUMBERING SETTINGS ==============
+
+@router.get("/settings/job-numbering")
+async def get_job_numbering(current_user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"type": "job_numbering"}, {"_id": 0})
+    return doc or {
+        "type": "job_numbering",
+        "sla_prefix": "SLA-",
+        "workshop_prefix": "WS-",
+        "cabling_prefix": "CW-",
+        "sla_next": 1001,
+        "workshop_next": 1001,
+        "cabling_next": 1001,
+    }
+
+@router.put("/settings/job-numbering")
+async def update_job_numbering(data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"sla_prefix", "workshop_prefix", "cabling_prefix", "sla_next", "workshop_next", "cabling_next"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    update["type"] = "job_numbering"
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one({"type": "job_numbering"}, {"$set": update}, upsert=True)
+    return {"message": "Job numbering settings updated"}

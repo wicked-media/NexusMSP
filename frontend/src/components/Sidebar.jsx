@@ -205,6 +205,7 @@ const navGroups = [
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
+      { path: "/estimates", icon: FileText, label: "Estimates" },
       { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
     ]

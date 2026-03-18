@@ -22,7 +22,8 @@ import {
   AlertCircle, ExternalLink, Shield, Trophy, History, BarChart3, Award,
   Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff,
   Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
-  Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing
+  Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
+  Radio, Cable, ServerCrash, Siren, Settings
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
@@ -353,6 +354,19 @@ export default function TechniciansPage() {
 
   const isOnCall = (techId) => activeOnCall.some(s => s.tech_id === techId);
 
+  const ON_CALL_CATEGORIES = {
+    sla: { label: "SLA", icon: Shield, color: "emerald", bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
+    wisp: { label: "WISP", icon: Wifi, color: "cyan", bg: "bg-cyan-500/20", text: "text-cyan-400", border: "border-cyan-500/40", ring: "ring-cyan-500/50", glow: "shadow-cyan-500/20 shadow-lg" },
+    workshop: { label: "WORKSHOP", icon: Wrench, color: "purple", bg: "bg-purple-500/20", text: "text-purple-400", border: "border-purple-500/40", ring: "ring-purple-500/50", glow: "shadow-purple-500/20 shadow-lg" },
+    cabling: { label: "CABLING", icon: Cable, color: "amber", bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40", ring: "ring-amber-500/50", glow: "shadow-amber-500/20 shadow-lg" },
+    network: { label: "NETWORK", icon: Radio, color: "blue", bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/40", ring: "ring-blue-500/50", glow: "shadow-blue-500/20 shadow-lg" },
+    emergency: { label: "EMERGENCY", icon: Siren, color: "red", bg: "bg-red-500/20", text: "text-red-400", border: "border-red-500/40", ring: "ring-red-500/50", glow: "shadow-red-500/20 shadow-lg" },
+    general: { label: "ON CALL", icon: PhoneCall, color: "emerald", bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
+  };
+
+  const getOnCallConfig = (category) => ON_CALL_CATEGORIES[category] || ON_CALL_CATEGORIES.general;
+  const getOnCallShift = (techId) => activeOnCall.find(s => s.tech_id === techId);
+
   const filtered = techs.filter(t => !searchQuery || t.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.email?.toLowerCase().includes(searchQuery.toLowerCase()) || (t.job_title || "").toLowerCase().includes(searchQuery.toLowerCase()));
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -606,26 +620,36 @@ export default function TechniciansPage() {
 
       {/* ON-CALL ROSTER */}
       {activeOnCall.length > 0 && (
-        <Card className="border-emerald-500/30 bg-emerald-500/5">
+        <Card className="border-emerald-500/30 bg-gradient-to-r from-emerald-500/5 via-transparent to-cyan-500/5 overflow-hidden">
           <CardContent className="py-3 px-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                  <PhoneCall className="w-5 h-5 text-emerald-400 animate-pulse" />
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                    <PhoneCall className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full animate-ping" />
+                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-emerald-400">Currently On Call</p>
-                  <div className="flex gap-3 mt-1">
-                    {activeOnCall.map(s => (
-                      <Badge key={s.id} className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse">
-                        <PhoneCall className="w-3 h-3 mr-1" />{s.tech_name} ({s.category})
-                      </Badge>
-                    ))}
+                  <p className="text-sm font-bold tracking-wide">CURRENTLY ON CALL</p>
+                  <div className="flex gap-2 mt-1.5 flex-wrap">
+                    {activeOnCall.map(s => {
+                      const cfg = getOnCallConfig(s.category);
+                      const Icon = cfg.icon;
+                      return (
+                        <div key={s.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${cfg.bg} ${cfg.border} border ring-1 ${cfg.ring} ${cfg.glow} animate-pulse`}>
+                          <Icon className={`w-3.5 h-3.5 ${cfg.text}`} />
+                          <span className={`text-xs font-bold ${cfg.text} tracking-wider`}>{cfg.label}</span>
+                          <span className="text-xs font-semibold text-foreground">{s.tech_name}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handlePingOnCall} data-testid="ping-on-call-btn"><BellRing className="w-3 h-3 mr-1" />Ping</Button>
+                <Button variant="outline" size="sm" onClick={handlePingOnCall} data-testid="ping-on-call-btn" className="border-emerald-500/30 hover:bg-emerald-500/10"><BellRing className="w-3 h-3 mr-1 text-emerald-400" />Ping All</Button>
                 <Button size="sm" onClick={() => setOnCallDialog(true)} data-testid="schedule-on-call-btn"><Plus className="w-3 h-3 mr-1" />Schedule</Button>
               </div>
             </div>
@@ -636,7 +660,7 @@ export default function TechniciansPage() {
         <Card className="border-dashed border-muted-foreground/20">
           <CardContent className="py-3 px-4 flex items-center justify-between">
             <div className="flex items-center gap-3 text-muted-foreground">
-              <PhoneCall className="w-5 h-5" />
+              <PhoneCall className="w-5 h-5 opacity-40" />
               <span className="text-sm">No one currently on call</span>
             </div>
             <Button size="sm" variant="outline" onClick={() => setOnCallDialog(true)} data-testid="schedule-on-call-empty-btn"><Plus className="w-3 h-3 mr-1" />Schedule On-Call</Button>
@@ -654,15 +678,18 @@ export default function TechniciansPage() {
           <div className="mt-2 space-y-2">
             {onCallRoster.slice(0, 10).map(shift => {
               const isActive = new Date(shift.start_time) <= new Date() && new Date(shift.end_time) >= new Date();
+              const cfg = getOnCallConfig(shift.category);
+              const Icon = cfg.icon;
               return (
-                <div key={shift.id} className={`flex items-center justify-between p-3 rounded-lg border ${isActive ? "border-emerald-500/30 bg-emerald-500/5" : "bg-muted/20"}`} data-testid={`roster-shift-${shift.id}`}>
+                <div key={shift.id} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isActive ? `${cfg.border} ${cfg.bg} ${cfg.glow}` : "bg-muted/20"}`} data-testid={`roster-shift-${shift.id}`}>
                   <div className="flex items-center gap-3">
-                    {isActive && <PhoneCall className="w-4 h-4 text-emerald-400 animate-pulse" />}
+                    {isActive && <Icon className={`w-4 h-4 ${cfg.text} animate-pulse`} />}
+                    {!isActive && <Clock className="w-4 h-4 text-muted-foreground" />}
                     <div>
                       <p className="text-sm font-medium">{shift.tech_name}</p>
                       <p className="text-xs text-muted-foreground">{shift.start_time?.slice(0, 16)} - {shift.end_time?.slice(0, 16)}</p>
                     </div>
-                    <Badge variant="outline" className="text-xs capitalize">{shift.category}</Badge>
+                    <Badge className={`${cfg.bg} ${cfg.text} ${cfg.border} text-xs`}><Icon className="w-3 h-3 mr-1" />{cfg.label}</Badge>
                     <Badge variant="outline" className="text-xs capitalize">{shift.shift_type}</Badge>
                     {shift.swapped_from && <Badge className="bg-amber-500/20 text-amber-400 text-xs"><ArrowRightLeft className="w-3 h-3 mr-1" />Swapped</Badge>}
                   </div>
@@ -735,7 +762,12 @@ export default function TechniciansPage() {
                       {tech.job_title && <Badge variant="secondary" className="text-[10px]">{tech.job_title}</Badge>}
                       <Badge variant="outline" className="text-[10px] capitalize">{tech.role}</Badge>
                       {tech.is_admin && <Badge className="bg-amber-600 text-[10px]"><Crown className="w-2 h-2 mr-0.5" />Admin</Badge>}
-                      {isOnCall(tech.id) && <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/40 text-[10px] animate-pulse ring-1 ring-emerald-500/50" data-testid={`on-call-badge-${tech.id}`}><PhoneCall className="w-2.5 h-2.5 mr-0.5" />ON CALL</Badge>}
+                      {isOnCall(tech.id) && (() => {
+                        const shift = getOnCallShift(tech.id);
+                        const cfg = getOnCallConfig(shift?.category);
+                        const Icon = cfg.icon;
+                        return <Badge className={`${cfg.bg} ${cfg.text} ${cfg.border} text-[10px] animate-pulse ring-1 ${cfg.ring} ${cfg.glow}`} data-testid={`on-call-badge-${tech.id}`}><Icon className="w-2.5 h-2.5 mr-0.5" />{cfg.label}</Badge>;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -877,8 +909,10 @@ export default function TechniciansPage() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="general">General</SelectItem>
-                    <SelectItem value="wisp">WISP/Internet</SelectItem>
-                    <SelectItem value="workshop">Workshop/Retail</SelectItem>
+                    <SelectItem value="sla">SLA</SelectItem>
+                    <SelectItem value="wisp">WISP</SelectItem>
+                    <SelectItem value="cabling">Cabling</SelectItem>
+                    <SelectItem value="workshop">Workshop</SelectItem>
                     <SelectItem value="network">Network</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                   </SelectContent>

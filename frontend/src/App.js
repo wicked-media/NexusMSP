@@ -53,6 +53,7 @@ import TicketPingSettingsPage from "@/pages/TicketPingSettingsPage";
 import GradientPage from "@/pages/GradientPage";
 import FinancialReportsPage from "@/pages/FinancialReportsPage";
 import StocktakePage from "@/pages/StocktakePage";
+import EstimatesPage from "@/pages/EstimatesPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -643,6 +644,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <FinancialReportsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/estimates"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <EstimatesPage />
                 </MainLayout>
               </ProtectedRoute>
             }
