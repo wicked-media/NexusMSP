@@ -54,6 +54,9 @@ import GradientPage from "@/pages/GradientPage";
 import FinancialReportsPage from "@/pages/FinancialReportsPage";
 import StocktakePage from "@/pages/StocktakePage";
 import EstimatesPage from "@/pages/EstimatesPage";
+import SmartSchedulePage from "@/pages/SmartSchedulePage";
+import StatusBoardPage from "@/pages/StatusBoardPage";
+import OnboardingWizardPage from "@/pages/OnboardingWizardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -657,6 +660,30 @@ function App() {
                 </MainLayout>
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/smart-scheduling"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SmartSchedulePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <OnboardingWizardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/status-board/:clientId"
+            element={<StatusBoardPage />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

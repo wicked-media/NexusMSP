@@ -47,7 +47,8 @@ import {
   Gift,
   Volume2,
   DollarSign,
-  Wallet
+  Wallet,
+  Navigation
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -175,6 +176,7 @@ const navGroups = [
       { path: "/technicians", icon: UserCog, label: "Technicians" },
       { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
       { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
+      { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
     ]
   },
   {
@@ -195,6 +197,7 @@ const navGroups = [
     title: "Business",
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
+      { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
       { path: "/products", icon: Package, label: "Products" },

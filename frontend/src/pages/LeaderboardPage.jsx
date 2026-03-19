@@ -1,284 +1,249 @@
-import { useState, useEffect } from "react";
-import { useAuth } from "@/App";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
+import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 import {
-  Trophy, Award, Crown, Star, Zap, Target, Shield, Gem, Rocket,
-  Layers, Cake, Calendar, CreditCard, Monitor, Wifi, DollarSign,
-  Medal, TrendingUp, Users, Flame, CheckCircle
+  Trophy, Star, Flame, Zap, Shield, Heart, Moon, Wrench, CheckCircle,
+  Timer, Target, TrendingUp, Crown, RefreshCw, Loader2, Award, Users
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const BADGE_ICONS = { zap: Zap, timer: Timer, heart: Heart, flame: Flame, shield: Shield, moon: Moon, wrench: Wrench, "check-circle": CheckCircle };
+const LEVEL_COLORS = ["#71717a", "#a855f7", "#3b82f6", "#06b6d4", "#f59e0b", "#ef4444", "#ec4899"];
 
-const ICON_MAP = { trophy: Trophy, target: Target, zap: Zap, award: Award, crown: Crown, gem: Gem, "dollar-sign": DollarSign, "credit-card": CreditCard, banknote: DollarSign, monitor: Monitor, wifi: Wifi, calendar: Calendar, shield: Shield, star: Star, cake: Cake, rocket: Rocket, layers: Layers };
-function AchIcon({ icon, className = "w-5 h-5" }) {
-  const Icon = ICON_MAP[icon] || Trophy;
-  return <Icon className={className} />;
+function XpBar({ current, nextLevel }) {
+  if (!nextLevel) return <div className="text-xs text-emerald-400 font-bold">MAX LEVEL</div>;
+  const prevMin = nextLevel.min_xp - 500;
+  const progress = ((current - prevMin) / (nextLevel.min_xp - prevMin)) * 100;
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>{current} XP</span><span>{nextLevel.min_xp} XP</span>
+      </div>
+      <Progress value={Math.min(100, Math.max(0, progress))} className="h-1.5" />
+    </div>
+  );
+}
+
+function ActivityHeatmap({ data }) {
+  if (!data || Object.keys(data).length === 0) return <p className="text-xs text-muted-foreground">No activity data</p>;
+  const sorted = Object.entries(data).sort((a, b) => a[0].localeCompare(b[0]));
+  const last52 = sorted.slice(-364);
+  const maxVal = Math.max(1, ...last52.map(([, v]) => v));
+  return (
+    <div className="flex flex-wrap gap-[2px]">
+      {last52.map(([date, val]) => {
+        const intensity = val / maxVal;
+        const bg = val === 0 ? "bg-muted/30" : intensity > 0.75 ? "bg-emerald-500" : intensity > 0.5 ? "bg-emerald-400/70" : intensity > 0.25 ? "bg-emerald-400/40" : "bg-emerald-400/20";
+        return <div key={date} className={`w-2.5 h-2.5 rounded-sm ${bg}`} title={`${date}: ${val} actions`} />;
+      })}
+    </div>
+  );
 }
 
 export default function LeaderboardPage() {
   const { token } = useAuth();
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [selectedTech, setSelectedTech] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [heatmap, setHeatmap] = useState({});
+  const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
-  const [leaderboard, setLeaderboard] = useState(null);
-  const [achievements, setAchievements] = useState([]);
-  const [techs, setTechs] = useState([]);
-  const [techAchievements, setTechAchievements] = useState({});
-  const [period, setPeriod] = useState("monthly");
-  const [tab, setTab] = useState("rankings");
 
-  useEffect(() => {
-    fetchAll();
-  }, [period]);
-
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
     try {
-      const [lbRes, achRes, techRes] = await Promise.all([
-        axios.get(`${API}/api/technicians/leaderboard?period=${period}`, { headers }),
-        axios.get(`${API}/api/achievements`, { headers }),
-        axios.get(`${API}/api/technicians/overview`, { headers }),
+      const [lRes, sRes] = await Promise.all([
+        axios.get(`${API}/gamification/leaderboard`, { headers }),
+        axios.get(`${API}/gamification/stats`, { headers }),
       ]);
-      setLeaderboard(lbRes.data);
-      setAchievements(achRes.data);
-      const techList = techRes.data || [];
-      setTechs(techList);
+      setLeaderboard(lRes.data);
+      setStats(sRes.data);
+    } catch { toast.error("Failed to fetch leaderboard"); }
+    finally { setLoading(false); }
+  }, [token]);
 
-      // Fetch achievements for each tech
-      const achMap = {};
-      await Promise.all(techList.map(async (t) => {
-        try {
-          const r = await axios.get(`${API}/api/technicians/${t.id}/achievements`, { headers });
-          achMap[t.id] = r.data;
-        } catch { achMap[t.id] = []; }
-      }));
-      setTechAchievements(achMap);
-    } catch {}
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const viewProfile = async (userId) => {
+    try {
+      const [pRes, hRes] = await Promise.all([
+        axios.get(`${API}/gamification/profile/${userId}`, { headers }),
+        axios.get(`${API}/gamification/activity/${userId}`, { headers }),
+      ]);
+      setProfile(pRes.data);
+      setHeatmap(hRes.data);
+      setSelectedTech(userId);
+    } catch { toast.error("Failed to load profile"); }
   };
 
-  // Calculate badge rankings
-  const badgeRankings = techs
-    .map(t => ({
-      ...t,
-      badges: (techAchievements[t.id] || []).length,
-      earnedBadges: techAchievements[t.id] || [],
-    }))
-    .sort((a, b) => b.badges - a.badges);
+  const recalculate = async (userId) => {
+    try {
+      await axios.post(`${API}/gamification/recalculate/${userId}`, {}, { headers });
+      toast.success("XP recalculated from ticket history");
+      viewProfile(userId);
+      fetchAll();
+    } catch { toast.error("Failed"); }
+  };
 
-  // Use leaderboard data - backend returns { leaderboard: [...] }
-  const rankings = (leaderboard?.leaderboard || []).map(r => ({
-    ...r, tech_id: r.id, tickets_closed: r.closed_this_month || 0, avg_resolution_hours: r.avg_resolution_hours || 0
-  }));
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
-  // Badge rarity - how many techs have each badge
-  const badgeRarity = achievements.map(a => {
-    const owners = techs.filter(t => (techAchievements[t.id] || []).some(e => e.achievement_id === a.id));
-    return { ...a, ownerCount: owners.length, owners, rarity: owners.length === 0 ? "Legendary" : owners.length <= 1 ? "Epic" : owners.length <= 3 ? "Rare" : "Common" };
-  });
-
-  // Badge of the Month - most recently earned unique badge
-  const allEarned = Object.values(techAchievements).flat().sort((a, b) => (b.awarded_at || "").localeCompare(a.awarded_at || ""));
-  const badgeOfMonth = allEarned[0];
-  const badgeOfMonthDef = badgeOfMonth ? achievements.find(a => a.id === badgeOfMonth.achievement_id) : null;
-
-  // Top 3 podium
-  const podium = rankings.slice(0, 3);
-
-  const rarityColors = { Legendary: "text-amber-400 border-amber-400/30 bg-amber-500/10", Epic: "text-purple-400 border-purple-400/30 bg-purple-500/10", Rare: "text-blue-400 border-blue-400/30 bg-blue-500/10", Common: "text-zinc-400 border-zinc-400/30 bg-zinc-500/10" };
-
-  return (
-    <div className="space-y-6" data-testid="leaderboard-page">
-      <div>
-        <h1 className="text-4xl font-bold tracking-tight">Leaderboard</h1>
-        <p className="text-muted-foreground mt-1">Company gamification wall - rankings, achievements & badge spotlight</p>
-      </div>
-
-      {/* Badge of the Month Spotlight */}
-      {badgeOfMonth && badgeOfMonthDef && (
-        <Card className="border-amber-500/30 bg-gradient-to-r from-amber-500/5 to-transparent" data-testid="badge-of-month">
-          <CardContent className="py-5 flex items-center gap-6">
-            <div className="w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg" style={{ backgroundColor: (badgeOfMonthDef.color || "#f59e0b") + "20", color: badgeOfMonthDef.color, boxShadow: `0 0 30px ${badgeOfMonthDef.color}25` }}>
-              <AchIcon icon={badgeOfMonthDef.icon} className="w-10 h-10" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-widest text-amber-500 font-semibold">Badge of the Month</p>
-              <h2 className="text-2xl font-bold mt-1">{badgeOfMonthDef.name}</h2>
-              <p className="text-sm text-muted-foreground">{badgeOfMonthDef.description}</p>
-              <p className="text-xs text-muted-foreground mt-1">Earned by <strong className="text-foreground">{badgeOfMonth.user_name}</strong> {badgeOfMonth.awarded_at ? formatDistanceToNow(new Date(badgeOfMonth.awarded_at), { addSuffix: true }) : ""}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="rankings" data-testid="tab-rankings"><Trophy className="w-3.5 h-3.5 mr-1" />Ticket Rankings</TabsTrigger>
-          <TabsTrigger value="badges" data-testid="tab-badges"><Award className="w-3.5 h-3.5 mr-1" />Badge Leaderboard</TabsTrigger>
-          <TabsTrigger value="rarity" data-testid="tab-rarity"><Gem className="w-3.5 h-3.5 mr-1" />Badge Rarity</TabsTrigger>
-          <TabsTrigger value="feed" data-testid="tab-feed"><Flame className="w-3.5 h-3.5 mr-1" />Activity Feed</TabsTrigger>
-        </TabsList>
-
-        {/* TICKET RANKINGS TAB */}
-        <TabsContent value="rankings" className="space-y-4 mt-4">
-          <div className="flex gap-2 mb-4">
-            {["weekly", "monthly", "quarterly", "yearly"].map(p => (
-              <Badge key={p} variant={period === p ? "default" : "outline"} className="cursor-pointer capitalize" onClick={() => setPeriod(p)} data-testid={`period-${p}`}>{p}</Badge>
-            ))}
+  // PROFILE VIEW
+  if (selectedTech && profile) {
+    const lvl = profile.level_info || {};
+    return (
+      <div className="space-y-5" data-testid="tech-profile">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedTech(null); setProfile(null); }} data-testid="back-leaderboard">Back</Button>
+          <Trophy className="w-6 h-6 text-amber-400" />
+          <div>
+            <h1 className="text-2xl font-bold">{profile.user_name || "Technician"}</h1>
+            <p className="text-sm text-muted-foreground">Level {lvl.level} &middot; {lvl.title}</p>
           </div>
+          <Badge className="ml-auto text-lg px-4 py-1 bg-amber-500/20 text-amber-400 border-amber-500/30">{profile.total_xp || 0} XP</Badge>
+        </div>
 
-          {/* Podium */}
-          {podium.length >= 3 && (
-            <div className="flex items-end justify-center gap-4 mb-8 h-56" data-testid="podium">
-              {[podium[1], podium[0], podium[2]].map((r, i) => {
-                const heights = ["h-32", "h-44", "h-24"];
-                const medals = ["text-zinc-300", "text-amber-400", "text-amber-700"];
-                const positions = [2, 1, 3];
-                return (
-                  <div key={r.tech_id} className="flex flex-col items-center gap-2">
-                    <div className="relative">
-                      {r.avatar ? (
-                        <img src={r.avatar} alt={r.name} className={`w-14 h-14 rounded-full object-cover border-2 ${i === 1 ? "border-amber-400 shadow-lg shadow-amber-500/30" : "border-muted"}`} />
-                      ) : (
-                        <div className={`w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold ${i === 1 ? "ring-2 ring-amber-400" : ""}`}>{r.name?.charAt(0)}</div>
-                      )}
-                      <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full bg-card border flex items-center justify-center text-xs font-bold ${medals[i]}`}>{positions[i]}</div>
-                    </div>
-                    <p className="text-sm font-medium text-center">{r.name}</p>
-                    <div className={`${heights[i]} w-24 rounded-t-lg bg-gradient-to-t ${i === 1 ? "from-amber-500/20 to-amber-500/5 border-amber-500/30" : "from-muted/50 to-muted/20 border-muted/30"} border flex flex-col items-center justify-center`}>
-                      <p className="text-2xl font-bold">{r.tickets_closed}</p>
-                      <p className="text-[10px] text-muted-foreground">closed</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="border-amber-500/20">
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Star className="w-4 h-4 text-amber-400" />Experience</CardTitle></CardHeader>
+            <CardContent>
+              <div className="text-center mb-4">
+                <div className="text-4xl font-black" style={{ color: LEVEL_COLORS[lvl.level - 1] || "#fff" }}>{profile.total_xp || 0}</div>
+                <p className="text-xs text-muted-foreground mt-1">Total XP</p>
+              </div>
+              <XpBar current={profile.total_xp || 0} nextLevel={lvl.next_level} />
+              <Button size="sm" variant="outline" className="w-full mt-3" onClick={() => recalculate(selectedTech)} data-testid="recalculate-btn"><RefreshCw className="w-3 h-3 mr-1" />Recalculate from History</Button>
+            </CardContent>
+          </Card>
 
-          {/* Full Rankings Table */}
           <Card>
-            <CardContent className="p-0">
-              <div className="space-y-1 p-2">
-                {rankings.map((r, i) => (
-                  <div key={r.tech_id} className={`flex items-center gap-4 p-3 rounded-lg transition-colors ${i === 0 ? "bg-amber-500/5 border border-amber-500/20" : "hover:bg-muted/30"}`} data-testid={`ranking-${i}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-500 text-black" : i === 1 ? "bg-zinc-300 text-black" : i === 2 ? "bg-amber-700 text-white" : "bg-muted text-muted-foreground"}`}>{i + 1}</div>
-                    {r.avatar ? (
-                      <img src={r.avatar} alt={r.name} className="w-10 h-10 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center font-semibold">{r.name?.charAt(0)}</div>
-                    )}
-                    <div className="flex-1">
-                      <p className="font-medium">{r.name}</p>
-                      <p className="text-xs text-muted-foreground">{r.job_title || "Technician"}</p>
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Award className="w-4 h-4 text-purple-400" />Badges ({(profile.badges_earned || []).length}/{(profile.all_badges || []).length})</CardTitle></CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-2">
+                {(profile.all_badges || []).map(b => {
+                  const earned = (profile.badges_earned || []).some(e => e.id === b.id);
+                  const Icon = BADGE_ICONS[b.icon] || Star;
+                  return (
+                    <div key={b.id} className={`p-2 rounded-lg border text-center transition-all ${earned ? "border-amber-500/40 bg-amber-500/5" : "border-border/30 opacity-40"}`}>
+                      <Icon className="w-5 h-5 mx-auto mb-1" style={{ color: earned ? b.color : "#666" }} />
+                      <p className="text-[10px] font-bold">{b.name}</p>
+                      <p className="text-[9px] text-muted-foreground">{b.description}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold">{r.tickets_closed}</p>
-                      <p className="text-[10px] text-muted-foreground">tickets closed</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-muted-foreground">{r.avg_resolution_hours?.toFixed(1) || "0"}h</p>
-                      <p className="text-[10px] text-muted-foreground">avg resolve</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                      <span className="text-sm">{(techAchievements[r.tech_id] || []).length}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* BADGE LEADERBOARD TAB */}
-        <TabsContent value="badges" className="space-y-4 mt-4">
-          <div className="grid grid-cols-1 gap-3">
-            {badgeRankings.map((t, i) => (
-              <Card key={t.id} className={i === 0 ? "border-amber-500/30" : ""} data-testid={`badge-rank-${i}`}>
-                <CardContent className="py-4 flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-500 text-black" : i === 1 ? "bg-zinc-300 text-black" : i === 2 ? "bg-amber-700 text-white" : "bg-muted text-muted-foreground"}`}>{i + 1}</div>
-                  {t.avatar ? (
-                    <img src={t.avatar} alt={t.name} className="w-12 h-12 rounded-full object-cover" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center font-bold text-lg">{t.name?.charAt(0)}</div>
-                  )}
-                  <div className="flex-1">
-                    <p className="font-semibold">{t.name}</p>
-                    <p className="text-xs text-muted-foreground">{t.job_title || "Technician"} {t.badges > 0 ? `| ${t.badges} badge${t.badges > 1 ? "s" : ""}` : ""}</p>
-                  </div>
-                  <div className="flex gap-1.5 flex-wrap justify-end max-w-[400px]">
-                    {t.earnedBadges.map(e => {
-                      const def = achievements.find(a => a.id === e.achievement_id) || {};
-                      return (
-                        <div key={e.id} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ backgroundColor: (def.color || "#8b5cf6") + "20", color: def.color }} title={e.achievement_name}>
-                          <AchIcon icon={def.icon} className="w-4 h-4" />
-                        </div>
-                      );
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Target className="w-4 h-4 text-emerald-400" />Activity Heatmap</CardTitle></CardHeader>
+            <CardContent>
+              <ActivityHeatmap data={heatmap} />
+              <Separator className="my-3" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold">Recent XP</p>
+                <ScrollArea className="h-32">
+                  {(profile.xp_history || []).slice(-10).reverse().map((h, i) => (
+                    <div key={i} className="flex items-center justify-between py-1 text-xs border-b border-border/20">
+                      <span className="text-muted-foreground">{h.reason}</span>
+                      <Badge className="bg-amber-500/20 text-amber-400 text-[10px]">+{h.xp} XP</Badge>
+                    </div>
+                  ))}
+                </ScrollArea>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // LEADERBOARD VIEW
+  return (
+    <div className="space-y-5" data-testid="leaderboard-page">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Trophy className="w-8 h-8 text-amber-400" />Leaderboard</h1>
+          <p className="text-muted-foreground">{stats?.total_techs || 0} technicians &middot; {stats?.total_xp_awarded?.toLocaleString() || 0} total XP awarded</p>
+        </div>
+        <Button variant="outline" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+      </div>
+
+      {/* Top 3 Podium */}
+      {leaderboard.length >= 1 && (
+        <div className="grid grid-cols-3 gap-4">
+          {[1, 0, 2].map((idx) => {
+            const t = leaderboard[idx];
+            if (!t) return <div key={idx} />;
+            const pos = idx + 1;
+            const colors = ["border-amber-500/40 bg-amber-500/5", "border-zinc-400/40 bg-zinc-400/5", "border-orange-500/40 bg-orange-500/5"];
+            const crowns = [<Crown key="g" className="w-6 h-6 text-amber-400" />, <Crown key="s" className="w-5 h-5 text-zinc-400" />, <Crown key="b" className="w-5 h-5 text-orange-400" />];
+            const lvl = t.level_info || {};
+            return (
+              <Card key={idx} className={`${colors[idx]} cursor-pointer hover:scale-[1.02] transition-transform`}
+                onClick={() => viewProfile(t.user_id)} data-testid={`podium-${pos}`}>
+                <CardContent className="pt-5 text-center">
+                  <div className="flex justify-center mb-2">{crowns[idx]}</div>
+                  <div className="text-3xl font-black">#{pos}</div>
+                  <p className="font-bold text-lg mt-1">{t.user_name || "Unknown"}</p>
+                  <p className="text-xs text-muted-foreground">Level {lvl.level} {lvl.title}</p>
+                  <div className="text-2xl font-black text-amber-400 mt-2">{(t.total_xp || 0).toLocaleString()} XP</div>
+                  <div className="flex justify-center gap-1 mt-2 flex-wrap">
+                    {(t.badges_earned || []).slice(0, 4).map(b => {
+                      const Icon = BADGE_ICONS[b.icon] || Star;
+                      return <Icon key={b.id} className="w-4 h-4" style={{ color: b.color }} />;
                     })}
-                    {t.badges === 0 && <span className="text-xs text-muted-foreground italic">No badges yet</span>}
                   </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        </TabsContent>
+            );
+          })}
+        </div>
+      )}
 
-        {/* BADGE RARITY TAB */}
-        <TabsContent value="rarity" className="space-y-4 mt-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {badgeRarity.sort((a, b) => a.ownerCount - b.ownerCount).map(badge => (
-              <Card key={badge.id} className={`${rarityColors[badge.rarity]}`} data-testid={`rarity-${badge.id}`}>
-                <CardContent className="py-4 flex flex-col items-center gap-2">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ backgroundColor: badge.color + "20", color: badge.color, boxShadow: `0 0 20px ${badge.color}15` }}>
-                    <AchIcon icon={badge.icon} className="w-7 h-7" />
-                  </div>
-                  <p className="text-sm font-semibold text-center">{badge.name}</p>
-                  <Badge variant="outline" className={`text-[10px] ${rarityColors[badge.rarity]}`}>{badge.rarity}</Badge>
-                  <p className="text-xs text-muted-foreground text-center">{badge.description}</p>
-                  <p className="text-[10px] text-muted-foreground">{badge.ownerCount}/{techs.length} technicians</p>
-                  {badge.owners.length > 0 && (
-                    <div className="flex -space-x-2 mt-1">
-                      {badge.owners.slice(0, 5).map(o => (
-                        o.avatar ? <img key={o.id} src={o.avatar} alt={o.name} className="w-6 h-6 rounded-full border-2 border-card object-cover" /> :
-                        <div key={o.id} className="w-6 h-6 rounded-full bg-primary/20 border-2 border-card flex items-center justify-center text-[9px] font-bold">{o.name?.charAt(0)}</div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* ACTIVITY FEED TAB */}
-        <TabsContent value="feed" className="space-y-3 mt-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2"><Flame className="w-4 h-4 text-orange-500" />Recent Achievements</h3>
-          {allEarned.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">No achievements earned yet. Start closing tickets!</div>
-          ) : (
-            <div className="space-y-2">
-              {allEarned.slice(0, 50).map((e, i) => {
-                const def = achievements.find(a => a.id === e.achievement_id) || {};
+      {/* Full Rankings */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead className="w-12">#</TableHead><TableHead>Technician</TableHead><TableHead>Level</TableHead><TableHead>Badges</TableHead><TableHead className="text-right">XP</TableHead><TableHead></TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {leaderboard.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="text-center py-12">
+                  <Users className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
+                  <p className="text-muted-foreground">No gamification data yet. Resolve tickets to earn XP!</p>
+                </TableCell></TableRow>
+              ) : leaderboard.map((t, i) => {
+                const lvl = t.level_info || {};
                 return (
-                  <div key={e.id || i} className="flex items-center gap-4 p-3 rounded-lg border bg-card hover:bg-muted/20 transition-colors" data-testid={`feed-${i}`}>
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: (def.color || "#8b5cf6") + "20", color: def.color }}>
-                      <AchIcon icon={def.icon} className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm"><strong>{e.user_name}</strong> earned <strong style={{ color: def.color }}>{e.achievement_name}</strong></p>
-                      <p className="text-xs text-muted-foreground">{def.description}{e.note && ` | ${e.note}`}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground">{e.awarded_at ? formatDistanceToNow(new Date(e.awarded_at), { addSuffix: true }) : ""}</p>
-                      <Badge variant="outline" className="text-[9px]">{e.awarded_by === "System" ? "Auto" : "Admin"}</Badge>
-                    </div>
-                  </div>
+                  <TableRow key={t.user_id} className="cursor-pointer hover:bg-muted/30" onClick={() => viewProfile(t.user_id)} data-testid={`rank-${i + 1}`}>
+                    <TableCell className="font-mono font-bold">{i + 1}</TableCell>
+                    <TableCell className="font-bold">{t.user_name || "Unknown"}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" style={{ borderColor: LEVEL_COLORS[lvl.level - 1] || "#666", color: LEVEL_COLORS[lvl.level - 1] || "#666" }}>
+                        Lv.{lvl.level} {lvl.title}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">{(t.badges_earned || []).map(b => { const Icon = BADGE_ICONS[b.icon] || Star; return <Icon key={b.id} className="w-3.5 h-3.5" style={{ color: b.color }} />; })}</div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-bold text-amber-400">{(t.total_xp || 0).toLocaleString()}</TableCell>
+                    <TableCell><TrendingUp className="w-4 h-4 text-muted-foreground" /></TableCell>
+                  </TableRow>
                 );
               })}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

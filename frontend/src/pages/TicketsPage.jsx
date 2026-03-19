@@ -24,7 +24,7 @@ import {
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
-  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar
+  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -125,6 +125,10 @@ export default function TicketsPage() {
   const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
   const [worksheetItems, setWorksheetItems] = useState([]);
   const [newWorksheetItem, setNewWorksheetItem] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [triageResult, setTriageResult] = useState(null);
+  const [triaging, setTriaging] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -247,6 +251,62 @@ export default function TicketsPage() {
       fetchTickets();
     } catch { toast.error("Failed to create ticket"); }
   };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const fd = new FormData();
+        fd.append("file", blob, "voice_ticket.webm");
+        try {
+          toast.info("Transcribing audio...");
+          const res = await axios.post(`${API}/voice-ticket/transcribe`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+          const s = res.data.structured || {};
+          setFormData(prev => ({ ...prev, title: s.title || prev.title, description: s.description || prev.description, priority: s.priority || prev.priority, category: s.category || prev.category, source: "voice" }));
+          toast.success("Voice transcribed! Review and submit.");
+          setIsCreateOpen(true);
+        } catch { toast.error("Transcription failed"); }
+      };
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      toast.info("Recording... Click stop when done.");
+    } catch { toast.error("Microphone access denied"); }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorder) { mediaRecorder.stop(); setMediaRecorder(null); }
+    setIsRecording(false);
+  };
+
+  const handleAiTriage = async () => {
+    if (!formData.title && !formData.description) { toast.error("Enter a title or description first"); return; }
+    setTriaging(true);
+    try {
+      const clientName = clients.find(c => c.id === formData.client_id)?.name || "";
+      const res = await axios.post(`${API}/ai/triage`, { title: formData.title, description: formData.description, client_name: clientName }, { headers });
+      setTriageResult(res.data);
+      toast.success(`AI Triage: ${res.data.suggested_priority} priority, ${Math.round((res.data.confidence || 0) * 100)}% confidence`);
+    } catch { toast.error("AI Triage failed"); }
+    finally { setTriaging(false); }
+  };
+
+  const applyTriage = () => {
+    if (!triageResult) return;
+    setFormData(prev => ({
+      ...prev,
+      priority: triageResult.suggested_priority || prev.priority,
+      category: triageResult.suggested_category || prev.category,
+      assigned_to: triageResult.suggested_technician_id || prev.assigned_to,
+    }));
+    toast.success("Triage suggestions applied");
+  };
+
 
   const handleUpdateTicket = async (field, value) => {
     try {
@@ -1727,6 +1787,11 @@ export default function TicketsPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
           <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New SLA Job</Button>
+          <Button onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+            className={isRecording ? "bg-red-600 hover:bg-red-700 animate-pulse" : "bg-amber-600 hover:bg-amber-700"}
+            data-testid="voice-ticket-btn">
+            <Mic className="w-4 h-4 mr-1" />{isRecording ? "Stop Recording" : "Voice Ticket"}
+          </Button>
           <Button onClick={() => setWsDialog(true)} data-testid="create-ws-btn" className="bg-purple-600 hover:bg-purple-700"><Wrench className="w-4 h-4 mr-1" />Workshop</Button>
           <Button onClick={() => setFjDialog(true)} data-testid="create-fj-btn" className="bg-cyan-600 hover:bg-cyan-700"><Radio className="w-4 h-4 mr-1" />Cabling / WISP</Button>
         </div>
@@ -2006,6 +2071,30 @@ export default function TicketsPage() {
             {/* Core Info */}
             <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
             <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
+
+            {/* AI Triage */}
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={handleAiTriage} disabled={triaging} className="text-cyan-400 border-cyan-500/30" data-testid="ai-triage-btn">
+                {triaging ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
+                AI Triage
+              </Button>
+              {triageResult && (
+                <>
+                  <Badge className="bg-cyan-500/20 text-cyan-400">{Math.round((triageResult.confidence || 0) * 100)}% confidence</Badge>
+                  <Badge className={triageResult.suggested_priority === "critical" ? "bg-red-500/20 text-red-400" : triageResult.suggested_priority === "high" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}>{triageResult.suggested_priority}</Badge>
+                  <Badge variant="outline">{triageResult.suggested_category}</Badge>
+                  {triageResult.suggested_technician_name && <Badge variant="outline">{triageResult.suggested_technician_name}</Badge>}
+                  <Button type="button" size="sm" onClick={applyTriage} className="bg-cyan-600 hover:bg-cyan-700 text-xs h-7" data-testid="apply-triage-btn">Apply</Button>
+                </>
+              )}
+            </div>
+            {triageResult?.resolution_plan && (
+              <div className="p-2 rounded-lg bg-cyan-500/5 border border-cyan-500/20 text-xs">
+                <span className="font-bold text-cyan-400">AI Resolution Plan: </span>
+                {triageResult.resolution_plan.map((s, i) => <span key={i} className="text-muted-foreground">{i + 1}. {s} </span>)}
+                <span className="text-muted-foreground ml-2">(~{triageResult.estimated_time_minutes} min est.)</span>
+              </div>
+            )}
 
             {/* Row 1: Client, Contact, Device */}
             <div className="grid grid-cols-3 gap-3">

@@ -21,7 +21,8 @@ from app.routers import (
     whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications,
     invoice_pdf, device_viewers, device_chat, ticket_attachments,
     proxmox, acronis, gradient, financial_reports, tech_performance,
-    stocktake, on_call, estimates
+    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
+    smart_scheduling, status_board, voice_ticket, predictive, onboarding
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -49,7 +50,8 @@ all_routers = [
     o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
     whitelabel, ticket_ping, rustdesk,
     proxmox, acronis, gradient, financial_reports, tech_performance,
-    stocktake, on_call, estimates
+    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
+    smart_scheduling, status_board, voice_ticket, predictive, onboarding
 ]
 
 for router_module in all_routers:

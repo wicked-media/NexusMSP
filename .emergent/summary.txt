@@ -1,88 +1,78 @@
 <analysis>**original_problem_statement:**
-The user's goal is to build a rich and elegant RMM/PSA like Syncro and Super Ops named NexusOps. The application should be fully feature-rich and surpass competitors by combining the best features from existing platforms with unique capabilities. The user is highly sensitive to credit consumption and insists on implementing all requested features in large, parallel batches.
+The user's primary goal is to build NexusOps, a feature-rich RMM/PSA platform intended to surpass competitors like Syncro and SuperOps. The user is highly sensitive to credit consumption and mandates that all features be implemented in large, parallel batches.
 
 **PRODUCT REQUIREMENTS:**
-- **Core Vision**: A comprehensive platform with modules for Ticketing, Client Management, Scripting, Reporting, Invoicing, and CRM.
-- **Current Core Request**: The user has requested another large, parallel implementation of several major features, which has been partially started:
-    1.  **Unified Ticket System**: Merge the SLA, Workshop, and Cabling/WISP tabs into a single unified ticket view. Use a  field to differentiate them, and display corresponding icons (shield for SLA, computer for workshop, Wi-Fi for cabling/WISP) in the ticket list and next to the technician's name when viewing a ticket.
-    2.  **Ticket Worksheets**: Add a Worksheets feature to tickets, allowing technicians to mark off checklist items with full audit transparency.
-    3.  **Estimates Module**: Build a new, full-featured Estimates page. Estimates should have a lifecycle with statuses (Draft, Published, Sent, Approved, Declined) indicated by cool flashing lights and text. Published estimates should be visible to clients in their self-service portal for approval.
-    4.  **On-Call Overhaul**: Make the on-call feature more elegant and cool and unique. Add options for on-call categories (e.g., SLA, WISP, Cabling) with corresponding unique icons (e.g., shield, Wi-Fi) and flashing effects.
-    5.  **Splynx Integration Enhancement**: Add the ability to sync customers with non-payment status from Splynx and an option to trigger auto-suspension, providing a one pane of glass view.
-    6.  **Job Numbering Configuration**: Rename the Field Jobs tab to Cabling / WiSP and add a settings page to configure the ticket numbering prefixes for different job types (SLA, Workshop, Cabling/WISP).
+- **Phase 7 (Recently Completed):** Unified ticketing system, a new Estimates module, ticket Worksheets, an enhanced on-call UI, a Splynx non-payment UI, and configurable job numbering.
+- **Phase 8 (In Progress):** A massive batch of eight differentiator features requested by the user to make the platform unique:
+    1.  AI Ticket Triage & Auto-Routing
+    2.  Client Sentiment Scoring
+    3.  Technician Gamification & Leaderboard
+    4.  Smart Scheduling with Travel Optimization
+    5.  Client-Facing Live Status Board
+    6.  Voice-to-Ticket
+    7.  Predictive Maintenance Alerts
+    8.  One-Click Client Onboarding Wizard
+- **Phase 9 (In Progress):** A second batch of features requested while Phase 8 was being scaffolded:
+    1.  **Device Activity Monitoring:** A User Active / Free to remote status indicator on the devices page.
+    2.  **Acronis Reporting:** Ability to compile and export branded PDF/CSV reports and display detailed device backup status and plans.
+    3.  **UI Theming:** A dark/light mode toggle and customizable color styles.
+    4.  **Ticket UI Enhancement:** Improve the visual appeal and information density of the ticket view.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A large-scale, full-stack RMM/PSA application built with a FastAPI backend and a React/Shadcn frontend. In this session, the agent successfully implemented two massive feature batches in parallel:
-1.  **Inventory & Procurement**: A complete Purchase Order system with status tracking and escalations, a Stocktake module, product bundling, and on-order tracking.
-2.  **Technician & Job Management**: An on-call roster system for technicians, separate management tabs for Workshop and Field Jobs, and an automated low-stock reordering system.
-
-The agent began work on the user's latest set of requests but was interrupted mid-implementation.
+A full-stack FastAPI and React/Shadcn application. The agent has successfully completed one massive feature batch (Phase 7) and immediately began scaffolding another (Phase 8) by creating placeholder backend routers and frontend pages for all eight features. This work was interrupted by the user requesting yet another batch of features (Phase 9). The agent has started to address linting errors from the Phase 8 scaffolding and has begun exploring the files required for the Phase 9 work.
 
 **Last working item**:
-- **Last item agent was working:** The agent was in the middle of a massive parallel implementation based on the user's latest requests (Messages #275, #278, #353). It had just created the backend router for the new **Estimates module** () and was about to add the backend endpoints for the **Ticket Worksheets** feature.
+- **Last item agent was working:** The agent was multitasking between two large, parallel feature implementations. It was fixing Python linting errors in the newly created backend routers for the Phase 8 features (specifically ) while simultaneously exploring the codebase (, ) to begin implementing the Phase 9 features (Device Activity, Acronis Reports, and Theming).
 - **Status:** IN PROGRESS
 - **Agent Testing Done:** N
-- **Which testing method agent to use?** testing_agent_v3_fork (due to the scale of adding a new Estimates module and overhauling the core ticketing system).
+- **Which testing method agent to use?** testing_agent_v3_fork (This is mandatory given the sheer volume of parallel work across 10+ new features and multiple core modules).
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Complete the massive parallel feature implementation (P0)
+  - Issue 1: Linting errors in  (P0)
   - Issue 2:  console warnings are present on the Reports page (P3)
 
 **Issues Detail**:
-  - **Issue 1:** Complete the massive parallel feature implementation
-     - **Attempted fixes:** The agent has created several backend files (, updated , , ) but has not started the corresponding frontend work. The implementation was interrupted.
-     - **Next debug checklist:** Resume the implementation plan. The immediate next step is to add the Worksheets endpoints to , register the new  router in , and then begin building all the required frontend components in parallel.
-     - **Why fix this issue and what will be achieved with the fix?** This will deliver the user's highest-priority features, including a unified ticketing system, a new estimates module, and an enhanced on-call system.
-     - **Status:** IN PROGRESS
-     - **Is recurring issue?** N
-     - **Should Test frontend/backend/both after fix?** Both
-     - **Blocked on other issue:** None
+- **Issue 1:** Linting errors in 
+    - **Attempted fixes:** The agent used  to fix some errors (renaming  to ) but several  (unused variable) and  (ambiguous variable name) errors remained at the last check.
+    - **Next debug checklist:**
+        1. Run  with the  option on .
+        2. Manually inspect the file to remove any remaining unused variables (, ) and fix ambiguous names.
+    - **Why fix this issue and what will be achieved with the fix?** To ensure code quality and prevent runtime errors before implementing the gamification logic.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Backend
+    - **Blocked on other issue:** None
 
-  - **Issue 2:**  console warnings on the Reports page
-     - **Attempted fixes:** None. This is a low-priority issue carried over from previous sessions.
-     - **Next debug checklist:** Inspect , check the browser console for  warnings, and update the component usage based on the library's latest documentation.
-     - **Why fix this issue and what will be achieved with the fix?** To clean up console errors and ensure the long-term stability of the reporting charts.
-     - **Status:** NOT STARTED
-     - **Is recurring issue?** Y
-     - **Should Test frontend/backend/both after fix?** Frontend
-     - **Blocked on other issue:** None
+- **Issue 2:**  console warnings on the Reports page
+    - **Attempted fixes:** None. This is a low-priority issue carried over from previous sessions.
+    - **Next debug checklist:** Inspect , check the browser console for warnings, and update the component usage based on the library's latest documentation.
+    - **Why fix this issue and what will be achieved with the fix?** To clean up console errors and ensure the long-term stability of the reporting charts.
+    - **Status:** NOT STARTED
+    - **Is recurring issue?** Y
+    - **Should Test frontend/backend/both after fix?** Frontend
+    - **Blocked on other issue:** None
 
 **In progress Task List**:
-  - Task 1: Complete the unified tickets, worksheets, and estimates implementation (P0)
-  - Task 2: Complete the UI for the On-Call overhaul and Splynx integration (P1)
-  - Task 3: Complete the UI for Job Numbering configuration (P2)
+- **Task 1:** Implement the 8 Differentiators feature set (P0)
+- **Task 2:** Implement the Enhancements feature set (Device Activity, Acronis Reports, Theming) (P0)
 
 **Task Detail**:
-  - **Task 1:** Unified Tickets, Worksheets, and Estimates Implementation
-     - **Where to resume:** The agent just created . The next steps are:
-        1. Add worksheet CRUD endpoints to .
-        2. Register the estimates router in .
-        3. Create  for the new estimates module.
-        4. Overhaul  to merge tabs, add a  selector, display type-specific icons, and add a Worksheets tab to the ticket detail view.
-     - **What will be achieved with this?** A streamlined ticketing experience and a powerful new estimates module.
-     - **Status:** IN PROGRESS
-     - **Should Test frontend/backend/both after fix?** Both
-     - **Blocked on something:** None
+- **Task 1:** Implement the 8 Differentiators feature set
+    - **Where to resume:** All backend routers and frontend pages have been created as placeholders. The next step is to implement the full backend logic and frontend UI for all eight features in parallel, starting with the now-clean .
+    - **What will be achieved with this?** Delivers the eight unique, AI-powered features requested by the user.
+    - **Status:** IN PROGRESS
+    - **Should Test frontend/backend/both after fix?** Both
+    - **Blocked on something:** Linting errors in .
 
-  - **Task 2:** UI for On-Call Overhaul and Splynx Integration
-     - **Where to resume:** Backend logic exists. The next step is to implement the frontend changes.
-        1. In , overhaul the on-call badges and banner to be category-specific with unique icons and colors.
-        2. In , add a new tab and UI to display non-payment customers from Splynx and an option to trigger suspension.
-     - **What will be achieved with this?** A more intuitive on-call system and tighter integration with Splynx for billing.
-     - **Status:** IN PROGRESS
-     - **Should Test frontend/backend/both after fix?** Both
-     - **Blocked on something:** Task 1 (P0) has higher priority.
-
-  - **Task 3:** UI for Job Numbering Configuration
-     - **Where to resume:** Backend logic exists in . The next step is to implement the frontend.
-        1. In , add a new settings card for Job Numbering to allow admins to configure ticket prefixes.
-     - **What will be achieved with this?** Customizable ticket numbering for different business departments.
-     - **Status:** IN PROGRESS
-     - **Should Test frontend/backend/both after fix?** Both
-     - **Blocked on something:** Task 1 (P0) has higher priority.
+- **Task 2:** Implement the Enhancements feature set
+    - **Where to resume:** The agent has explored  and . The next step is to implement the backend endpoints for device activity and Acronis backup reporting, and simultaneously build the frontend components for the activity indicators, backup status display, and theme selection in settings.
+    - **What will be achieved with this?** Real-time device status monitoring, advanced backup reporting, and UI customization.
+    - **Status:** IN PROGRESS
+    - **Should Test frontend/backend/both after fix?** Both
+    - **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
 - **Upcoming Tasks**:
@@ -91,124 +81,109 @@ The agent began work on the user's latest set of requests but was interrupted mi
 - **Future Tasks**:
     - **P2:** Implement full backend logic for mocked integrations: Pax8, Domotz.
     - **P2:** Build a standalone, configurable database seeding mechanism.
-    - **P2:** Build out the client portal, especially the section for estimate approval.
+    - **P2:** Build out the client portal for estimate approval.
+    - **P2:** Enhance the ticket page to be more visually appealing.
+    - **P3:** Bluetooth barcode scanner integration.
 
 **Completed work in this session**
-- **Purchase Order & Inventory System**:
-    - Implemented a full Purchase Order workflow with status tracking (Draft, Ordered, Received), escalations, and technician pings. (, ).
-    - Added a Stocktake system for inventory management (, ).
-- **Product Enhancements**:
-    - Created a product bundling feature.
-    - Added On Order status indicators to products, linked to open POs (, ).
-- **Ticket Itemization**:
-    - Replaced the Notify Client button with an Add Items flow to add billable products to tickets, with an option to push them to an invoice ().
-- **Technician & Job Management**:
-    - Built an on-call roster with technician pings, swaps, and an auto-reorder system for low stock (, ).
-    - Created separate Workshop and Field Job management tabs integrated into .
-- **Testing**: Successfully used  twice, which identified and fixed a route-ordering bug.
+- **Phase 7 Feature Batch (Fully Implemented & Tested):**
+    - **Unified Ticket System**: Merged SLA, Workshop, and Cabling tabs into a unified view with type filters and icons on .
+    - **Ticket Worksheets**: Added a fully functional worksheet feature to the ticket detail view.
+    - **Estimates Module**: Built a complete, new  for managing estimates.
+    - **Job Numbering Config**: Added a UI card in .
+- **Technical Fixes**:
+    - Corrected a route-ordering bug in .
+    - Moved worksheet-related endpoints into  and updated the backend logic to support add/check operations.
+    - Fixed incorrect API paths in the frontend  for the worksheet feature.
+- **Testing**: Executed a comprehensive test suite using , achieving a 100% pass rate for all Phase 7 features, documented in .
+- **Documentation**: Updated  to reflect the completion of Phase 7.
 
 **Earlier issues found/mentioned but not fixed**
-   -  console warnings on the .
+-  console warnings on the .
 
 **Known issue recurrence from previous fork**
-  - None.
+- None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Massive Parallel Implementation**: The agent's standard operating procedure is to implement large batches of features simultaneously, creating/modifying dozens of files in a single turn.
-- **Complex State Management**: Extensive use of  and  to manage data for new modules like Purchase Orders, Stocktake, On-Call rosters, and multiple job types.
-- **Advanced Conditional UI**: Heavy use of conditional rendering for status badges with icons (e.g., PO status, on-call indicators), progress bars, and dynamic buttons.
-- **Backend Automation Logic**: Implemented backend logic for PO escalations, technician pings, and automatic low-stock reordering.
+- **Massive Parallel Implementation**: The agent's core workflow involves scaffolding and implementing multiple large feature sets simultaneously, as demanded by the user.
+- **Complex UI Refactoring**: The agent completely refactored  from a tab-based layout to a unified list with dynamic filtering, which is now over 2300 lines long.
+- **AI Integration**: The agent is using the  library and the  to build the new AI features.
 
 **key DB schema**
-  - **New Collections**: , , , , , ,  (newly created).
-  - **Modifications**:
-    - : Added .
-    - : Will be modified to add  and a unified .
-    - : Will be modified to add .
+- **New Collections (Implemented):** .
+- **New Collections (Scaffolded):** , , , , , , , .
+- **Modified Collections**:  (now includes  and ),  (now includes ).
 
 **changes in tech stack**
-  - None in this session.
+- None.
 
 **All files of reference**
-- **Files for immediate task**:
-    -  (add worksheet endpoints)
-    -  (register new router)
-    -  (major overhaul)
-    -  (on-call UI overhaul)
-    -  (add non-payment UI)
-    -  (add job numbering UI)
-    - A new file to be created: 
-- **Key files from this session**: , , , , .
+- **Files for Phase 8 (Differentiators):**
+    - The 8 new router files in 
+    - The 5 new page files in 
+    -  (for Voice-to-Ticket and AI Triage)
+- **Files for Phase 9 (Enhancements):**
+    - 
+    - 
+    - 
+    - 
+    -  (for theme provider)
 
 **Areas that need refactoring**:
-- ****: Critically bloated with manual router registrations. Needs to be refactored to auto-discover routers.
-- ****: Is becoming extremely large and complex. It should be broken down into smaller child components for maintainability.
-- ****: Also growing in complexity and would benefit from decomposition.
+- ****: Critically bloated with manual router registrations. It should be refactored to auto-discover and register routers.
+- ****: At over 2300 lines, this file is a significant maintainability risk and must be broken down into smaller, manageable components.
+- ****: Contains all the ticket worksheet logic. This logic should be moved to  to maintain separation of concerns.
 
 **key api endpoints**
-- **New Endpoints from this session**:
+- **Completed**:
     - 
-    - 
-    - 
-    -  and 
-    - , 
-    - 
-- **Endpoints being built**:
-    - 
-    - 
+    -  (GET, PUT) &  (POST) &  (POST)
+- **Scaffolded (New)**:
+    - , , , , , , , 
 
 **Critical Info for New Agent**
-- **USER'S #1 RULE: PARALLEL IMPLEMENTATION.** The user demands that all requested features are built simultaneously. You must resume the large, in-progress batch and complete all parts in one go. Do not propose breaking down the work.
-- **IMMEDIATE TASK**: You are mid-implementation. Your first action must be to resume and complete the user's latest requests (from messages #275, #278, #353).
-- **THE FULL BATCH INCLUDES:**
-    1.  **Unified Tickets**: Merge SLA/Workshop/Cabling tabs, add type icons.
-    2.  **Ticket Worksheets**: Add an auditable checklist feature to tickets.
-    3.  **Estimates Module**: Build the new Estimates page with full lifecycle statuses.
-    4.  **On-Call UI Overhaul**: Implement category-specific icons and styles.
-    5.  **Splynx UI**: Build the non-payment customer view.
-    6.  **Job Numbering UI**: Build the settings card.
-- **TESTING IS MANDATORY**: After the large implementation is complete, you MUST call  for comprehensive testing before finishing the task.
+- **USER'S #1 RULE: PARALLEL IMPLEMENTATION.** The user demands that all requested features are built simultaneously. You must continue implementing **both** the 8 Differentiators (Phase 8) and the Enhancements (Phase 9) feature batches in parallel.
+- **Prioritize the  linting fix** before adding any new logic to that file.
+- **Refactoring is needed but not requested.** Be aware that  and  are becoming unmanageable. You may need to propose a refactoring step to the user after the current feature batches are complete.
+- **Testing is mandatory.** After the massive parallel implementation is complete, you MUST call  for comprehensive testing before finishing the task.
 
 **documents and test reports created in this job**
-  -  (updated after each major feature batch)
-  - 
-  - 
+- 
+- 
 
 **Last 10 User Messages and any pending HUMAN messages**
-- **1. (LATEST)** Continue. With the tickets. Migrate the workshop and cabling wisp into one...Add worksheets...add an estimates page... - **Status: IN PROGRESS**. The primary directive for the current work batch.
-- **2.** Yes please. Also fix the on call feature. It’s lacking...Add into splynx the ability to sync non payment... - **Status: IN PROGRESS**. Backend created, frontend pending.
-- **3.** Instead of the label Tickets next to Workshop and field jobs tabs, can we name the tickets tab SLA... - **Status: IN PROGRESS**. Backend created, frontend pending.
-- **4.** Agent finished the Technician/On-Call/Workshop features and updated the PRD. - **Status: N/A**.
-- **5.** Integrated and everything you said in parallel. Don’t waste my credits. Get it all done please. - **Status: ACKNOWLEDGED**. User confirmation for the previous batch.
-- **6.** Agent proposed the plan for On-Call roster, Workshop/Field jobs, and auto-reordering. - **Status: ADDRESSED**.
-- **7.** Yes add that. We also have a workshop/retail side...in the technician page add an option to add on call roster... - **Status: COMPLETED**. The request for the previous batch of features.
-- **8.** Agent finished the PO/Stocktake features and updated the PRD. - **Status: N/A**.
-- **9.** Agent called the testing agent for the PO/Stocktake batch. - **Status: N/A**.
-- **10.** Agent completed implementation of PO/Stocktake features. - **Status: N/A**.
+1. **(LATEST)** Yes please - **Status: ACKNOWLEDGED**. Final approval to proceed with the Enhancements batch (Acronis, Device Activity, Theming).
+2. Agent's  proposing the plan for the Enhancements batch.
+3. Yes sure. Can you also build into the Acronis module... - **Status: IN PROGRESS**. The user's request for the Enhancements batch.
+4. Agent's  proposing the plan for the Device Activity feature.
+5. Continue. Can you build into the device page... - **Status: IN PROGRESS**. The user's request for the Device Activity feature.
+6. Agent's  after finding lint errors, proposing to fix them and then build out the requested features.
+7. Get them all built out first. - **Status: ACKNOWLEDGED**. The user's approval to build all 8 differentiator features.
+8. Agent's  asking for prioritization of the 8 features.
+9. Yes do them all. Those are great suggestions. - **Status: IN PROGRESS**. The user's initial approval to build the 8 Differentiators.
+10. Agent's  proposing the 8 differentiator features.
 
 **Project Health Check:**
 - **Broken**: No.
-- **Mocked**: Yes. Xero, Pax8, Domotz integrations remain fully mocked.
-- **Partially Integrated**: Acronis, Proxmox, Gradient. Splynx now has backend logic for non-payment sync but lacks the UI.
+- **Mocked**: Yes. Xero, Pax8, Domotz remain fully mocked. The 8 new AI/Differentiator features are scaffolded but are effectively mocked until the logic is implemented.
+- **Partially Integrated**: Acronis, Proxmox, Gradient, Splynx.
 
 **3rd Party Integrations**
-- **Active**: Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, Multi-LLM (via Emergent LLM Key), Office 365, fpdf2, RustDesk.
+- **Active**: Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, ** for Multi-LLM (uses Emergent LLM Key)**, Office 365, fpdf2, RustDesk.
 - **Planned**: Bluetooth barcode scanner integration.
-- **Mocked/Partially Integrated**: Xero, Pax8, Domotz, Acronis, Proxmox, Gradient.
 
 **Testing status**
-  - **Testing agent used after significant changes**: YES. The agent successfully used  twice in this session, which caught and fixed a backend route-ordering issue.
-  - **Troubleshoot agent used after agent stuck in loop**: NO.
-  - **Test files created**: None.
-  - **Known regressions**: None.
+- **Testing agent used after significant changes**: YES. Was used successfully for the Phase 7 features.
+- **Troubleshoot agent used after agent stuck in loop**: NO.
+- **Test files created**: None.
+- **Known regressions**: None.
 
 **Credentials to test flow:**
 - **Email**: 
 - **Password**: 
 
 **What agent forgot to execute**
-- The agent was interrupted mid-task. It must complete the entire batch of features requested in messages #275, #278, and #353.
-- The recurring, low-priority task of fixing the  console warnings on the Reports page remains unaddressed.</analysis>
+- The agent has not yet fully resolved all linting errors in the newly created backend files, specifically in .</analysis>
