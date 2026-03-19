@@ -1,117 +1,99 @@
 # NexusOps - Product Requirements Document
 
-## Original Problem Statement
-Build a rich and elegant RMM/PSA platform called "NexusOps" that rivals Syncro and Super Ops, fully feature-rich with the best features from competitors plus unique capabilities.
+## Overview
+NexusOps is a feature-rich RMM/PSA (Remote Monitoring & Management / Professional Services Automation) platform intended to surpass competitors like Syncro and SuperOps.
 
-## Core Modules
-1. **Dashboard** - Real-time overview with device health, tickets, alerts
-2. **Ticketing** - Unified ticket system (SLA + Workshop + Cabling/WISP) with type icons, worksheets, AI triage, voice-to-ticket
-3. **Estimates** - Full estimate lifecycle (Draft -> Published -> Sent -> Approved -> Declined -> Converted)
-4. **Workshop** - Retail/bench repair job management with timer, parts, billing
-5. **Field Jobs** - WISP/Internet field dispatch with checklists, signal/speed testing, zones
-6. **Devices & RMM** - Device management, remote access, discovery, chat, predictive maintenance
-7. **Clients & CRM** - Client management, leads, loyalty, sentiment scoring, health scoring
-8. **Products & Inventory** - Product catalog, bundling, stock management, on-order tracking
-9. **Purchase Orders** - Full PO lifecycle, stock receiving, ping/escalation, audit trail
-10. **Stocktake** - Inventory counting, variance tracking, reports, barcode scanner
-11. **Technicians** - Tech management, on-call roster, ping/swap, performance, gamification
-12. **Invoicing** - Invoices with PDF preview/print, white-label branding
-13. **Contracts & Scheduling** - Contract management, smart scheduling with travel optimization
-14. **Integrations** - Acronis, Proxmox, Gradient, UniFi, Splynx, Xero, O365, Pax8, Domotz
-15. **Reporting** - Financial reports, tech performance, inventory reports, benchmarking
-16. **Settings** - White-label, ticket ping, PO ping, job numbering prefixes
+## Core Architecture
+- **Frontend**: React + Shadcn UI + Tailwind CSS
+- **Backend**: FastAPI (Python)
+- **Database**: MongoDB
+- **AI Integration**: Emergent LLM Key (Claude Sonnet for AI features)
 
-## Architecture
-- **Frontend**: React + Shadcn/UI + TailwindCSS
-- **Backend**: FastAPI + MongoDB
-- **Auth**: JWT-based with role support
-- **AI**: Emergent LLM Key (Claude Sonnet) for triage, sentiment, copilot, voice transcription, doc scanning
-- **Encryption**: Fernet for password vault
+## Authentication
+- JWT-based custom auth
+- Default admin: admin@nexusops.io / admin123
 
-## Test Credentials
-- Email: admin@nexusops.io
-- Password: admin123
+## Implementation Phases
 
-## Completed Phases
+### Phase 1-7: Core Platform (COMPLETE)
+- Dashboard, Tickets, Devices, Assets, Clients, Contracts, Invoices
+- Time Tracking, Knowledge Base, Remote Access, CRM/Leads
+- Email, Scripting, IT Documentation, Projects
+- Networking, Scheduling, Technicians, Products, Purchase Orders
+- Device Discovery, Stocktake, Estimates, On-Call Scheduling
+- Integrations: Stripe, Splynx, Hudu, Xero (mocked), Pax8 (mocked), Domotz (mocked), RustDesk, Proxmox, Acronis, O365
 
-### Phase 1-4: Core Platform
-- All major modules, advanced ticketing, device management, invoicing, integrations
-
-### Phase 5: Inventory & Procurement
-- Purchase Orders, Stocktake, Product Bundling, Vendor PO Integration
-
-### Phase 6: Technician & Workshop Tools
-- Auto-Reorder Alerts, On-Call Roster, Workshop/Retail Jobs, WISP Field Jobs
-
-### Phase 7: Unified Tickets & Estimates
-- Unified Ticket System, Worksheets, Estimates Module, Job Numbering
-
-### Phase 8: 8 Differentiator Features (March 19, 2026)
-1. AI Ticket Triage & Auto-Routing
-2. Client Sentiment Scoring Dashboard
-3. Technician Gamification & Leaderboard
-4. Smart Scheduling with Travel Optimization
-5. Client-Facing Live Status Board
+### Phase 8: 8 Differentiator Features (COMPLETE - Tested)
+1. AI Ticket Triage
+2. Client Sentiment Scoring
+3. Gamification & Leaderboard
+4. Smart Scheduling (Route Optimization)
+5. Public Status Board
 6. Voice-to-Ticket
-7. Predictive Maintenance Alerts
-8. One-Click Client Onboarding Wizard
+7. Predictive Failure Analysis
+8. Client Onboarding Wizard
 
-### Phase 10: 15 Swiss Army Knife Features (March 19, 2026)
-All tested 100% pass rate:
-1. **AI Copilot Chat** - Platform-wide AI assistant with live data access
-2. **Client Health Score Dashboard** - Composite score (sentiment+tickets+payments+devices+engagement)
-3. **NOC Wallboard** - Full-screen TV-mountable dashboard with live ticket queue, SLA timers, tech status
-4. **Magic Link Client Portal** - Zero-login client access to tickets, devices, estimates, contracts
-5. **Network Topology Auto-Mapper** - SVG network diagrams per client from device data
-6. **Runbook Automation Engine** - If-this-then-that workflows with 5 pre-built templates
-7. **Password Vault** - Encrypted credential storage with reveal, copy, audit trail
-8. **QR Code Asset Tags** - Batch QR generation for all devices, printable labels
-9. **Bulk Email Campaign Tool** - Branded campaigns with templates, recipient filtering
-10. **SLA Countdown Timer** - Live SLA tracking with breach predictions
-11. **Time-to-Resolution Benchmarking** - Compare MSP metrics against industry averages
-12. **Automated Billing Reconciliation** - Find unbilled time, products, contract overages
-13. **Upsell Opportunity Detector** - AI scan for device/backup/tier gaps
-14. **Client ROI Report Generator** - Value-delivered reports with downtime savings
-15. **Smart Document Scanner** - AI OCR to extract device info from text/labels
+### Phase 10: 15 Swiss Army Knife Features (COMPLETE - Tested)
+1. AI Copilot Panel
+2. Client Health Scoring
+3. NOC Wallboard
+4. Magic Portal Links
+5. Document Scanner
+6. Network Topology
+7. Runbook Automation
+8. Password Vault
+9. QR Asset Tags
+10. Email Campaigns
+11. SLA Timer
+12. Benchmarking
+13. Billing Reconciliation
+14. Upsell Detector
+15. ROI Reports
 
-## Prioritized Backlog
+### Phase 11: 15 Features MSPs Are Screaming For (COMPLETE - Tested 2026-03-19)
+1. AI-Powered Knowledge Base (Self-Healing Wiki) - `/api/kb/*`
+2. Client Communication Timeline - `/api/client-timeline/{client_id}`
+3. Automated Compliance Reporting (CIS/HIPAA) - `/api/compliance/*`
+4. Real-Time Revenue Per Endpoint Dashboard - `/api/rpe/dashboard`
+5. Intelligent Dispatch Board - `/api/dispatch/*`
+6. Contract Profitability Analyzer - `/api/contract-profit/overview`
+7. Vendor Scorecard & Spend Analytics - `/api/vendor-scorecard/overview`
+8. Client IT Roadmap Builder - `/api/it-roadmap/*`
+9. Automated Warranty Tracker - `/api/warranty/overview`
+10. Multi-Tenant Client Comparison Dashboard - `/api/client-compare`
+11. Technician Skills Matrix & Auto-Matching - `/api/skills-matrix`
+12. Approval Workflows Engine - `/api/approvals/*`
+13. Asset Depreciation & Refresh Planner - `/api/asset-depreciation`
+14. Incident Post-Mortem Generator (AI) - `/api/postmortem/*`
+15. Client Satisfaction Pulse Surveys - `/api/csat/*`
 
-### P0 (Current Priority)
-- Phase 9 Enhancements: Device Activity Monitoring, Acronis Reporting, UI Theming, Ticket UI Enhancement
+## Backlog
 
-### P1 (High Priority)
-- Full UniFi Integration Phase 2 (active management)
-- Full Xero Integration (real API vs mocked)
+### P1 - Upcoming
+- Phase 9 Enhancements: Device Activity Monitoring, Acronis Reporting, UI Dark/Light mode
+- Full UniFi Integration
+- Full Xero Integration (currently mocked)
 
-### P2 (Medium Priority)
-- Full backend for Pax8, Domotz integrations
-- Client self-service portal with estimate approval
-- Recharts console warnings fix
+### P2 - Future
+- Full Pax8 & Domotz backend logic (currently mocked)
+- Standalone DB seeding mechanism
+- Client portal for estimate approval
+- Ticket page visual overhaul
 
-### P3 (Low Priority)
-- Component refactoring (TicketsPage, server.py auto-discovery)
-- Database seeding mechanism
-- SLA breach alerting
+### P3 - Nice to Have
 - Bluetooth barcode scanner integration
+- recharts console warnings fix
 
-## Key API Endpoints (Phase 10)
-- `/api/copilot/chat`, `/api/copilot/suggestions`, `/api/copilot/history`
-- `/api/client-health/scores`, `/api/client-health/dashboard`
-- `/api/wallboard/data`, `/api/wallboard/public`
-- `/api/magic-portal/generate/{client_id}`, `/api/magic-portal/access/{token}`
-- `/api/topology/all`, `/api/topology/{client_id}`
-- `/api/automation`, `/api/automation/templates`, `/api/automation/{id}/test`
-- `/api/vault/entries`, `/api/vault/entries/{id}`, `/api/vault/audit-log`
-- `/api/qr-assets/generate-batch`, `/api/qr-assets/print-sheet`
-- `/api/campaigns`, `/api/campaigns/templates`, `/api/campaigns/{id}/send`
-- `/api/sla-timer/active`, `/api/sla-timer/predictions`
-- `/api/benchmarking/overview`
-- `/api/billing-recon/overview`
-- `/api/upsell/opportunities`
-- `/api/roi-reports`, `/api/roi-reports/{client_id}`
-- `/api/doc-scanner/scan`, `/api/doc-scanner/create-device`
+## Refactoring Needs
+- `server.py`: 45+ manually registered routers - needs auto-discovery
+- `App.js`: 70+ route definitions - needs route modules
+- `TicketsPage.jsx`: 2300+ line monolith - needs decomposition
+- API routing strategy to prevent path collisions
 
-## Mocked Integrations
-- Xero, Pax8, Domotz: Fully mocked
-- Email campaigns: Simulated sending (no actual emails)
-- Runbook automation: Simulated execution (no real actions)
+## Active 3rd Party Integrations
+Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, emergentintegrations (Multi-LLM), Office 365, fpdf2, RustDesk, qrcode
+
+## Test Reports
+- Phase 8: /app/test_reports/iteration_39.json (34/34 backend, 8/8 frontend)
+- Phase 10: /app/test_reports/iteration_40.json (39/39 backend, 15/15 frontend)
+- Phase 11: /app/test_reports/iteration_41.json (28/28 backend, 14/14 frontend)
