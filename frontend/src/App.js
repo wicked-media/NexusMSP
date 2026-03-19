@@ -58,9 +58,24 @@ import SmartSchedulePage from "@/pages/SmartSchedulePage";
 import StatusBoardPage from "@/pages/StatusBoardPage";
 import OnboardingWizardPage from "@/pages/OnboardingWizardPage";
 import SentimentDashboardPage from "@/pages/SentimentDashboardPage";
+import ClientHealthPage from "@/pages/ClientHealthPage";
+import WallboardPage from "@/pages/WallboardPage";
+import MagicPortalPage from "@/pages/MagicPortalPage";
+import TopologyPage from "@/pages/TopologyPage";
+import RunbooksPage from "@/pages/RunbooksPage";
+import VaultPage from "@/pages/VaultPage";
+import QrAssetsPage from "@/pages/QrAssetsPage";
+import CampaignsPage from "@/pages/CampaignsPage";
+import SlaTimerPage from "@/pages/SlaTimerPage";
+import BenchmarkingPage from "@/pages/BenchmarkingPage";
+import BillingReconPage from "@/pages/BillingReconPage";
+import UpsellPage from "@/pages/UpsellPage";
+import RoiReportsPage from "@/pages/RoiReportsPage";
+import DocScannerPage from "@/pages/DocScannerPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
+import { AICopilotPanel } from "@/components/AICopilotPanel";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -160,15 +175,17 @@ const ProtectedRoute = ({ children }) => {
 // Main Layout with Sidebar
 const MainLayout = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background flex">
-      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <main className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'}`}>
+      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />
+      <main className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'} ${copilotOpen ? 'mr-[380px]' : ''}`}>
         <div className="p-6 md:p-8">
           {children}
         </div>
       </main>
+      <AICopilotPanel isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 };
@@ -691,6 +708,138 @@ function App() {
                 </MainLayout>
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/client-health"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ClientHealthPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/wallboard"
+            element={
+              <ProtectedRoute>
+                <WallboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/topology"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TopologyPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/runbooks"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RunbooksPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/vault"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <VaultPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/qr-assets"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <QrAssetsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/campaigns"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <CampaignsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sla-timer"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SlaTimerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/benchmarking"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <BenchmarkingPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing-recon"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <BillingReconPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/upsell"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <UpsellPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/roi-reports"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RoiReportsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/doc-scanner"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DocScannerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/portal/:token"
+            element={<MagicPortalPage />}
           />
           <Route
             path="/status-board/:clientId"

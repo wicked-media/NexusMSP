@@ -22,7 +22,10 @@ from app.routers import (
     invoice_pdf, device_viewers, device_chat, ticket_attachments,
     proxmox, acronis, gradient, financial_reports, tech_performance,
     stocktake, on_call, estimates, ai_triage, sentiment, gamification,
-    smart_scheduling, status_board, voice_ticket, predictive, onboarding
+    smart_scheduling, status_board, voice_ticket, predictive, onboarding,
+    ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
+    topology, runbooks, vault, qr_assets, campaigns,
+    sla_timer, benchmarking, billing_recon, upsell, roi_reports
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -51,7 +54,11 @@ all_routers = [
     whitelabel, ticket_ping, rustdesk,
     proxmox, acronis, gradient, financial_reports, tech_performance,
     stocktake, on_call, estimates, ai_triage, sentiment, gamification,
-    smart_scheduling, status_board, voice_ticket, predictive, onboarding
+    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
+    smart_scheduling, status_board, voice_ticket, predictive, onboarding,
+    ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
+    topology, runbooks, vault, qr_assets, campaigns,
+    sla_timer, benchmarking, billing_recon, upsell, roi_reports
 ]
 
 for router_module in all_routers:

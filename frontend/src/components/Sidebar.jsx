@@ -48,7 +48,15 @@ import {
   Volume2,
   DollarSign,
   Wallet,
-  Navigation
+  Navigation,
+  Bot,
+  KeyRound,
+  QrCode,
+  Workflow,
+  Timer,
+  ScanLine,
+  TrendingUp,
+  FileBarChart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -173,22 +181,29 @@ const navGroups = [
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
+      { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
       { path: "/technicians", icon: UserCog, label: "Technicians" },
       { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
       { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
       { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
+      { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
     ]
   },
   {
     title: "Infrastructure",
     items: [
       { path: "/devices", icon: Monitor, label: "Devices" },
+      { path: "/topology", icon: Wifi, label: "Network Topology" },
       { path: "/networking", icon: Wifi, label: "Networking" },
       { path: "/dmarc-compliance", icon: ShieldCheck, label: "Email Security" },
       { path: "/splynx-dashboard", icon: Activity, label: "ISP Health" },
       { path: "/assets", icon: Package, label: "Assets" },
+      { path: "/qr-assets", icon: QrCode, label: "QR Asset Tags" },
       { path: "/asset-lifecycle", icon: Wrench, label: "Asset Lifecycle" },
       { path: "/predictive-maintenance", icon: Cpu, label: "Predictive AI" },
+      { path: "/doc-scanner", icon: ScanLine, label: "Document Scanner" },
+      { path: "/vault", icon: KeyRound, label: "Password Vault" },
+      { path: "/runbooks", icon: Workflow, label: "Runbook Automation" },
       { path: "/scripting", icon: Terminal, label: "Scripting" },
       { path: "/remote-access", icon: Laptop, label: "Remote Access" },
     ]
@@ -197,10 +212,14 @@ const navGroups = [
     title: "Business",
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
+      { path: "/client-health", icon: Activity, label: "Client Health" },
       { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
       { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
+      { path: "/upsell", icon: TrendingUp, label: "Upsell Detector" },
+      { path: "/roi-reports", icon: FileBarChart, label: "ROI Reports" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
+      { path: "/campaigns", icon: Mail, label: "Email Campaigns" },
       { path: "/products", icon: Package, label: "Products" },
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
       { path: "/stocktake", icon: Package, label: "Stocktake" },
@@ -210,6 +229,7 @@ const navGroups = [
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
       { path: "/estimates", icon: FileText, label: "Estimates" },
+      { path: "/billing-recon", icon: DollarSign, label: "Billing Recon" },
       { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
     ]
@@ -237,6 +257,7 @@ const navGroups = [
     title: "System",
     items: [
       { path: "/health-radar", icon: Radar, label: "Health Radar" },
+      { path: "/benchmarking", icon: BarChart3, label: "Benchmarking" },
       { path: "/white-label", icon: Paintbrush, label: "White Label" },
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
@@ -248,7 +269,7 @@ const navGroups = [
   },
 ];
 
-export const Sidebar = ({ collapsed, onToggle }) => {
+export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const navigate = useNavigate();
 
@@ -393,6 +414,26 @@ export const Sidebar = ({ collapsed, onToggle }) => {
             )}
           </Tooltip>
           
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size={collapsed ? "icon" : "sm"}
+                onClick={onCopilotToggle}
+                className={`text-muted-foreground hover:text-primary hover:bg-primary/10 ${
+                  collapsed ? 'w-10 h-10' : 'w-full justify-start gap-2'
+                }`}
+                data-testid="copilot-toggle"
+              >
+                <Bot className="h-4 w-4" />
+                {!collapsed && <span>AI Copilot</span>}
+              </Button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right">AI Copilot</TooltipContent>
+            )}
+          </Tooltip>
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
