@@ -57,6 +57,7 @@ import EstimatesPage from "@/pages/EstimatesPage";
 import SmartSchedulePage from "@/pages/SmartSchedulePage";
 import StatusBoardPage from "@/pages/StatusBoardPage";
 import OnboardingWizardPage from "@/pages/OnboardingWizardPage";
+import SentimentDashboardPage from "@/pages/SentimentDashboardPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -677,6 +678,16 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <OnboardingWizardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sentiment"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SentimentDashboardPage />
                 </MainLayout>
               </ProtectedRoute>
             }

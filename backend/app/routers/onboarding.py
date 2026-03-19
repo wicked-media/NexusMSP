@@ -28,8 +28,9 @@ async def start_onboarding(data: dict, current_user: dict = Depends(get_current_
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("name", ""),
     }
-    await db.onboarding_sessions.insert_one({**doc, "_id": None})
-    await db.onboarding_sessions.update_many({"_id": None}, {"$unset": {"_id": ""}})
+    await db.onboarding_sessions.insert_one(doc)
+    # Return without _id (MongoDB adds it in-place)
+    doc.pop("_id", None)
     return doc
 
 
@@ -83,8 +84,7 @@ async def complete_step(session_id: str, step_num: int, data: dict, current_user
             "onboarded": True,
             "onboarding_id": session_id,
         }
-        await db.clients.insert_one({**client, "_id": None})
-        await db.clients.update_many({"_id": None}, {"$unset": {"_id": ""}})
+        await db.clients.insert_one(client)
         updates["client_id"] = client_id
 
     # Step 2: Create contacts
@@ -101,8 +101,7 @@ async def complete_step(session_id: str, step_num: int, data: dict, current_user
                 "role": c.get("role", "primary"),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            await db.client_contacts.insert_one({**contact, "_id": None})
-            await db.client_contacts.update_many({"_id": None}, {"$unset": {"_id": ""}})
+            await db.client_contacts.insert_one(contact)
 
     # Step 3: Register devices
     elif step_num == 3:
@@ -122,8 +121,7 @@ async def complete_step(session_id: str, step_num: int, data: dict, current_user
                 "monitoring_enabled": True,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            await db.devices.insert_one({**device, "_id": None})
-            await db.devices.update_many({"_id": None}, {"$unset": {"_id": ""}})
+            await db.devices.insert_one(device)
 
     # Step 4: Create contract
     elif step_num == 4:
@@ -140,8 +138,7 @@ async def complete_step(session_id: str, step_num: int, data: dict, current_user
                 "status": "active",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            await db.contracts.insert_one({**contract, "_id": None})
-            await db.contracts.update_many({"_id": None}, {"$unset": {"_id": ""}})
+            await db.contracts.insert_one(contract)
 
     # Step 6: Final - mark complete
     if step_num == 6:

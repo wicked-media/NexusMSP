@@ -198,6 +198,7 @@ const navGroups = [
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
       { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
+      { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
       { path: "/products", icon: Package, label: "Products" },

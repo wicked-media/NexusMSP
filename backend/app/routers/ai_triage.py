@@ -66,8 +66,8 @@ Analyze and triage this ticket."""
     try:
         from emergentintegrations.llm.chat import UserMessage
         chat = await _get_ai_chat(f"triage-{uuid.uuid4().hex[:8]}", system)
-        resp = await chat.send_message(UserMessage(content=prompt))
-        text = resp.content.strip()
+        resp = await chat.send_message(UserMessage(text=prompt))
+        text = resp.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):

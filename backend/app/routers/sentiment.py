@@ -104,8 +104,8 @@ Analyze the sentiment and churn risk."""
     try:
         from emergentintegrations.llm.chat import UserMessage
         chat = await _get_ai_chat(f"sentiment-{uuid.uuid4().hex[:8]}", system)
-        resp = await chat.send_message(UserMessage(content=prompt))
-        text = resp.content.strip()
+        resp = await chat.send_message(UserMessage(text=prompt))
+        text = resp.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -148,13 +148,12 @@ Analyze the sentiment and churn risk."""
     )
     # History
     await db.sentiment_history.insert_one({
-        "_id": None, "id": str(uuid.uuid4())[:8],
+        "id": str(uuid.uuid4())[:8],
         "client_id": client_id,
         "score": result.get("score", 50),
         "status": result.get("status", "neutral"),
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
     })
-    await db.sentiment_history.update_many({"_id": None}, {"$unset": {"_id": ""}})
 
     return sentiment_doc
 

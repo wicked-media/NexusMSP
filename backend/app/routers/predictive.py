@@ -157,11 +157,10 @@ async def analyze_device(device_id: str, current_user: dict = Depends(get_curren
 
     # Store history point
     await db.device_health_history.insert_one({
-        "_id": None, "device_id": device_id,
+        "device_id": device_id,
         "health_score": score, "telemetry": telemetry,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
-    await db.device_health_history.update_many({"_id": None}, {"$unset": {"_id": ""}})
 
     # Create alerts for critical predictions
     for pred in predictions:

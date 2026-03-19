@@ -75,8 +75,8 @@ Return ONLY valid JSON:
     try:
         from emergentintegrations.llm.chat import UserMessage
         chat = await _get_ai_chat(f"voice-{uuid.uuid4().hex[:8]}", system)
-        resp = await chat.send_message(UserMessage(content=f"Transcription:\n{transcript}"))
-        text = resp.content.strip()
+        resp = await chat.send_message(UserMessage(text=f"Transcription:\n{transcript}"))
+        text = resp.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -129,6 +129,7 @@ async def create_ticket_from_transcript(data: dict, current_user: dict = Depends
         "created_by": current_user.get("id", ""),
         "created_by_name": current_user.get("name", ""),
     }
-    await db.tickets.insert_one({**ticket, "_id": None})
-    await db.tickets.update_one({"id": ticket_id}, {"$unset": {"_id": ""}})
+    await db.tickets.insert_one(ticket)
+    # Return without _id (MongoDB adds it in-place)
+    ticket.pop("_id", None)
     return ticket
