@@ -56,7 +56,18 @@ import {
   Timer,
   ScanLine,
   TrendingUp,
-  FileBarChart
+  FileBarChart,
+  History,
+  ShieldAlert,
+  Target,
+  MapPin,
+  Map,
+  Award,
+  CheckSquare,
+  RefreshCw,
+  FileSearch,
+  Star,
+  BarChart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -182,11 +193,15 @@ const navGroups = [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
       { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
+      { path: "/dispatch-board", icon: MapPin, label: "Dispatch Board" },
       { path: "/technicians", icon: UserCog, label: "Technicians" },
+      { path: "/skills-matrix", icon: Award, label: "Skills Matrix" },
       { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
       { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
       { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
+      { path: "/approvals", icon: CheckSquare, label: "Approvals" },
+      { path: "/postmortem", icon: FileSearch, label: "Post-Mortems" },
     ]
   },
   {
@@ -200,6 +215,8 @@ const navGroups = [
       { path: "/assets", icon: Package, label: "Assets" },
       { path: "/qr-assets", icon: QrCode, label: "QR Asset Tags" },
       { path: "/asset-lifecycle", icon: Wrench, label: "Asset Lifecycle" },
+      { path: "/asset-depreciation", icon: RefreshCw, label: "Depreciation" },
+      { path: "/warranty-tracker", icon: Shield, label: "Warranty Tracker" },
       { path: "/predictive-maintenance", icon: Cpu, label: "Predictive AI" },
       { path: "/doc-scanner", icon: ScanLine, label: "Document Scanner" },
       { path: "/vault", icon: KeyRound, label: "Password Vault" },
@@ -213,9 +230,15 @@ const navGroups = [
     items: [
       { path: "/clients", icon: Users, label: "Clients" },
       { path: "/client-health", icon: Activity, label: "Client Health" },
+      { path: "/client-timeline", icon: History, label: "Client Timeline" },
+      { path: "/client-compare", icon: BarChart, label: "Client Compare" },
+      { path: "/csat-surveys", icon: Star, label: "CSAT Surveys" },
       { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
       { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
+      { path: "/it-roadmap", icon: Map, label: "IT Roadmap" },
       { path: "/upsell", icon: TrendingUp, label: "Upsell Detector" },
+      { path: "/rpe-dashboard", icon: Target, label: "Revenue/Endpoint" },
+      { path: "/contract-profit", icon: DollarSign, label: "Contract Profit" },
       { path: "/roi-reports", icon: FileBarChart, label: "ROI Reports" },
       { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
@@ -224,6 +247,7 @@ const navGroups = [
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
       { path: "/stocktake", icon: Package, label: "Stocktake" },
       { path: "/vendors", icon: Building2, label: "Vendors" },
+      { path: "/vendor-scorecard", icon: Star, label: "Vendor Scorecard" },
       { path: "/rentals", icon: Phone, label: "Phone Rentals" },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
@@ -241,6 +265,12 @@ const navGroups = [
       { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
       { path: "/documentation", icon: Key, label: "IT Docs" },
       { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
+    ]
+  },
+  {
+    title: "Compliance",
+    items: [
+      { path: "/compliance", icon: ShieldAlert, label: "Compliance Reports" },
     ]
   },
   {

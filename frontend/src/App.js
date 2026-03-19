@@ -72,6 +72,20 @@ import BillingReconPage from "@/pages/BillingReconPage";
 import UpsellPage from "@/pages/UpsellPage";
 import RoiReportsPage from "@/pages/RoiReportsPage";
 import DocScannerPage from "@/pages/DocScannerPage";
+import ClientTimelinePage from "@/pages/ClientTimelinePage";
+import CompliancePage from "@/pages/CompliancePage";
+import RpeDashboardPage from "@/pages/RpeDashboardPage";
+import DispatchBoardPage from "@/pages/DispatchBoardPage";
+import ContractProfitPage from "@/pages/ContractProfitPage";
+import VendorScorecardPage from "@/pages/VendorScorecardPage";
+import ItRoadmapPage from "@/pages/ItRoadmapPage";
+import WarrantyTrackerPage from "@/pages/WarrantyTrackerPage";
+import ClientComparePage from "@/pages/ClientComparePage";
+import SkillsMatrixPage from "@/pages/SkillsMatrixPage";
+import ApprovalWorkflowsPage from "@/pages/ApprovalWorkflowsPage";
+import AssetDepreciationPage from "@/pages/AssetDepreciationPage";
+import PostmortemPage from "@/pages/PostmortemPage";
+import CsatSurveysPage from "@/pages/CsatSurveysPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -833,6 +847,146 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <DocScannerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/client-timeline"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ClientTimelinePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <CompliancePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rpe-dashboard"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RpeDashboardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dispatch-board"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <DispatchBoardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/contract-profit"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ContractProfitPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/vendor-scorecard"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <VendorScorecardPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/it-roadmap"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ItRoadmapPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/warranty-tracker"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <WarrantyTrackerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/client-compare"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ClientComparePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/skills-matrix"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SkillsMatrixPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/approvals"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ApprovalWorkflowsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/asset-depreciation"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <AssetDepreciationPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/postmortem"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <PostmortemPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/csat-surveys"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <CsatSurveysPage />
                 </MainLayout>
               </ProtectedRoute>
             }

@@ -25,7 +25,11 @@ from app.routers import (
     smart_scheduling, status_board, voice_ticket, predictive, onboarding,
     ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
     topology, runbooks, vault, qr_assets, campaigns,
-    sla_timer, benchmarking, billing_recon, upsell, roi_reports
+    sla_timer, benchmarking, billing_recon, upsell, roi_reports,
+    client_timeline, compliance, rpe_dashboard, dispatch_board,
+    contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
+    client_compare, skills_matrix, approval_workflows, asset_depreciation,
+    postmortem, csat_surveys
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -54,11 +58,14 @@ all_routers = [
     whitelabel, ticket_ping, rustdesk,
     proxmox, acronis, gradient, financial_reports, tech_performance,
     stocktake, on_call, estimates, ai_triage, sentiment, gamification,
-    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
     smart_scheduling, status_board, voice_ticket, predictive, onboarding,
     ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
     topology, runbooks, vault, qr_assets, campaigns,
-    sla_timer, benchmarking, billing_recon, upsell, roi_reports
+    sla_timer, benchmarking, billing_recon, upsell, roi_reports,
+    client_timeline, compliance, rpe_dashboard, dispatch_board,
+    contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
+    client_compare, skills_matrix, approval_workflows, asset_depreciation,
+    postmortem, csat_surveys
 ]
 
 for router_module in all_routers:
