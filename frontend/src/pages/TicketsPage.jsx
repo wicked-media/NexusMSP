@@ -37,6 +37,7 @@ const priorityConfig = {
 const statusConfig = {
   open: { label: "Open", class: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
   in_progress: { label: "In Progress", class: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
+  on_hold: { label: "On Hold", class: "bg-orange-500/10 text-orange-500 border-orange-500/20" },
   resolved: { label: "Resolved", class: "bg-green-500/10 text-green-500 border-green-500/20" },
   closed: { label: "Closed", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" }
 };

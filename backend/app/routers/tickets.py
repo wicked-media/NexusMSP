@@ -403,16 +403,5 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         doc['sent_at'] = doc['sent_at'].isoformat()
     await db.ticket_emails.insert_one(doc)
     
-    # Add to ticket comments
-    await db.ticket_comments.insert_one({
-        "id": str(uuid.uuid4()),
-        "ticket_id": ticket_id,
-        "user_id": current_user['id'],
-        "user_name": current_user['name'],
-        "content": f"📧 Email sent to: {', '.join(email_data.to_addresses)}\n\nSubject: {subject}\n\n{email_data.body}",
-        "is_internal": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    
     return ticket_email
 
