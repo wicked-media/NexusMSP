@@ -761,9 +761,9 @@ export default function TicketsPage() {
           );
         })()}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ minHeight: "calc(100vh - 220px)" }}>
           {/* Main content */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-2 flex flex-col" style={{ minHeight: 0 }}>
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-2">
@@ -905,8 +905,8 @@ export default function TicketsPage() {
             )}
 
             {/* Tabs: Conversation first, then Suggestions, etc */}
-            <Tabs defaultValue="conversation">
-              <TabsList className="w-full grid grid-cols-8">
+            <Tabs defaultValue="conversation" className="flex-1 flex flex-col min-h-0 mt-4">
+              <TabsList className="w-full grid grid-cols-8 flex-shrink-0">
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
@@ -1090,7 +1090,7 @@ export default function TicketsPage() {
 
 
               {/* UNIFIED CONVERSATION TAB */}
-              <TabsContent value="conversation" className="space-y-3">
+              <TabsContent value="conversation" className="flex-1 flex flex-col min-h-0 space-y-3">
                 {/* Message Type Selector */}
                 <div className="flex items-center gap-3 pb-2 border-b border-border/50">
                   <Select value={conversationType} onValueChange={setConversationType}>
@@ -1146,7 +1146,7 @@ export default function TicketsPage() {
                 )}
 
                 {/* Unified Conversation Timeline */}
-                <ScrollArea className="h-[300px]">
+                <ScrollArea className="flex-1 min-h-[200px]" style={{ maxHeight: "calc(100vh - 520px)" }}>
                   {(() => {
                     const allItems = [
                       ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
@@ -1157,18 +1157,21 @@ export default function TicketsPage() {
 
                     return allItems.map(item => {
                       if (item._type === "note") {
+                        const isInternal = item.is_internal;
                         return (
-                          <div key={`note-${item.id}`} className={`p-3 rounded-lg mb-2 border ${item.is_internal ? 'bg-yellow-500/5 border-yellow-500/20' : 'bg-muted/30 border-border'}`} data-testid={`note-${item.id}`}>
+                          <div key={`note-${item.id}`} className={`p-3 rounded-lg mb-2 ${isInternal ? 'bg-amber-400/10 border-l-4 border-l-amber-400/60 border border-amber-400/20 shadow-sm' : 'bg-muted/30 border border-border rounded-lg'}`} data-testid={`note-${item.id}`}>
                             <div className="flex justify-between items-start mb-1">
                               <div className="flex items-center gap-2">
-                                <MessageSquare className="w-3 h-3 text-blue-400" />
+                                {isInternal ? (
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500/80 bg-amber-400/15 px-1.5 py-0.5 rounded">Internal Note</span>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
+                                )}
                                 <User className="w-3 h-3" /><span className="text-sm font-medium">{item.user_name}</span>
-                                {item.is_internal && <Badge variant="outline" className="text-yellow-500 text-[10px] h-4">Internal</Badge>}
-                                <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
                               </div>
                               <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                             </div>
-                            {item.content?.startsWith("<") ? (
+                            {item.content && /<[a-z][\s\S]*>/i.test(item.content) ? (
                               <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: item.content }} />
                             ) : (
                               <p className="text-sm whitespace-pre-wrap">{item.content}</p>
@@ -1187,7 +1190,7 @@ export default function TicketsPage() {
                               <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">To: {item.to_addresses?.join(", ")}</p>
-                            {item.body?.startsWith("<") ? (
+                            {item.body && /<[a-z][\s\S]*>/i.test(item.body) ? (
                               <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: item.body }} />
                             ) : (
                               <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
@@ -1344,7 +1347,7 @@ export default function TicketsPage() {
           </div>
 
           {/* Right sidebar */}
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
             <Card>
               <CardContent className="pt-4 space-y-4">
                 <div><Label className="text-xs text-muted-foreground">Status</Label>
