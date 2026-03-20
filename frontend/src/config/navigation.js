@@ -11,7 +11,8 @@ import {
   CheckSquare, RefreshCw, FileSearch, Star, BarChart, Calculator,
   TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
   ShoppingBag, Globe, PatchCheck, Lock, BellOff, Layers,
-  Gauge, WifiIcon, Eye, Bug, FileWarning, ClipboardList, Kanban
+  Gauge, WifiIcon, Eye, Bug, FileWarning, ClipboardList, Kanban,
+  Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned
 } from "lucide-react";
 
 export const navGroups = [
@@ -159,12 +160,30 @@ export const navGroups = [
     ]
   },
   {
+    title: "AI & Intelligence",
+    items: [
+      { path: "/nlp-query", icon: Search, label: "NLP Search" },
+      { path: "/ai-resolution", icon: BrainCircuit, label: "AI Auto-Resolve" },
+      { path: "/patch-hub", icon: Layers, label: "Patch Hub" },
+    ]
+  },
+  {
     title: "System",
     items: [
       { path: "/health-radar", icon: Radar, label: "Health Radar" },
       { path: "/benchmarking", icon: BarChart3, label: "Benchmarking" },
       { path: "/white-label", icon: Paintbrush, label: "White Label" },
       { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
+      { path: "/executive-reports", icon: FileBarChart, label: "Exec Reports" },
+      { path: "/nps-tracker", icon: ThumbsUp, label: "NPS Tracker" },
+      { path: "/client-budget", icon: DollarSign, label: "Client Budgets" },
+      { path: "/geo-map", icon: MapPinned, label: "Geo Map" },
+      { path: "/onboarding-workflows", icon: ClipboardList, label: "Onboarding" },
+      { path: "/hardware-refresh", icon: HardDrive, label: "HW Refresh" },
+      { path: "/dark-web-monitor", icon: Eye, label: "Dark Web Monitor" },
+      { path: "/phishing-sim", icon: Crosshair, label: "Phishing Sim" },
+      { path: "/backup-verify", icon: TestTube, label: "Backup Verify" },
+      { path: "/compliance-frameworks", icon: Shield, label: "Compliance" },
       { path: "/reports", icon: BarChart3, label: "Reports" },
       { path: "/financial-reports", icon: Wallet, label: "Financial Reports" },
       { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },

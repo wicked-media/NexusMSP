@@ -149,6 +149,29 @@ export const routeConfig = [
   { path: "/capacity-planner", component: page("CapacityPlannerPage"), auth: true, layout: true },
   { path: "/auto-documentation", component: page("AutoDocumentationPage"), auth: true, layout: true },
 
+  // Phase E: Deep Patching
+  { path: "/patch-hub", component: page("PatchHubPage"), auth: true, layout: true },
+
+  // Phase E: AI & Autonomous
+  { path: "/nlp-query", component: page("NLPQueryPage"), auth: true, layout: true },
+  { path: "/ai-resolution", component: page("AIResolutionPage"), auth: true, layout: true },
+
+  // Phase E: Revenue & Billing
+  { path: "/client-budget", component: page("ClientBudgetPage"), auth: true, layout: true },
+  { path: "/executive-reports", component: page("ExecutiveReportsPage"), auth: true, layout: true },
+  { path: "/nps-tracker", component: page("NPSTrackerPage"), auth: true, layout: true },
+
+  // Phase E: Security
+  { path: "/dark-web-monitor", component: page("DarkWebMonitorPage"), auth: true, layout: true },
+  { path: "/phishing-sim", component: page("PhishingSimPage"), auth: true, layout: true },
+  { path: "/backup-verify", component: page("BackupVerifyPage"), auth: true, layout: true },
+  { path: "/compliance-frameworks", component: page("ComplianceFrameworksPage"), auth: true, layout: true },
+
+  // Phase E: Operations
+  { path: "/hardware-refresh", component: page("HardwareRefreshPage"), auth: true, layout: true },
+  { path: "/geo-map", component: page("GeoMapPage"), auth: true, layout: true },
+  { path: "/onboarding-workflows", component: page("OnboardingWorkflowsPage"), auth: true, layout: true },
+
   // Special: Wallboard (no MainLayout)
   { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },
 
