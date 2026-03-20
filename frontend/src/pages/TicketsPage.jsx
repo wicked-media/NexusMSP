@@ -761,9 +761,9 @@ export default function TicketsPage() {
           );
         })()}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ minHeight: "calc(100vh - 220px)" }}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
-          <div className="lg:col-span-2 flex flex-col" style={{ minHeight: 0 }}>
+          <div className="lg:col-span-2 space-y-4">
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-2">
@@ -905,8 +905,8 @@ export default function TicketsPage() {
             )}
 
             {/* Tabs: Conversation first, then Suggestions, etc */}
-            <Tabs defaultValue="conversation" className="flex-1 flex flex-col min-h-0 mt-4">
-              <TabsList className="w-full grid grid-cols-8 flex-shrink-0">
+            <Tabs defaultValue="conversation">
+              <TabsList className="w-full grid grid-cols-8">
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
@@ -1090,7 +1090,7 @@ export default function TicketsPage() {
 
 
               {/* UNIFIED CONVERSATION TAB */}
-              <TabsContent value="conversation" className="flex-1 flex flex-col min-h-0 space-y-3">
+              <TabsContent value="conversation" className="space-y-3">
                 {/* Message Type Selector */}
                 <div className="flex items-center gap-3 pb-2 border-b border-border/50">
                   <Select value={conversationType} onValueChange={setConversationType}>
@@ -1146,7 +1146,7 @@ export default function TicketsPage() {
                 )}
 
                 {/* Unified Conversation Timeline */}
-                <ScrollArea className="flex-1 min-h-[200px]" style={{ maxHeight: "calc(100vh - 520px)" }}>
+                <ScrollArea className="h-[400px]">
                   {(() => {
                     const allItems = [
                       ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
@@ -1347,7 +1347,7 @@ export default function TicketsPage() {
           </div>
 
           {/* Right sidebar */}
-          <div className="space-y-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
+          <div className="space-y-4">
             <Card>
               <CardContent className="pt-4 space-y-4">
                 <div><Label className="text-xs text-muted-foreground">Status</Label>
