@@ -1146,7 +1146,7 @@ export default function TicketsPage() {
                 )}
 
                 {/* Unified Conversation Timeline */}
-                <ScrollArea className="h-[400px]">
+                <ScrollArea style={{ height: "calc(100vh - 420px)", minHeight: "300px" }}>
                   {(() => {
                     const allItems = [
                       ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
