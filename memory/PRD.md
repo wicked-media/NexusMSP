@@ -1,52 +1,97 @@
 # NexusOps - Product Requirements Document
 
-## Original Problem Statement
-Build "NexusOps," a feature-rich RMM/PSA platform for MSPs. Full-send mode with rapid parallel feature delivery.
+## Overview
+NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, manage, and support from a single pane of glass.
 
-## Architecture
-- **Backend**: FastAPI + MongoDB (Motor async), 178+ auto-discovered routers
-- **Frontend**: React + Shadcn/UI + Recharts + TipTap, 174+ pages
-- **Auth**: JWT-based (admin@nexusops.io / admin123)
+## Core Modules
+- **Ticketing**: SLA tickets, workshop jobs, cabling/WISP jobs with full conversation, status tracking, and lifecycle automation
+- **RMM/Monitoring**: Device monitoring, agent management, remote access (RustDesk)
+- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking
+- **Asset Management**: Asset lifecycle, inventory, procurement
+- **CRM**: Client management, contacts, addresses, loyalty tracking
+- **Networking**: Network maps, zero-trust management, SNMP monitoring
+- **Scheduling & Dispatch**: Smart scheduling, dispatch board, on-call management
+- **Reporting**: Dashboards, analytics, SLA compliance, revenue reports
+- **White Label**: Full branding customization, custom domains
+- **Client Portal**: Self-service portal for clients
+- **AI Features**: AI copilot, intelligent routing, voice-to-ticket
 
-## Completed Phases
+## User Personas
+- **MSP Admin**: Full platform control, branding, client management
+- **Technician**: Ticket handling, workshop repairs, on-site work
+- **Client**: Self-service portal access, ticket submission
 
-### Phases 8-12, P0, B-J: 95+ features, all DONE & TESTED
+## Authentication
+- JWT-based custom auth with email/password
+- Demo credentials: admin@nexusops.io / admin123
 
-### Ticket Lifecycle & Tech Settings (March 20, 2026) - DONE
-- Auto-close: Resolved tickets auto-set to Closed
-- 24h filter: Closed tickets drop from main list after 24 hours
-- Client page shows Active and Resolved/Closed tickets separately
-- Full Technician Settings page (9 tabs): Profile, Security (password, 2FA, FIDO2), Email Signature, Notifications, Working Hours, API Keys, Sessions, Display, Badges & Awards
-- Accessible via clicking user avatar in sidebar bottom-left
+## Tech Stack
+- **Frontend**: React + Vite, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
+- **Backend**: FastAPI (Python), Motor (async MongoDB)
+- **Database**: MongoDB
+- **Integrations**: Resend (email), Stripe, RustDesk, qrcode, fpdf2, emergentintegrations (Multi-LLM)
 
-### P1 Feature Batch (March 20, 2026) - DONE
-1. **AI-Powered Intelligent Routing**: Tech workload dashboard with skills/capacity/SLA/CSAT, 5 routing rules with toggles, bulk route unassigned, single ticket routing with reasoning
-2. **Client Self-Service Portal**: Per-client branded portal config, token generation, public endpoints for ticket creation/viewing, device status
-3. **Revenue-per-Ticket Tracking**: Profitability by ticket/client/technician, margin analysis, labor vs parts breakdown
-4. **Voice-to-Ticket**: Speech transcription, AI keyword extraction (priority/category), create tickets or add notes from voice
+## What's Been Implemented
 
-## Testing Status
-- iteration_43-52: All passed (100%)
-- iteration_51: Tech Settings + Ticket Lifecycle (100%)
-- iteration_52: P1 Features (25/25 backend, all 4 frontend pages) 
+### Completed Features (All Tested)
+1. Full ticketing system (SLA, workshop, cabling/WISP)
+2. Client management with revamped UI
+3. Invoice & billing system
+4. Asset lifecycle management
+5. RMM monitoring dashboard
+6. Network management & zero-trust
+7. Scheduling & dispatch
+8. Reporting & analytics
+9. White label / branding
+10. AI copilot & intelligent routing
+11. Client self-service portal
+12. Voice-to-ticket
+13. Revenue-per-ticket tracking
+14. Technician settings page (2FA, FIDO2, signatures, badges)
+15. Ticket lifecycle automation (auto-close resolved after 24h)
+16. Gamification & leaderboard system
+17. SLA timer & penalties
+18. Change management
+19. Escalation matrix
+20. Incident heatmap
+21. Skills matrix
+22. Tech utilization tracking
+23. **Workshop Enrichment (Phase 1-3)** - COMPLETED 2026-03-20
+    - Diagnostic repair notes system
+    - Before/during/after photo attachments
+    - Diagnostic checklists (5 device templates: laptop, desktop, phone, printer, network)
+    - Full audit trail
+    - Visual progress tracker (6 stages)
+    - Customer email/SMS notifications with templates
+    - Quote/estimate builder with send & approval workflow
+    - Push-to-invoice (new or existing)
+    - Enhanced device intake (condition, accessories, password, warranty)
+    - Workshop job PDF generation (branded job card)
+    - QR code label generation
+    - Repair history lookup by serial/customer
+    - Workshop queue/kanban view
 
-## Stats
-- **Backend Routers**: 178+ auto-discovered
-- **Frontend Pages**: 174+
-- **Devices**: 131 across 15 clients
-- **Collections**: 100+
+## Prioritized Backlog
 
-## Active Integrations
-Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, emergentintegrations (Multi-LLM), Office 365, fpdf2, RustDesk, qrcode
+### P0 (Next Up)
+- **Purchase Order PDF Generation** - Generate branded PO PDFs with company logo
+- **PO Approval Workflow** - Draft → Pending Approval → Approved → Submitted
+- **PO Vendor Emailing** - Auto-email PO PDFs to vendors
+- **Goods Received Tracking** - Track received items against PO line items
 
-## Backlog
-### P2 - Future:
+### P1
+- **Technician Performance Leaderboard** - Gamified leaderboard with weekly challenges
+
+### P2
 - Deeper CRM integrations (Xero, Pax8, Domotz)
 - Cross-platform scripting library
-- Mobile Tech PWA
-- Bluetooth barcode scanner
+- Advanced client off-boarding and tenant lifecycle management
 
-### P3 - Low Priority:
-- recharts console warnings fix
-- Decompose monolithic seed.py + navigation.js
-- aria-describedby for DialogContent (accessibility)
+### P3
+- Decompose monolithic seed.py and navigation.js
+- Bluetooth barcode scanner integration
+- Fix recharts console warnings on Reports page
+
+## Known Issues
+- recharts console warnings on ReportsPage (cosmetic, P3)
+- Missing aria-describedby for some DialogContent (accessibility, P3)
