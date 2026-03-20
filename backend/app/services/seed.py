@@ -148,11 +148,11 @@ async def _seed_core_data():
         await db.users.insert_one(doc)
     
     clients_data = [
-        {"id": "client-001", "name": "Acme Corporation", "email": "it@acme.com", "industry": "Manufacturing", "mrr": 2500, "device_count": 45, "ticket_count": 12},
-        {"id": "client-002", "name": "TechStart Inc", "email": "support@techstart.io", "industry": "Technology", "mrr": 1800, "device_count": 28, "ticket_count": 8},
-        {"id": "client-003", "name": "Global Finance Ltd", "email": "helpdesk@globalfin.com", "industry": "Finance", "mrr": 4200, "device_count": 120, "ticket_count": 25},
-        {"id": "client-004", "name": "HealthCare Plus", "email": "it@hcplus.org", "industry": "Healthcare", "mrr": 3100, "device_count": 67, "ticket_count": 15},
-        {"id": "client-005", "name": "RetailMax", "email": "tech@retailmax.com", "industry": "Retail", "mrr": 1500, "device_count": 34, "ticket_count": 6},
+        {"id": "client-001", "name": "Acme Corporation", "email": "it@acme.com", "industry": "Manufacturing", "mrr": 2500, "device_count": 45, "ticket_count": 12, "address": "14 Industrial Ave, Auckland 1010"},
+        {"id": "client-002", "name": "TechStart Inc", "email": "support@techstart.io", "industry": "Technology", "mrr": 1800, "device_count": 28, "ticket_count": 8, "address": "7 Queen St, Level 4, Auckland CBD 1010"},
+        {"id": "client-003", "name": "Global Finance Ltd", "email": "helpdesk@globalfin.com", "industry": "Finance", "mrr": 4200, "device_count": 120, "ticket_count": 25, "address": "200 George St, Sydney NSW 2000"},
+        {"id": "client-004", "name": "HealthCare Plus", "email": "it@hcplus.org", "industry": "Healthcare", "mrr": 3100, "device_count": 67, "ticket_count": 15, "address": "55 Grafton Rd, Grafton, Auckland 1023"},
+        {"id": "client-005", "name": "RetailMax", "email": "tech@retailmax.com", "industry": "Retail", "mrr": 1500, "device_count": 34, "ticket_count": 6, "address": "12 Sylvia Park Rd, Mt Wellington, Auckland 1060"},
     ]
     for c in clients_data:
         client = Client(**c)
@@ -456,16 +456,16 @@ async def _seed_core_data():
 async def _seed_phase11_data():
     # Seed additional clients (10 more for 15 total)
     extra_clients = [
-        {"id": "client-006", "name": "Summit Legal Group", "email": "it@summitlegal.com", "industry": "Legal", "mrr": 2800, "device_count": 35, "ticket_count": 9},
-        {"id": "client-007", "name": "Pacific Schools District", "email": "tech@pacificschools.edu", "industry": "Education", "mrr": 3500, "device_count": 85, "ticket_count": 18},
-        {"id": "client-008", "name": "Metro Real Estate", "email": "support@metrore.com", "industry": "Real Estate", "mrr": 1200, "device_count": 18, "ticket_count": 4},
-        {"id": "client-009", "name": "Cascade Manufacturing", "email": "helpdesk@cascade.com", "industry": "Manufacturing", "mrr": 3800, "device_count": 92, "ticket_count": 22},
-        {"id": "client-010", "name": "Bright Dental Partners", "email": "it@brightdental.com", "industry": "Healthcare", "mrr": 1600, "device_count": 24, "ticket_count": 7},
-        {"id": "client-011", "name": "CloudNine SaaS", "email": "ops@cloudnine.io", "industry": "Technology", "mrr": 2200, "device_count": 32, "ticket_count": 11},
-        {"id": "client-012", "name": "Harbor Logistics", "email": "it@harborlog.com", "industry": "Logistics", "mrr": 2900, "device_count": 55, "ticket_count": 14},
-        {"id": "client-013", "name": "Pinnacle Accounting", "email": "support@pinnacle-acc.com", "industry": "Finance", "mrr": 1900, "device_count": 22, "ticket_count": 5},
-        {"id": "client-014", "name": "GreenVolt Energy", "email": "it@greenvolt.com", "industry": "Energy", "mrr": 4500, "device_count": 110, "ticket_count": 20},
-        {"id": "client-015", "name": "Apex Hospitality", "email": "tech@apexhosp.com", "industry": "Hospitality", "mrr": 1400, "device_count": 28, "ticket_count": 8},
+        {"id": "client-006", "name": "Summit Legal Group", "email": "it@summitlegal.com", "industry": "Legal", "mrr": 2800, "device_count": 35, "ticket_count": 9, "address": "88 Shortland St, Auckland CBD 1010"},
+        {"id": "client-007", "name": "Pacific Schools District", "email": "tech@pacificschools.edu", "industry": "Education", "mrr": 3500, "device_count": 85, "ticket_count": 18, "address": "350 Great South Rd, Otahuhu, Auckland 1062"},
+        {"id": "client-008", "name": "Metro Real Estate", "email": "support@metrore.com", "industry": "Real Estate", "mrr": 1200, "device_count": 18, "ticket_count": 4, "address": "22 Parnell Rd, Parnell, Auckland 1052"},
+        {"id": "client-009", "name": "Cascade Manufacturing", "email": "helpdesk@cascade.com", "industry": "Manufacturing", "mrr": 3800, "device_count": 92, "ticket_count": 22, "address": "45 Neilson St, Onehunga, Auckland 1061"},
+        {"id": "client-010", "name": "Bright Dental Partners", "email": "it@brightdental.com", "industry": "Healthcare", "mrr": 1600, "device_count": 24, "ticket_count": 7, "address": "5 Remuera Rd, Remuera, Auckland 1050"},
+        {"id": "client-011", "name": "CloudNine SaaS", "email": "ops@cloudnine.io", "industry": "Technology", "mrr": 2200, "device_count": 32, "ticket_count": 11, "address": "Level 2, 15 Sale St, Auckland 1010"},
+        {"id": "client-012", "name": "Harbor Logistics", "email": "it@harborlog.com", "industry": "Logistics", "mrr": 2900, "device_count": 55, "ticket_count": 14, "address": "Port of Auckland, Quay St, Auckland 1010"},
+        {"id": "client-013", "name": "Pinnacle Accounting", "email": "support@pinnacle-acc.com", "industry": "Finance", "mrr": 1900, "device_count": 22, "ticket_count": 5, "address": "Level 8, 34 Customs St East, Auckland 1010"},
+        {"id": "client-014", "name": "GreenVolt Energy", "email": "it@greenvolt.com", "industry": "Energy", "mrr": 4500, "device_count": 110, "ticket_count": 20, "address": "120 Beaumont St, Westhaven, Auckland 1010"},
+        {"id": "client-015", "name": "Apex Hospitality", "email": "tech@apexhosp.com", "industry": "Hospitality", "mrr": 1400, "device_count": 28, "ticket_count": 8, "address": "8 Federal St, Auckland CBD 1010"},
     ]
     for c in extra_clients:
         existing = await db.clients.find_one({"id": c["id"]})

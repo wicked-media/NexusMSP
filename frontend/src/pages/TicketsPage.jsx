@@ -2040,6 +2040,10 @@ export default function TicketsPage() {
           const isClosed = ticket.status === "closed" || ticket.status === "resolved";
           const viewers = ticketViewers[ticket.id] || [];
           const isBeingViewed = viewers.length > 0;
+          const ticketClient = clients.find(c => c.id === ticket.client_id);
+          const ticketContact = ticket.contact_id ? ticketClient?.contacts?.find(ct => ct.id === ticket.contact_id || ct.name === ticket.contact_id) : null;
+          const contactName = ticket.contact_name || ticketContact?.name || "";
+          const clientAddress = ticketClient?.address || "";
 
           return (
             <Card
@@ -2117,6 +2121,8 @@ export default function TicketsPage() {
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span>{ticket.client_name}</span>
+                      {contactName && <><span className="text-muted-foreground/30">|</span><span>{contactName}</span></>}
+                      {clientAddress && <><span className="text-muted-foreground/30">|</span><span className="truncate max-w-[180px]">{clientAddress}</span></>}
                       {ticket.device_name && <><span className="text-muted-foreground/30">|</span><span className="font-mono">{ticket.device_name}</span></>}
                       {ticket.category && <><span className="text-muted-foreground/30">|</span><span className="capitalize">{ticket.category}</span></>}
                       {(ticket.tags || []).length > 0 && <><span className="text-muted-foreground/30">|</span>{ticket.tags.slice(0, 2).map(t => <Badge key={t} variant="outline" className="text-[9px] h-4 px-1">{t}</Badge>)}</>}

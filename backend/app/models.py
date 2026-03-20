@@ -128,6 +128,8 @@ class Ticket(BaseModel):
     watchers: List[str] = []
     merged_into: Optional[str] = None
     contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
     custom_fields: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
