@@ -1,99 +1,65 @@
 # NexusOps - Product Requirements Document
 
-## Overview
-NexusOps is a feature-rich RMM/PSA (Remote Monitoring & Management / Professional Services Automation) platform intended to surpass competitors like Syncro and SuperOps.
+## Original Problem Statement
+Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers. All features are implemented in large, parallel batches to maximize efficiency.
 
-## Core Architecture
-- **Frontend**: React + Shadcn UI + Tailwind CSS
-- **Backend**: FastAPI (Python)
-- **Database**: MongoDB
-- **AI Integration**: Emergent LLM Key (Claude Sonnet for AI features)
+## Architecture
+- **Backend**: FastAPI + MongoDB (Motor async driver)
+- **Frontend**: React + Shadcn/UI + Recharts + TipTap
+- **Auth**: JWT-based (admin@nexusops.io / admin123)
+- **Key Pattern**: Backend routers auto-discovered via `pkgutil`/`importlib` from `/app/backend/app/routers/`. Frontend routes defined in `/app/frontend/src/config/routes.js` using React.lazy. Sidebar navigation config-driven from `/app/frontend/src/config/navigation.js`.
 
-## Authentication
-- JWT-based custom auth
-- Default admin: admin@nexusops.io / admin123
+## Completed Phases
 
-## Implementation Phases
+### Phase 8 (8 Differentiator Features) - DONE
+### Phase 10 (15 Swiss Army Knife Features) - DONE
+### Phase 11 (15 MSP Features) - DONE
+- AI Knowledge Base, Compliance Reporting, Dispatch Board, Client Timeline, RPE Dashboard, Contract Profitability, Vendor Scorecard, IT Roadmap, Warranty Tracker, Client Compare, Skills Matrix, Approval Workflows, Asset Depreciation, Postmortems, CSAT Surveys
 
-### Phase 1-7: Core Platform (COMPLETE)
-- Dashboard, Tickets, Devices, Assets, Clients, Contracts, Invoices
-- Time Tracking, Knowledge Base, Remote Access, CRM/Leads
-- Email, Scripting, IT Documentation, Projects
-- Networking, Scheduling, Technicians, Products, Purchase Orders
-- Device Discovery, Stocktake, Estimates, On-Call Scheduling
-- Integrations: Stripe, Splynx, Hudu, Xero (mocked), Pax8 (mocked), Domotz (mocked), RustDesk, Proxmox, Acronis, O365
+### Phase 12 (15 New Features) - DONE
+- SLA Penalties, Revenue Forecast, Client Risk, Bulk Actions, Escalation Matrix, Change Management, Incident Heatmap, Tech Utilization, Cost Per Ticket, Profitability Heatmap, Backup Compliance, Procurement Planner, Client Reports, Live Chat
 
-### Phase 8: 8 Differentiator Features (COMPLETE - Tested)
-1. AI Ticket Triage
-2. Client Sentiment Scoring
-3. Gamification & Leaderboard
-4. Smart Scheduling (Route Optimization)
-5. Public Status Board
-6. Voice-to-Ticket
-7. Predictive Failure Analysis
-8. Client Onboarding Wizard
+### P0 Refactoring - DONE (March 20, 2026)
+- `server.py`: Auto-discovers 122 routers from `/app/backend/app/routers/` using pkgutil/importlib (was 60+ manual imports)
+- `App.js`: Refactored from 1165 lines to ~186 lines using React.lazy + routeConfig from `/app/frontend/src/config/routes.js`
+- `Sidebar.jsx`: Now imports navGroups from `/app/frontend/src/config/navigation.js`
 
-### Phase 10: 15 Swiss Army Knife Features (COMPLETE - Tested)
-1. AI Copilot Panel
-2. Client Health Scoring
-3. NOC Wallboard
-4. Magic Portal Links
-5. Document Scanner
-6. Network Topology
-7. Runbook Automation
-8. Password Vault
-9. QR Asset Tags
-10. Email Campaigns
-11. SLA Timer
-12. Benchmarking
-13. Billing Reconciliation
-14. Upsell Detector
-15. ROI Reports
+### Mock Data Enhancement - DONE (March 20, 2026)
+- 131 total devices across 15 clients (was 20)
+- Devices include: workstations, servers, firewalls, switches, laptops, printers
+- All devices have patch_status, pending_patches, OS, warranty, manufacturer data
+- 9 network sites seeded for bandwidth monitoring
 
-### Phase 11: 15 Features MSPs Are Screaming For (COMPLETE - Tested 2026-03-19)
-1. AI-Powered Knowledge Base (Self-Healing Wiki) - `/api/kb/*`
-2. Client Communication Timeline - `/api/client-timeline/{client_id}`
-3. Automated Compliance Reporting (CIS/HIPAA) - `/api/compliance/*`
-4. Real-Time Revenue Per Endpoint Dashboard - `/api/rpe/dashboard`
-5. Intelligent Dispatch Board - `/api/dispatch/*`
-6. Contract Profitability Analyzer - `/api/contract-profit/overview`
-7. Vendor Scorecard & Spend Analytics - `/api/vendor-scorecard/overview`
-8. Client IT Roadmap Builder - `/api/it-roadmap/*`
-9. Automated Warranty Tracker - `/api/warranty/overview`
-10. Multi-Tenant Client Comparison Dashboard - `/api/client-compare`
-11. Technician Skills Matrix & Auto-Matching - `/api/skills-matrix`
-12. Approval Workflows Engine - `/api/approvals/*`
-13. Asset Depreciation & Refresh Planner - `/api/asset-depreciation`
-14. Incident Post-Mortem Generator (AI) - `/api/postmortem/*`
-15. Client Satisfaction Pulse Surveys - `/api/csat/*`
+### Phase B+C: DNS Monitor + 9 MSP Features - DONE (March 20, 2026)
+1. **DNS Record Change Monitor** - Track DNS records (A/MX/TXT/CNAME/NS) for 7+ client domains, alerts on changes
+2. **Patch Compliance Dashboard** - 67.9% compliance tracking, 4 deployment rings, auto-approve policies
+3. **Client Portal Admin** - Branded client portal config with feature toggles, access logs, invitations
+4. **Backup Dashboard** - Unified backup status across Acronis/Veeam/Datto, per-client success rates
+5. **MFA Management** - Track MFA enrollment across client tenants (Azure AD/Google/Okta/Duo), enforce policies
+6. **Alert Suppression** - Intelligent alert noise reduction with 6 rule types, estimated time saved
+7. **License Management** - Software license tracking, utilization rates, wasted spend identification
+8. **Maintenance Scheduler** - Recurring maintenance windows with pre/post scripts per client
+9. **Bandwidth Monitor** - Real-time per-site bandwidth with area charts, alerts, ISP tracking
 
-## Backlog
+## Testing Status
+- iteration_41.json: Phase 11 (100% pass)
+- iteration_42.json: Phase 12 (100% pass)
+- iteration_43.json: P0 Refactoring + Phase B+C (100% pass - 20/20 backend, 9/9 frontend)
 
-### P1 - Upcoming
-- Phase 9 Enhancements: Device Activity Monitoring, Acronis Reporting, UI Dark/Light mode
-- Full UniFi Integration
-- Full Xero Integration (currently mocked)
+## Stats
+- **Backend Routers**: 122 auto-discovered
+- **Frontend Pages**: 94+
+- **Devices**: 131 across 15 clients
+- **Collections**: 50+
 
-### P2 - Future
-- Full Pax8 & Domotz backend logic (currently mocked)
-- Standalone DB seeding mechanism
-- Client portal for estimate approval
-- Ticket page visual overhaul
-
-### P3 - Nice to Have
-- Bluetooth barcode scanner integration
-- recharts console warnings fix
-
-## Refactoring Needs
-- `server.py`: 45+ manually registered routers - needs auto-discovery
-- `App.js`: 70+ route definitions - needs route modules
-- `TicketsPage.jsx`: 2300+ line monolith - needs decomposition
-- API routing strategy to prevent path collisions
-
-## Active 3rd Party Integrations
+## Active Integrations
 Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, emergentintegrations (Multi-LLM), Office 365, fpdf2, RustDesk, qrcode
 
-## Test Reports
-- Phase 8: /app/test_reports/iteration_39.json (34/34 backend, 8/8 frontend)
-- Phase 10: /app/test_reports/iteration_40.json (39/39 backend, 15/15 frontend)
-- Phase 11: /app/test_reports/iteration_41.json (28/28 backend, 14/14 frontend)
+## Mocked Integrations
+Xero, Pax8, Domotz
+
+## Backlog
+- **P1**: Phase 9 Enhancements (Device Activity Monitoring, Acronis Branded Reporting, Dark/Light Mode)
+- **P1**: Full UniFi Integration, Full Xero Integration
+- **P2**: Full Pax8/Domotz backend logic, Standalone DB seeding mechanism, Client portal for estimate approval, Ticket page visual overhaul
+- **P3**: Bluetooth barcode scanner, recharts console warnings fix
