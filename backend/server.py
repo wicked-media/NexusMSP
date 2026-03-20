@@ -4,37 +4,11 @@ from starlette.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
 import os
 import logging
+import importlib
+import pkgutil
 
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
-
-# Import all routers
-from app.routers import (
-    auth, clients, clients_contacts, tickets, devices, assets, contracts,
-    invoices, time_entries, knowledge_base, integrations, dashboard,
-    technicians, scheduling, products, networking, purchase_orders,
-    remote, crm, scripting, it_docs, portal, projects, admin,
-    infrastructure, yeastar, activity_logs, achievements,
-    technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
-    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
-    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping, rustdesk, device_discovery, ticket_email_notifications,
-    invoice_pdf, device_viewers, device_chat, ticket_attachments,
-    proxmox, acronis, gradient, financial_reports, tech_performance,
-    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
-    smart_scheduling, status_board, voice_ticket, predictive, onboarding,
-    ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
-    topology, runbooks, vault, qr_assets, campaigns,
-    sla_timer, benchmarking, billing_recon, upsell, roi_reports,
-    client_timeline, compliance, rpe_dashboard, dispatch_board,
-    contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
-    client_compare, skills_matrix, approval_workflows, asset_depreciation,
-    postmortem, csat_surveys,
-    sla_penalties, revenue_forecast, client_risk, bulk_actions,
-    escalation_matrix, change_management, incident_heatmap,
-    tech_utilization, cost_per_ticket, profitability_heatmap,
-    backup_compliance, procurement_planner, client_reports, live_chat
-)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -44,47 +18,51 @@ app = FastAPI(title="NexusOps API", version="3.0.0")
 # Static files for uploads
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
-# Include all routers with /api prefix
-# Note: device_discovery and device_viewers must come BEFORE devices so static routes are matched first
-# Note: invoice_pdf must come BEFORE invoices so /invoices/{id}/pdf is matched first
-# Note: device_chat must come BEFORE devices/{device_id} for chat routes
-# Note: ticket_attachments must come BEFORE tickets for attachment routes
-all_routers = [
-    auth, clients, clients_contacts, ticket_attachments, ticket_email_notifications, tickets,
-    device_discovery, device_viewers, device_chat, devices,
-    assets, contracts, invoice_pdf, invoices, time_entries, knowledge_base, integrations, dashboard,
-    technicians, scheduling, products, networking, purchase_orders,
-    remote, crm, scripting, it_docs, portal, projects, admin,
-    infrastructure, yeastar, activity_logs, achievements,
-    technicians_profile, microsoft_config, vendors, rentals, ticket_categories,
-    suped, splynx, hudu, ticket_suggestions, ai_service, xero, syncro,
-    o365_mailbox, asset_lifecycle, predictive_maintenance, event_bus, health_radar,
-    whitelabel, ticket_ping, rustdesk,
-    proxmox, acronis, gradient, financial_reports, tech_performance,
-    stocktake, on_call, estimates, ai_triage, sentiment, gamification,
-    smart_scheduling, status_board, voice_ticket, predictive, onboarding,
-    ai_copilot, client_health, wallboard, magic_portal, doc_scanner,
-    topology, runbooks, vault, qr_assets, campaigns,
-    sla_timer, benchmarking, billing_recon, upsell, roi_reports,
-    client_timeline, compliance, rpe_dashboard, dispatch_board,
-    contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
-    client_compare, skills_matrix, approval_workflows, asset_depreciation,
-    postmortem, csat_surveys,
-    sla_penalties, revenue_forecast, client_risk, bulk_actions,
-    escalation_matrix, change_management, incident_heatmap,
-    tech_utilization, cost_per_ticket, profitability_heatmap,
-    backup_compliance, procurement_planner, client_reports, live_chat
+# Auto-discover and register all routers from app/routers/
+# Priority ordering ensures specific routes are matched before dynamic ones
+ROUTER_PRIORITY = [
+    "auth",
+    "ticket_attachments", "ticket_email_notifications",
+    "device_discovery", "device_viewers", "device_chat",
+    "invoice_pdf",
 ]
 
-for router_module in all_routers:
-    app.include_router(router_module.router, prefix="/api")
+def discover_and_register_routers():
+    import app.routers as routers_pkg
+    discovered = {}
+    for _importer, modname, _ispkg in pkgutil.iter_modules(routers_pkg.__path__):
+        if modname.startswith('_'):
+            continue
+        try:
+            module = importlib.import_module(f'app.routers.{modname}')
+            if hasattr(module, 'router'):
+                discovered[modname] = module
+        except Exception as e:
+            logger.warning(f"Failed to import router '{modname}': {e}")
+
+    # Register priority routers first (order matters for route matching)
+    registered = set()
+    for name in ROUTER_PRIORITY:
+        if name in discovered:
+            app.include_router(discovered[name].router, prefix="/api")
+            registered.add(name)
+
+    # Register remaining routers alphabetically
+    for name in sorted(discovered.keys()):
+        if name not in registered:
+            app.include_router(discovered[name].router, prefix="/api")
+            registered.add(name)
+
+    logger.info(f"Auto-discovered and registered {len(registered)} routers")
+
+discover_and_register_routers()
 
 # Root endpoint
 @app.get("/api/")
 async def root():
     return {"message": "NexusOps API v3.0.0", "status": "operational"}
 
-# Stripe webhook - outside api prefix since it needs raw body
+# Stripe webhook
 @app.post("/api/webhook/stripe")
 async def stripe_webhook(request: FastAPIRequest):
     body = await request.body()
@@ -125,7 +103,6 @@ async def stripe_webhook(request: FastAPIRequest):
 @app.on_event("startup")
 async def startup_event():
     await seed_data()
-    # Assign ticket numbers to existing tickets that don't have one
     from app.routers.ticket_suggestions import generate_ticket_number
     tickets_without_number = await db.tickets.find(
         {"$or": [{"ticket_number": None}, {"ticket_number": {"$exists": False}}, {"ticket_number": ""}]},

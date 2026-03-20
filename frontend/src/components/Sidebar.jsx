@@ -1,89 +1,14 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
-import { 
-  LayoutDashboard, 
-  Ticket, 
-  Monitor, 
-  Package, 
-  Users, 
-  FileText,
-  Receipt,
-  Clock,
-  BookOpen,
-  Cloud,
-  Network,
-  Laptop,
-  BarChart3, 
-  Settings, 
-  LogOut,
-  ChevronLeft,
-  ChevronRight,
-  Zap,
-  UserPlus,
-  Shield,
-  Mail,
-  Terminal,
-  Key,
-  FolderKanban,
-  Server,
-  CalendarClock,
-  UserCog,
-  CalendarDays,
-  ShoppingCart,
-  Wifi,
-  Trophy,
-  Phone,
-  Building2,
-  Tags,
-  ShieldCheck,
-  Activity,
-  CreditCard,
-  Bell,
-  Cpu,
-  Heart,
-  Wrench,
-  Radar,
-  Paintbrush,
-  Gift,
-  Volume2,
-  DollarSign,
-  Wallet,
-  Navigation,
-  Bot,
-  KeyRound,
-  QrCode,
-  Workflow,
-  Timer,
-  ScanLine,
-  TrendingUp,
-  FileBarChart,
-  History,
-  ShieldAlert,
-  Target,
-  MapPin,
-  Map,
-  Award,
-  CheckSquare,
-  RefreshCw,
-  FileSearch,
-  Star,
-  BarChart,
-  Calculator,
-  TrendingDown,
-  GitBranch,
-  Flame,
-  MessageSquare,
-  HardDrive,
-  ShoppingBag
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { navGroups } from "@/config/navigation";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
@@ -109,7 +34,6 @@ function NotificationBell({ token, collapsed }) {
   const handleNotificationClick = (n) => {
     const link = getNotificationLink(n);
     if (link) {
-      // Mark this notification as read
       axios.post(`${API}/notifications/mark-read`, { ids: [n.id] }, { headers }).catch(() => {});
       setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       setUnreadCount(prev => Math.max(0, prev - (n.read ? 0 : 1)));
@@ -131,7 +55,6 @@ function NotificationBell({ token, collapsed }) {
 
   useEffect(() => {
     fetchNotifications();
-    // Also generate new ones
     axios.post(`${API}/notifications/generate`, {}, { headers }).then(() => fetchNotifications()).catch(() => {});
     const iv = setInterval(fetchNotifications, 60000);
     return () => clearInterval(iv);
@@ -192,134 +115,6 @@ function NotificationBell({ token, collapsed }) {
   );
 }
 
-// Grouped navigation for better organization
-const navGroups = [
-  {
-    title: "Main",
-    items: [
-      { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-      { path: "/tickets", icon: Ticket, label: "Tickets" },
-      { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
-      { path: "/sla-penalties", icon: Calculator, label: "SLA Penalties" },
-      { path: "/dispatch-board", icon: MapPin, label: "Dispatch Board" },
-      { path: "/escalation-matrix", icon: Bell, label: "Escalation Matrix" },
-      { path: "/change-management", icon: GitBranch, label: "Change Mgmt" },
-      { path: "/incident-heatmap", icon: Flame, label: "Incident Heatmap" },
-      { path: "/technicians", icon: UserCog, label: "Technicians" },
-      { path: "/skills-matrix", icon: Award, label: "Skills Matrix" },
-      { path: "/tech-utilization", icon: Clock, label: "Tech Utilization" },
-      { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
-      { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
-      { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
-      { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
-      { path: "/approvals", icon: CheckSquare, label: "Approvals" },
-      { path: "/postmortem", icon: FileSearch, label: "Post-Mortems" },
-      { path: "/live-chat", icon: MessageSquare, label: "Live Chat" },
-    ]
-  },
-  {
-    title: "Infrastructure",
-    items: [
-      { path: "/devices", icon: Monitor, label: "Devices" },
-      { path: "/bulk-actions", icon: Zap, label: "Bulk Actions" },
-      { path: "/topology", icon: Wifi, label: "Network Topology" },
-      { path: "/networking", icon: Wifi, label: "Networking" },
-      { path: "/dmarc-compliance", icon: ShieldCheck, label: "Email Security" },
-      { path: "/splynx-dashboard", icon: Activity, label: "ISP Health" },
-      { path: "/assets", icon: Package, label: "Assets" },
-      { path: "/qr-assets", icon: QrCode, label: "QR Asset Tags" },
-      { path: "/asset-lifecycle", icon: Wrench, label: "Asset Lifecycle" },
-      { path: "/asset-depreciation", icon: RefreshCw, label: "Depreciation" },
-      { path: "/warranty-tracker", icon: Shield, label: "Warranty Tracker" },
-      { path: "/backup-compliance", icon: HardDrive, label: "Backup Compliance" },
-      { path: "/procurement-planner", icon: ShoppingBag, label: "Procurement" },
-      { path: "/predictive-maintenance", icon: Cpu, label: "Predictive AI" },
-      { path: "/doc-scanner", icon: ScanLine, label: "Document Scanner" },
-      { path: "/vault", icon: KeyRound, label: "Password Vault" },
-      { path: "/runbooks", icon: Workflow, label: "Runbook Automation" },
-      { path: "/scripting", icon: Terminal, label: "Scripting" },
-      { path: "/remote-access", icon: Laptop, label: "Remote Access" },
-    ]
-  },
-  {
-    title: "Business",
-    items: [
-      { path: "/clients", icon: Users, label: "Clients" },
-      { path: "/client-health", icon: Activity, label: "Client Health" },
-      { path: "/client-timeline", icon: History, label: "Client Timeline" },
-      { path: "/client-compare", icon: BarChart, label: "Client Compare" },
-      { path: "/client-risk", icon: ShieldAlert, label: "Client Risk" },
-      { path: "/csat-surveys", icon: Star, label: "CSAT Surveys" },
-      { path: "/client-reports", icon: FileText, label: "Client Reports" },
-      { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
-      { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
-      { path: "/it-roadmap", icon: Map, label: "IT Roadmap" },
-      { path: "/upsell", icon: TrendingUp, label: "Upsell Detector" },
-      { path: "/revenue-forecast", icon: TrendingUp, label: "Revenue Forecast" },
-      { path: "/rpe-dashboard", icon: Target, label: "Revenue/Endpoint" },
-      { path: "/contract-profit", icon: DollarSign, label: "Contract Profit" },
-      { path: "/profitability-heatmap", icon: BarChart3, label: "Profitability Map" },
-      { path: "/cost-per-ticket", icon: DollarSign, label: "Cost/Ticket" },
-      { path: "/roi-reports", icon: FileBarChart, label: "ROI Reports" },
-      { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
-      { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
-      { path: "/campaigns", icon: Mail, label: "Email Campaigns" },
-      { path: "/products", icon: Package, label: "Products" },
-      { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
-      { path: "/stocktake", icon: Package, label: "Stocktake" },
-      { path: "/vendors", icon: Building2, label: "Vendors" },
-      { path: "/vendor-scorecard", icon: Star, label: "Vendor Scorecard" },
-      { path: "/rentals", icon: Phone, label: "Phone Rentals" },
-      { path: "/projects", icon: FolderKanban, label: "Projects" },
-      { path: "/contracts", icon: FileText, label: "Contracts" },
-      { path: "/invoices", icon: Receipt, label: "Invoices" },
-      { path: "/estimates", icon: FileText, label: "Estimates" },
-      { path: "/billing-recon", icon: DollarSign, label: "Billing Recon" },
-      { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
-      { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
-    ]
-  },
-  {
-    title: "Communication",
-    items: [
-      { path: "/email", icon: Mail, label: "Email" },
-      { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
-      { path: "/documentation", icon: Key, label: "IT Docs" },
-      { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
-    ]
-  },
-  {
-    title: "Compliance",
-    items: [
-      { path: "/compliance", icon: ShieldAlert, label: "Compliance Reports" },
-    ]
-  },
-  {
-    title: "Integrations",
-    items: [
-      { path: "/proxmox", icon: Server, label: "Proxmox" },
-      { path: "/domotz", icon: Network, label: "Domotz" },
-      { path: "/acronis", icon: Shield, label: "Acronis" },
-      { path: "/pax8", icon: Cloud, label: "Pax8" },
-      { path: "/gradient", icon: DollarSign, label: "Gradient MSP" },
-    ]
-  },
-  {
-    title: "System",
-    items: [
-      { path: "/health-radar", icon: Radar, label: "Health Radar" },
-      { path: "/benchmarking", icon: BarChart3, label: "Benchmarking" },
-      { path: "/white-label", icon: Paintbrush, label: "White Label" },
-      { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
-      { path: "/reports", icon: BarChart3, label: "Reports" },
-      { path: "/financial-reports", icon: Wallet, label: "Financial Reports" },
-      { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },
-      { path: "/ticket-ping-settings", icon: Volume2, label: "Ping & Escalation" },
-      { path: "/settings", icon: Settings, label: "Settings" },
-    ]
-  },
-];
-
 export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const navigate = useNavigate();
@@ -371,7 +166,6 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
           <nav className="py-3 px-3">
             {navGroups.map((group, groupIndex) => (
               <div key={group.title} className={groupIndex > 0 ? 'mt-5' : ''}>
-                {/* Group Title */}
                 {!collapsed && (
                   <div className="px-3 mb-2">
                     <span className="text-[11px] font-semibold uppercase tracking-widest text-cyan-400">
@@ -382,8 +176,6 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                 {collapsed && groupIndex > 0 && (
                   <div className="mx-3 mb-2 border-t border-border/50" />
                 )}
-                
-                {/* Group Items */}
                 <div className="space-y-1">
                   {group.items.map((item) => (
                     <Tooltip key={item.path}>

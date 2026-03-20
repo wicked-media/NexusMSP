@@ -1,0 +1,135 @@
+import { lazy } from "react";
+
+// Lazy-loaded page components
+const page = (name) => lazy(() => import(`@/pages/${name}`));
+
+// Route configuration
+// layout: true = wrapped in MainLayout, auth: true = requires authentication
+export const routeConfig = [
+  // Core
+  { path: "/", component: page("DashboardPage"), auth: true, layout: true },
+  { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
+  { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },
+  { path: "/devices/:deviceId", component: page("DeviceDetailPage"), auth: true, layout: true },
+  { path: "/devices/:deviceId/chat", component: page("DeviceChatPage"), auth: true, layout: true },
+  { path: "/assets", component: page("AssetsPage"), auth: true, layout: true },
+  { path: "/clients", component: page("ClientsPage"), auth: true, layout: true },
+  { path: "/contracts", component: page("ContractsPage"), auth: true, layout: true },
+  { path: "/invoices", component: page("InvoicesPage"), auth: true, layout: true },
+  { path: "/time-tracking", component: page("TimeTrackingPage"), auth: true, layout: true },
+  { path: "/knowledge-base", component: page("KnowledgeBasePage"), auth: true, layout: true },
+
+  // Integrations
+  { path: "/pax8", component: page("Pax8Page"), auth: true, layout: true },
+  { path: "/domotz", component: page("DomotzPage"), auth: true, layout: true },
+  { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
+  { path: "/acronis", component: page("AcronisPage"), auth: true, layout: true },
+  { path: "/proxmox", component: page("ProxmoxPage"), auth: true, layout: true },
+  { path: "/splynx-dashboard", component: page("SplynxDashboardPage"), auth: true, layout: true },
+  { path: "/xero", component: page("XeroDashboardPage"), auth: true, layout: true },
+  { path: "/o365-setup", component: page("O365SetupPage"), auth: true, layout: true },
+  { path: "/gradient", component: page("GradientPage"), auth: true, layout: true },
+
+  // Reports & Analytics
+  { path: "/reports", component: page("ReportsPage"), auth: true, layout: true },
+  { path: "/financial-reports", component: page("FinancialReportsPage"), auth: true, layout: true },
+  { path: "/roi-reports", component: page("RoiReportsPage"), auth: true, layout: true },
+  { path: "/benchmarking", component: page("BenchmarkingPage"), auth: true, layout: true },
+  { path: "/profitability-heatmap", component: page("ProfitabilityHeatmapPage"), auth: true, layout: true },
+  { path: "/incident-heatmap", component: page("IncidentHeatmapPage"), auth: true, layout: true },
+  { path: "/cost-per-ticket", component: page("CostPerTicketPage"), auth: true, layout: true },
+  { path: "/revenue-forecast", component: page("RevenueForecastPage"), auth: true, layout: true },
+  { path: "/rpe-dashboard", component: page("RpeDashboardPage"), auth: true, layout: true },
+  { path: "/client-reports", component: page("ClientReportsPage"), auth: true, layout: true },
+
+  // Service Management
+  { path: "/sla-timer", component: page("SlaTimerPage"), auth: true, layout: true },
+  { path: "/sla-penalties", component: page("SlaPenaltiesPage"), auth: true, layout: true },
+  { path: "/dispatch-board", component: page("DispatchBoardPage"), auth: true, layout: true },
+  { path: "/escalation-matrix", component: page("EscalationMatrixPage"), auth: true, layout: true },
+  { path: "/change-management", component: page("ChangeManagementPage"), auth: true, layout: true },
+  { path: "/postmortem", component: page("PostmortemPage"), auth: true, layout: true },
+  { path: "/approvals", component: page("ApprovalWorkflowsPage"), auth: true, layout: true },
+  { path: "/live-chat", component: page("LiveChatPage"), auth: true, layout: true },
+  { path: "/bulk-actions", component: page("BulkActionsPage"), auth: true, layout: true },
+
+  // Infrastructure
+  { path: "/topology", component: page("TopologyPage"), auth: true, layout: true },
+  { path: "/networking", component: page("NetworkingPage"), auth: true, layout: true },
+  { path: "/dmarc-compliance", component: page("DmarcCompliancePage"), auth: true, layout: true },
+  { path: "/qr-assets", component: page("QrAssetsPage"), auth: true, layout: true },
+  { path: "/asset-lifecycle", component: page("AssetLifecyclePage"), auth: true, layout: true },
+  { path: "/asset-depreciation", component: page("AssetDepreciationPage"), auth: true, layout: true },
+  { path: "/warranty-tracker", component: page("WarrantyTrackerPage"), auth: true, layout: true },
+  { path: "/backup-compliance", component: page("BackupCompliancePage"), auth: true, layout: true },
+  { path: "/procurement-planner", component: page("ProcurementPlannerPage"), auth: true, layout: true },
+  { path: "/predictive-maintenance", component: page("PredictiveMaintenancePage"), auth: true, layout: true },
+  { path: "/doc-scanner", component: page("DocScannerPage"), auth: true, layout: true },
+  { path: "/vault", component: page("VaultPage"), auth: true, layout: true },
+  { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
+  { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
+
+  // People & Scheduling
+  { path: "/technicians", component: page("TechniciansPage"), auth: true, layout: true },
+  { path: "/skills-matrix", component: page("SkillsMatrixPage"), auth: true, layout: true },
+  { path: "/tech-utilization", component: page("TechUtilizationPage"), auth: true, layout: true },
+  { path: "/leaderboard", component: page("LeaderboardPage"), auth: true, layout: true },
+  { path: "/scheduling", component: page("SchedulingPage"), auth: true, layout: true },
+  { path: "/smart-scheduling", component: page("SmartSchedulePage"), auth: true, layout: true },
+
+  // Client Management
+  { path: "/client-health", component: page("ClientHealthPage"), auth: true, layout: true },
+  { path: "/client-timeline", component: page("ClientTimelinePage"), auth: true, layout: true },
+  { path: "/client-compare", component: page("ClientComparePage"), auth: true, layout: true },
+  { path: "/client-risk", component: page("ClientRiskPage"), auth: true, layout: true },
+  { path: "/csat-surveys", component: page("CsatSurveysPage"), auth: true, layout: true },
+  { path: "/onboarding", component: page("OnboardingWizardPage"), auth: true, layout: true },
+  { path: "/sentiment", component: page("SentimentDashboardPage"), auth: true, layout: true },
+  { path: "/it-roadmap", component: page("ItRoadmapPage"), auth: true, layout: true },
+  { path: "/upsell", component: page("UpsellPage"), auth: true, layout: true },
+  { path: "/contract-profit", component: page("ContractProfitPage"), auth: true, layout: true },
+  { path: "/vendor-scorecard", component: page("VendorScorecardPage"), auth: true, layout: true },
+  { path: "/compliance", component: page("CompliancePage"), auth: true, layout: true },
+
+  // Business Operations
+  { path: "/leads", component: page("LeadsPage"), auth: true, layout: true },
+  { path: "/loyalty", component: page("LoyaltyDashboardPage"), auth: true, layout: true },
+  { path: "/campaigns", component: page("CampaignsPage"), auth: true, layout: true },
+  { path: "/products", component: page("ProductsPage"), auth: true, layout: true },
+  { path: "/purchase-orders", component: page("PurchaseOrdersPage"), auth: true, layout: true },
+  { path: "/stocktake", component: page("StocktakePage"), auth: true, layout: true },
+  { path: "/vendors", component: page("VendorsPage"), auth: true, layout: true },
+  { path: "/rentals", component: page("RentalsPage"), auth: true, layout: true },
+  { path: "/projects", component: page("ProjectsPage"), auth: true, layout: true },
+  { path: "/estimates", component: page("EstimatesPage"), auth: true, layout: true },
+  { path: "/billing-recon", component: page("BillingReconPage"), auth: true, layout: true },
+
+  // Communication
+  { path: "/email", component: page("EmailPage"), auth: true, layout: true },
+  { path: "/documentation", component: page("ITDocumentationPage"), auth: true, layout: true },
+  { path: "/settings", component: page("SettingsPage"), auth: true, layout: true },
+  { path: "/expiry-tracker", component: page("ExpiryTrackerPage"), auth: true, layout: true },
+  { path: "/white-label", component: page("WhiteLabelPage"), auth: true, layout: true },
+  { path: "/ticket-settings", component: page("TicketSettingsPage"), auth: true, layout: true },
+  { path: "/ticket-ping-settings", component: page("TicketPingSettingsPage"), auth: true, layout: true },
+  { path: "/health-radar", component: page("HealthRadarPage"), auth: true, layout: true },
+  { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
+
+  // Phase C new features
+  { path: "/dns-monitor", component: page("DnsMonitorPage"), auth: true, layout: true },
+  { path: "/patch-compliance", component: page("PatchCompliancePage"), auth: true, layout: true },
+  { path: "/client-portal-admin", component: page("ClientPortalAdminPage"), auth: true, layout: true },
+  { path: "/backup-dashboard", component: page("BackupDashboardPage"), auth: true, layout: true },
+  { path: "/mfa-management", component: page("MfaManagementPage"), auth: true, layout: true },
+  { path: "/alert-suppression", component: page("AlertSuppressionPage"), auth: true, layout: true },
+  { path: "/license-management", component: page("LicenseManagementPage"), auth: true, layout: true },
+  { path: "/maintenance-scheduler", component: page("MaintenanceSchedulerPage"), auth: true, layout: true },
+  { path: "/bandwidth-monitor", component: page("BandwidthMonitorPage"), auth: true, layout: true },
+
+  // Special: Wallboard (no MainLayout)
+  { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },
+
+  // Public routes (no auth, no layout)
+  { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },
+  { path: "/status-board/:clientId", component: page("StatusBoardPage"), auth: false, layout: false },
+];
