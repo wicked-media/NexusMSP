@@ -11,7 +11,7 @@ import {
   CheckSquare, RefreshCw, FileSearch, Star, BarChart, Calculator,
   TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
   ShoppingBag, Globe, PatchCheck, Lock, BellOff, Layers,
-  Gauge, WifiIcon
+  Gauge, WifiIcon, Eye, Bug, FileWarning, ClipboardList, Kanban
 } from "lucide-react";
 
 export const navGroups = [
@@ -20,6 +20,7 @@ export const navGroups = [
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
+      { path: "/kanban-tickets", icon: FolderKanban, label: "Kanban Board" },
       { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
       { path: "/sla-penalties", icon: Calculator, label: "SLA Penalties" },
       { path: "/dispatch-board", icon: MapPin, label: "Dispatch Board" },
@@ -36,6 +37,8 @@ export const navGroups = [
       { path: "/approvals", icon: CheckSquare, label: "Approvals" },
       { path: "/postmortem", icon: FileSearch, label: "Post-Mortems" },
       { path: "/live-chat", icon: MessageSquare, label: "Live Chat" },
+      { path: "/custom-monitors", icon: Activity, label: "Custom Monitors" },
+      { path: "/script-ticket", icon: Terminal, label: "Script-to-Ticket" },
       { path: "/alert-suppression", icon: BellOff, label: "Alert Suppression" },
       { path: "/maintenance-scheduler", icon: CalendarClock, label: "Maintenance" },
     ]
@@ -78,6 +81,7 @@ export const navGroups = [
       { path: "/client-risk", icon: ShieldAlert, label: "Client Risk" },
       { path: "/csat-surveys", icon: Star, label: "CSAT Surveys" },
       { path: "/client-reports", icon: FileText, label: "Client Reports" },
+      { path: "/sla-report-gen", icon: FileBarChart, label: "Client SLA Reports" },
       { path: "/client-portal-admin", icon: Users, label: "Client Portal" },
       { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
       { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
@@ -102,6 +106,7 @@ export const navGroups = [
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/invoices", icon: Receipt, label: "Invoices" },
       { path: "/estimates", icon: FileText, label: "Estimates" },
+      { path: "/recurring-invoices", icon: RefreshCw, label: "Recurring Invoices" },
       { path: "/billing-recon", icon: DollarSign, label: "Billing Recon" },
       { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
@@ -114,14 +119,33 @@ export const navGroups = [
       { path: "/email", icon: Mail, label: "Email" },
       { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
       { path: "/documentation", icon: Key, label: "IT Docs" },
+      { path: "/capacity-planner", icon: Users, label: "Capacity Planner" },
+      { path: "/auto-documentation", icon: FileText, label: "Auto-Docs" },
       { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
+    ]
+  },
+  {
+    title: "Security Operations",
+    items: [
+      { path: "/security-dashboard", icon: Shield, label: "Security SOC" },
+      { path: "/endpoint-security", icon: ShieldCheck, label: "Endpoint Scores" },
+      { path: "/threat-timeline", icon: Flame, label: "Threat Timeline" },
+      { path: "/identity-threats", icon: Eye, label: "Identity Threats" },
+      { path: "/ransomware-canary", icon: FileWarning, label: "Ransomware Canary" },
+      { path: "/remediation-playbooks", icon: Workflow, label: "Remediation" },
+      { path: "/soc-feed", icon: Activity, label: "SOC Feed" },
+      { path: "/vulnerability-scanner", icon: Bug, label: "Vuln Scanner" },
+      { path: "/third-party-patching", icon: ShieldCheck, label: "3rd Party Patches" },
+      { path: "/audit-trail", icon: ClipboardList, label: "Audit Trail" },
     ]
   },
   {
     title: "Security & Compliance",
     items: [
       { path: "/compliance", icon: ShieldAlert, label: "Compliance Reports" },
+      { path: "/compliance-report-gen", icon: FileText, label: "Compliance Gen" },
       { path: "/mfa-management", icon: Lock, label: "MFA Management" },
+      { path: "/password-rotation", icon: RefreshCw, label: "Password Rotation" },
     ]
   },
   {

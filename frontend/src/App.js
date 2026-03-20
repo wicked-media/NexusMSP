@@ -12,6 +12,27 @@ import { routeConfig } from "@/config/routes";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
+// Theme Context
+const ThemeContext = createContext(null);
+export const useTheme = () => useContext(ThemeContext);
+
+export const ThemeProvider = ({ children }) => {
+  const [theme, setTheme] = useState(() => localStorage.getItem("nexusops_theme") || "dark");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light");
+    localStorage.setItem("nexusops_theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+};
+
 // Auth Context
 const AuthContext = createContext(null);
 
@@ -163,6 +184,7 @@ function App() {
   }, []);
 
   return (
+    <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -179,6 +201,7 @@ function App() {
       </BrowserRouter>
       <Toaster position="top-right" richColors />
     </AuthProvider>
+    </ThemeProvider>
   );
 }
 

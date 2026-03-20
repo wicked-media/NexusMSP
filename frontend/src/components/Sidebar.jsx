@@ -1,6 +1,6 @@
-import { NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "@/App";
-import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap } from "lucide-react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useAuth, useTheme } from "@/App";
+import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -79,7 +79,7 @@ function NotificationBell({ token, collapsed }) {
 
   return (
     <div className="relative px-3 py-2" ref={ref}>
-      <button onClick={() => setIsOpen(!isOpen)} className={`relative flex items-center gap-2 w-full px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 transition-all ${collapsed ? "justify-center" : ""}`} data-testid="notification-bell">
+      <button onClick={() => setIsOpen(!isOpen)} className={`relative flex items-center gap-2 w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all ${collapsed ? "justify-center" : ""}`} data-testid="notification-bell">
         <Bell className="w-[18px] h-[18px]" />
         {!collapsed && <span className="text-[13px] font-medium">Notifications</span>}
         {unreadCount > 0 && (
@@ -115,8 +115,41 @@ function NotificationBell({ token, collapsed }) {
   );
 }
 
+// Nav item component that avoids className function + TooltipTrigger asChild conflict
+const NavItem = ({ item, collapsed }) => {
+  const location = useLocation();
+  const isActive = item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          to={item.path}
+          className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
+            isActive
+              ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground hover:translate-x-1'
+          } ${collapsed ? 'justify-center' : ''}`}
+          data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+        >
+          <item.icon className="h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 group-hover:scale-110" strokeWidth={1.75} />
+          {!collapsed && (
+            <span className="text-[13px] font-medium">{item.label}</span>
+          )}
+        </Link>
+      </TooltipTrigger>
+      {collapsed && (
+        <TooltipContent side="right" className="font-medium">
+          {item.label}
+        </TooltipContent>
+      )}
+    </Tooltip>
+  );
+};
+
 export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -168,7 +201,7 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
               <div key={group.title} className={groupIndex > 0 ? 'mt-5' : ''}>
                 {!collapsed && (
                   <div className="px-3 mb-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-widest text-cyan-400">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-primary/80">
                       {group.title}
                     </span>
                   </div>
@@ -178,32 +211,7 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                 )}
                 <div className="space-y-1">
                   {group.items.map((item) => (
-                    <Tooltip key={item.path}>
-                      <TooltipTrigger asChild>
-                        <NavLink
-                          to={item.path}
-                          end={item.path === "/"}
-                          className={({ isActive }) =>
-                            `group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
-                              isActive
-                                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
-                                : 'text-slate-200 hover:bg-slate-700/60 hover:text-white hover:translate-x-1'
-                            } ${collapsed ? 'justify-center' : ''}`
-                          }
-                          data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                        >
-                          <item.icon className={`h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 group-hover:scale-110`} strokeWidth={1.75} />
-                          {!collapsed && (
-                            <span className="text-[13px] font-medium">{item.label}</span>
-                          )}
-                        </NavLink>
-                      </TooltipTrigger>
-                      {collapsed && (
-                        <TooltipContent side="right" className="font-medium">
-                          {item.label}
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
+                    <NavItem key={item.path} item={item} collapsed={collapsed} />
                   ))}
                 </div>
               </div>
@@ -257,6 +265,26 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
             )}
           </Tooltip>
           
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size={collapsed ? "icon" : "sm"}
+                onClick={toggleTheme}
+                className={`text-muted-foreground hover:text-amber-400 hover:bg-amber-400/10 ${
+                  collapsed ? 'w-10 h-10' : 'w-full justify-start gap-2'
+                }`}
+                data-testid="theme-toggle"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {!collapsed && <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>}
+              </Button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right">{theme === "dark" ? "Light Mode" : "Dark Mode"}</TooltipContent>
+            )}
+          </Tooltip>
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

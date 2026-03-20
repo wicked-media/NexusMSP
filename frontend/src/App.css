@@ -143,10 +143,11 @@
 }
 
 .recharts-default-tooltip {
-    background-color: hsl(217 33% 17%) !important;
-    border: 1px solid hsl(217 33% 25%) !important;
+    background-color: hsl(var(--card)) !important;
+    border: 1px solid hsl(var(--border)) !important;
     border-radius: 0.5rem !important;
-    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3) !important;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.2) !important;
+    color: hsl(var(--card-foreground)) !important;
 }
 
 /* Scrollbar for data tables */

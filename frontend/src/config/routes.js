@@ -126,6 +126,29 @@ export const routeConfig = [
   { path: "/maintenance-scheduler", component: page("MaintenanceSchedulerPage"), auth: true, layout: true },
   { path: "/bandwidth-monitor", component: page("BandwidthMonitorPage"), auth: true, layout: true },
 
+  // Phase D: Security Operations + Huntress-killers
+  { path: "/security-dashboard", component: page("SecurityDashboardPage"), auth: true, layout: true },
+  { path: "/endpoint-security", component: page("EndpointSecurityPage"), auth: true, layout: true },
+  { path: "/threat-timeline", component: page("ThreatTimelinePage"), auth: true, layout: true },
+  { path: "/identity-threats", component: page("IdentityThreatPage"), auth: true, layout: true },
+  { path: "/ransomware-canary", component: page("RansomwareCanaryPage"), auth: true, layout: true },
+  { path: "/remediation-playbooks", component: page("RemediationPlaybooksPage"), auth: true, layout: true },
+  { path: "/soc-feed", component: page("SocFeedPage"), auth: true, layout: true },
+  { path: "/vulnerability-scanner", component: page("VulnerabilityScannerPage"), auth: true, layout: true },
+  { path: "/third-party-patching", component: page("ThirdPartyPatchingPage"), auth: true, layout: true },
+  { path: "/compliance-report-gen", component: page("ComplianceReportGenPage"), auth: true, layout: true },
+  { path: "/audit-trail", component: page("AuditTrailPage"), auth: true, layout: true },
+
+  // Phase D: Operations & Business
+  { path: "/script-ticket", component: page("ScriptTicketPage"), auth: true, layout: true },
+  { path: "/custom-monitors", component: page("CustomMonitorsPage"), auth: true, layout: true },
+  { path: "/recurring-invoices", component: page("RecurringInvoicesPage"), auth: true, layout: true },
+  { path: "/kanban-tickets", component: page("KanbanTicketsPage"), auth: true, layout: true },
+  { path: "/password-rotation", component: page("PasswordRotationPage"), auth: true, layout: true },
+  { path: "/sla-report-gen", component: page("SlaReportGenPage"), auth: true, layout: true },
+  { path: "/capacity-planner", component: page("CapacityPlannerPage"), auth: true, layout: true },
+  { path: "/auto-documentation", component: page("AutoDocumentationPage"), auth: true, layout: true },
+
   // Special: Wallboard (no MainLayout)
   { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },
 
