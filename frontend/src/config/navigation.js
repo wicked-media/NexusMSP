@@ -12,7 +12,10 @@ import {
   TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
   ShoppingBag, Globe, PatchCheck, Lock, BellOff, Layers,
   Gauge, WifiIcon, Eye, Bug, FileWarning, ClipboardList, Kanban,
-  Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned
+  Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
+  HeartPulse, AlertTriangle, Banknote, MessageCircle,
+  FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
+  LayoutGrid, Building, Smartphone, Radio, Coins
 } from "lucide-react";
 
 export const navGroups = [
@@ -34,6 +37,7 @@ export const navGroups = [
       { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
       { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
       { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
+      { path: "/mobile-tech", icon: Smartphone, label: "Mobile Tech" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
       { path: "/approvals", icon: CheckSquare, label: "Approvals" },
       { path: "/postmortem", icon: FileSearch, label: "Post-Mortems" },
@@ -112,6 +116,11 @@ export const navGroups = [
       { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
       { path: "/license-management", icon: Layers, label: "License Mgmt" },
+      { path: "/usage-billing", icon: Receipt, label: "Usage Billing" },
+      { path: "/pricing-calc", icon: Banknote, label: "Pricing Calculator" },
+      { path: "/late-payment", icon: BadgeDollarSign, label: "Late Payment AI" },
+      { path: "/qbr-generator", icon: FileSpreadsheet, label: "QBR Generator" },
+      { path: "/revenue-tracker", icon: Coins, label: "Revenue Tracker" },
     ]
   },
   {
@@ -119,6 +128,7 @@ export const navGroups = [
     items: [
       { path: "/email", icon: Mail, label: "Email" },
       { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
+      { path: "/comms-timeline", icon: MessageCircle, label: "Comms Timeline" },
       { path: "/documentation", icon: Key, label: "IT Docs" },
       { path: "/capacity-planner", icon: Users, label: "Capacity Planner" },
       { path: "/auto-documentation", icon: FileText, label: "Auto-Docs" },
@@ -138,6 +148,9 @@ export const navGroups = [
       { path: "/vulnerability-scanner", icon: Bug, label: "Vuln Scanner" },
       { path: "/third-party-patching", icon: ShieldCheck, label: "3rd Party Patches" },
       { path: "/audit-trail", icon: ClipboardList, label: "Audit Trail" },
+      { path: "/zero-trust", icon: Fingerprint, label: "Zero Trust" },
+      { path: "/ransomware-tabletop", icon: Swords, label: "Ransomware Tabletop" },
+      { path: "/soc-realtime", icon: Radio, label: "Live SOC Feed" },
     ]
   },
   {
@@ -157,6 +170,9 @@ export const navGroups = [
       { path: "/acronis", icon: Shield, label: "Acronis" },
       { path: "/pax8", icon: Cloud, label: "Pax8" },
       { path: "/gradient", icon: DollarSign, label: "Gradient MSP" },
+      { path: "/webhook-builder", icon: Webhook, label: "Webhook Builder" },
+      { path: "/git-scripts", icon: GitMerge, label: "Git Scripts Sync" },
+      { path: "/channel-mode", icon: Building, label: "Channel / MSP Mode" },
     ]
   },
   {
@@ -165,6 +181,9 @@ export const navGroups = [
       { path: "/nlp-query", icon: Search, label: "NLP Search" },
       { path: "/ai-resolution", icon: BrainCircuit, label: "AI Auto-Resolve" },
       { path: "/patch-hub", icon: Layers, label: "Patch Hub" },
+      { path: "/self-healing", icon: HeartPulse, label: "AI Self-Healing" },
+      { path: "/predictive-failure", icon: AlertTriangle, label: "Predictive Failure" },
+      { path: "/dashboard-builder", icon: LayoutGrid, label: "Dashboard Builder" },
     ]
   },
   {

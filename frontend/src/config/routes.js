@@ -156,6 +156,26 @@ export const routeConfig = [
   { path: "/nlp-query", component: page("NLPQueryPage"), auth: true, layout: true },
   { path: "/ai-resolution", component: page("AIResolutionPage"), auth: true, layout: true },
 
+  // Phase F: AI Self-Healing + Advanced Ops
+  { path: "/self-healing", component: page("SelfHealingPage"), auth: true, layout: true },
+  { path: "/predictive-failure", component: page("PredictiveFailurePage"), auth: true, layout: true },
+  { path: "/usage-billing", component: page("UsageBillingPage"), auth: true, layout: true },
+  { path: "/pricing-calc", component: page("PricingCalcPage"), auth: true, layout: true },
+  { path: "/comms-timeline", component: page("CommsTimelinePage"), auth: true, layout: true },
+  { path: "/qbr-generator", component: page("QBRGeneratorPage"), auth: true, layout: true },
+  { path: "/zero-trust", component: page("ZeroTrustPage"), auth: true, layout: true },
+  { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
+  { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
+  { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
+  { path: "/ransomware-tabletop", component: page("RansomwareTabletopPage"), auth: true, layout: true },
+
+  // Phase G: Dashboard Builder + Channel Mode + Real-time SOC + Revenue
+  { path: "/dashboard-builder", component: page("DashboardBuilderPage"), auth: true, layout: true },
+  { path: "/channel-mode", component: page("ChannelModePage"), auth: true, layout: true },
+  { path: "/mobile-tech", component: page("MobileTechPage"), auth: true, layout: true },
+  { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
+  { path: "/revenue-tracker", component: page("RevenueTrackerPage"), auth: true, layout: true },
+
   // Phase E: Revenue & Billing
   { path: "/client-budget", component: page("ClientBudgetPage"), auth: true, layout: true },
   { path: "/executive-reports", component: page("ExecutiveReportsPage"), auth: true, layout: true },
