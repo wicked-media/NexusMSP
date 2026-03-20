@@ -156,6 +156,11 @@ async def create_workshop_job(data: dict, current_user: dict = Depends(get_curre
         "ticket_id": data.get("ticket_id", ""),
         "timer_running": False,
         "timer_started_at": None,
+        "condition_on_arrival": data.get("condition_on_arrival", ""),
+        "accessories_received": data.get("accessories_received", []),
+        "customer_password": data.get("customer_password", ""),
+        "warranty_status": data.get("warranty_status", "unknown"),
+        "warranty_expiry": data.get("warranty_expiry", ""),
         "pickup_notified": False,
         "collected": False,
         "collected_at": None,
@@ -180,7 +185,9 @@ async def update_workshop_job(job_id: str, data: dict, current_user: dict = Depe
     allowed = {"repair_status", "diagnosis", "repair_notes", "parts_used", "labour_minutes",
                "total_parts_cost", "total_labour_cost", "total_cost", "assigned_to", "assigned_to_name",
                "priority", "estimated_cost", "customer_name", "customer_phone", "customer_email",
-               "device_type", "device_brand", "device_model", "fault_description", "serial_number"}
+               "device_type", "device_brand", "device_model", "fault_description", "serial_number",
+               "condition_on_arrival", "accessories_received", "customer_password",
+               "warranty_status", "warranty_expiry"}
     update = {k: v for k, v in data.items() if k in allowed}
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.workshop_jobs.update_one({"id": job_id}, {"$set": update})
@@ -200,6 +207,13 @@ async def update_workshop_status(job_id: str, data: dict, current_user: dict = D
     # Notify pickup if ready
     if new_status == "ready_for_pickup" and not job.get("pickup_notified"):
         await db.workshop_jobs.update_one({"id": job_id}, {"$set": {"pickup_notified": True}})
+    # Audit log
+    try:
+        from app.routers.workshop_enhanced import _ws_audit
+        old_status = job.get("repair_status", "unknown")
+        await _ws_audit(job_id, "status_changed", f"Status changed: {old_status} -> {new_status}", current_user)
+    except Exception:
+        pass
     return {"message": f"Status updated to {new_status}"}
 
 @router.post("/workshop/jobs/{job_id}/add-part")

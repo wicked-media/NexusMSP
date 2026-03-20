@@ -24,7 +24,8 @@ import {
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
-  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic
+  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
+  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -95,7 +96,7 @@ export default function TicketsPage() {
   const [fieldJobs, setFieldJobs] = useState([]);
   const [fieldStats, setFieldStats] = useState({});
   const [wsDialog, setWsDialog] = useState(false);
-  const [wsForm, setWsForm] = useState({ customer_name: "", customer_phone: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+  const [wsForm, setWsForm] = useState({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
   const [fjDialog, setFjDialog] = useState(false);
   const [fjForm, setFjForm] = useState({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
   const [viewWsJob, setViewWsJob] = useState(null);
@@ -126,6 +127,27 @@ export default function TicketsPage() {
   const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
   const [worksheetItems, setWorksheetItems] = useState([]);
   const [newWorksheetItem, setNewWorksheetItem] = useState("");
+  // Workshop enrichment state
+  const [wsNotes, setWsNotes] = useState([]);
+  const [wsNewNote, setWsNewNote] = useState("");
+  const [wsPhotos, setWsPhotos] = useState([]);
+  const [wsPhotoUploading, setWsPhotoUploading] = useState(false);
+  const [wsChecklist, setWsChecklist] = useState([]);
+  const [wsNewCheckItem, setWsNewCheckItem] = useState("");
+  const [wsAuditLog, setWsAuditLog] = useState([]);
+  const [wsQuote, setWsQuote] = useState(null);
+  const [wsQuoteDialog, setWsQuoteDialog] = useState(false);
+  const [wsQuoteItems, setWsQuoteItems] = useState([{ description: "", qty: 1, price: 0 }]);
+  const [wsQuoteNotes, setWsQuoteNotes] = useState("");
+  const [wsRepairHistory, setWsRepairHistory] = useState([]);
+  const [wsNotifyDialog, setWsNotifyDialog] = useState(false);
+  const [wsNotifyForm, setWsNotifyForm] = useState({ email: "", subject: "", message: "" });
+  const [wsInvoiceDialog, setWsInvoiceDialog] = useState(false);
+  const [wsInvoiceList, setWsInvoiceList] = useState([]);
+  const [wsIntakeDialog, setWsIntakeDialog] = useState(false);
+  const [wsIntakeForm, setWsIntakeForm] = useState({ condition_on_arrival: "", accessories_received: [], customer_password: "", warranty_status: "unknown", warranty_expiry: "", customer_email: "" });
+  const [wsTemplateDialog, setWsTemplateDialog] = useState(false);
+  const [wsTemplates, setWsTemplates] = useState({});
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [triageResult, setTriageResult] = useState(null);
@@ -545,7 +567,7 @@ export default function TicketsPage() {
     try {
       const res = await axios.post(`${API}/workshop/jobs`, wsForm, { headers });
       toast.success(`Workshop job ${res.data.job_number} created`);
-      setWsDialog(false); setWsForm({ customer_name: "", customer_phone: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+      setWsDialog(false); setWsForm({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
       fetchTickets();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
@@ -584,6 +606,186 @@ export default function TicketsPage() {
 
   const handleFjChecklist = async (jobId, checklist) => {
     try { await axios.put(`${API}/field-jobs/${jobId}`, { checklist }, { headers }); } catch {}
+  };
+
+  // ============ WORKSHOP ENRICHMENT HANDLERS ============
+
+  const fetchWsJobDetail = async (job) => {
+    setViewWsJob(job);
+    setWsNotes([]); setWsPhotos([]); setWsChecklist([]); setWsAuditLog([]); setWsQuote(null); setWsRepairHistory([]);
+    try {
+      const [notesRes, photosRes, clRes, auditRes, quoteRes, histRes] = await Promise.all([
+        axios.get(`${API}/workshop/jobs/${job.id}/notes`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop/jobs/${job.id}/photos`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop/jobs/${job.id}/checklist`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop/jobs/${job.id}/audit-log`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop/jobs/${job.id}/quote`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/workshop/jobs/${job.id}/repair-history`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setWsNotes(notesRes.data || []);
+      setWsPhotos(photosRes.data || []);
+      setWsChecklist(clRes.data || []);
+      setWsAuditLog(auditRes.data || []);
+      setWsQuote(quoteRes.data);
+      setWsRepairHistory(histRes.data || []);
+      setWsIntakeForm({
+        condition_on_arrival: job.condition_on_arrival || "",
+        accessories_received: job.accessories_received || [],
+        customer_password: job.customer_password || "",
+        warranty_status: job.warranty_status || "unknown",
+        warranty_expiry: job.warranty_expiry || "",
+        customer_email: job.customer_email || "",
+      });
+    } catch { /* silent */ }
+  };
+
+  const handleAddWsNote = async () => {
+    if (!wsNewNote.trim() || !viewWsJob) return;
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/notes`, { content: wsNewNote, note_type: "repair" }, { headers });
+      setWsNewNote("");
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/notes`, { headers });
+      setWsNotes(r.data || []);
+      toast.success("Note added");
+    } catch { toast.error("Failed to add note"); }
+  };
+
+  const handleWsPhotoUpload = async (e, photoType = "general") => {
+    const file = e.target.files?.[0];
+    if (!file || !viewWsJob) return;
+    setWsPhotoUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/photos?photo_type=${photoType}`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/photos`, { headers });
+      setWsPhotos(r.data || []);
+      toast.success("Photo uploaded");
+    } catch { toast.error("Upload failed"); }
+    finally { setWsPhotoUploading(false); e.target.value = ""; }
+  };
+
+  const handleDeleteWsPhoto = async (photoId) => {
+    if (!viewWsJob) return;
+    try {
+      await axios.delete(`${API}/workshop/jobs/${viewWsJob.id}/photos/${photoId}`, { headers });
+      setWsPhotos(prev => prev.filter(p => p.id !== photoId));
+      toast.success("Photo deleted");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleLoadWsTemplate = async (template) => {
+    if (!viewWsJob) return;
+    try {
+      const r = await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { template }, { headers });
+      const clRes = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { headers });
+      setWsChecklist(clRes.data || []);
+      setWsTemplateDialog(false);
+      toast.success(`${template} checklist loaded`);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleToggleWsCheckItem = async (itemId, checked) => {
+    if (!viewWsJob) return;
+    try {
+      await axios.put(`${API}/workshop/jobs/${viewWsJob.id}/checklist/${itemId}`, { checked: !checked }, { headers });
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { headers });
+      setWsChecklist(r.data || []);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleAddWsCheckItem = async () => {
+    if (!wsNewCheckItem.trim() || !viewWsJob) return;
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/checklist/add-item`, { item: wsNewCheckItem.trim() }, { headers });
+      setWsNewCheckItem("");
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { headers });
+      setWsChecklist(r.data || []);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleSaveWsQuote = async () => {
+    if (!viewWsJob) return;
+    const lineItems = wsQuoteItems.filter(i => i.description).map(i => ({
+      description: i.description, quantity: Number(i.qty) || 1, unit_price: Number(i.price) || 0, total: (Number(i.qty) || 1) * (Number(i.price) || 0),
+    }));
+    try {
+      const r = await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/quote`, { line_items: lineItems, notes: wsQuoteNotes }, { headers });
+      setWsQuote(r.data);
+      setWsQuoteDialog(false);
+      toast.success("Quote saved");
+    } catch { toast.error("Failed to save quote"); }
+  };
+
+  const handleSendWsQuote = async () => {
+    if (!viewWsJob) return;
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/quote/send`, { email: viewWsJob.customer_email || wsIntakeForm.customer_email }, { headers });
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/quote`, { headers });
+      setWsQuote(r.data);
+      toast.success("Quote sent to customer");
+    } catch { toast.error("Failed to send quote"); }
+  };
+
+  const handleApproveWsQuote = async () => {
+    if (!viewWsJob) return;
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/quote/approve`, {}, { headers });
+      const r = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/quote`, { headers });
+      setWsQuote(r.data);
+      toast.success("Quote approved");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleWsNotifyCustomer = async () => {
+    if (!viewWsJob) return;
+    try {
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/notify-customer`, wsNotifyForm, { headers });
+      setWsNotifyDialog(false);
+      setWsNotifyForm({ email: "", subject: "", message: "" });
+      toast.success("Customer notified");
+    } catch { toast.error("Failed to notify"); }
+  };
+
+  const handleWsPushToInvoice = async (invoiceId) => {
+    if (!viewWsJob) return;
+    try {
+      const r = await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/to-invoice`, { invoice_id: invoiceId || null }, { headers });
+      toast.success(r.data.message);
+      setWsInvoiceDialog(false);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleSaveWsIntake = async () => {
+    if (!viewWsJob) return;
+    try {
+      await axios.put(`${API}/workshop/jobs/${viewWsJob.id}/intake`, wsIntakeForm, { headers });
+      setViewWsJob(prev => ({ ...prev, ...wsIntakeForm }));
+      setWsIntakeDialog(false);
+      toast.success("Intake info saved");
+    } catch { toast.error("Failed to save"); }
+  };
+
+  const handleDownloadWsPdf = async () => {
+    if (!viewWsJob) return;
+    try {
+      const res = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/pdf`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url; a.download = `JobCard_${viewWsJob.job_number}.pdf`; a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
+    } catch { toast.error("Failed to download PDF"); }
+  };
+
+  const handleDownloadWsQr = async () => {
+    if (!viewWsJob) return;
+    try {
+      const res = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/qr-code`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url; a.download = `QR_${viewWsJob.job_number}.png`; a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("QR code downloaded");
+    } catch { toast.error("Failed"); }
   };
 
   const WS_STATUSES = {
@@ -1784,69 +1986,366 @@ export default function TicketsPage() {
 
   // ============ WORKSHOP DETAIL VIEW ============
   if (viewWsJob) {
+    const wsStages = [
+      { key: "checked_in", label: "Checked In", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+      { key: "diagnosing", label: "Diagnosing", color: "from-purple-500 to-purple-600", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
+      { key: "parts_ordered", label: "Parts Ordered", color: "from-cyan-500 to-cyan-600", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
+      { key: "repairing", label: "Repairing", color: "from-amber-500 to-amber-600", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
+      { key: "ready_for_pickup", label: "Ready", color: "from-green-500 to-green-600", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
+      { key: "collected", label: "Collected", color: "from-slate-500 to-slate-600", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30" },
+    ];
+    const wsIdx = wsStages.findIndex(s => s.key === viewWsJob.repair_status);
+    const wsActiveIdx = wsIdx >= 0 ? wsIdx : 0;
+    const wsProgress = Math.round((wsActiveIdx / (wsStages.length - 1)) * 100);
+    const wsCheckDone = wsChecklist.filter(c => c.checked).length;
+
     return (
       <div className="space-y-4" data-testid="ws-job-detail">
-        <div className="flex items-center gap-3">
+        {/* Header */}
+        <div className="flex items-center gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => setViewWsJob(null)} data-testid="ws-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
           <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wrench className="w-4 h-4 text-purple-400" /></div>
           <span className="font-mono font-semibold">{viewWsJob.job_number}</span>
           <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
+          <Badge variant="outline" className="text-xs capitalize">{viewWsJob.priority}</Badge>
+          {viewWsJob.warranty_status === "in_warranty" && <Badge className="bg-green-500/20 text-green-400 border-green-500/30"><Shield className="w-3 h-3 mr-1" />Under Warranty</Badge>}
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
+            <Button variant="outline" size="sm" onClick={() => setWsIntakeDialog(true)} data-testid="ws-intake-btn"><ClipboardList className="w-3 h-3 mr-1" />Intake</Button>
+            <Button variant="outline" size="sm" onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }} data-testid="ws-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
+            <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }} data-testid="ws-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
+            <Button variant="outline" size="sm" onClick={handleDownloadWsPdf} data-testid="ws-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
+            <Button variant="outline" size="sm" onClick={handleDownloadWsQr} data-testid="ws-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+          </div>
         </div>
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-8 space-y-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+
+        {/* Progress Tracker */}
+        <Card className="overflow-hidden" data-testid="ws-progress-bar">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Repair Progress</span>
+              <span className="text-xs font-mono text-muted-foreground">{wsProgress}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
+              <div className={`h-full rounded-full bg-gradient-to-r ${wsStages[wsActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, wsProgress)}%` }} />
+            </div>
+            <div className="grid grid-cols-6 gap-1.5">
+              {wsStages.map((stage, i) => {
+                const isActive = i === wsActiveIdx;
+                const isPast = i < wsActiveIdx;
+                return (
+                  <button key={stage.key} onClick={() => handleWsStatus(viewWsJob.id, stage.key)}
+                    className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
+                    data-testid={`ws-progress-${stage.key}`}>
+                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                      {isPast ? <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : i + 1}
+                    </div>
+                    <span className={`text-[9px] font-semibold block ${isActive ? stage.text : isPast ? "text-emerald-400" : "text-muted-foreground/60"}`}>{stage.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Main content — left 2/3 */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Job Details Card */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Job Details</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="grid grid-cols-3 gap-3">
-                  <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
-                  <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
-                  <div><span className="text-muted-foreground block">Device</span><span className="font-medium">{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "-"}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Email</span><span className="font-medium">{viewWsJob.customer_email || wsIntakeForm.customer_email || "-"}</span></div>
                 </div>
                 <Separator />
-                <div><span className="text-muted-foreground block">Serial</span><span className="font-mono">{viewWsJob.serial_number || "-"}</span></div>
-                <div><span className="text-muted-foreground block">Fault</span><span>{viewWsJob.fault_description || "-"}</span></div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><span className="text-muted-foreground block text-xs">Device</span><span className="font-medium">{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "-"}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Serial</span><span className="font-mono text-xs">{viewWsJob.serial_number || "-"}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Warranty</span>
+                    <Badge variant="outline" className={`text-[10px] ${viewWsJob.warranty_status === "in_warranty" ? "text-green-400 border-green-500/30" : viewWsJob.warranty_status === "expired" ? "text-red-400 border-red-500/30" : "text-muted-foreground"}`}>
+                      {(viewWsJob.warranty_status || "unknown").replace("_", " ")}
+                    </Badge>
+                  </div>
+                </div>
+                {(viewWsJob.condition_on_arrival || viewWsJob.accessories_received?.length > 0) && <>
+                  <Separator />
+                  <div className="grid grid-cols-2 gap-3">
+                    {viewWsJob.condition_on_arrival && <div><span className="text-muted-foreground block text-xs">Condition on Arrival</span><span className="text-xs">{viewWsJob.condition_on_arrival}</span></div>}
+                    {viewWsJob.accessories_received?.length > 0 && <div><span className="text-muted-foreground block text-xs">Accessories</span><div className="flex flex-wrap gap-1">{viewWsJob.accessories_received.map((a, i) => <Badge key={i} variant="secondary" className="text-[9px]">{a}</Badge>)}</div></div>}
+                  </div>
+                </>}
+                <Separator />
+                <div><span className="text-muted-foreground block text-xs">Fault Description</span><p className="text-sm">{viewWsJob.fault_description || "-"}</p></div>
               </CardContent>
             </Card>
-            <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-sm">Parts Used ({viewWsJob.parts_used?.length || 0})</CardTitle><Button size="sm" variant="outline" onClick={() => setWsPartDialog(true)} data-testid="add-ws-part"><Plus className="w-3 h-3 mr-1" />Add Part</Button></div></CardHeader>
-              <CardContent className="p-0">
+
+            {/* Tabs */}
+            <Tabs defaultValue="notes">
+              <TabsList className="w-full grid grid-cols-7">
+                <TabsTrigger value="notes" data-testid="ws-notes-tab"><MessageSquare className="w-3 h-3 mr-1" />Notes ({wsNotes.length})</TabsTrigger>
+                <TabsTrigger value="checklist" data-testid="ws-checklist-tab"><ListChecks className="w-3 h-3 mr-1" />Checklist ({wsCheckDone}/{wsChecklist.length})</TabsTrigger>
+                <TabsTrigger value="photos" data-testid="ws-photos-tab"><Camera className="w-3 h-3 mr-1" />Photos ({wsPhotos.length})</TabsTrigger>
+                <TabsTrigger value="parts" data-testid="ws-parts-tab"><Package className="w-3 h-3 mr-1" />Parts ({viewWsJob.parts_used?.length || 0})</TabsTrigger>
+                <TabsTrigger value="quote" data-testid="ws-quote-tab"><DollarSign className="w-3 h-3 mr-1" />Quote</TabsTrigger>
+                <TabsTrigger value="history" data-testid="ws-history-tab"><History className="w-3 h-3 mr-1" />History ({wsRepairHistory.length})</TabsTrigger>
+                <TabsTrigger value="audit" data-testid="ws-audit-tab"><Eye className="w-3 h-3 mr-1" />Audit</TabsTrigger>
+              </TabsList>
+
+              {/* NOTES TAB */}
+              <TabsContent value="notes" className="space-y-3">
+                <div className="space-y-2">
+                  <Textarea placeholder="Add a repair note..." value={wsNewNote} onChange={e => setWsNewNote(e.target.value)} rows={3} data-testid="ws-note-input" />
+                  <Button size="sm" onClick={handleAddWsNote} disabled={!wsNewNote.trim()} data-testid="ws-add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
+                </div>
+                <ScrollArea className="h-[350px]">
+                  {wsNotes.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No repair notes yet</p></div>
+                  ) : (
+                    <div className="space-y-2">
+                      {wsNotes.map(n => (
+                        <div key={n.id} className="p-3 rounded-lg border bg-muted/10" data-testid={`ws-note-${n.id}`}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold text-purple-400">{(n.user_name || "?")[0]}</span>
+                            <span className="text-xs font-semibold">{n.user_name}</span>
+                            <span className="text-[10px] text-muted-foreground ml-auto">{n.created_at?.slice(0, 16).replace("T", " ")}</span>
+                          </div>
+                          <p className="text-sm whitespace-pre-wrap pl-8">{n.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+
+              {/* DIAGNOSTIC CHECKLIST TAB */}
+              <TabsContent value="checklist" className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Add checklist item..." value={wsNewCheckItem} onChange={e => setWsNewCheckItem(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAddWsCheckItem()} data-testid="ws-check-input" />
+                  <Button size="sm" onClick={handleAddWsCheckItem} disabled={!wsNewCheckItem.trim()}><Plus className="w-3 h-3 mr-1" />Add</Button>
+                  <Button size="sm" variant="outline" onClick={async () => { try { const r = await axios.get(`${API}/workshop/diagnostic-templates`, { headers }); setWsTemplates(r.data || {}); setWsTemplateDialog(true); } catch {} }} data-testid="ws-load-template-btn"><ClipboardList className="w-3 h-3 mr-1" />Templates</Button>
+                </div>
+                {wsChecklist.length > 0 && <div className="text-xs text-muted-foreground">{wsCheckDone} / {wsChecklist.length} completed</div>}
+                <ScrollArea className="h-[320px]">
+                  {wsChecklist.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><ListChecks className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No checklist items. Load a template or add items manually.</p></div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {wsChecklist.map(item => (
+                        <div key={item.id} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${item.checked ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/10 border-border/50 hover:bg-muted/20"}`}
+                          onClick={() => handleToggleWsCheckItem(item.id, item.checked)} data-testid={`ws-check-${item.id}`}>
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${item.checked ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>
+                            {item.checked && <CheckCircle className="w-3 h-3 text-white" />}
+                          </div>
+                          <span className={`text-sm flex-1 ${item.checked ? "line-through text-muted-foreground" : ""}`}>{item.item}</span>
+                          {item.checked_by_name && <span className="text-[10px] text-muted-foreground">{item.checked_by_name}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+
+              {/* PHOTOS TAB */}
+              <TabsContent value="photos" className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-2">
+                    <label className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={e => handleWsPhotoUpload(e, "before")} />
+                      <Button variant="outline" size="sm" asChild><span><Camera className="w-3 h-3 mr-1" />Before Photo</span></Button>
+                    </label>
+                    <label className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={e => handleWsPhotoUpload(e, "during")} />
+                      <Button variant="outline" size="sm" asChild><span><Camera className="w-3 h-3 mr-1" />During Repair</span></Button>
+                    </label>
+                    <label className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={e => handleWsPhotoUpload(e, "after")} />
+                      <Button variant="outline" size="sm" asChild><span><Camera className="w-3 h-3 mr-1" />After Photo</span></Button>
+                    </label>
+                  </div>
+                  {wsPhotoUploading && <Loader2 className="w-4 h-4 animate-spin" />}
+                </div>
+                {wsPhotos.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground"><ImageIcon className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No photos yet. Upload before/during/after photos.</p></div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    {wsPhotos.map(p => (
+                      <div key={p.id} className="relative group rounded-lg border overflow-hidden" data-testid={`ws-photo-${p.id}`}>
+                        <img src={`${API}/uploads/workshop_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type}</Badge></div>
+                        <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteWsPhoto(p.id)}><X className="w-3 h-3" /></Button>
+                        <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* PARTS TAB */}
+              <TabsContent value="parts" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">{viewWsJob.parts_used?.length || 0} parts used</p>
+                  <Button size="sm" variant="outline" onClick={() => setWsPartDialog(true)} data-testid="add-ws-part"><Plus className="w-3 h-3 mr-1" />Add Part</Button>
+                </div>
                 {(viewWsJob.parts_used || []).length > 0 ? (
                   <Table><TableHeader><TableRow><TableHead>Part</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
                     <TableBody>{(viewWsJob.parts_used || []).map(p => (
                       <TableRow key={p.id}><TableCell className="font-medium">{p.product_name}</TableCell><TableCell className="text-right font-mono">{p.quantity}</TableCell><TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell><TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell></TableRow>
                     ))}</TableBody>
                   </Table>
-                ) : <div className="text-center py-6 text-muted-foreground text-sm">No parts added yet</div>}
-              </CardContent>
-            </Card>
+                ) : <div className="text-center py-8 text-muted-foreground text-sm">No parts added yet</div>}
+              </TabsContent>
+
+              {/* QUOTE TAB */}
+              <TabsContent value="quote" className="space-y-3">
+                {wsQuote ? (
+                  <Card className="border-amber-500/20">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-amber-400" />Repair Quote</CardTitle>
+                        <Badge className={`text-[10px] ${wsQuote.status === "approved" ? "bg-green-500/20 text-green-400" : wsQuote.status === "sent" ? "bg-blue-500/20 text-blue-400" : wsQuote.status === "declined" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"}`}>{wsQuote.status}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {wsQuote.line_items?.map((li, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm">
+                          <span>{li.description}</span>
+                          <span className="font-mono">{li.quantity} x ${li.unit_price?.toFixed(2)} = ${li.total?.toFixed(2)}</span>
+                        </div>
+                      ))}
+                      <Separator />
+                      <div className="flex justify-between font-bold"><span>Total</span><span className="text-green-400 font-mono">${wsQuote.total?.toFixed(2)}</span></div>
+                      {wsQuote.notes && <p className="text-xs text-muted-foreground">{wsQuote.notes}</p>}
+                      <div className="flex gap-2 pt-2">
+                        {wsQuote.status === "draft" && <Button size="sm" onClick={handleSendWsQuote} data-testid="ws-send-quote"><Send className="w-3 h-3 mr-1" />Send to Customer</Button>}
+                        {wsQuote.status === "sent" && <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApproveWsQuote} data-testid="ws-approve-quote"><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
+                        <Button size="sm" variant="outline" onClick={() => { setWsQuoteItems(wsQuote.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote.notes || ""); setWsQuoteDialog(true); }}>Edit Quote</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p>No quote created yet</p>
+                    <Button size="sm" className="mt-3" onClick={() => { setWsQuoteItems([{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(""); setWsQuoteDialog(true); }} data-testid="ws-create-quote-btn"><Plus className="w-3 h-3 mr-1" />Create Quote</Button>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* REPAIR HISTORY TAB */}
+              <TabsContent value="history" className="space-y-3">
+                {wsRepairHistory.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground"><History className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No previous repair history found for this device/customer</p></div>
+                ) : (
+                  <ScrollArea className="h-[350px]">
+                    <div className="space-y-2">
+                      {wsRepairHistory.map(h => (
+                        <Card key={h.id} className="border-purple-500/10 hover:border-purple-500/30 cursor-pointer transition-colors" onClick={() => fetchWsJobDetail(h)} data-testid={`ws-history-${h.id}`}>
+                          <CardContent className="py-2.5 px-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-muted-foreground">{h.job_number}</span>
+                                <Badge className={WS_STATUSES[h.repair_status]?.class + " text-[9px]"}>{WS_STATUSES[h.repair_status]?.label}</Badge>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground">{h.created_at?.slice(0, 10)}</span>
+                            </div>
+                            <p className="text-sm">{h.fault_description || "Workshop Job"}</p>
+                            <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1">
+                              <span>{h.device_brand} {h.device_model}</span>
+                              {h.serial_number && <span className="font-mono">S/N: {h.serial_number}</span>}
+                              <span className="text-green-400 font-mono">${(h.total_cost || 0).toFixed(2)}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </TabsContent>
+
+              {/* AUDIT LOG TAB */}
+              <TabsContent value="audit" className="space-y-3">
+                <ScrollArea className="h-[350px]">
+                  {wsAuditLog.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><Eye className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No audit entries yet</p></div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {wsAuditLog.map(entry => (
+                        <div key={entry.id} className="flex items-start gap-3 p-2 rounded-lg bg-muted/10 text-sm" data-testid={`ws-audit-${entry.id}`}>
+                          <div className="w-2 h-2 rounded-full bg-purple-400 mt-1.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-xs">{entry.user_name}</span>
+                              <Badge variant="outline" className="text-[9px]">{entry.action?.replace(/_/g, " ")}</Badge>
+                              <span className="text-[10px] text-muted-foreground ml-auto">{entry.created_at?.slice(0, 16).replace("T", " ")}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{entry.details}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
           </div>
-          <div className="col-span-4 space-y-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Billing</CardTitle></CardHeader>
+
+          {/* Sidebar — right 1/3 */}
+          <div className="space-y-4">
+            {/* Billing Card */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Billing Summary</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0} min @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0}m @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
                 <Separator />
                 <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
+                {viewWsJob.estimated_cost > 0 && <div className="flex justify-between text-xs text-muted-foreground"><span>Estimated</span><span className="font-mono">${viewWsJob.estimated_cost.toFixed(2)}</span></div>}
               </CardContent>
             </Card>
-            <Card className="border-amber-500/20"><CardContent className="py-3">
-              <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
-              <div className="flex items-center gap-2">
-                <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
-                  {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
-                </Button>
-                <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
-                {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
-              </div>
-            </CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
+
+            {/* Labour Timer */}
+            <Card className="border-amber-500/20">
+              <CardContent className="py-3">
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
+                <div className="flex items-center gap-2">
+                  <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
+                    {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
+                  </Button>
+                  <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
+                  {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Update Status */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+              <CardContent className="space-y-1.5">
                 {Object.entries(WS_STATUSES).filter(([k]) => k !== viewWsJob.repair_status).map(([k, v]) => (
-                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)}>{v.label}</Button>
+                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)} data-testid={`ws-status-${k}`}>{v.label}</Button>
                 ))}
+              </CardContent>
+            </Card>
+
+            {/* Assigned Tech */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div><span className="text-muted-foreground block text-xs">Technician</span><span className="font-medium">{viewWsJob.assigned_to_name || "Unassigned"}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Created by</span><span>{viewWsJob.created_by_name}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Created</span><span>{viewWsJob.created_at?.slice(0, 10)}</span></div>
               </CardContent>
             </Card>
           </div>
         </div>
-        {/* Workshop Add Part Dialog */}
+
+        {/* ============ DIALOGS ============ */}
+
+        {/* Add Part Dialog */}
         <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
           <DialogContent>
             <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
@@ -1859,6 +2358,136 @@ export default function TicketsPage() {
               <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
             </div>
             <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Quote Builder Dialog */}
+        <Dialog open={wsQuoteDialog} onOpenChange={setWsQuoteDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader><DialogTitle>Repair Quote Builder</DialogTitle></DialogHeader>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {wsQuoteItems.map((item, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...wsQuoteItems]; n[i].description = e.target.value; setWsQuoteItems(n); }} placeholder="Labour / Part / Service" /></div>
+                  <div className="col-span-2"><Label className="text-xs">Qty</Label><Input type="number" min="1" value={item.qty} onChange={e => { const n = [...wsQuoteItems]; n[i].qty = parseInt(e.target.value) || 1; setWsQuoteItems(n); }} /></div>
+                  <div className="col-span-3"><Label className="text-xs">Price</Label><Input type="number" step="0.01" value={item.price} onChange={e => { const n = [...wsQuoteItems]; n[i].price = parseFloat(e.target.value) || 0; setWsQuoteItems(n); }} /></div>
+                  <div className="col-span-1"><Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setWsQuoteItems(prev => prev.filter((_, j) => j !== i))}><X className="w-4 h-4" /></Button></div>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setWsQuoteItems(prev => [...prev, { description: "", qty: 1, price: 0 }])}><Plus className="w-3 h-3 mr-1" />Add Line</Button>
+              <div className="flex justify-between font-bold text-lg border-t pt-3">
+                <span>Total</span>
+                <span className="text-green-400">${wsQuoteItems.reduce((s, i) => s + (Number(i.qty) || 1) * (Number(i.price) || 0), 0).toFixed(2)}</span>
+              </div>
+              <div><Label className="text-xs">Notes</Label><Textarea value={wsQuoteNotes} onChange={e => setWsQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes for the customer..." /></div>
+            </div>
+            <DialogFooter><Button onClick={handleSaveWsQuote} data-testid="ws-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Customer Notification Dialog */}
+        <Dialog open={wsNotifyDialog} onOpenChange={setWsNotifyDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div><Label>Email</Label><Input value={wsNotifyForm.email} onChange={e => setWsNotifyForm({ ...wsNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="ws-notify-email" /></div>
+              <div><Label>Subject</Label><Input value={wsNotifyForm.subject} onChange={e => setWsNotifyForm({ ...wsNotifyForm, subject: e.target.value })} /></div>
+              <div><Label>Message</Label><Textarea value={wsNotifyForm.message} onChange={e => setWsNotifyForm({ ...wsNotifyForm, message: e.target.value })} rows={4} placeholder="Your device is ready for pickup..." data-testid="ws-notify-message" /></div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={() => setWsNotifyForm(prev => ({ ...prev, message: `Hi ${viewWsJob.customer_name},\n\nYour device (${viewWsJob.device_brand || ""} ${viewWsJob.device_model || ""}) has been checked in for repair.\n\nJob Number: ${viewWsJob.job_number}\nFault: ${viewWsJob.fault_description}\n\nWe will keep you updated on progress.\n\nRegards,\nThe Workshop Team`, subject: `Device Checked In - ${viewWsJob.job_number}` }))}>Checked In</Button>
+                <Button variant="outline" size="sm" onClick={() => setWsNotifyForm(prev => ({ ...prev, message: `Hi ${viewWsJob.customer_name},\n\nWe have completed the diagnosis on your ${viewWsJob.device_brand || ""} ${viewWsJob.device_model || ""}.\n\nPlease review the repair quote we have prepared. We will proceed once you approve.\n\nJob Number: ${viewWsJob.job_number}\n\nRegards,\nThe Workshop Team`, subject: `Quote Ready - ${viewWsJob.job_number}` }))}>Quote Ready</Button>
+                <Button variant="outline" size="sm" onClick={() => setWsNotifyForm(prev => ({ ...prev, message: `Hi ${viewWsJob.customer_name},\n\nGreat news! Your ${viewWsJob.device_brand || ""} ${viewWsJob.device_model || ""} is ready for collection.\n\nJob Number: ${viewWsJob.job_number}\nTotal: $${(viewWsJob.total_cost || 0).toFixed(2)}\n\nPlease collect at your earliest convenience.\n\nRegards,\nThe Workshop Team`, subject: `Ready for Pickup - ${viewWsJob.job_number}` }))}>Ready for Pickup</Button>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={handleWsNotifyCustomer} data-testid="ws-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Push to Invoice Dialog */}
+        <Dialog open={wsInvoiceDialog} onOpenChange={setWsInvoiceDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Push Workshop Job to Invoice</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Parts (${(viewWsJob.total_parts_cost || 0).toFixed(2)}) + Labour (${(viewWsJob.total_labour_cost || 0).toFixed(2)}) = <strong className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</strong></p>
+              <Button className="w-full" onClick={() => handleWsPushToInvoice(null)} data-testid="ws-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
+              {wsInvoiceList.length > 0 && <>
+                <Separator />
+                <p className="text-xs text-muted-foreground">Or add to existing invoice:</p>
+                <ScrollArea className="h-[200px]">
+                  {wsInvoiceList.slice(0, 20).map(inv => (
+                    <Button key={inv.id} variant="outline" className="w-full justify-start mb-1 text-xs" size="sm" onClick={() => handleWsPushToInvoice(inv.id)}>
+                      {inv.invoice_number} - {inv.client_name} (${inv.total?.toFixed(2)})
+                    </Button>
+                  ))}
+                </ScrollArea>
+              </>}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Device Intake Dialog */}
+        <Dialog open={wsIntakeDialog} onOpenChange={setWsIntakeDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Device Intake Details</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div><Label>Customer Email</Label><Input value={wsIntakeForm.customer_email} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_email: e.target.value })} placeholder="customer@example.com" data-testid="ws-intake-email" /></div>
+              <div><Label>Condition on Arrival</Label>
+                <Select value={wsIntakeForm.condition_on_arrival || "not_assessed"} onValueChange={v => setWsIntakeForm({ ...wsIntakeForm, condition_on_arrival: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="not_assessed">Not Assessed</SelectItem>
+                    <SelectItem value="excellent">Excellent - No visible damage</SelectItem>
+                    <SelectItem value="good">Good - Minor wear</SelectItem>
+                    <SelectItem value="fair">Fair - Some scratches/dents</SelectItem>
+                    <SelectItem value="poor">Poor - Significant damage</SelectItem>
+                    <SelectItem value="broken">Broken - Major physical damage</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Accessories Received</Label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {["Charger", "Power Cable", "Bag/Case", "Mouse", "Keyboard", "USB Drive", "Manual", "Box"].map(acc => (
+                    <label key={acc} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <Checkbox checked={wsIntakeForm.accessories_received.includes(acc)} onCheckedChange={c => {
+                        setWsIntakeForm(prev => ({ ...prev, accessories_received: c ? [...prev.accessories_received, acc] : prev.accessories_received.filter(a => a !== acc) }));
+                      }} />{acc}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div><Label>Customer Password/PIN (for login)</Label><Input value={wsIntakeForm.customer_password} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_password: e.target.value })} placeholder="Optional - stored securely" type="password" data-testid="ws-intake-password" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Warranty Status</Label>
+                  <Select value={wsIntakeForm.warranty_status} onValueChange={v => setWsIntakeForm({ ...wsIntakeForm, warranty_status: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unknown">Unknown</SelectItem>
+                      <SelectItem value="in_warranty">In Warranty</SelectItem>
+                      <SelectItem value="expired">Expired</SelectItem>
+                      <SelectItem value="void">Voided</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Warranty Expiry</Label><Input type="date" value={wsIntakeForm.warranty_expiry} onChange={e => setWsIntakeForm({ ...wsIntakeForm, warranty_expiry: e.target.value })} /></div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save Intake</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diagnostic Template Picker Dialog */}
+        <Dialog open={wsTemplateDialog} onOpenChange={setWsTemplateDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Load Diagnostic Template</DialogTitle></DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Select a device-type template to load pre-built diagnostic checklist items.</p>
+              {Object.entries(wsTemplates).map(([key, items]) => (
+                <Button key={key} variant="outline" className="w-full justify-between" onClick={() => handleLoadWsTemplate(key)} data-testid={`ws-template-${key}`}>
+                  <span className="capitalize font-medium">{key}</span>
+                  <Badge variant="secondary" className="text-[10px]">{items.length} items</Badge>
+                </Button>
+              ))}
+            </div>
           </DialogContent>
         </Dialog>
       </div>
@@ -2162,7 +2791,7 @@ export default function TicketsPage() {
           const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
           return (
             <Card key={`ws-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-purple-500"
-              onClick={() => setViewWsJob(j)} data-testid={`ws-job-${j.id}`}>
+              onClick={() => fetchWsJobDetail(j)} data-testid={`ws-job-${j.id}`}>
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-purple-500/10">
@@ -2430,6 +3059,7 @@ export default function TicketsPage() {
               <div><Label>Customer Name</Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} data-testid="ws-customer" /></div>
               <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} /></div>
             </div>
+            <div><Label>Customer Email</Label><Input value={wsForm.customer_email} onChange={e => setWsForm({ ...wsForm, customer_email: e.target.value })} placeholder="customer@example.com" type="email" /></div>
             <div className="grid grid-cols-3 gap-3">
               <div><Label>Device Type</Label>
                 <Select value={wsForm.device_type || "laptop"} onValueChange={v => setWsForm({ ...wsForm, device_type: v })}>
