@@ -86,6 +86,20 @@ import ApprovalWorkflowsPage from "@/pages/ApprovalWorkflowsPage";
 import AssetDepreciationPage from "@/pages/AssetDepreciationPage";
 import PostmortemPage from "@/pages/PostmortemPage";
 import CsatSurveysPage from "@/pages/CsatSurveysPage";
+import SlaPenaltiesPage from "@/pages/SlaPenaltiesPage";
+import RevenueForecastPage from "@/pages/RevenueForecastPage";
+import ClientRiskPage from "@/pages/ClientRiskPage";
+import BulkActionsPage from "@/pages/BulkActionsPage";
+import EscalationMatrixPage from "@/pages/EscalationMatrixPage";
+import ChangeManagementPage from "@/pages/ChangeManagementPage";
+import IncidentHeatmapPage from "@/pages/IncidentHeatmapPage";
+import TechUtilizationPage from "@/pages/TechUtilizationPage";
+import CostPerTicketPage from "@/pages/CostPerTicketPage";
+import ProfitabilityHeatmapPage from "@/pages/ProfitabilityHeatmapPage";
+import BackupCompliancePage from "@/pages/BackupCompliancePage";
+import ProcurementPlannerPage from "@/pages/ProcurementPlannerPage";
+import ClientReportsPage from "@/pages/ClientReportsPage";
+import LiveChatPage from "@/pages/LiveChatPage";
 
 // Components
 import { Sidebar } from "@/components/Sidebar";
@@ -987,6 +1001,146 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <CsatSurveysPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sla-penalties"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SlaPenaltiesPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/revenue-forecast"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <RevenueForecastPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/client-risk"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ClientRiskPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bulk-actions"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <BulkActionsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/escalation-matrix"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <EscalationMatrixPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/change-management"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ChangeManagementPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incident-heatmap"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <IncidentHeatmapPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tech-utilization"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <TechUtilizationPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/cost-per-ticket"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <CostPerTicketPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profitability-heatmap"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ProfitabilityHeatmapPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/backup-compliance"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <BackupCompliancePage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/procurement-planner"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ProcurementPlannerPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/client-reports"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <ClientReportsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/live-chat"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <LiveChatPage />
                 </MainLayout>
               </ProtectedRoute>
             }

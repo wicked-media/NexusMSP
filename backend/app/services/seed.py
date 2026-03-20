@@ -100,8 +100,16 @@ PERMISSION_PRESETS = {
 
 async def seed_data():
     existing_clients = await db.clients.count_documents({})
-    if existing_clients > 0:
-        return {"message": "Data already seeded"}
+    if existing_clients == 0:
+        await _seed_core_data()
+    
+    # Always run Phase 11 enhancements
+    await _seed_phase11_data()
+    
+    return {"message": "Demo data seeded successfully"}
+
+
+async def _seed_core_data():
     
     # Create demo user
     demo_user = User(
@@ -444,5 +452,206 @@ async def seed_data():
         c["created_at"] = datetime.now(timezone.utc).isoformat()
         await db.network_clients.insert_one(c)
 
-    return {"message": "Demo data seeded successfully"}
 
+async def _seed_phase11_data():
+    # Seed additional clients (10 more for 15 total)
+    extra_clients = [
+        {"id": "client-006", "name": "Summit Legal Group", "email": "it@summitlegal.com", "industry": "Legal", "mrr": 2800, "device_count": 35, "ticket_count": 9},
+        {"id": "client-007", "name": "Pacific Schools District", "email": "tech@pacificschools.edu", "industry": "Education", "mrr": 3500, "device_count": 85, "ticket_count": 18},
+        {"id": "client-008", "name": "Metro Real Estate", "email": "support@metrore.com", "industry": "Real Estate", "mrr": 1200, "device_count": 18, "ticket_count": 4},
+        {"id": "client-009", "name": "Cascade Manufacturing", "email": "helpdesk@cascade.com", "industry": "Manufacturing", "mrr": 3800, "device_count": 92, "ticket_count": 22},
+        {"id": "client-010", "name": "Bright Dental Partners", "email": "it@brightdental.com", "industry": "Healthcare", "mrr": 1600, "device_count": 24, "ticket_count": 7},
+        {"id": "client-011", "name": "CloudNine SaaS", "email": "ops@cloudnine.io", "industry": "Technology", "mrr": 2200, "device_count": 32, "ticket_count": 11},
+        {"id": "client-012", "name": "Harbor Logistics", "email": "it@harborlog.com", "industry": "Logistics", "mrr": 2900, "device_count": 55, "ticket_count": 14},
+        {"id": "client-013", "name": "Pinnacle Accounting", "email": "support@pinnacle-acc.com", "industry": "Finance", "mrr": 1900, "device_count": 22, "ticket_count": 5},
+        {"id": "client-014", "name": "GreenVolt Energy", "email": "it@greenvolt.com", "industry": "Energy", "mrr": 4500, "device_count": 110, "ticket_count": 20},
+        {"id": "client-015", "name": "Apex Hospitality", "email": "tech@apexhosp.com", "industry": "Hospitality", "mrr": 1400, "device_count": 28, "ticket_count": 8},
+    ]
+    for c in extra_clients:
+        existing = await db.clients.find_one({"id": c["id"]})
+        if not existing:
+            client = Client(**c)
+            doc = client.model_dump()
+            doc['created_at'] = doc['created_at'].isoformat()
+            await db.clients.insert_one(doc)
+
+    # Add warranty & purchase data to existing devices
+    warranty_updates = {
+        "dev-001": {"warranty_expiry": "2027-01-15", "purchase_date": "2024-01-15", "purchase_price": 8500},
+        "dev-002": {"warranty_expiry": "2026-06-01", "purchase_date": "2023-06-01", "purchase_price": 1200},
+        "dev-003": {"warranty_expiry": "2025-09-15", "purchase_date": "2022-09-15", "purchase_price": 12000},
+        "dev-004": {"warranty_expiry": "2028-02-10", "purchase_date": "2025-02-10", "purchase_price": 15000},
+        "dev-005": {"warranty_expiry": "2025-03-01", "purchase_date": "2022-03-01", "purchase_price": 850},
+        "dev-006": {"warranty_expiry": "2027-08-20", "purchase_date": "2024-08-20", "purchase_price": 950},
+        "dev-007": {"warranty_expiry": "2026-11-10", "purchase_date": "2023-11-10", "purchase_price": 1600},
+        "dev-008": {"warranty_expiry": "2029-05-01", "purchase_date": "2024-05-01", "purchase_price": 2200},
+        "dev-009": {"warranty_expiry": "2027-07-01", "purchase_date": "2024-07-01", "purchase_price": 3800},
+        "dev-010": {"warranty_expiry": "2026-02-10", "purchase_date": "2024-02-10", "purchase_price": 9500},
+    }
+    for dev_id, updates in warranty_updates.items():
+        await db.devices.update_one({"id": dev_id}, {"$set": updates})
+
+    # Add 5 more devices for extra clients
+    extra_devices = [
+        {"id": "dev-011", "name": "SUMMIT-DC-01", "client_id": "client-006", "client_name": "Summit Legal Group", "device_type": "server", "os": "Windows Server 2022", "os_version": "21H2", "ip_address": "192.168.20.10", "mac_address": "00:1A:2B:3C:5D:01", "serial_number": "DELL-PE-R650-001", "manufacturer": "Dell", "model": "PowerEdge R650", "processor": "Intel Xeon Silver 4314", "processor_cores": 16, "ram_gb": 64, "storage_total_gb": 1800, "storage_used_gb": 720, "domain": "summitlegal.local", "location": "Server Closet", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 90, "patch_status": "current", "status": "online", "cpu_usage": 38, "memory_usage": 55, "disk_usage": 40, "warranty_expiry": "2027-03-15", "purchase_date": "2024-03-15", "purchase_price": 9800, "tags": ["production", "domain-controller"]},
+        {"id": "dev-012", "name": "PACIFIC-SRV-01", "client_id": "client-007", "client_name": "Pacific Schools District", "device_type": "server", "os": "Ubuntu 22.04", "os_version": "22.04 LTS", "ip_address": "10.10.0.5", "mac_address": "00:1A:2B:3C:5D:02", "serial_number": "HPE-DL380-005", "manufacturer": "HPE", "model": "ProLiant DL380 Gen10", "processor": "Intel Xeon Gold 5218R", "processor_cores": 20, "ram_gb": 128, "storage_total_gb": 4000, "storage_used_gb": 2400, "domain": "pacificschools.local", "location": "Data Center - Building A", "antivirus": "CrowdStrike Falcon", "antivirus_status": "active", "firewall_enabled": True, "compliance_score": 78, "patch_status": "needs_attention", "pending_patches": 6, "status": "warning", "cpu_usage": 72, "memory_usage": 81, "disk_usage": 60, "warranty_expiry": "2025-06-01", "purchase_date": "2022-06-01", "purchase_price": 14500, "tags": ["production", "student-data", "critical"]},
+        {"id": "dev-013", "name": "CASCADE-WS-01", "client_id": "client-009", "client_name": "Cascade Manufacturing", "device_type": "workstation", "os": "Windows 11", "os_version": "23H2", "ip_address": "192.168.30.101", "mac_address": "00:1A:2B:3C:5D:03", "serial_number": "DELL-OPT-5090-001", "manufacturer": "Dell", "model": "OptiPlex 5090", "processor": "Intel Core i5-11500", "processor_cores": 6, "ram_gb": 16, "storage_total_gb": 256, "storage_used_gb": 180, "domain": "cascade.local", "location": "Factory Floor Office", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "compliance_score": 85, "status": "online", "cpu_usage": 25, "memory_usage": 48, "disk_usage": 70, "warranty_expiry": "2024-12-01", "purchase_date": "2021-12-01", "purchase_price": 1100, "tags": ["production", "manufacturing"]},
+        {"id": "dev-014", "name": "GREENVOLT-FW-01", "client_id": "client-014", "client_name": "GreenVolt Energy", "device_type": "network", "os": "FortiOS", "os_version": "7.4.1", "ip_address": "10.50.0.1", "mac_address": "00:1A:2B:3C:5D:04", "serial_number": "FGT-100F-001", "manufacturer": "Fortinet", "model": "FortiGate 100F", "processor": "NP6 ASIC", "ram_gb": 8, "storage_total_gb": 256, "storage_used_gb": 28, "location": "HQ Network Rack", "firewall_enabled": True, "compliance_score": 100, "status": "online", "cpu_usage": 18, "memory_usage": 42, "disk_usage": 11, "warranty_expiry": "2028-01-01", "purchase_date": "2025-01-01", "purchase_price": 3800, "tags": ["infrastructure", "firewall", "critical"]},
+        {"id": "dev-015", "name": "APEX-LT-001", "client_id": "client-015", "client_name": "Apex Hospitality", "device_type": "laptop", "os": "Windows 11", "os_version": "23H2", "ip_address": "192.168.40.51", "mac_address": "00:1A:2B:3C:5D:05", "serial_number": "LEN-X1C-G11-001", "manufacturer": "Lenovo", "model": "ThinkPad X1 Carbon Gen 11", "processor": "Intel Core i7-1365U", "processor_cores": 10, "ram_gb": 32, "storage_total_gb": 1000, "storage_used_gb": 350, "domain": "apexhosp.local", "location": "Front Desk", "assigned_user": "manager@apexhosp.com", "antivirus": "SentinelOne", "antivirus_status": "active", "firewall_enabled": True, "edr_status": "active", "encryption_status": "BitLocker - Encrypted", "compliance_score": 94, "status": "online", "cpu_usage": 20, "memory_usage": 55, "disk_usage": 35, "warranty_expiry": "2026-09-01", "purchase_date": "2023-09-01", "purchase_price": 2100, "tags": ["mobile", "management"]},
+    ]
+    for d in extra_devices:
+        existing = await db.devices.find_one({"id": d["id"]})
+        if not existing:
+            device = Device(**d)
+            doc = device.model_dump()
+            doc['created_at'] = doc['created_at'].isoformat()
+            doc['last_seen'] = doc['last_seen'].isoformat()
+            if 'warranty_expiry' in d:
+                doc['warranty_expiry'] = d['warranty_expiry']
+            if 'purchase_date' in d:
+                doc['purchase_date'] = d['purchase_date']
+            if 'purchase_price' in d:
+                doc['purchase_price'] = d['purchase_price']
+            await db.devices.insert_one(doc)
+
+    # Seed extra contracts for additional clients
+    extra_contracts = [
+        {"id": "contract-003", "client_id": "client-002", "client_name": "TechStart Inc", "name": "Cloud Managed Services", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-06-01", "value": 1800, "status": "active"},
+        {"id": "contract-004", "client_id": "client-004", "client_name": "HealthCare Plus", "name": "HIPAA Compliance Package", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-02-01", "value": 3100, "status": "active"},
+        {"id": "contract-005", "client_id": "client-005", "client_name": "RetailMax", "name": "POS Support Agreement", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-04-15", "value": 1500, "status": "active"},
+        {"id": "contract-006", "client_id": "client-006", "client_name": "Summit Legal Group", "name": "Legal IT Services", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-05-01", "value": 2800, "status": "active"},
+        {"id": "contract-007", "client_id": "client-007", "client_name": "Pacific Schools District", "name": "Education IT Package", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-01-15", "value": 3500, "status": "active"},
+        {"id": "contract-008", "client_id": "client-009", "client_name": "Cascade Manufacturing", "name": "Industrial IT Support", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-03-01", "value": 3800, "status": "active"},
+        {"id": "contract-009", "client_id": "client-014", "client_name": "GreenVolt Energy", "name": "Enterprise Managed Services", "contract_type": "managed_services", "billing_frequency": "monthly", "start_date": "2024-01-01", "value": 4500, "status": "active"},
+    ]
+    for c in extra_contracts:
+        existing = await db.contracts.find_one({"id": c["id"]})
+        if not existing:
+            contract = Contract(**c)
+            doc = contract.model_dump()
+            doc['created_at'] = doc['created_at'].isoformat()
+            await db.contracts.insert_one(doc)
+
+    # Seed Phase 11 data: Skills Matrix
+    skills_data = [
+        {"user_id": "user-001", "name": "Alex Thompson", "skills": {"networking": 4, "server": 4, "cloud": 3, "security": 4, "email": 3, "hardware": 2, "software": 3, "voip": 2}, "certifications": ["CCNA", "Azure Solutions Architect", "ITIL v4"], "total_resolved": 142},
+        {"user_id": "user-002", "name": "Sarah Chen", "skills": {"networking": 4, "server": 3, "cloud": 4, "security": 3, "email": 2, "hardware": 2, "software": 3, "voip": 1}, "certifications": ["AWS Solutions Architect", "Azure Administrator", "CCNP"], "total_resolved": 198},
+        {"user_id": "user-003", "name": "Mike Rodriguez", "skills": {"networking": 2, "server": 4, "cloud": 2, "security": 4, "email": 3, "hardware": 3, "software": 4, "voip": 2}, "certifications": ["CompTIA Security+", "MCSE", "CySA+"], "total_resolved": 176},
+        {"user_id": "user-004", "name": "Lisa Park", "skills": {"networking": 1, "server": 1, "cloud": 1, "security": 1, "email": 3, "hardware": 3, "software": 2, "voip": 1}, "certifications": ["CompTIA A+", "Apple ACMT"], "total_resolved": 89},
+    ]
+    for s in skills_data:
+        existing = await db.skills.find_one({"user_id": s["user_id"]})
+        if not existing:
+            s["id"] = f"skill-{s['user_id']}"
+            s["created_at"] = datetime.now(timezone.utc).isoformat()
+            await db.skills.insert_one(s)
+
+    # Seed Phase 11 data: Approval Requests (collection: approvals)
+    approval_data = [
+        {"id": "appr-001", "type": "purchase", "title": "New Dell servers for Cascade Manufacturing", "description": "3x PowerEdge R750 servers for factory floor upgrade", "amount": 45000, "requested_by": "Sarah Chen", "requested_by_id": "user-002", "status": "pending", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "appr-002", "type": "discount", "title": "15% discount for GreenVolt annual renewal", "description": "Client threatening to leave. Offering retention discount.", "amount": 8100, "requested_by": "Alex Thompson", "requested_by_id": "user-001", "status": "pending", "created_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()},
+        {"id": "appr-003", "type": "device_change", "title": "Replace HealthCare Plus reception PC", "description": "HC-WS-REC01 failing patches, recommend replacement with new Dell OptiPlex", "amount": 1200, "requested_by": "Mike Rodriguez", "requested_by_id": "user-003", "status": "approved", "decided_by": "Alex Thompson", "decided_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(), "created_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()},
+        {"id": "appr-004", "type": "contract_change", "title": "Upgrade RetailMax to Premium tier", "description": "Adding 24/7 monitoring and security stack to RetailMax contract", "amount": 800, "requested_by": "James Wilson", "requested_by_id": "user-005", "status": "rejected", "decided_by": "Alex Thompson", "rejection_reason": "Budget not approved for Q1", "decided_at": (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(), "created_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()},
+    ]
+    for a in approval_data:
+        existing = await db.approvals.find_one({"id": a["id"]})
+        if not existing:
+            await db.approvals.insert_one(a)
+
+    # Seed Phase 11 data: IT Roadmap items (collection: it_roadmap)
+    roadmap_data = [
+        {"id": "road-001", "client_id": "client-001", "title": "Migrate to Azure AD", "description": "Move from on-prem Active Directory to Azure AD with hybrid join", "category": "migration", "priority": "high", "status": "in_progress", "target_date": "2026-06-30", "quarter": "Q2 2026", "estimated_cost": 15000, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "road-002", "client_id": "client-001", "title": "Replace FortiGate 60F with 200F", "description": "Current firewall at capacity. Upgrade to FortiGate 200F for SDWAN", "category": "upgrade", "priority": "medium", "status": "planned", "target_date": "2026-09-01", "quarter": "Q3 2026", "estimated_cost": 8500, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "road-003", "client_id": "client-003", "title": "Zero Trust Network Implementation", "description": "Implement zero trust architecture with microsegmentation for PCI compliance", "category": "security", "priority": "high", "status": "planned", "target_date": "2026-12-31", "quarter": "Q4 2026", "estimated_cost": 45000, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "road-004", "client_id": "client-004", "title": "HIPAA Compliance Remediation", "description": "Address gaps identified in latest HIPAA audit: encryption, access controls, logging", "category": "security", "priority": "high", "status": "in_progress", "target_date": "2026-04-30", "quarter": "Q2 2026", "estimated_cost": 22000, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "road-005", "client_id": "client-007", "title": "1:1 Chromebook Deployment", "description": "Deploy 500 Chromebooks to students with MDM and content filtering", "category": "new_service", "priority": "high", "status": "planned", "target_date": "2026-08-01", "quarter": "Q3 2026", "estimated_cost": 175000, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "road-006", "client_id": "client-009", "title": "OT Network Segmentation", "description": "Separate factory floor OT network from corporate IT network", "category": "infrastructure", "priority": "high", "status": "planned", "target_date": "2026-07-15", "quarter": "Q3 2026", "estimated_cost": 35000, "created_at": datetime.now(timezone.utc).isoformat()},
+    ]
+    for r in roadmap_data:
+        existing = await db.it_roadmap.find_one({"id": r["id"]})
+        if not existing:
+            await db.it_roadmap.insert_one(r)
+
+    # Seed Phase 11 data: CSAT Surveys (collection: csat_surveys)
+    csat_data = []
+    now = datetime.now(timezone.utc)
+    tech_names = [("user-001", "Alex Thompson"), ("user-002", "Sarah Chen"), ("user-003", "Mike Rodriguez"), ("user-004", "Lisa Park")]
+    client_names = [("client-001", "Acme Corporation"), ("client-002", "TechStart Inc"), ("client-003", "Global Finance Ltd"), ("client-004", "HealthCare Plus"), ("client-005", "RetailMax")]
+    comments_good = ["Excellent service!", "Very quick response", "Resolved immediately", "Professional and thorough", "Great communication throughout"]
+    comments_ok = ["Got the job done", "Took a while but resolved", "Had to follow up once"]
+    comments_bad = ["Took too long", "Had to call multiple times", "Issue not fully resolved"]
+    for i in range(30):
+        score = random.choices([5, 4, 3, 2, 1], weights=[35, 30, 20, 10, 5])[0]
+        tech = random.choice(tech_names)
+        client = random.choice(client_names)
+        comment = random.choice(comments_good) if score >= 4 else (random.choice(comments_ok) if score == 3 else random.choice(comments_bad))
+        csat_data.append({
+            "id": f"csat-{i+1:03d}",
+            "client_id": client[0], "client_name": client[1],
+            "tech_id": tech[0], "tech_name": tech[1],
+            "ticket_id": f"TKT-{random.randint(1,16):03d}",
+            "score": score, "comment": comment,
+            "submitted_at": (now - timedelta(days=random.randint(0, 90))).isoformat(),
+        })
+    existing_csat = await db.csat_surveys.count_documents({})
+    if existing_csat == 0:
+        for c in csat_data:
+            await db.csat_surveys.insert_one(c)
+
+    # Seed Phase 11 data: Vendor Scores
+    vendor_data = [
+        {"id": "vendor-001", "vendor_name": "Dell Technologies", "category": "hardware", "total_pos": 24, "total_spend": 185000, "fulfilled": 23, "fulfillment_rate": 96, "avg_delivery_days": 5, "score": 92, "rating": "excellent", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "vendor-002", "vendor_name": "HPE", "category": "hardware", "total_pos": 12, "total_spend": 142000, "fulfilled": 11, "fulfillment_rate": 92, "avg_delivery_days": 8, "score": 78, "rating": "good", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "vendor-003", "vendor_name": "Ubiquiti", "category": "networking", "total_pos": 18, "total_spend": 28500, "fulfilled": 18, "fulfillment_rate": 100, "avg_delivery_days": 3, "score": 95, "rating": "excellent", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "vendor-004", "vendor_name": "SentinelOne", "category": "security", "total_pos": 8, "total_spend": 45000, "fulfilled": 8, "fulfillment_rate": 100, "avg_delivery_days": 1, "score": 98, "rating": "excellent", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "vendor-005", "vendor_name": "Lenovo", "category": "hardware", "total_pos": 15, "total_spend": 67000, "fulfilled": 13, "fulfillment_rate": 87, "avg_delivery_days": 12, "score": 65, "rating": "average", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": "vendor-006", "vendor_name": "Fortinet", "category": "networking", "total_pos": 6, "total_spend": 52000, "fulfilled": 6, "fulfillment_rate": 100, "avg_delivery_days": 7, "score": 85, "rating": "good", "created_at": datetime.now(timezone.utc).isoformat()},
+    ]
+    existing_vendors = await db.vendor_scores.count_documents({})
+    if existing_vendors == 0:
+        for v in vendor_data:
+            await db.vendor_scores.insert_one(v)
+
+    # Seed Phase 11 data: Compliance Reports (2 sample scans)
+    compliance_data = [
+        {"id": "comp-001", "client_id": "client-003", "client_name": "Global Finance Ltd", "framework": "cis", "framework_name": "CIS Controls v8", "score": 85, "passed": 15, "total": 18, "scanned_at": (datetime.now(timezone.utc) - timedelta(days=14)).isoformat(), "scanned_by": "Alex Thompson",
+         "controls": [
+             {"id": "CIS-1.1", "name": "Enterprise Asset Inventory", "description": "Establish an enterprise asset inventory", "status": "pass"},
+             {"id": "CIS-2.1", "name": "Software Inventory", "description": "Establish a software inventory", "status": "pass"},
+             {"id": "CIS-3.1", "name": "Data Protection", "description": "Establish data management process", "status": "fail"},
+             {"id": "CIS-4.1", "name": "Secure Configuration", "description": "Establish secure configuration standards", "status": "pass"},
+         ]},
+        {"id": "comp-002", "client_id": "client-004", "client_name": "HealthCare Plus", "framework": "hipaa", "framework_name": "HIPAA Security Rule", "score": 62, "passed": 8, "total": 13, "scanned_at": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(), "scanned_by": "Alex Thompson",
+         "controls": [
+             {"id": "HIPAA-164.312a", "name": "Access Control", "description": "Implement technical access controls", "status": "pass"},
+             {"id": "HIPAA-164.312b", "name": "Audit Controls", "description": "Implement audit logging mechanisms", "status": "fail"},
+             {"id": "HIPAA-164.312c", "name": "Integrity Controls", "description": "Protect ePHI from improper alteration", "status": "pass"},
+             {"id": "HIPAA-164.312d", "name": "Transmission Security", "description": "Guard against unauthorized access during transmission", "status": "fail"},
+             {"id": "HIPAA-164.312e", "name": "Person Authentication", "description": "Verify identity of persons accessing ePHI", "status": "pass"},
+         ]},
+    ]
+    existing_comp = await db.compliance_reports.count_documents({})
+    if existing_comp == 0:
+        for c in compliance_data:
+            await db.compliance_reports.insert_one(c)
+
+    # Seed Postmortem for resolved ticket TKT-004
+    pm_data = {
+        "id": "pm-001",
+        "ticket_id": "TKT-004",
+        "title": "Network Printer Outage - HealthCare Plus Reception",
+        "client_name": "HealthCare Plus",
+        "severity": "low",
+        "summary": "The reception area network printer went offline due to a DHCP lease expiration combined with a static IP conflict on the network.",
+        "root_cause": "The printer's DHCP reservation expired when the DHCP server was rebooted. Another device had been manually assigned the same IP address, causing a conflict.",
+        "impact": "Reception staff unable to print patient forms for approximately 3 hours. Staff used a backup printer on the second floor as a workaround.",
+        "resolution": "Assigned a permanent static IP outside the DHCP range. Updated DHCP exclusion list. Documented the IP allocation in the network inventory.",
+        "timeline": ["10:15 AM - Printer reported offline by reception staff", "10:30 AM - Ticket created and assigned", "11:00 AM - Remote diagnosis identified IP conflict", "11:30 AM - Static IP configured and printer back online", "1:15 PM - DHCP server configuration updated"],
+        "prevention": ["Implement IP address management (IPAM) system", "Add monitoring alerts for printer offline status", "Document all static IP assignments in NexusOps"],
+        "duration_estimate": "3 hours",
+        "generated_by": "Alex Thompson",
+        "generated_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+    }
+    existing_pm = await db.postmortems.find_one({"id": "pm-001"})
+    if not existing_pm:
+        await db.postmortems.insert_one(pm_data)

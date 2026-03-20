@@ -29,7 +29,11 @@ from app.routers import (
     client_timeline, compliance, rpe_dashboard, dispatch_board,
     contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
     client_compare, skills_matrix, approval_workflows, asset_depreciation,
-    postmortem, csat_surveys
+    postmortem, csat_surveys,
+    sla_penalties, revenue_forecast, client_risk, bulk_actions,
+    escalation_matrix, change_management, incident_heatmap,
+    tech_utilization, cost_per_ticket, profitability_heatmap,
+    backup_compliance, procurement_planner, client_reports, live_chat
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -65,7 +69,11 @@ all_routers = [
     client_timeline, compliance, rpe_dashboard, dispatch_board,
     contract_profit, vendor_scorecard, it_roadmap, warranty_tracker,
     client_compare, skills_matrix, approval_workflows, asset_depreciation,
-    postmortem, csat_surveys
+    postmortem, csat_surveys,
+    sla_penalties, revenue_forecast, client_risk, bulk_actions,
+    escalation_matrix, change_management, incident_heatmap,
+    tech_utilization, cost_per_ticket, profitability_heatmap,
+    backup_compliance, procurement_planner, client_reports, live_chat
 ]
 
 for router_module in all_routers:
