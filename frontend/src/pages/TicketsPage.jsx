@@ -130,6 +130,9 @@ export default function TicketsPage() {
   const [triageResult, setTriageResult] = useState(null);
   const [triaging, setTriaging] = useState(false);
   const [enrichment, setEnrichment] = useState(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [clientContacts, setClientContacts] = useState([]);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -186,6 +189,8 @@ export default function TicketsPage() {
     setAiAnalysis(null);
     setDeviceStatus(null);
     setEnrichment(null);
+    setEditingTitle(false);
+    setClientContacts([]);
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
@@ -209,6 +214,10 @@ export default function TicketsPage() {
       setTicketAttachments(attRes.data || []);
       setTicketProducts(prodRes.data || []);
       setEnrichment(enrichRes.data);
+      // Fetch client contacts for email auto-populate
+      if (ticket.client_id) {
+        axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(r.data || [])).catch(() => {});
+      }
       // Fetch worksheets
       try {
         const wsRes2 = await axios.get(`${API}/tickets/${ticket.id}/worksheet`, { headers });
@@ -236,8 +245,13 @@ export default function TicketsPage() {
 
   const handleCreateTicket = async () => {
     if (!formData.title || !formData.client_id) { toast.error("Title and client are required"); return; }
+    const selectedClient = clients.find(c => c.id === formData.client_id);
+    const selectedContact = selectedClient?.contacts?.find(ct => ct.id === formData.contact_id || ct.name === formData.contact_id);
     const payload = {
       ...formData,
+      client_name: selectedClient?.name || "",
+      contact_name: selectedContact?.name || "",
+      contact_email: selectedContact?.email || "",
       estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
       due_date: formData.due_date || null,
     };
@@ -293,20 +307,23 @@ export default function TicketsPage() {
     setTriaging(true);
     try {
       const clientName = clients.find(c => c.id === formData.client_id)?.name || "";
-      const res = await axios.post(`${API}/ai/triage`, { title: formData.title, description: formData.description, client_name: clientName }, { headers });
+      const res = await axios.post(`${API}/ticket-triage/analyze`, { title: formData.title, description: formData.description, client_name: clientName }, { headers });
+      const t = res.data.triage;
       setTriageResult(res.data);
-      toast.success(`AI Triage: ${res.data.suggested_priority} priority, ${Math.round((res.data.confidence || 0) * 100)}% confidence`);
+      toast.success(`AI Triage: ${t.priority} priority → ${t.category} → ${t.recommended_assignee?.tech_name || "Unassigned"}`);
     } catch { toast.error("AI Triage failed"); }
     finally { setTriaging(false); }
   };
 
   const applyTriage = () => {
-    if (!triageResult) return;
+    if (!triageResult?.triage) return;
+    const t = triageResult.triage;
     setFormData(prev => ({
       ...prev,
-      priority: triageResult.suggested_priority || prev.priority,
-      category: triageResult.suggested_category || prev.category,
-      assigned_to: triageResult.suggested_technician_id || prev.assigned_to,
+      priority: t.priority || prev.priority,
+      category: t.category || prev.category,
+      assigned_to: t.recommended_assignee?.tech_id || prev.assigned_to,
+      tags: [...new Set([...(prev.tags || []), ...(t.tags || [])])],
     }));
     toast.success("Triage suggestions applied");
   };
@@ -748,7 +765,51 @@ export default function TicketsPage() {
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-xl">{viewingTicket.title}</CardTitle></CardHeader>
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  {editingTitle ? (
+                    <Input
+                      value={titleDraft}
+                      onChange={e => setTitleDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") { handleUpdateTicket("title", titleDraft); setEditingTitle(false); }
+                        if (e.key === "Escape") setEditingTitle(false);
+                      }}
+                      onBlur={() => { if (titleDraft !== viewingTicket.title) handleUpdateTicket("title", titleDraft); setEditingTitle(false); }}
+                      className="text-xl font-bold"
+                      autoFocus
+                      data-testid="edit-title-input"
+                    />
+                  ) : (
+                    <CardTitle
+                      className="text-xl cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => { setTitleDraft(viewingTicket.title); setEditingTitle(true); }}
+                      data-testid="ticket-title-editable"
+                      title="Click to edit"
+                    >
+                      {viewingTicket.title}
+                    </CardTitle>
+                  )}
+                </div>
+                {/* Company + Reporter */}
+                <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+                  {viewingTicket.client_name && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">{viewingTicket.client_name.charAt(0)}</span>
+                      {viewingTicket.client_name}
+                    </span>
+                  )}
+                  {viewingTicket.contact_name && (
+                    <>
+                      <span className="text-border">|</span>
+                      <span className="flex items-center gap-1"><User className="w-3 h-3" />{viewingTicket.contact_name}</span>
+                    </>
+                  )}
+                  {viewingTicket.contact_email && (
+                    <span className="text-xs text-muted-foreground/60">{viewingTicket.contact_email}</span>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingTicket.description}</p>
                 {/* Tags */}
@@ -843,11 +904,11 @@ export default function TicketsPage() {
               </Card>
             )}
 
-            {/* Tabs: Notes, Emails, Children, Time, Audit */}
-            <Tabs defaultValue="suggestions">
+            {/* Tabs: Conversation first, then Suggestions, etc */}
+            <Tabs defaultValue="conversation">
               <TabsList className="w-full grid grid-cols-8">
-                <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
+                <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
                 <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
                 <TabsTrigger value="items" data-testid="items-tab"><ShoppingCart className="w-3 h-3 mr-1" />Items ({ticketProducts.length})</TabsTrigger>
@@ -1049,35 +1110,10 @@ export default function TicketsPage() {
                 {/* Internal Note Form */}
                 {conversationType === "note" && (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Textarea className="flex-1" placeholder="Add an internal note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
-                    </div>
+                    <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" />
                     <div className="flex items-center gap-3 flex-wrap">
-                      <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
-                        onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
-                        data-testid="proofread-note-btn">
-                        {proofreadLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <SpellCheck className="w-3 h-3 mr-1" />}
-                        Proofread
-                      </Button>
                       <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
                     </div>
-                    {proofreadResult && proofreadResult.target === "note" && (
-                      <div className="p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20" data-testid="proofread-result">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-semibold text-cyan-400">Proofread Suggestion</span>
-                          <div className="flex gap-1">
-                            <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => { setNewNote(proofreadResult.corrected); setProofreadResult(null); }}>Apply</Button>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setProofreadResult(null)}><X className="w-3 h-3" /></Button>
-                          </div>
-                        </div>
-                        <p className="text-sm mb-1">{proofreadResult.corrected}</p>
-                        {proofreadResult.changes?.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {proofreadResult.changes.map((c, i) => <Badge key={i} variant="outline" className="text-[9px] bg-cyan-500/5">{c}</Badge>)}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1085,24 +1121,22 @@ export default function TicketsPage() {
                 {conversationType === "email" && (
                   <div className="space-y-3 p-3 rounded-lg border bg-blue-500/[0.02] border-blue-500/20">
                     <div className="grid grid-cols-3 gap-2">
-                      <div><Label className="text-xs">To</Label><Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="inline-email-to" /></div>
+                      <div>
+                        <Label className="text-xs">To</Label>
+                        <div className="relative">
+                          <Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="inline-email-to" list="contact-emails" />
+                          <datalist id="contact-emails">
+                            {clientContacts.map(c => c.email && <option key={c.id} value={c.email}>{c.name} ({c.email})</option>)}
+                          </datalist>
+                        </div>
+                      </div>
                       <div><Label className="text-xs">CC</Label><Input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="cc@email.com" /></div>
                       <div><Label className="text-xs">BCC</Label><Input value={emailForm.bcc} onChange={e => setEmailForm({ ...emailForm, bcc: e.target.value })} placeholder="bcc@email.com" /></div>
                     </div>
                     <div><Label className="text-xs">Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="inline-email-subject" /></div>
-                    <div><Label className="text-xs">Body</Label><Textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={4} data-testid="inline-email-body" />
-                      <div className="flex items-center gap-2 mt-1">
-                        <Button variant="outline" size="sm" className="h-7 text-[11px] text-cyan-400 border-cyan-500/30"
-                          onClick={() => handleProofread(emailForm.body, "email")} disabled={proofreadLoading || !emailForm.body} data-testid="proofread-email-btn">
-                          <SpellCheck className="w-3 h-3 mr-1" />Proofread
-                        </Button>
-                        {proofreadResult && proofreadResult.target === "email" && (
-                          <Button variant="outline" size="sm" className="h-7 text-[11px] text-green-400"
-                            onClick={() => { setEmailForm({...emailForm, body: proofreadResult.corrected}); setProofreadResult(null); }}>
-                            Apply Corrections
-                          </Button>
-                        )}
-                      </div>
+                    <div>
+                      <Label className="text-xs">Body</Label>
+                      <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="120px" />
                     </div>
                     {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: emailSignature }} /></div>}
                     <div className="flex justify-end">
@@ -1134,7 +1168,11 @@ export default function TicketsPage() {
                               </div>
                               <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                             </div>
-                            <p className="text-sm whitespace-pre-wrap">{item.content}</p>
+                            {item.content?.startsWith("<") ? (
+                              <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: item.content }} />
+                            ) : (
+                              <p className="text-sm whitespace-pre-wrap">{item.content}</p>
+                            )}
                           </div>
                         );
                       } else {
@@ -1149,7 +1187,11 @@ export default function TicketsPage() {
                               <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">To: {item.to_addresses?.join(", ")}</p>
-                            <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
+                            {item.body?.startsWith("<") ? (
+                              <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: item.body }} />
+                            ) : (
+                              <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
+                            )}
                           </div>
                         );
                       }
@@ -2204,21 +2246,22 @@ export default function TicketsPage() {
                 {triaging ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
                 AI Triage
               </Button>
-              {triageResult && (
+              {triageResult?.triage && (
                 <>
-                  <Badge className="bg-cyan-500/20 text-cyan-400">{Math.round((triageResult.confidence || 0) * 100)}% confidence</Badge>
-                  <Badge className={triageResult.suggested_priority === "critical" ? "bg-red-500/20 text-red-400" : triageResult.suggested_priority === "high" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}>{triageResult.suggested_priority}</Badge>
-                  <Badge variant="outline">{triageResult.suggested_category}</Badge>
-                  {triageResult.suggested_technician_name && <Badge variant="outline">{triageResult.suggested_technician_name}</Badge>}
+                  <Badge className="bg-cyan-500/20 text-cyan-400">{triageResult.triage.category_confidence}% match</Badge>
+                  <Badge className={triageResult.triage.priority === "critical" ? "bg-red-500/20 text-red-400" : triageResult.triage.priority === "high" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}>{triageResult.triage.priority}</Badge>
+                  <Badge variant="outline">{triageResult.triage.category}</Badge>
+                  {triageResult.triage.recommended_assignee && <Badge variant="outline">{triageResult.triage.recommended_assignee.tech_name}</Badge>}
+                  {triageResult.triage.tags?.length > 0 && triageResult.triage.tags.map(t => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
                   <Button type="button" size="sm" onClick={applyTriage} className="bg-cyan-600 hover:bg-cyan-700 text-xs h-7" data-testid="apply-triage-btn">Apply</Button>
                 </>
               )}
             </div>
-            {triageResult?.resolution_plan && (
+            {triageResult?.triage?.priority_reason && (
               <div className="p-2 rounded-lg bg-cyan-500/5 border border-cyan-500/20 text-xs">
-                <span className="font-bold text-cyan-400">AI Resolution Plan: </span>
-                {triageResult.resolution_plan.map((s, i) => <span key={i} className="text-muted-foreground">{i + 1}. {s} </span>)}
-                <span className="text-muted-foreground ml-2">(~{triageResult.estimated_time_minutes} min est.)</span>
+                <span className="font-bold text-cyan-400">AI Analysis: </span>
+                <span className="text-muted-foreground">{triageResult.triage.priority_reason}</span>
+                {triageResult.analysis?.infrastructure_impact && <Badge className="ml-2 bg-orange-500/20 text-orange-400 text-[9px]">Infrastructure Impact</Badge>}
               </div>
             )}
 
@@ -2235,8 +2278,8 @@ export default function TicketsPage() {
                   <SelectTrigger data-testid="create-contact"><SelectValue placeholder="Select contact" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">-- No specific contact --</SelectItem>
-                    {formData.client_id && clients.find(c => c.id === formData.client_id)?.contacts?.map((ct, i) => (
-                      <SelectItem key={i} value={ct.name}>{ct.name} ({ct.role || "General"})</SelectItem>
+                    {formData.client_id && (clients.find(c => c.id === formData.client_id)?.contacts || []).map((ct, i) => (
+                      <SelectItem key={ct.id || i} value={ct.id || ct.name}>{ct.name} - {ct.email || ct.role || "General"}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
