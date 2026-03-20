@@ -4,8 +4,8 @@
 Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers. All features are implemented in large, parallel batches to maximize efficiency.
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB (Motor async driver), 166 auto-discovered routers
-- **Frontend**: React + Shadcn/UI + Recharts + TipTap, 160+ pages
+- **Backend**: FastAPI + MongoDB (Motor async driver), 171 auto-discovered routers
+- **Frontend**: React + Shadcn/UI + Recharts + TipTap, 165+ pages
 - **Auth**: JWT-based (admin@nexusops.io / admin123)
 - **Key Pattern**: Backend routers auto-discovered via `pkgutil`/`importlib` from `/app/backend/app/routers/`. Frontend routes in `/app/frontend/src/config/routes.js`. Sidebar nav in `/app/frontend/src/config/navigation.js`.
 - **Theming**: CSS variables in `index.css` (:root for dark, .light for light mode). ThemeProvider in App.js toggles `.light` class.
@@ -16,7 +16,7 @@ Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers.
 85+ features including Tickets, Devices, Clients, Assets, Security, Financial, Networking, Integrations, Gamification
 
 ### P0 Refactoring - DONE (March 20, 2026)
-- `server.py`: Auto-discovers 166 routers
+- `server.py`: Auto-discovers 171 routers
 - `App.js`: Config-driven routes via `routes.js`
 - `Sidebar.jsx`: Config-driven nav via `navigation.js`
 
@@ -28,44 +28,42 @@ Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers.
 
 ### Phase E: Deep Patching + 12 MSP Forum Features - DONE (March 20, 2026)
 **Patch Hub (8-tab deep patching system):**
-1. Dashboard: OS compliance 67.9%, App compliance 59.7%, 250 pending patches, 12 critical devices, 7-day activity chart, ring status, compliance by client
-2. Intelligence: 15 patches with CVSS scores, AI-paused patches, stability analysis
-3. Deployment Rings: 5 rings (Test Lab > Early Adopters > Broad > Critical > Legacy) with auto-promote and manual approval
-4. Exclusions: KB/app exclusion management with scope, expiry, reasons
-5. Reboot Scheduler: Per-client schedules with deferral limits and force reboot
-6. Rollback: History + available rollbacks with one-click rollback
-7. Testing Lab: Test results (pass/fail/warning) + pre/post deployment scripts
-8. History: Full patch audit trail with KB IDs, devices, status, rings
+1. Dashboard, 2. Intelligence, 3. Deployment Rings, 4. Exclusions, 5. Reboot Scheduler, 6. Rollback, 7. Testing Lab, 8. History
 
-**New Features:**
-9. NLP Query Engine, 10. AI Auto-Resolution, 11. Client Budget Tracker, 12. Dark Web Monitor,
-13. Phishing Simulation, 14. Backup Verification, 15. Compliance Frameworks, 16. NPS Tracker,
-17. Executive Reports, 18. Geo Map, 19. Hardware Refresh Planner, 20. Onboarding Workflows
+**Plus:** NLP Query, AI Auto-Resolution, Client Budget, Dark Web Monitor, Phishing Sim, Backup Verification, Compliance Frameworks, NPS Tracker, Executive Reports, Geo Map, Hardware Refresh, Onboarding Workflows
 
 ### Phase F: AI Self-Healing + 10 Advanced Features - DONE (March 20, 2026)
-1. **AI Self-Healing Engine** (/self-healing) - Autonomous issue detection, runbook matching & execution, zero human intervention. Live feed, 24h timeline, runbook stats, simulate issue.
-2. **Predictive Failure Detection** (/predictive-failure) - SMART data ML-based failure predictions with risk levels (critical/high/medium), 87.3% accuracy
-3. **Usage-Based Billing Engine** (/usage-billing) - Auto-calc MRR from device/user counts, overage tracking, per-client plans
-4. **Dynamic Pricing Calculator** (/pricing-calc) - Auto-margin calculation from tech cost, labor rates, target margins, overhead multipliers
-5. **Client Communication Timeline** (/comms-timeline) - Unified feed of all client interactions (email, ticket, call, meeting)
-6. **AI QBR Generator** (/qbr-generator) - Auto-generate quarterly business reviews with sections (exec summary, security, uptime, tickets)
-7. **Zero Trust Policy Manager** (/zero-trust) - Conditional access rules, policy enforcement, trust scoring, event logging
-8. **Webhook/API Builder** (/webhook-builder) - Visual webhook configuration with triggers, targets, and status tracking
-9. **Git-Integrated Script Library** (/git-scripts) - Version-controlled scripts with commit history, language detection, sync status
-10. **Late Payment Predictor** (/late-payment) - AI flags likely late payers with risk analysis and outstanding amount tracking
-11. **Ransomware Tabletop Simulation** (/ransomware-tabletop) - Interactive drill scenarios with phases, start/stop exercises
+1. **AI Self-Healing Engine** (/self-healing) - Autonomous issue detection, runbook matching & execution
+2. **Predictive Failure Detection** (/predictive-failure) - SMART data ML-based failure predictions
+3. **Usage-Based Billing Engine** (/usage-billing) - Auto-calc MRR from device/user counts
+4. **Dynamic Pricing Calculator** (/pricing-calc) - Auto-margin from tech cost
+5. **Client Communication Timeline** (/comms-timeline) - Unified client interaction feed
+6. **AI QBR Generator** (/qbr-generator) - Auto-generate quarterly business reviews
+7. **Zero Trust Policy Manager** (/zero-trust) - Conditional access rules & trust scoring
+8. **Webhook/API Builder** (/webhook-builder) - Visual webhook configuration
+9. **Git-Integrated Script Library** (/git-scripts) - Version-controlled scripts
+10. **Late Payment Predictor** (/late-payment) - AI risk scoring for payments
+11. **Ransomware Tabletop Simulation** (/ransomware-tabletop) - Interactive drill scenarios
+
+### Phase G: Dashboard Builder + Channel Mode + 3 Features - DONE (March 20, 2026)
+1. **Custom Dashboard Builder** (/dashboard-builder) - Drag-and-drop widgets with 12 types (stat cards, line/bar/pie charts, ticket/alert feeds, SLA gauge, device map, client table, revenue trend, patch status). 3 pre-built layouts (Operations, Security, Financial). Full CRUD for layouts.
+2. **Channel / MSP-of-MSPs Mode** (/channel-mode) - White-label tenant management. 8 seeded tenants across Enterprise/Professional/Standard tiers. Revenue tracking by tier, feature toggle per tenant, create new tenants.
+3. **Mobile Tech Dashboard** (/mobile-tech) - Technician's daily view with assigned tickets, schedule, queue, notifications. Quick actions (New Ticket, Time Entry, Scan Asset). Time entry logging.
+4. **Real-time SOC Feed** (/soc-realtime) - Live security event stream with auto-refresh (10s polling). Severity filters, simulate events, threat map with attack sources by country. 30+ event types.
+5. **MRR/ARR Revenue Tracker** (/revenue-tracker) - Full revenue analytics: Current MRR/ARR, Net Revenue Retention, Logo Retention, revenue by service, client-level breakdown with churn risk, cohort analysis.
 
 ## Testing Status
 - iteration_43.json: P0 Refactoring + Phase B+C (100% pass)
 - iteration_44.json: Phase D - 21 features (100% pass)
 - iteration_45.json: Phase E - 13 features + Patch Hub (100% pass - 23/23 backend, 13/13 frontend)
-- iteration_46 (pytest): Phase F - 11 features (100% pass - 16/16 backend, 11/11 frontend smoke test)
+- iteration_46 (pytest): Phase F - 11 features (100% pass - 16/16 backend)
+- iteration_47.json: Phase G - 5 features (100% pass - 19/19 backend, 5/5 frontend)
 
 ## Stats
-- **Backend Routers**: 166 auto-discovered
-- **Frontend Pages**: 160+
+- **Backend Routers**: 171 auto-discovered
+- **Frontend Pages**: 165+
 - **Devices**: 131 across 15 clients
-- **Collections**: 85+
+- **Collections**: 90+
 
 ## Active Integrations
 Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, emergentintegrations (Multi-LLM), Office 365, fpdf2, RustDesk, qrcode
@@ -75,11 +73,8 @@ Xero, Pax8, Domotz, All Security/AI feature APIs (seeded mock data)
 
 ## Backlog (User-Approved)
 ### Remaining Features:
-- Custom Dashboard Builder (drag-and-drop widgets)
-- MSP-of-MSPs Channel Mode (white-label tenants)
-- Mobile Tech Dashboard (PWA)
 - AR Remote Support
-- WebSocket push for SOC Feed
+- Mobile Tech Dashboard (PWA manifest/service worker)
 
 ### Other Backlog:
 - **P1**: Phase 9 Enhancements (Device Activity Monitoring, Acronis Reporting)
