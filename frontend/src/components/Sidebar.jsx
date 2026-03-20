@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap, Sun, Moon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -147,6 +147,76 @@ const NavItem = ({ item, collapsed }) => {
   );
 };
 
+// Sidebar Search Component - searches all modules/pages
+function SidebarSearch() {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const navigate = useNavigate();
+  const inputRef = useRef(null);
+
+  // Flatten all nav items for searching
+  const allItems = navGroups.flatMap(g => g.items.map(item => ({ ...item, group: g.title })));
+  const filtered = query.trim()
+    ? allItems.filter(item =>
+        item.label.toLowerCase().includes(query.toLowerCase()) ||
+        item.group.toLowerCase().includes(query.toLowerCase()) ||
+        item.path.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 8)
+    : [];
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  return (
+    <div className="px-3 py-1 relative">
+      <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all ${focused ? "bg-muted ring-1 ring-primary/30" : "bg-muted/50"}`}>
+        <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 200)}
+          placeholder="Search modules..."
+          className="bg-transparent text-[12px] w-full outline-none placeholder:text-muted-foreground/50"
+          data-testid="sidebar-search-input"
+        />
+        {query ? (
+          <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
+        ) : (
+          <kbd className="text-[9px] text-muted-foreground/60 bg-background/50 px-1 rounded hidden sm:inline">Ctrl+K</kbd>
+        )}
+      </div>
+      {focused && filtered.length > 0 && (
+        <div className="absolute left-3 right-3 top-full mt-1 bg-card border rounded-lg shadow-xl z-50 overflow-hidden" data-testid="sidebar-search-results">
+          {filtered.map((item, i) => (
+            <button
+              key={item.path}
+              onMouseDown={() => { navigate(item.path); setQuery(""); }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-left hover:bg-muted/70 transition-colors border-b border-border/30 last:border-0"
+              data-testid={`search-result-${i}`}
+            >
+              <item.icon className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium truncate">{item.label}</p>
+                <p className="text-[10px] text-muted-foreground/60 truncate">{item.group}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -193,6 +263,22 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
 
         {/* Notification Bell */}
         <NotificationBell token={token} collapsed={collapsed} />
+
+        {/* Global Module Search */}
+        {!collapsed ? (
+          <SidebarSearch />
+        ) : (
+          <div className="px-3 py-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={onToggle} className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all" data-testid="sidebar-search-collapsed">
+                  <Search className="w-[18px] h-[18px]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Search modules (expand sidebar)</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         {/* Navigation */}
         <ScrollArea className="flex-1">

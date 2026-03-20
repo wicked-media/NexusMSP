@@ -227,11 +227,11 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2 mb-1"><CreditCard className="w-3.5 h-3.5 text-green-500" /><span className="text-[10px] text-muted-foreground uppercase tracking-wider">Collected</span></div>
             <p className="text-lg font-bold">${(enhancedStats.total_collected || 0).toLocaleString()}</p>
           </div>
-          <div className={`p-3 rounded-lg border cursor-pointer hover:border-red-500/50 transition-colors ${(enhancedStats.outstanding || 0) > 0 ? "bg-red-500/5 border-red-500/20" : "bg-muted/30"}`} onClick={() => navigate("/invoices")}>
+          <div className={`p-3 rounded-lg border cursor-pointer hover:border-red-500/50 transition-colors ${(enhancedStats.outstanding || 0) > 0 ? "bg-red-500/5 border-red-500/20 pulse-critical" : "bg-muted/30"}`} onClick={() => navigate("/invoices")}>
             <div className="flex items-center gap-2 mb-1"><XCircle className="w-3.5 h-3.5 text-red-500" /><span className="text-[10px] text-muted-foreground uppercase tracking-wider">Outstanding</span></div>
             <p className="text-lg font-bold text-red-500">${(enhancedStats.outstanding || 0).toLocaleString()}</p>
           </div>
-          <div className={`p-3 rounded-lg border cursor-pointer hover:border-orange-500/50 transition-colors ${(enhancedStats.sla_breaches || 0) > 0 ? "bg-orange-500/5 border-orange-500/20" : "bg-muted/30"}`} onClick={() => navigate("/tickets")}>
+          <div className={`p-3 rounded-lg border cursor-pointer hover:border-orange-500/50 transition-colors ${(enhancedStats.sla_breaches || 0) > 0 ? "bg-orange-500/5 border-orange-500/20 pulse-warning" : "bg-muted/30"}`} onClick={() => navigate("/tickets")}>
             <div className="flex items-center gap-2 mb-1"><AlertCircle className="w-3.5 h-3.5 text-orange-500" /><span className="text-[10px] text-muted-foreground uppercase tracking-wider">SLA Breaches</span></div>
             <p className={`text-lg font-bold ${(enhancedStats.sla_breaches || 0) > 0 ? "text-orange-500" : "text-emerald-500"}`}>{enhancedStats.sla_breaches || 0}</p>
           </div>

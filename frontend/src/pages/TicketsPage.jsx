@@ -129,6 +129,7 @@ export default function TicketsPage() {
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [triageResult, setTriageResult] = useState(null);
   const [triaging, setTriaging] = useState(false);
+  const [enrichment, setEnrichment] = useState(null);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -184,10 +185,11 @@ export default function TicketsPage() {
     setSuggestions(null);
     setAiAnalysis(null);
     setDeviceStatus(null);
+    setEnrichment(null);
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
@@ -196,6 +198,7 @@ export default function TicketsPage() {
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/attachments`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/products`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/ticket-enrichment/${ticket.id}`, { headers }).catch(() => ({ data: null })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
@@ -205,6 +208,7 @@ export default function TicketsPage() {
       setScripts(sRes.data);
       setTicketAttachments(attRes.data || []);
       setTicketProducts(prodRes.data || []);
+      setEnrichment(enrichRes.data);
       // Fetch worksheets
       try {
         const wsRes2 = await axios.get(`${API}/tickets/${ticket.id}/worksheet`, { headers });
@@ -319,7 +323,7 @@ export default function TicketsPage() {
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
-      await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, { content: newNote, is_internal: isInternalNote }, { headers });
+      await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, { content: newNote, is_internal: conversationType === "note" }, { headers });
       setNewNote("");
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers });
       setTicketNotes(res.data);
@@ -1046,20 +1050,16 @@ export default function TicketsPage() {
                 {conversationType === "note" && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <Textarea className="flex-1" placeholder="Add a note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
+                      <Textarea className="flex-1" placeholder="Add an internal note..." value={newNote} onChange={e => setNewNote(e.target.value)} rows={2} data-testid="note-input" />
                     </div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <Checkbox checked={isInternalNote} onCheckedChange={setIsInternalNote} id="internal" data-testid="internal-note-check" />
-                        <Label htmlFor="internal" className="text-sm">Internal note</Label>
-                      </div>
                       <Button variant="outline" size="sm" className="h-8 text-cyan-400 border-cyan-500/30"
                         onClick={() => handleProofread(newNote, "note")} disabled={proofreadLoading || !newNote}
                         data-testid="proofread-note-btn">
                         {proofreadLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <SpellCheck className="w-3 h-3 mr-1" />}
                         Proofread
                       </Button>
-                      <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add</Button>
+                      <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
                     </div>
                     {proofreadResult && proofreadResult.target === "note" && (
                       <div className="p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20" data-testid="proofread-result">
@@ -1420,6 +1420,132 @@ export default function TicketsPage() {
                   </ScrollArea>
                 </CardContent>
               </Card>
+            )}
+
+            {/* ── Enrichment: Sentiment + TTR Prediction ── */}
+            {enrichment && !enrichment.error && (
+              <>
+                <Card data-testid="sentiment-card" className="overflow-hidden">
+                  <CardContent className="pt-4 pb-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Client Sentiment</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        enrichment.sentiment?.label === "frustrated" ? "bg-red-500/15 text-red-400 pulse-critical" :
+                        enrichment.sentiment?.label === "positive" ? "bg-emerald-500/15 text-emerald-400" :
+                        "bg-blue-500/15 text-blue-400"
+                      }`} data-testid="sentiment-badge">
+                        {enrichment.sentiment?.label === "frustrated" ? "Frustrated" : enrichment.sentiment?.label === "positive" ? "Happy" : "Neutral"}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${
+                        enrichment.sentiment?.label === "frustrated" ? "bg-red-500" :
+                        enrichment.sentiment?.label === "positive" ? "bg-emerald-500" : "bg-blue-500"
+                      }`} style={{ width: `${enrichment.sentiment?.score || 50}%` }} />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{enrichment.sentiment?.reason}</p>
+                  </CardContent>
+                </Card>
+
+                <Card data-testid="ttr-card">
+                  <CardContent className="pt-4 pb-3">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Resolution Prediction</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-primary">
+                        {enrichment.ttr_prediction?.predicted_minutes >= 60
+                          ? `${Math.round(enrichment.ttr_prediction.predicted_minutes / 60)}h ${enrichment.ttr_prediction.predicted_minutes % 60}m`
+                          : `${enrichment.ttr_prediction?.predicted_minutes}m`}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">estimated</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <div className="h-1 flex-1 rounded-full bg-muted/50 overflow-hidden">
+                        <div className="h-full rounded-full bg-primary/60" style={{ width: `${(enrichment.ttr_prediction?.confidence || 0) * 100}%` }} />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{Math.round((enrichment.ttr_prediction?.confidence || 0) * 100)}% conf.</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">{enrichment.ttr_prediction?.based_on}</p>
+                  </CardContent>
+                </Card>
+
+                {/* Blast Radius */}
+                {enrichment.blast_radius?.affected_users > 0 && (
+                  <Card data-testid="blast-radius-card" className={enrichment.blast_radius.affected_users > 10 ? "pulse-warning" : ""}>
+                    <CardContent className="pt-4 pb-3">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Impact Blast Radius</span>
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+                          <span className="text-sm font-bold text-orange-400">{enrichment.blast_radius.affected_users}</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">Users Affected</p>
+                          {enrichment.blast_radius.device_name && (
+                            <p className="text-[10px] text-muted-foreground">{enrichment.blast_radius.device_name} ({enrichment.blast_radius.device_type})</p>
+                          )}
+                        </div>
+                      </div>
+                      {enrichment.blast_radius.affected_services?.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {enrichment.blast_radius.affected_services.map((s, i) => (
+                            <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20">{s}</span>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Client Context */}
+                <Card data-testid="client-context-card">
+                  <CardContent className="pt-4 pb-3 space-y-2.5">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Client Health</span>
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-11 h-11">
+                        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                          <circle cx="18" cy="18" r="15.9" fill="none" stroke="hsl(var(--muted))" strokeWidth="2.5" opacity="0.3" />
+                          <circle cx="18" cy="18" r="15.9" fill="none"
+                            stroke={enrichment.client_context?.health_score >= 80 ? "#10b981" : enrichment.client_context?.health_score >= 60 ? "#f97316" : "#ef4444"}
+                            strokeWidth="2.5" strokeDasharray={`${enrichment.client_context?.health_score} ${100 - (enrichment.client_context?.health_score || 0)}`} strokeLinecap="round" />
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{enrichment.client_context?.health_score}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{enrichment.client_context?.name}</p>
+                        <p className="text-[10px] text-muted-foreground capitalize">{enrichment.client_context?.contract_status} &middot; ${enrichment.client_context?.contract_value?.toLocaleString()}/mo</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Open Tickets</span><span className="font-medium">{enrichment.client_context?.open_tickets}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Lifetime</span><span className="font-medium">{enrichment.client_context?.total_tickets_lifetime}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Devices</span><span className="font-medium">{enrichment.client_context?.total_devices}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Offline</span><span className="font-medium text-red-400">{enrichment.client_context?.offline_devices}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">NPS</span><span className="font-medium">{enrichment.client_context?.nps_score}/10</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">CSAT</span><span className="font-medium">{enrichment.client_context?.avg_satisfaction}/5</span></div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Smart Merge Suggestions */}
+                {enrichment.merge_candidates?.length > 0 && (
+                  <Card data-testid="smart-merge-card">
+                    <CardContent className="pt-4 pb-3 space-y-2">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Related Tickets</span>
+                      <p className="text-[10px] text-muted-foreground">Potential duplicates or related issues from this client</p>
+                      {enrichment.merge_candidates.map(mc => (
+                        <div key={mc.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => fetchTicketDetail(mc)}>
+                          <span className="font-mono text-[10px] text-primary">{mc.ticket_number}</span>
+                          <span className="text-[11px] truncate flex-1">{mc.title}</span>
+                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                            mc.priority === "critical" ? "bg-red-500/15 text-red-400" :
+                            mc.priority === "high" ? "bg-orange-500/15 text-orange-400" :
+                            "bg-muted text-muted-foreground"
+                          }`}>{mc.priority}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
             )}
           </div>
         </div>
