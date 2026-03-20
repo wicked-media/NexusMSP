@@ -1,85 +1,78 @@
 # NexusOps - Product Requirements Document
 
 ## Original Problem Statement
-Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers. All features are implemented in large, parallel batches to maximize efficiency.
+Build "NexusOps," a feature-rich RMM/PSA platform for Managed Service Providers. All features implemented in large, parallel batches for maximum efficiency.
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB (Motor async driver), 172 auto-discovered routers
+- **Backend**: FastAPI + MongoDB (Motor async), 174 auto-discovered routers
 - **Frontend**: React + Shadcn/UI + Recharts + TipTap, 170+ pages
 - **Auth**: JWT-based (admin@nexusops.io / admin123)
-- **Key Pattern**: Backend routers auto-discovered from `/app/backend/app/routers/`. Frontend routes in `/app/frontend/src/config/routes.js`. Sidebar nav in `/app/frontend/src/config/navigation.js`.
-- **Theming**: CSS variables in `index.css` (:root for dark, .light for light mode). ThemeProvider in App.js.
+- **Key Pattern**: Backend routers auto-discovered from `/app/backend/app/routers/`. Frontend routes in `routes.js`, sidebar nav in `navigation.js`.
+- **Theming**: CSS variables (:root dark, .light light mode)
 
 ## Completed Phases
 
-### Phase 8-12 (Previous Sessions) - DONE
-85+ features including Tickets, Devices, Clients, Assets, Security, Financial, Networking, Integrations, Gamification
+### Phases 8-12 (Previous Sessions) - DONE
+85+ features: Tickets, Devices, Clients, Assets, Security, Financial, Networking, Integrations, Gamification
 
 ### P0 Refactoring - DONE
-- `server.py`: Auto-discovers 172 routers
-- `App.js`: Config-driven routes via `routes.js`
-- `Sidebar.jsx`: Config-driven nav via `navigation.js`
+Auto-discovery for routers, config-driven routes + sidebar nav
 
 ### Phase B+C: DNS Monitor + 9 Features - DONE
 ### Phase D: Dark/Light Mode + 20 Security Features - DONE
-### Bug Fix: Light Mode Sidebar - FIXED
-
 ### Phase E: Deep Patching + 12 MSP Forum Features - DONE
-Patch Hub (8-tab), NLP Query, AI Auto-Resolution, Client Budget, Dark Web Monitor, Phishing Sim, Backup Verification, Compliance Frameworks, NPS Tracker, Executive Reports, Geo Map, Hardware Refresh, Onboarding Workflows
+Patch Hub (8-tab), NLP Query, AI Auto-Resolve, + 10 more
 
 ### Phase F: AI Self-Healing + 10 Advanced Features - DONE
 Self-Healing, Predictive Failure, Usage Billing, Pricing Calculator, Comms Timeline, QBR Generator, Zero Trust, Webhook Builder, Git Scripts, Late Payment, Ransomware Tabletop
 
 ### Phase G: Dashboard Builder + Channel Mode + 3 Features - DONE
-Dashboard Builder (12 widgets, 3 layouts), Channel/MSP-of-MSPs Mode (8 tenants), Mobile Tech Dashboard, Real-time SOC Feed, MRR/ARR Revenue Tracker
+Dashboard Builder (12 widgets, 3 layouts), Channel/MSP-of-MSPs Mode, Mobile Tech, Real-time SOC Feed, MRR/ARR Revenue Tracker
 
-### Phase H: Ticket Enrichment + Global Search + Dashboard UX - DONE (March 20, 2026)
-1. **Global Module Search** (Sidebar) - Ctrl+K command palette with instant fuzzy search across all 170+ pages/modules. Results show icon, label, and group. Navigate by clicking.
-2. **AI Ticket Enrichment** (Ticket Detail) - 5 intelligent panels on every ticket:
-   - **Client Sentiment** - AI keyword analysis detects frustrated/neutral/positive tone with score bar
-   - **Resolution Prediction** - TTR estimate based on historical category/priority patterns with confidence %
-   - **Impact Blast Radius** - Shows affected users and services when a linked device is a server/network device
-   - **Client Health Card** - Health score gauge, open tickets, total devices, NPS, CSAT, contract value
-   - **Smart Merge Suggestions** - Lists related/duplicate open tickets from the same client
-3. **Internal Note Fix** - Removed redundant "Internal note" checkbox; notes are always internal when conversation type is "note"
-4. **Dashboard Pulsating Borders** - CSS animated red pulsating border on Outstanding card (pulse-critical), orange pulsating border on SLA Breaches card (pulse-warning)
+### Phase H: Ticket Enrichment + Global Search + Dashboard UX - DONE
+Global Module Search (Ctrl+K), Sentiment, Resolution Prediction, Blast Radius, Client Health, Smart Merge, Dashboard Pulsating Borders
+
+### Phase I: Ticket UX Overhaul + AI Triage - DONE (March 20, 2026)
+1. **Editable Ticket Title** - Click-to-edit inline, Enter saves, Escape cancels
+2. **Company + Reporter Display** - Colored initial badge + company name under title, reporter name/email
+3. **Client End User Contacts** - Full CRUD per client (name, email, phone, role). Seeded for Acme, TechStart, Global Finance
+4. **Conversation Tab First** - Reordered: Conversation (default) > Suggestions > Worksheets > Files > Items > Children > Time > Audit
+5. **Rich Text Notes & Emails** - TipTap editor with full toolbar: Bold, Italic, Underline, Headings, Lists, Blockquote, Code, Divider, Alignment, Links, Image paste/upload/drag-drop, Undo/Redo
+6. **No Internal Note Checkbox** - Removed redundant checkbox; notes always internal when type is "note"
+7. **Contact Auto-Populate** - Email To field auto-suggests from client contacts via HTML datalist
+8. **AI-Powered Ticket Triage** - Auto-categorize (7 categories), auto-prioritize (keyword + urgency analysis with infrastructure amplification), auto-route to best tech (skills × 10 - workload × 3), auto-tag. Apply button fills form fields.
+9. **Skills Matrix** - Hardcoded skills per tech per category (network, security, hardware, email, software, backup, support)
 
 ## Testing Status
-- iteration_43.json: P0 Refactoring + Phase B+C (100% pass)
-- iteration_44.json: Phase D - 21 features (100% pass)
-- iteration_45.json: Phase E - 13 features + Patch Hub (100% pass)
-- iteration_46 (pytest): Phase F - 11 features (100% pass)
-- iteration_47.json: Phase G - 5 features (100% pass - 19/19 backend, 5/5 frontend)
-- iteration_48.json: Phase H - Ticket Enrichment + Search + Dashboard UX (100% pass - 14/14 backend, all frontend)
+- iteration_43-47: Phases B-G (100% pass)
+- iteration_48: Phase H - Enrichment + Search (100% pass - 14/14 backend)
+- iteration_49: Phase I - Ticket UX + AI Triage (100% pass - 13/13 backend, all frontend verified)
 
 ## Stats
-- **Backend Routers**: 172 auto-discovered
+- **Backend Routers**: 174 auto-discovered
 - **Frontend Pages**: 170+
 - **Devices**: 131 across 15 clients
-- **Collections**: 90+
+- **Collections**: 95+
 
 ## Active Integrations
 Stripe, TipTap, Recharts, @dnd-kit/core, Splynx, Hudu, Resend, emergentintegrations (Multi-LLM), Office 365, fpdf2, RustDesk, qrcode
 
 ## Mocked Integrations
-Xero, Pax8, Domotz, Ticket Enrichment AI (keyword-based), All Security/AI features
+Xero, Pax8, Domotz, All AI features (keyword-based), Skills matrix (hardcoded)
 
-## Backlog (User-Approved)
-### Remaining User Requests:
-- AI-Powered Ticket Triage (auto-categorize, prioritize, route by skills matrix)
+## Backlog
+### Remaining User-Approved:
 - Client Self-Service Portal (branded status page, ticket logging)
 - Revenue-per-Ticket Tracking (profitability analysis)
 - Automated Warranty Claims (detect & auto-generate vendor RMAs)
-- Voice-to-Ticket (dictate ticket updates, AI transcribes)
+- Voice-to-Ticket (dictate updates, AI transcribes)
 - Competitive Win/Loss Tracker
 - AR Remote Support
 - Mobile Tech PWA (service worker)
 
-### Other Backlog:
+### Other:
 - **P1**: Phase 9 Enhancements (Device Activity Monitoring, Acronis Reporting)
 - **P1**: Full UniFi Integration (Phase 2)
 - **P2**: Full backend logic for mocked integrations (Xero, Pax8, Domotz)
-- **P2**: Decompose monolithic `seed.py`
-- **P2**: Decompose `navigation.js` into section-specific files
-- **P3**: Bluetooth barcode scanner integration
-- **P3**: Fix recharts console warnings
+- **P2**: Decompose monolithic `seed.py` + `navigation.js`
+- **P3**: Bluetooth barcode scanner, recharts console warnings
