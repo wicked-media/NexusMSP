@@ -523,61 +523,86 @@ export default function ClientsPage() {
               </TabsContent>
 
               {/* TICKETS TAB - Matches main TicketsPage styling */}
-              <TabsContent value="tickets" className="space-y-2" data-testid="client-tickets-tab">
-                {tickets.length > 0 ? (
-                  <div className="space-y-2">
-                    {tickets.map(t => {
-                      const pc = priorityConfig[t.priority] || priorityConfig.medium;
-                      const sc = statusConfig[t.status] || statusConfig.open;
-                      const isClosed = t.status === "closed" || t.status === "resolved";
-                      const priorityBorder = t.priority === "critical" ? "border-l-red-500" : t.priority === "high" ? "border-l-orange-500" : t.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
-                      return (
-                        <Card
-                          key={t.id}
-                          className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${isClosed ? "opacity-60" : ""}`}
-                          data-testid={`client-ticket-${t.id}`}
-                        >
-                          <CardContent className="py-3 px-4">
-                            <div className="flex items-center gap-4">
-                              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
-                                <Ticket className="w-4 h-4 text-blue-400" />
-                              </div>
-                              <div className="flex flex-col items-center w-20 flex-shrink-0">
-                                <div className={`w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider ${isClosed ? "bg-muted/20 border border-border/30 text-muted-foreground/50" : "bg-muted/40 border border-border/50 text-muted-foreground"}`}>
-                                  {t.ticket_number}
-                                </div>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-0.5">
-                                  <p className="font-medium text-sm truncate">{t.title}</p>
-                                  {!t.assigned_to && !isClosed && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">UNASSIGNED</Badge>}
-                                </div>
-                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                  {t.category && <span className="capitalize">{t.category}</span>}
-                                  {t.assigned_name && <><span className="text-muted-foreground/30">|</span><span>{t.assigned_name}</span></>}
-                                  {t.created_at && <><span className="text-muted-foreground/30">|</span><span>{formatDistanceToNow(new Date(t.created_at), { addSuffix: true })}</span></>}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-3 flex-shrink-0">
-                                <div className="text-right">
-                                  <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
-                                  <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
-                                </div>
+              <TabsContent value="tickets" className="space-y-4" data-testid="client-tickets-tab">
+                {(() => {
+                  const activeTickets = tickets.filter(t => t.status !== "closed" && t.status !== "resolved");
+                  const closedTickets = tickets.filter(t => t.status === "closed" || t.status === "resolved");
+                  const renderTicket = (t) => {
+                    const pc = priorityConfig[t.priority] || priorityConfig.medium;
+                    const sc = statusConfig[t.status] || statusConfig.open;
+                    const isClosed = t.status === "closed" || t.status === "resolved";
+                    const priorityBorder = t.priority === "critical" ? "border-l-red-500" : t.priority === "high" ? "border-l-orange-500" : t.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
+                    return (
+                      <Card
+                        key={t.id}
+                        className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${isClosed ? "opacity-60" : ""}`}
+                        data-testid={`client-ticket-${t.id}`}
+                      >
+                        <CardContent className="py-3 px-4">
+                          <div className="flex items-center gap-4">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
+                              <Ticket className="w-4 h-4 text-blue-400" />
+                            </div>
+                            <div className="flex flex-col items-center w-20 flex-shrink-0">
+                              <div className={`w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider ${isClosed ? "bg-muted/20 border border-border/30 text-muted-foreground/50" : "bg-muted/40 border border-border/50 text-muted-foreground"}`}>
+                                {t.ticket_number}
                               </div>
                             </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Card className="border-dashed">
-                    <CardContent className="py-12 text-center">
-                      <Ticket className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
-                      <p className="text-muted-foreground">No tickets for this client</p>
-                    </CardContent>
-                  </Card>
-                )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="font-medium text-sm truncate">{t.title}</p>
+                                {!t.assigned_to && !isClosed && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">UNASSIGNED</Badge>}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                {t.category && <span className="capitalize">{t.category}</span>}
+                                {t.assigned_name && <><span className="text-muted-foreground/30">|</span><span>{t.assigned_name}</span></>}
+                                {t.created_at && <><span className="text-muted-foreground/30">|</span><span>{formatDistanceToNow(new Date(t.created_at), { addSuffix: true })}</span></>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                              <div className="text-right">
+                                <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
+                                <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  };
+                  return tickets.length > 0 ? (
+                    <>
+                      {activeTickets.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Active Tickets</h4>
+                            <Badge variant="outline" className="text-[10px]">{activeTickets.length}</Badge>
+                          </div>
+                          {activeTickets.map(renderTicket)}
+                        </div>
+                      )}
+                      {closedTickets.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Resolved / Closed</h4>
+                            <Badge variant="outline" className="text-[10px]">{closedTickets.length}</Badge>
+                          </div>
+                          {closedTickets.map(renderTicket)}
+                        </div>
+                      )}
+                      {activeTickets.length === 0 && closedTickets.length > 0 && (
+                        <Card className="bg-emerald-500/5 border-emerald-500/20"><CardContent className="py-3 px-4 text-sm text-emerald-400 flex items-center gap-2"><CheckCircle className="w-4 h-4" />All tickets resolved</CardContent></Card>
+                      )}
+                    </>
+                  ) : (
+                    <Card className="border-dashed">
+                      <CardContent className="py-12 text-center">
+                        <Ticket className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
+                        <p className="text-muted-foreground">No tickets for this client</p>
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
               </TabsContent>
 
               {/* DEVICES TAB */}

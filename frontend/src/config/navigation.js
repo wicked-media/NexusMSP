@@ -15,7 +15,7 @@ import {
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Smartphone, Radio, Coins
+  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic
 } from "lucide-react";
 
 export const navGroups = [
@@ -25,6 +25,8 @@ export const navGroups = [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/tickets", icon: Ticket, label: "Tickets" },
       { path: "/kanban-tickets", icon: FolderKanban, label: "Kanban Board" },
+      { path: "/intelligent-routing", icon: Brain, label: "Smart Routing" },
+      { path: "/voice-ticket", icon: Mic, label: "Voice to Ticket" },
       { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
       { path: "/sla-penalties", icon: Calculator, label: "SLA Penalties" },
       { path: "/dispatch-board", icon: MapPin, label: "Dispatch Board" },
@@ -88,6 +90,7 @@ export const navGroups = [
       { path: "/client-reports", icon: FileText, label: "Client Reports" },
       { path: "/sla-report-gen", icon: FileBarChart, label: "Client SLA Reports" },
       { path: "/client-portal-admin", icon: Users, label: "Client Portal" },
+      { path: "/client-portal", icon: Globe, label: "Self-Service Portal" },
       { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
       { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
       { path: "/it-roadmap", icon: Map, label: "IT Roadmap" },
@@ -121,6 +124,7 @@ export const navGroups = [
       { path: "/late-payment", icon: BadgeDollarSign, label: "Late Payment AI" },
       { path: "/qbr-generator", icon: FileSpreadsheet, label: "QBR Generator" },
       { path: "/revenue-tracker", icon: Coins, label: "Revenue Tracker" },
+      { path: "/revenue-tracking", icon: DollarSign, label: "Revenue/Ticket" },
     ]
   },
   {

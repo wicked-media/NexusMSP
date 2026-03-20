@@ -324,10 +324,12 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
         <div className={`border-t border-border p-3 ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div 
+              <Link
+                to="/my-settings"
                 className={`flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-all duration-150 cursor-pointer ${
                   collapsed ? 'justify-center' : ''
                 }`}
+                data-testid="user-settings-link"
               >
                 <Avatar className="h-9 w-9">
                   <AvatarImage src={user?.avatar} alt={user?.name} />
@@ -341,12 +343,12 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                     <p className="text-xs text-muted-foreground truncate capitalize">{user?.role}</p>
                   </div>
                 )}
-              </div>
+              </Link>
             </TooltipTrigger>
             {collapsed && (
               <TooltipContent side="right">
                 <p className="font-medium">{user?.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+                <p className="text-xs text-muted-foreground capitalize">{user?.role} - My Settings</p>
               </TooltipContent>
             )}
           </Tooltip>

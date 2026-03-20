@@ -1,51 +1,139 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
+import uuid
+import secrets
 from app.database import db
 from app.auth import get_current_user
-import uuid
 
 router = APIRouter()
 
-@router.get("/client-portal/config")
-async def get_portal_config(current_user: dict = Depends(get_current_user)):
-    config = await db.client_portal_config.find_one({}, {"_id": 0})
+# ============== PORTAL CONFIGURATION ==============
+
+@router.get("/client-portal/config/{client_id}")
+async def get_portal_config(client_id: str, current_user: dict = Depends(get_current_user)):
+    config = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0})
     if not config:
-        config = {"id": "portal-config-001", "enabled": True, "allow_ticket_creation": True, "allow_ticket_viewing": True, "allow_estimate_approval": True, "allow_invoice_viewing": True, "allow_asset_viewing": True, "branding": {"logo_url": "", "primary_color": "#3b82f6", "company_name": "NexusOps MSP"}, "features": {"knowledge_base": True, "status_page": True, "file_sharing": True}, "created_at": datetime.now(timezone.utc).isoformat()}
-        await db.client_portal_config.insert_one(config)
-        config.pop("_id", None)
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+        config = {
+            "client_id": client_id, "client_name": client["name"] if client else "Unknown",
+            "enabled": False, "branding": {"primary_color": "#3b82f6", "logo_url": None, "company_name": client["name"] if client else ""},
+            "features": {"can_create_tickets": True, "can_view_devices": True, "can_view_invoices": True, "can_view_contracts": True, "can_view_kb": True},
+            "portal_url": None, "access_tokens": []
+        }
     return config
 
-@router.put("/client-portal/config")
-async def update_portal_config(data: dict, current_user: dict = Depends(get_current_user)):
+@router.put("/client-portal/config/{client_id}")
+async def update_portal_config(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    data["client_id"] = client_id
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.client_portal_config.update_one({}, {"$set": data}, upsert=True)
-    return {"status": "updated"}
+    await db.portal_configs.update_one({"client_id": client_id}, {"$set": data}, upsert=True)
+    return {"message": "Portal config updated"}
 
-@router.get("/client-portal/access-logs")
-async def get_portal_access_logs(current_user: dict = Depends(get_current_user)):
-    logs = await db.portal_access_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(100)
-    if not logs:
-        now = datetime.now(timezone.utc)
-        logs = [
-            {"id": "pal-001", "client_id": "client-001", "client_name": "Acme Corporation", "user_email": "it@acme.com", "action": "viewed_tickets", "ip_address": "203.45.67.10", "timestamp": (now - timedelta(hours=1)).isoformat()},
-            {"id": "pal-002", "client_id": "client-003", "client_name": "Global Finance Ltd", "user_email": "helpdesk@globalfin.com", "action": "created_ticket", "ip_address": "91.23.45.67", "timestamp": (now - timedelta(hours=3)).isoformat()},
-            {"id": "pal-003", "client_id": "client-004", "client_name": "HealthCare Plus", "user_email": "it@hcplus.org", "action": "approved_estimate", "ip_address": "67.89.12.34", "timestamp": (now - timedelta(hours=5)).isoformat()},
-            {"id": "pal-004", "client_id": "client-001", "client_name": "Acme Corporation", "user_email": "jane.doe@acme.com", "action": "viewed_invoices", "ip_address": "203.45.67.12", "timestamp": (now - timedelta(hours=8)).isoformat()},
-            {"id": "pal-005", "client_id": "client-002", "client_name": "TechStart Inc", "user_email": "support@techstart.io", "action": "downloaded_report", "ip_address": "45.67.89.12", "timestamp": (now - timedelta(days=1)).isoformat()},
-        ]
-        for l in logs:
-            await db.portal_access_logs.insert_one(l)
-        logs = [dict((k, v) for k, v in l.items() if k != "_id") for l in logs]
-    return logs
+@router.post("/client-portal/generate-token/{client_id}")
+async def generate_portal_token(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    token_value = secrets.token_urlsafe(32)
+    token_entry = {
+        "id": str(uuid.uuid4()), "token": token_value,
+        "contact_name": data.get("contact_name", ""),
+        "contact_email": data.get("contact_email", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=data.get("expiry_days", 90))).isoformat(),
+        "last_used": None, "active": True
+    }
+    await db.portal_configs.update_one(
+        {"client_id": client_id},
+        {"$push": {"access_tokens": token_entry}, "$set": {"client_id": client_id, "enabled": True}},
+        upsert=True
+    )
+    return {"token": token_value, "portal_url": f"/portal/{token_value}", "entry": token_entry}
 
-@router.get("/client-portal/invitations")
-async def get_portal_invitations(current_user: dict = Depends(get_current_user)):
-    invitations = await db.portal_invitations.find({}, {"_id": 0}).to_list(100)
-    return invitations
+@router.delete("/client-portal/tokens/{client_id}/{token_id}")
+async def revoke_portal_token(client_id: str, token_id: str, current_user: dict = Depends(get_current_user)):
+    await db.portal_configs.update_one(
+        {"client_id": client_id},
+        {"$pull": {"access_tokens": {"id": token_id}}}
+    )
+    return {"message": "Token revoked"}
 
-@router.post("/client-portal/invite")
-async def invite_client_user(data: dict, current_user: dict = Depends(get_current_user)):
-    invitation = {"id": f"inv-{uuid.uuid4().hex[:8]}", "client_id": data["client_id"], "client_name": data.get("client_name", ""), "email": data["email"], "role": data.get("role", "viewer"), "status": "pending", "invited_by": current_user.get("name"), "created_at": datetime.now(timezone.utc).isoformat()}
-    await db.portal_invitations.insert_one(invitation)
-    invitation.pop("_id", None)
-    return invitation
+# ============== PUBLIC PORTAL ENDPOINTS (no auth) ==============
+
+@router.get("/portal-api/{token}/info")
+async def portal_get_info(token: str):
+    config = await db.portal_configs.find_one({"access_tokens.token": token}, {"_id": 0})
+    if not config or not config.get("enabled"):
+        raise HTTPException(status_code=404, detail="Portal not found or disabled")
+    
+    token_entry = next((t for t in config.get("access_tokens", []) if t["token"] == token and t.get("active")), None)
+    if not token_entry:
+        raise HTTPException(status_code=403, detail="Token expired or revoked")
+    
+    await db.portal_configs.update_one(
+        {"client_id": config["client_id"], "access_tokens.token": token},
+        {"$set": {"access_tokens.$.last_used": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    client = await db.clients.find_one({"id": config["client_id"]}, {"_id": 0, "name": 1, "email": 1, "industry": 1})
+    return {
+        "client": client, "branding": config.get("branding", {}),
+        "features": config.get("features", {}),
+        "contact_name": token_entry.get("contact_name"),
+    }
+
+@router.get("/portal-api/{token}/tickets")
+async def portal_get_tickets(token: str):
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    
+    tickets = await db.tickets.find(
+        {"client_id": config["client_id"]},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1, "category": 1, "created_at": 1, "updated_at": 1}
+    ).sort("created_at", -1).to_list(100)
+    return tickets
+
+@router.post("/portal-api/{token}/tickets")
+async def portal_create_ticket(token: str, data: dict):
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    if not config.get("features", {}).get("can_create_tickets"):
+        raise HTTPException(status_code=403, detail="Ticket creation disabled")
+    
+    token_entry = next((t for t in config.get("access_tokens", []) if t["token"] == token), None)
+    ticket = {
+        "id": str(uuid.uuid4()),
+        "ticket_number": f"PT-{datetime.now(timezone.utc).strftime('%m%d%H%M')}",
+        "title": data.get("title", "Portal Ticket"),
+        "description": data.get("description", ""),
+        "priority": "medium", "category": data.get("category", "support"),
+        "status": "open", "source": "client_portal",
+        "client_id": config["client_id"],
+        "client_name": config.get("client_name", ""),
+        "contact_name": token_entry.get("contact_name") if token_entry else None,
+        "contact_email": token_entry.get("contact_email") if token_entry else None,
+        "assigned_to": None, "assigned_name": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.tickets.insert_one(ticket)
+    ticket.pop("_id", None)
+    return ticket
+
+@router.get("/portal-api/{token}/devices")
+async def portal_get_devices(token: str):
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    if not config.get("features", {}).get("can_view_devices"):
+        raise HTTPException(status_code=403, detail="Device view disabled")
+    
+    devices = await db.devices.find(
+        {"client_id": config["client_id"]},
+        {"_id": 0, "id": 1, "name": 1, "device_type": 1, "os": 1, "status": 1, "ip_address": 1}
+    ).to_list(200)
+    return devices
+
+@router.get("/client-portal/all")
+async def get_all_portal_configs(current_user: dict = Depends(get_current_user)):
+    configs = await db.portal_configs.find({}, {"_id": 0}).to_list(100)
+    return configs

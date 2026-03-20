@@ -195,6 +195,15 @@ export const routeConfig = [
   // Special: Wallboard (no MainLayout)
   { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },
 
+  // Technician Settings
+  { path: "/my-settings", component: page("TechSettingsPage"), auth: true, layout: true },
+
+  // P1 Features
+  { path: "/intelligent-routing", component: page("IntelligentRoutingPage"), auth: true, layout: true },
+  { path: "/client-portal", component: page("ClientPortalPage"), auth: true, layout: true },
+  { path: "/revenue-tracking", component: page("RevenueTrackingPage"), auth: true, layout: true },
+  { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
+
   // Public routes (no auth, no layout)
   { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },
   { path: "/status-board/:clientId", component: page("StatusBoardPage"), auth: false, layout: false },

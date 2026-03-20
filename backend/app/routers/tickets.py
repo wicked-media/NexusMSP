@@ -30,6 +30,14 @@ async def get_tickets(
     if client_id:
         query["client_id"] = client_id
     
+    # If no specific status filter, exclude closed tickets older than 24h
+    if not status:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        query["$or"] = [
+            {"status": {"$nin": ["closed"]}},
+            {"status": "closed", "updated_at": {"$gte": cutoff}}
+        ]
+    
     tickets = await db.tickets.find(query, {"_id": 0}).to_list(1000)
     for t in tickets:
         for field in ['created_at', 'updated_at', 'sla_due']:
@@ -120,6 +128,9 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
 async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
     old_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     ticket_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    # Auto-close: when marked as resolved, automatically set to closed
+    if ticket_data.get("status") == "resolved":
+        ticket_data["status"] = "closed"
     # Resolve device name if device_id changed
     if 'device_id' in ticket_data and ticket_data['device_id']:
         device = await db.devices.find_one({"id": ticket_data['device_id']}, {"_id": 0, "name": 1})
