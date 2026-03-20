@@ -1146,7 +1146,7 @@ export default function TicketsPage() {
                 )}
 
                 {/* Unified Conversation Timeline */}
-                <ScrollArea style={{ height: "calc(100vh - 420px)", minHeight: "300px" }}>
+                <div className="border rounded-lg overflow-hidden" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "200px", maxHeight: "calc(100vh - 300px)" }}>
                   {(() => {
                     const allItems = [
                       ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
@@ -1200,7 +1200,7 @@ export default function TicketsPage() {
                       }
                     });
                   })()}
-                </ScrollArea>
+                </div>
               </TabsContent>
 
               {/* ATTACHMENTS TAB */}
