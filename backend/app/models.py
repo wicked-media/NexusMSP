@@ -82,7 +82,7 @@ class Client(BaseModel):
 class TicketCreate(BaseModel):
     title: str
     description: str
-    client_id: str
+    client_id: Optional[str] = None
     priority: str = "medium"
     category: str = "support"
     assigned_to: Optional[str] = None
@@ -105,7 +105,7 @@ class Ticket(BaseModel):
     ticket_number: Optional[str] = None
     title: str
     description: str
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     priority: str = "medium"
     status: str = "open"
@@ -136,7 +136,7 @@ class Ticket(BaseModel):
 
 class DeviceCreate(BaseModel):
     name: str
-    client_id: str
+    client_id: Optional[str] = None
     device_type: str = "workstation"
     os: str = "Windows 11"
     ip_address: Optional[str] = None
@@ -157,7 +157,7 @@ class Device(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     device_type: str = "workstation"
     os: str = "Windows 11"
@@ -213,7 +213,7 @@ class Device(BaseModel):
 
 class AssetCreate(BaseModel):
     name: str
-    client_id: str
+    client_id: Optional[str] = None
     device_id: Optional[str] = None
     asset_type: str = "hardware"
     manufacturer: Optional[str] = None
@@ -231,7 +231,7 @@ class Asset(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     device_id: Optional[str] = None
     asset_type: str = "hardware"
@@ -254,7 +254,7 @@ class Alert(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     device_id: str
     device_name: Optional[str] = None
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     alert_type: str
     severity: str = "warning"
@@ -265,7 +265,7 @@ class Alert(BaseModel):
 # ============== NEW MODELS ==============
 
 class ContractCreate(BaseModel):
-    client_id: str
+    client_id: Optional[str] = None
     name: str
     contract_type: str = "managed_services"
     billing_frequency: str = "monthly"
@@ -279,7 +279,7 @@ class ContractCreate(BaseModel):
 class Contract(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     name: str
     contract_type: str = "managed_services"
@@ -295,7 +295,7 @@ class Contract(BaseModel):
 
 class LineItemCreate(BaseModel):
     contract_id: str
-    client_id: str
+    client_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     quantity: int = 1
@@ -308,7 +308,7 @@ class LineItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     contract_id: str
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     name: str
     description: Optional[str] = None
@@ -322,7 +322,7 @@ class LineItem(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvoiceCreate(BaseModel):
-    client_id: str
+    client_id: Optional[str] = None
     contract_id: Optional[str] = None
     due_date: str
     notes: Optional[str] = None
@@ -337,7 +337,7 @@ class Invoice(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     invoice_number: str = Field(default_factory=lambda: f"INV-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}")
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     contract_id: Optional[str] = None
     status: str = "draft"
@@ -411,7 +411,7 @@ class KBArticle(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Pax8Settings(BaseModel):
-    client_id: str
+    client_id: Optional[str] = None
     client_secret: str
 
 # ============== DOMOTZ & REMOTE ACCESS MODELS ==============
@@ -441,7 +441,7 @@ class DeviceChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     device_id: str
     device_name: Optional[str] = None
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     user_id: str
     user_name: Optional[str] = None
@@ -462,7 +462,7 @@ class RemoteSession(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     device_id: str
     device_name: Optional[str] = None
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     user_id: str
     user_name: Optional[str] = None
@@ -481,7 +481,7 @@ class RemoteSession(BaseModel):
 
 class Office365Settings(BaseModel):
     tenant_id: str
-    client_id: str
+    client_id: Optional[str] = None
     client_secret: str
     redirect_uri: Optional[str] = None
 
@@ -521,14 +521,14 @@ class EmailMessageCreate(BaseModel):
 
 class AcronisSettings(BaseModel):
     api_url: str
-    client_id: str
+    client_id: Optional[str] = None
     client_secret: str
 
 class AcronisSubscription(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     external_id: Optional[str] = None  # Acronis subscription ID
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     device_id: Optional[str] = None
     device_name: Optional[str] = None
@@ -671,7 +671,7 @@ class ProxmoxVM(BaseModel):
 class WarrantyEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     device_id: Optional[str] = None
     device_name: Optional[str] = None
@@ -694,7 +694,7 @@ class WarrantyEntry(BaseModel):
 class SoftwareLicense(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     software_name: str
     vendor: str
@@ -716,7 +716,7 @@ class SoftwareLicense(BaseModel):
 class DomainEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     domain_name: str
     registrar: Optional[str] = None
@@ -733,7 +733,7 @@ class DomainEntry(BaseModel):
 class SSLCertificate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     domain: str
     issuer: Optional[str] = None
@@ -772,7 +772,7 @@ class Vendor(BaseModel):
 class NetworkScan(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     site_id: Optional[str] = None
     site_name: Optional[str] = None
@@ -1020,7 +1020,7 @@ class Policy(BaseModel):
 class PasswordEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     name: str
     category: str = "general"  # general, server, network, cloud, application, other
@@ -1056,7 +1056,7 @@ class DocumentationPage(BaseModel):
 class NetworkDiagram(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     name: str
     description: Optional[str] = None
@@ -1105,7 +1105,7 @@ class RunbookExecution(BaseModel):
 class PortalUser(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     email: str
     password_hash: str
@@ -1124,7 +1124,7 @@ class PortalUser(BaseModel):
 class PortalSession(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     portal_user_id: str
-    client_id: str
+    client_id: Optional[str] = None
     token: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime
@@ -1136,7 +1136,7 @@ class Project(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     description: Optional[str] = None
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     status: str = "planning"  # planning, in_progress, on_hold, completed, cancelled
     priority: str = "medium"
@@ -1260,7 +1260,7 @@ class Webhook(BaseModel):
 class Site(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_id: str
+    client_id: Optional[str] = None
     client_name: Optional[str] = None
     name: str
     address: Optional[str] = None
@@ -1338,7 +1338,7 @@ class RentalDevice(RentalDeviceCreate):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class RentalAgreementCreate(BaseModel):
-    client_id: str
+    client_id: Optional[str] = None
     device_id: str
     agreement_type: str = "rental"  # rental, buy_outright, lease_to_own
     start_date: str
