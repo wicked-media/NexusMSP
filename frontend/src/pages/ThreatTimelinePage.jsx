@@ -1,72 +1,71 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Shield, AlertTriangle, GitBranch, CheckCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Loader2, Activity, AlertTriangle, CheckCircle, Clock, Shield, Zap, ArrowRight } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+
+const SEV = { critical: "border-red-500/40 bg-red-500/5", high: "border-orange-500/30 bg-orange-500/5", medium: "border-amber-500/20", low: "border-blue-500/20" };
+const SEV_DOT = { critical: "bg-red-500", high: "bg-orange-500", medium: "bg-amber-500", low: "bg-blue-500" };
 
 export default function ThreatTimelinePage() {
   const { token } = useAuth();
-  const [events, setEvents] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try { const res = await axios.get(`${API}/threat-timeline/events`, { headers }); setEvents(res.data); } catch (e) { toast.error("Failed to load threats"); }
-      setLoading(false);
-    };
-    fetchData();
-  }, []);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try { const res = await axios.get(`${API}/soc/alerts`, { headers }); setAlerts(res.data.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))); }
+    catch { toast.error("Failed"); }
+    finally { setLoading(false); }
+  }, [token]);
 
-  const handleResolve = async (id) => {
-    try { await axios.post(`${API}/threat-timeline/events/${id}/resolve`, { notes: "Resolved via dashboard" }, { headers }); setEvents(prev => prev.map(e => e.id === id ? { ...e, resolved: true } : e)); toast.success("Threat resolved"); } catch (e) { toast.error("Failed"); }
-  };
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
-
-  const severityColor = { critical: "destructive", high: "warning", medium: "secondary", low: "outline" };
-  const typeIcon = { persistence: "PERSIST", lateral_movement: "LATERAL", malware: "MALWARE", credential_access: "CREDS", exfiltration: "EXFIL" };
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   return (
-    <div className="space-y-6" data-testid="threat-timeline-page">
-      <div><h1 className="text-2xl font-bold tracking-tight">Threat Detection Timeline</h1><p className="text-muted-foreground text-sm mt-1">Kill chain view of detected threats across endpoints</p></div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card><CardContent className="pt-5 flex items-center gap-3"><AlertTriangle className="w-6 h-6 text-red-500" /><div><p className="text-2xl font-bold">{events.filter(e => !e.resolved).length}</p><p className="text-xs text-muted-foreground">Active Threats</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><Shield className="w-6 h-6 text-red-500" /><div><p className="text-2xl font-bold">{events.filter(e => e.severity === "critical" && !e.resolved).length}</p><p className="text-xs text-muted-foreground">Critical</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><GitBranch className="w-6 h-6 text-blue-500" /><div><p className="text-2xl font-bold">{events.filter(e => e.auto_isolated).length}</p><p className="text-xs text-muted-foreground">Auto-Isolated</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><CheckCircle className="w-6 h-6 text-emerald-500" /><div><p className="text-2xl font-bold">{events.filter(e => e.resolved).length}</p><p className="text-xs text-muted-foreground">Resolved</p></div></CardContent></Card>
+    <div className="space-y-6" data-testid="threat-timeline">
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Threat Timeline</h1><p className="text-muted-foreground">Chronological view of all security events</p></div>
       </div>
 
-      <div className="space-y-4">
-        {events.map(e => (
-          <Card key={e.id} className={!e.resolved ? "border-l-4 border-l-red-500" : ""} data-testid={`threat-${e.id}`}>
-            <CardContent className="pt-4">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant={severityColor[e.severity]}>{e.severity}</Badge>
-                    <Badge variant="outline" className="text-[10px] font-mono">{typeIcon[e.type] || e.type}</Badge>
-                    <Badge variant="outline" className="text-[10px]">{e.mitre_tactic}</Badge>
-                    {e.auto_isolated && <Badge className="bg-purple-500/10 text-purple-500">Auto-Isolated</Badge>}
-                  </div>
-                  <h3 className="font-semibold mt-2">{e.title}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">{e.description}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                    <span>{e.device_name}</span><span>{e.client_name}</span><span>{new Date(e.detected_at).toLocaleString()}</span>
-                  </div>
-                  {e.process_chain && <div className="mt-2"><p className="text-xs text-muted-foreground">Process Chain:</p><code className="text-xs bg-muted p-1 rounded">{e.process_chain.join(" → ")}</code></div>}
-                  {e.mitre_technique && <p className="text-xs text-muted-foreground mt-1">MITRE: {e.mitre_technique}</p>}
-                </div>
-                {!e.resolved && <Button variant="outline" size="sm" onClick={() => handleResolve(e.id)}>Resolve</Button>}
-                {e.resolved && <Badge variant="outline">Resolved by {e.resolved_by}</Badge>}
+      <div className="relative">
+        <div className="absolute left-[19px] top-0 bottom-0 w-0.5 bg-muted/20" />
+        <div className="space-y-4">
+          {alerts.length === 0 ? (
+            <Card><CardContent className="py-8 text-center text-muted-foreground">No events recorded</CardContent></Card>
+          ) : alerts.map((alert, i) => (
+            <div key={alert.id || i} className="flex gap-4 relative" data-testid={`timeline-${i}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${alert.severity === "critical" ? "bg-red-500/20" : alert.severity === "high" ? "bg-orange-500/20" : "bg-muted/30"}`}>
+                <div className={`w-3 h-3 rounded-full ${SEV_DOT[alert.severity] || "bg-gray-500"} ${alert.status === "new" ? "animate-pulse" : ""}`} />
               </div>
-            </CardContent>
-          </Card>
-        ))}
+              <Card className={`flex-1 ${SEV[alert.severity] || ""}`}>
+                <CardContent className="py-3 px-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{alert.title}</span>
+                        <Badge className={`text-[10px] ${alert.severity === "critical" ? "bg-red-500/20 text-red-400" : alert.severity === "high" ? "bg-orange-500/20 text-orange-400" : "bg-amber-500/20 text-amber-400"}`}>{alert.severity}</Badge>
+                        <Badge variant="outline" className="text-[10px] capitalize">{alert.status}</Badge>
+                        {alert.mitre_attack && <Badge variant="outline" className="text-[10px] font-mono">{alert.mitre_attack}</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono">{alert.hostname}</span>
+                        <span>{alert.organization}</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">{alert.created_at ? formatDistanceToNow(new Date(alert.created_at), { addSuffix: true }) : ""}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

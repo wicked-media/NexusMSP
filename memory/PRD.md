@@ -4,12 +4,14 @@
 NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, manage, and support from a single pane of glass.
 
 ## Core Modules
-- **Ticketing**: SLA tickets, workshop jobs, cabling/WISP jobs with full conversation, status tracking, and lifecycle automation
+- **Ticketing**: SLA tickets, workshop jobs, cabling/WISP jobs with full lifecycle
 - **RMM/Monitoring**: Device monitoring, agent management, remote access (RustDesk)
-- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking, aging reports, credit notes, revenue analytics, billing command center
+- **Invoicing & Billing**: Invoice management, purchase orders, billing command center, revenue tracking
 - **Asset Management**: Asset lifecycle, inventory, procurement
 - **CRM**: Client management, contacts, addresses, loyalty tracking
 - **Networking**: Network maps, zero-trust management, SNMP monitoring
+- **Security Operations Center**: Huntress-ready SOC, endpoint security, dark web monitoring, vulnerability scanning, phishing simulation, identity threat detection, ransomware canary, threat timeline
+- **Smart Automation**: AI thank-you detection, stale ticket reminders, billing reconciliation
 - **Scheduling & Dispatch**: Smart scheduling, dispatch board, on-call management
 - **Reporting**: Dashboards, analytics, SLA compliance, revenue reports
 - **White Label**: Full branding customization, custom domains
@@ -17,17 +19,17 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - **AI Features**: AI copilot, intelligent routing, voice-to-ticket
 
 ## Tech Stack
-- **Frontend**: React, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
-- **Backend**: FastAPI (Python), Motor (async MongoDB)
-- **Database**: MongoDB
-- **Integrations**: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations
+- Frontend: React, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
+- Backend: FastAPI (Python), Motor (async MongoDB)
+- Database: MongoDB
+- Integrations: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations
 
-## What's Been Implemented
+## Completed Features
 
-### Completed Features (All Tested)
+### Phase 1-3: Core Platform (DONE)
 1. Full ticketing system (SLA, workshop, cabling/WISP)
-2. Client management with revamped UI
-3. Invoice & billing system
+2. Client management, Contracts, Vendors
+3. Invoice & billing system with Stripe
 4. Asset lifecycle management
 5. RMM monitoring dashboard
 6. Network management & zero-trust
@@ -36,51 +38,56 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 9. White label / branding
 10. AI copilot & intelligent routing
 11. Client self-service portal
-12. Voice-to-ticket
-13. Revenue-per-ticket tracking
-14. Technician settings page (2FA, FIDO2, signatures, badges)
-15. Ticket lifecycle automation (auto-close resolved after 24h)
-16. Gamification & leaderboard system
-17. SLA timer & penalties
-18. Change management / Escalation matrix / Incident heatmap
-19. Skills matrix / Tech utilization tracking
-20. **Workshop Enrichment** - COMPLETED 2026-03-20
-21. **Cabling/WISP Enrichment** - COMPLETED 2026-03-21
-22. **PO, Invoices & Billing Overhaul** - COMPLETED 2026-03-21
-    - Purchase Orders: Approval workflows, notes, PDF, email vendor, duplicate, spend analytics
-    - Invoices: Tabbed detail, email, clone, credit notes, aging report, revenue analytics
-23. **Billing Command Center** - COMPLETED 2026-03-21
-    - Live MRR/ARR gauges with collection progress
-    - Payment Health Score (SVG radial gauge, 0-100 weighted scoring)
-    - Cash Collection Streak (gamified flame levels: starter/warming/hot/fire/legendary)
-    - 30-Day Cash Flow Forecast (incoming/outgoing/net)
-    - Overdue Alerts with one-click Chase buttons
-    - Monthly Revenue Trend (6-month invoiced vs collected)
-    - Top Debtors ranking with balance visualization
-    - Recent Payments feed
-    - Invoice Pipeline (Draft→Sent→Overdue→Paid)
+12. Voice-to-ticket, Gamification, SLA, Change Mgmt
+
+### Phase 4: Deep Enrichments (DONE - 2026-03-21)
+13. Workshop Enrichment (photos, checklists, QR codes, PDF job cards)
+14. Cabling/WISP Enrichment (site photos, materials, dispatch queue)
+15. PO/Invoice/Billing Overhaul (approval workflows, PDF, email, clone, credit notes, aging, revenue analytics)
+16. Billing Command Center (MRR/ARR gauges, health score, collection streak, cash flow forecast, chase)
+
+### Phase 5: SOC & Security Enrichment (DONE - 2026-03-21)
+17. **Security Dashboard** - Unified SOC hub with threat level banner, endpoint health, active incidents, dark web summary, vulnerability summary, identity threats
+18. **SOC Alert Feed** - Live alert stream with technician tools: Acknowledge, Create Ticket from Alert, Isolate Endpoint, Remediate, Close. Severity/status filters, MITRE ATT&CK tags, recommended remediation steps
+19. **Endpoint Security** - 30 managed endpoints with AV status, firewall, patch status, risk scores, scan/isolate/unisolate actions
+20. **Dark Web Monitor** - Credential leak detection, domain monitoring, breach source tracking, affected user counts
+21. **Vulnerability Scanner** - CVE tracking, CVSS scores, exploit-in-wild detection, patch availability, severity filtering
+22. **Phishing Simulation** - Campaign management with click rates, open rates, report rates, per-org tracking
+23. **Identity Threat Detection** - Impossible travel, brute force, MFA fatigue, token theft detection with location/IP tracking
+24. **Ransomware Canary** - Deployed canary files across endpoints, triggered alerts, emergency isolate
+25. **Threat Timeline** - Chronological security event view
+26. **Huntress Integration (Mock-Ready)** - Settings page for API key, auto-sync, mock data generators ready for real Huntress REST API connection
+
+### Phase 5b: Smart Automation (DONE - 2026-03-21)
+27. **AI Thank-You Detection** - Auto-close tickets when clients reply with "thanks/ty/cheers" (configurable keywords)
+28. **Stale Ticket Reminders** - Auto-ping clients on tickets inactive for X days (configurable)
+29. **Billing Reconciliation** - Compare RMM agent counts vs contract seats per client, flag revenue leakage
 
 ## Prioritized Backlog
 
 ### P1
-- **Technician Performance Leaderboard** - Gamified leaderboard with weekly challenges
+- Technician Performance Leaderboard
 
 ### P2
-- Dedicated "Workshop Bench View" with visual Kanban board
-- Dedicated "Dispatch Map View" for field jobs using GPS coords
-- Deeper CRM integrations (Xero, Pax8, Domotz)
-- Cross-platform scripting library
-- Advanced client off-boarding / tenant lifecycle
+- Workshop Bench View (Kanban)
+- Dispatch Map View (GPS)
+- CRM integrations (Xero, Pax8, Domotz)
+- Client Onboarding Wizard (guided, step-by-step)
+- Client Payment Portal (self-service invoices)
 
 ### P3
 - Decompose monolithic seed.py and navigation.js
+- Refactor TicketsPage.jsx into sub-components
 - Bluetooth barcode scanner integration
-- Fix recharts console warnings on Reports page
-- Refactor TicketsPage.jsx (3300+ lines) into sub-components
+- Fix recharts console warnings
+- Connect real Huntress API (when user provides API key)
+- SentinelOne / CrowdStrike connectors
 
-## Known Issues
-- recharts console warnings on ReportsPage (cosmetic, P3)
-- Missing aria-describedby for some DialogContent (accessibility, P3)
+## Mocked Features
+- All SOC/security data uses mock generators (realistic randomized data) - ready for real Huntress API
+- AI routing (mock)
+- Voice-to-text (mock)
+- Email sending (requires Resend API key)
 
 ## Authentication
 - JWT-based custom auth

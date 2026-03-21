@@ -1,166 +1,174 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Shield, Activity, Zap, Globe, AlertTriangle, Eye, RefreshCw, Play, Pause, Filter } from "lucide-react";
-
-const SEVERITY_COLORS = { critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e" };
-const CATEGORY_ICONS = { authentication: Shield, endpoint: Activity, email: Eye, network: Globe };
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { toast } from "sonner";
+import {
+  Loader2, Settings, Zap, MessageSquare, Clock, DollarSign, CheckCircle,
+  AlertTriangle, RefreshCw, Search, ArrowRightLeft
+} from "lucide-react";
 
 export default function SocRealtimePage() {
   const { token } = useAuth();
+  const [settings, setSettings] = useState(null);
+  const [recon, setRecon] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [thankYouResult, setThankYouResult] = useState(null);
+  const [staleResult, setStaleResult] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  const [data, setData] = useState(null);
-  const [threatMap, setThreatMap] = useState(null);
-  const [tab, setTab] = useState("feed");
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [filter, setFilter] = useState("all");
-  const intervalRef = useRef(null);
 
-  const loadEvents = useCallback(() => {
-    axios.get(`${API}/soc-realtime/events`, { headers }).then(r => setData(r.data));
-  }, []);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [settingsRes, reconRes] = await Promise.all([
+        axios.get(`${API}/automation/settings`, { headers }),
+        axios.get(`${API}/automation/billing-recon`, { headers }),
+      ]);
+      setSettings(settingsRes.data);
+      setRecon(reconRes.data);
+    } catch { toast.error("Failed to load"); }
+    finally { setLoading(false); }
+  }, [token]);
 
-  const loadThreatMap = () => {
-    axios.get(`${API}/soc-realtime/threat-map`, { headers }).then(r => setThreatMap(r.data));
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const saveSettings = async () => {
+    try {
+      await axios.put(`${API}/automation/settings`, settings, { headers });
+      toast.success("Settings saved");
+    } catch { toast.error("Failed to save"); }
   };
 
-  useEffect(() => {
-    loadEvents();
-    loadThreatMap();
-  }, []);
-
-  useEffect(() => {
-    if (autoRefresh) {
-      intervalRef.current = setInterval(loadEvents, 10000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [autoRefresh]);
-
-  const generateEvent = async () => {
-    await axios.post(`${API}/soc-realtime/generate`, {}, { headers });
-    loadEvents();
+  const runThankYou = async () => {
+    setActionLoading("thank_you");
+    try {
+      const res = await axios.post(`${API}/automation/check-thank-you`, {}, { headers });
+      setThankYouResult(res.data);
+      toast.success(res.data.message);
+    } catch { toast.error("Failed"); }
+    finally { setActionLoading(null); }
   };
 
-  if (!data) return <div className="animate-pulse p-8">Loading SOC Feed...</div>;
+  const runStaleCheck = async () => {
+    setActionLoading("stale");
+    try {
+      const res = await axios.post(`${API}/automation/check-stale-tickets`, {}, { headers });
+      setStaleResult(res.data);
+      toast.success(res.data.message);
+    } catch { toast.error("Failed"); }
+    finally { setActionLoading(null); }
+  };
 
-  const { events, stats } = data;
-  const filtered = filter === "all" ? events : events.filter(e => e.severity === filter);
+  if (loading || !settings) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+
+  const reconSummary = recon?.summary || {};
 
   return (
-    <div data-testid="soc-realtime-page">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Shield size={24} /> Real-time SOC Feed</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">
-            Live security event stream &middot; {autoRefresh && <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Auto-refreshing</span>}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button data-testid="toggle-refresh-btn" onClick={() => setAutoRefresh(!autoRefresh)} className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 ${autoRefresh ? "bg-emerald-600 text-white" : ""}`} style={{ background: autoRefresh ? undefined : "var(--secondary)" }}>
-            {autoRefresh ? <><Pause size={14} /> Live</> : <><Play size={14} /> Paused</>}
-          </button>
-          <button data-testid="generate-event-btn" onClick={generateEvent} className="px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5" style={{ background: "var(--accent)", color: "white" }}>
-            <Zap size={14} /> Simulate
-          </button>
-          <button onClick={loadEvents} className="px-3 py-1.5 rounded-lg text-sm" style={{ background: "var(--secondary)" }}>
-            <RefreshCw size={14} />
-          </button>
-        </div>
+    <div className="space-y-6" data-testid="smart-automation">
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Smart Automation</h1><p className="text-muted-foreground">Intelligent ticket management & billing reconciliation</p></div>
       </div>
 
-      {/* Stats bar */}
-      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">
-        {[
-          { label: "Events (24h)", value: stats.total_events_24h, color: "#3b82f6" },
-          { label: "Critical", value: stats.critical, color: "#ef4444" },
-          { label: "High", value: stats.high, color: "#f97316" },
-          { label: "Medium", value: stats.medium, color: "#eab308" },
-          { label: "Blocked", value: stats.blocked, color: "#10b981" },
-          { label: "Investigating", value: stats.investigating, color: "#8b5cf6" },
-        ].map((s, i) => (
-          <div key={i} className="rounded-lg p-3 border text-center" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-            <div className="text-xl font-bold" style={{ color: s.color }}>{s.value}</div>
-            <div className="text-[10px] text-[var(--muted)]">{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4">
-        {["feed", "threat-map"].map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === t ? "text-white" : "text-[var(--muted)]"}`} style={{ background: tab === t ? "var(--accent)" : "var(--secondary)" }}>{t.replace("-", " ")}</button>
-        ))}
-      </div>
-
-      {tab === "feed" && (
-        <>
-          {/* Filter bar */}
-          <div className="flex gap-1 mb-3">
-            {["all", "critical", "high", "medium"].map(f => (
-              <button key={f} onClick={() => setFilter(f)} className={`px-2.5 py-1 rounded text-xs capitalize ${filter === f ? "text-white" : ""}`} style={{ background: filter === f ? (SEVERITY_COLORS[f] || "var(--accent)") : "var(--secondary)" }}>{f}</button>
-            ))}
-          </div>
-
-          {/* Event list */}
-          <div className="space-y-1.5" data-testid="event-feed">
-            {filtered.map(event => {
-              const CatIcon = CATEGORY_ICONS[event.category] || Activity;
-              return (
-                <div key={event.event_id} data-testid={`event-${event.event_id}`} className="rounded-lg p-3 border flex items-center gap-3 transition-all hover:border-[var(--accent)]" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: SEVERITY_COLORS[event.severity] + "22" }}>
-                    <CatIcon size={14} style={{ color: SEVERITY_COLORS[event.severity] }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{event.title}</div>
-                    <div className="text-xs text-[var(--muted)] flex items-center gap-2 flex-wrap">
-                      <span>{event.device}</span>
-                      <span>&middot;</span>
-                      <span>{event.client}</span>
-                      <span>&middot;</span>
-                      <span>{event.source_ip}</span>
-                      {event.geo && <><span>&middot;</span><span>{event.geo}</span></>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${event.action === "blocked" ? "bg-emerald-500/20 text-emerald-400" : event.action === "quarantined" ? "bg-yellow-500/20 text-yellow-400" : "bg-purple-500/20 text-purple-400"}`}>{event.action}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px]" style={{ background: SEVERITY_COLORS[event.severity] + "22", color: SEVERITY_COLORS[event.severity] }}>{event.severity}</span>
-                    <span className="text-[10px] text-[var(--muted)] w-24 text-right">{new Date(event.timestamp).toLocaleTimeString()}</span>
-                  </div>
+      <div className="grid grid-cols-12 gap-6">
+        {/* Automation Settings */}
+        <div className="col-span-5 space-y-4">
+          <Card data-testid="automation-settings">
+            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Settings className="w-4 h-4" />Automation Settings</CardTitle></CardHeader>
+            <CardContent className="space-y-5">
+              {/* Thank You Detection */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div><Label className="text-sm font-semibold flex items-center gap-2"><MessageSquare className="w-4 h-4 text-green-400" />Thank You Detection</Label><p className="text-xs text-muted-foreground mt-0.5">Auto-close tickets with thank-you replies</p></div>
+                  <Switch checked={settings.thank_you_detection} onCheckedChange={v => setSettings({ ...settings, thank_you_detection: v })} data-testid="toggle-thank-you" />
                 </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {tab === "threat-map" && threatMap && (
-        <div className="space-y-4">
-          <div className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium">Attack Sources</h3>
-              <span className="text-xs text-[var(--muted)]">Total blocked today: <strong className="text-emerald-400">{threatMap.total_blocked_today}</strong></span>
-            </div>
-            <div className="space-y-2">
-              {threatMap.attack_sources?.sort((a, b) => b.attacks - a.attacks).map((src, i) => {
-                const maxAttacks = Math.max(...threatMap.attack_sources.map(s => s.attacks));
-                return (
-                  <div key={i} data-testid={`threat-source-${src.code}`} className="flex items-center gap-3">
-                    <span className="text-sm w-32 truncate">{src.country}</span>
-                    <div className="flex-1 h-5 rounded-full overflow-hidden" style={{ background: "var(--secondary)" }}>
-                      <div className="h-full rounded-full transition-all" style={{ width: `${(src.attacks / maxAttacks) * 100}%`, background: i === 0 ? "#ef4444" : i === 1 ? "#f97316" : "#eab308" }} />
-                    </div>
-                    <span className="text-sm font-medium w-10 text-right">{src.attacks}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <div className="rounded-xl p-4 border text-center" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-            <Globe size={48} className="mx-auto mb-2 text-[var(--accent)]" />
-            <p className="text-sm text-[var(--muted)]">Top attack type: <strong>{threatMap.top_attack_type}</strong></p>
-          </div>
+                <div><Label className="text-xs">Keywords (comma-separated)</Label><Input value={(settings.thank_you_keywords || []).join(", ")} onChange={e => setSettings({ ...settings, thank_you_keywords: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })} className="text-sm" data-testid="thank-you-keywords" /></div>
+                <Button size="sm" onClick={runThankYou} disabled={actionLoading === "thank_you"} data-testid="run-thank-you">
+                  {actionLoading === "thank_you" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}Run Now
+                </Button>
+                {thankYouResult && <div className="p-2 rounded bg-green-500/10 border border-green-500/20 text-xs text-green-400">Scanned {thankYouResult.scanned} tickets, auto-closed {thankYouResult.closed}</div>}
+              </div>
+              <Separator />
+              {/* Stale Ticket Reminders */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div><Label className="text-sm font-semibold flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" />Stale Ticket Reminders</Label><p className="text-xs text-muted-foreground mt-0.5">Auto-ping clients on inactive tickets</p></div>
+                  <Switch checked={settings.stale_ticket_enabled} onCheckedChange={v => setSettings({ ...settings, stale_ticket_enabled: v })} data-testid="toggle-stale" />
+                </div>
+                <div className="flex items-center gap-2"><Label className="text-xs whitespace-nowrap">Stale after</Label><Input type="number" min="1" max="30" value={settings.stale_ticket_days} onChange={e => setSettings({ ...settings, stale_ticket_days: parseInt(e.target.value) || 3 })} className="w-16 text-sm" /><span className="text-xs text-muted-foreground">days</span></div>
+                <Button size="sm" onClick={runStaleCheck} disabled={actionLoading === "stale"} data-testid="run-stale-check">
+                  {actionLoading === "stale" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Check Now
+                </Button>
+                {staleResult && <div className="p-2 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">Found {staleResult.stale_count} stale tickets, pinged {staleResult.pinged}</div>}
+              </div>
+              <Separator />
+              <Button onClick={saveSettings} className="w-full" data-testid="save-automation-settings">Save Settings</Button>
+            </CardContent>
+          </Card>
         </div>
-      )}
+
+        {/* Billing Reconciliation */}
+        <div className="col-span-7 space-y-4">
+          <Card data-testid="billing-recon">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-green-400" />Billing Reconciliation</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-4 gap-3">
+                <div className="p-2 rounded-lg bg-muted/20 text-center"><p className="text-[10px] text-muted-foreground">Clients</p><p className="text-lg font-bold">{reconSummary.total_clients || 0}</p></div>
+                <div className="p-2 rounded-lg bg-green-500/10 text-center"><p className="text-[10px] text-muted-foreground">Matched</p><p className="text-lg font-bold text-green-400">{reconSummary.matched || 0}</p></div>
+                <div className="p-2 rounded-lg bg-amber-500/10 text-center"><p className="text-[10px] text-muted-foreground">Over</p><p className="text-lg font-bold text-amber-400">{reconSummary.over_provisioned || 0}</p></div>
+                <div className="p-2 rounded-lg bg-red-500/10 text-center"><p className="text-[10px] text-muted-foreground">Under</p><p className="text-lg font-bold text-red-400">{reconSummary.under_provisioned || 0}</p></div>
+              </div>
+              {(reconSummary.potential_revenue_loss || 0) > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-400" />
+                  <div><p className="text-sm font-medium text-red-400">Potential Revenue Loss</p><p className="text-xs text-muted-foreground">${reconSummary.potential_revenue_loss} from {reconSummary.total_over_agents} unbilled agents</p></div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>Client</TableHead><TableHead className="text-right">Contracted</TableHead><TableHead className="text-right">Actual</TableHead><TableHead className="text-right">Diff</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Impact</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {(recon?.reconciliation || []).length === 0 ? <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground text-sm">No reconciliation data</TableCell></TableRow> :
+                  (recon?.reconciliation || []).map((r, i) => (
+                    <TableRow key={i} className={r.status === "over" ? "bg-amber-500/5" : r.status === "under" ? "bg-red-500/5" : ""} data-testid={`recon-${i}`}>
+                      <TableCell className="font-medium text-sm">{r.client_name}</TableCell>
+                      <TableCell className="text-right font-mono">{r.contracted_seats}</TableCell>
+                      <TableCell className="text-right font-mono">{r.actual_agents}</TableCell>
+                      <TableCell className="text-right font-mono font-bold">
+                        <span className={r.difference > 0 ? "text-amber-400" : r.difference < 0 ? "text-red-400" : "text-green-400"}>
+                          {r.difference > 0 ? "+" : ""}{r.difference}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] ${r.status === "match" ? "bg-green-500/20 text-green-400" : r.status === "over" ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"}`}>
+                          {r.status === "match" ? <CheckCircle className="w-3 h-3 mr-1" /> : <AlertTriangle className="w-3 h-3 mr-1" />}
+                          {r.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className={`text-right font-mono text-xs ${r.revenue_impact > 0 ? "text-amber-400" : r.revenue_impact < 0 ? "text-green-400" : ""}`}>${r.revenue_impact.toFixed(2)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
