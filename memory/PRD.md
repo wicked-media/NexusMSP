@@ -63,6 +63,17 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 28. **Stale Ticket Reminders** - Auto-ping clients on tickets inactive for X days (configurable)
 29. **Billing Reconciliation** - Compare RMM agent counts vs contract seats per client, flag revenue leakage
 
+### Phase 6: Client Onboarding Wizard (DONE - 2026-03-21)
+30. **Client Onboarding Wizard (Enhanced)** - Comprehensive 8-step guided wizard consolidating two previous modules:
+    - Template selection (Small Office, Mid-Market, Enterprise, Break/Fix)
+    - Steps: Company Profile → Contacts & Access → Asset Discovery → Contracts & Billing → Security & Compliance → Monitoring & Automation → Documentation → Go Live
+    - Preflight checklist with critical/non-critical items
+    - Health score tracking, pause/resume, audit log
+    - Side effects: auto-creates clients, contacts, devices, contracts, tickets
+    - First ticket creation on Go Live
+    - Backend: `/api/onboarding-enhanced/*` (11 endpoints), Collection: `onboarding_enhanced`
+    - Frontend: `/onboarding` and `/onboarding-workflows` both point to unified wizard
+
 ## Prioritized Backlog
 
 ### P1
@@ -72,7 +83,6 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Workshop Bench View (Kanban)
 - Dispatch Map View (GPS)
 - CRM integrations (Xero, Pax8, Domotz)
-- Client Onboarding Wizard (guided, step-by-step)
 - Client Payment Portal (self-service invoices)
 
 ### P3
