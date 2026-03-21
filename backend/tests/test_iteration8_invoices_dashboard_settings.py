@@ -194,7 +194,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         
         # Now try Stripe pay
         response = requests.post(f"{BASE_URL}/api/invoices/{stripe_test_inv['id']}/pay", 
-                                 json={"origin_url": "https://client-flow-15.preview.emergentagent.com"}, 
+                                 json={"origin_url": "https://nexus-enterprise-ops.preview.emergentagent.com"}, 
                                  headers=headers)
         
         # Stripe endpoint should return a URL or error if Stripe not fully configured
