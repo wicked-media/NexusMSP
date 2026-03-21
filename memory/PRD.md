@@ -6,7 +6,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 ## Core Modules
 - **Ticketing**: SLA tickets, workshop jobs, cabling/WISP jobs with full conversation, status tracking, and lifecycle automation
 - **RMM/Monitoring**: Device monitoring, agent management, remote access (RustDesk)
-- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking, aging reports, credit notes, revenue analytics
+- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking, aging reports, credit notes, revenue analytics, billing command center
 - **Asset Management**: Asset lifecycle, inventory, procurement
 - **CRM**: Client management, contacts, addresses, loyalty tracking
 - **Networking**: Network maps, zero-trust management, SNMP monitoring
@@ -44,23 +44,21 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 17. SLA timer & penalties
 18. Change management / Escalation matrix / Incident heatmap
 19. Skills matrix / Tech utilization tracking
-20. **Workshop Enrichment (All Phases)** - COMPLETED 2026-03-20
-    - Repair notes, before/during/after photos, diagnostic checklists (5 templates)
-    - Full audit trail, visual progress tracker (6 stages)
-    - Customer notifications with templates, quote builder, push-to-invoice
-    - Enhanced device intake (condition, accessories, password, warranty)
-    - PDF job card, QR code labels, repair history, workshop queue
-21. **Cabling/WISP Enrichment (All Phases)** - COMPLETED 2026-03-21
-    - Field notes, site photos (5 types: survey/before/during/after/completion)
-    - Enhanced checklists (5 templates)
-    - Full audit trail, visual progress tracker (5 stages)
-    - Customer notifications, quote builder, push-to-invoice
-    - Equipment tracking, materials tracking, site survey & access info
-    - PDF completion report, QR code labels, job history, dispatch queue
+20. **Workshop Enrichment** - COMPLETED 2026-03-20
+21. **Cabling/WISP Enrichment** - COMPLETED 2026-03-21
 22. **PO, Invoices & Billing Overhaul** - COMPLETED 2026-03-21
-    - **Purchase Orders**: Multi-stage approval workflow (Draft→Pending Approval→Approved→Submitted→Partial→Received), PO notes/comments, PDF generation, email-to-vendor, duplicate PO, spend analytics (top vendors, monthly trend, status breakdown), barcode scanner receiving, escalation checks
-    - **Invoices**: Tabbed detail view (Line Items, Payments, Emails, Audit), payment progress bar, email invoice with history tracking, clone invoices, credit notes, aging report (Current/30/60/90/120+ day buckets), revenue analytics (MRR/ARR, monthly trends, top clients, collection rate), void/move-client, recurring billing
-    - Bug fix: Made `due_date` Optional in Invoice model to prevent ResponseValidationError for workshop/field-generated invoices
+    - Purchase Orders: Approval workflows, notes, PDF, email vendor, duplicate, spend analytics
+    - Invoices: Tabbed detail, email, clone, credit notes, aging report, revenue analytics
+23. **Billing Command Center** - COMPLETED 2026-03-21
+    - Live MRR/ARR gauges with collection progress
+    - Payment Health Score (SVG radial gauge, 0-100 weighted scoring)
+    - Cash Collection Streak (gamified flame levels: starter/warming/hot/fire/legendary)
+    - 30-Day Cash Flow Forecast (incoming/outgoing/net)
+    - Overdue Alerts with one-click Chase buttons
+    - Monthly Revenue Trend (6-month invoiced vs collected)
+    - Top Debtors ranking with balance visualization
+    - Recent Payments feed
+    - Invoice Pipeline (Draft→Sent→Overdue→Paid)
 
 ## Prioritized Backlog
 
