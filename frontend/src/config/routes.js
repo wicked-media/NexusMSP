@@ -176,6 +176,8 @@ export const routeConfig = [
   { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
   { path: "/revenue-tracker", component: page("RevenueTrackerPage"), auth: true, layout: true },
 
+  { path: "/billing-dashboard", component: page("BillingDashboardPage"), auth: true, layout: true },
+
   // Phase E: Revenue & Billing
   { path: "/client-budget", component: page("ClientBudgetPage"), auth: true, layout: true },
   { path: "/executive-reports", component: page("ExecutiveReportsPage"), auth: true, layout: true },

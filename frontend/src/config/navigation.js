@@ -105,6 +105,7 @@ export const navGroups = [
       { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
       { path: "/campaigns", icon: Mail, label: "Email Campaigns" },
       { path: "/products", icon: Package, label: "Products" },
+      { path: "/billing-dashboard", icon: BarChart3, label: "Billing Command" },
       { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
       { path: "/stocktake", icon: Package, label: "Stocktake" },
       { path: "/vendors", icon: Building2, label: "Vendors" },
