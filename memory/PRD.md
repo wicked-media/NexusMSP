@@ -6,7 +6,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 ## Core Modules
 - **Ticketing**: SLA tickets, workshop jobs, cabling/WISP jobs with full conversation, status tracking, and lifecycle automation
 - **RMM/Monitoring**: Device monitoring, agent management, remote access (RustDesk)
-- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking
+- **Invoicing & Billing**: Invoice management, purchase orders, revenue tracking, aging reports, credit notes, revenue analytics
 - **Asset Management**: Asset lifecycle, inventory, procurement
 - **CRM**: Client management, contacts, addresses, loyalty tracking
 - **Networking**: Network maps, zero-trust management, SNMP monitoring
@@ -52,27 +52,24 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
     - PDF job card, QR code labels, repair history, workshop queue
 21. **Cabling/WISP Enrichment (All Phases)** - COMPLETED 2026-03-21
     - Field notes, site photos (5 types: survey/before/during/after/completion)
-    - Enhanced checklists (5 templates: installation/maintenance/troubleshooting/decommission/site_survey)
+    - Enhanced checklists (5 templates)
     - Full audit trail, visual progress tracker (5 stages)
-    - Customer notifications with templates (en route/on site/completed)
-    - Quote builder, push-to-invoice (materials + labour)
-    - Equipment tracking (CPE/router/antenna with serial/MAC/IP)
-    - Materials tracking with quantity/unit/cost
-    - Site survey & access info (GPS, mounting, weather, safety, power)
+    - Customer notifications, quote builder, push-to-invoice
+    - Equipment tracking, materials tracking, site survey & access info
     - PDF completion report, QR code labels, job history, dispatch queue
+22. **PO, Invoices & Billing Overhaul** - COMPLETED 2026-03-21
+    - **Purchase Orders**: Multi-stage approval workflow (Draft→Pending Approval→Approved→Submitted→Partial→Received), PO notes/comments, PDF generation, email-to-vendor, duplicate PO, spend analytics (top vendors, monthly trend, status breakdown), barcode scanner receiving, escalation checks
+    - **Invoices**: Tabbed detail view (Line Items, Payments, Emails, Audit), payment progress bar, email invoice with history tracking, clone invoices, credit notes, aging report (Current/30/60/90/120+ day buckets), revenue analytics (MRR/ARR, monthly trends, top clients, collection rate), void/move-client, recurring billing
+    - Bug fix: Made `due_date` Optional in Invoice model to prevent ResponseValidationError for workshop/field-generated invoices
 
 ## Prioritized Backlog
-
-### P0 (Next Up)
-- **Purchase Order PDF Generation** - Generate branded PO PDFs with company logo
-- **PO Approval Workflow** - Draft -> Pending Approval -> Approved -> Submitted
-- **PO Vendor Emailing** - Auto-email PO PDFs to vendors
-- **Goods Received Tracking** - Track received items against PO line items
 
 ### P1
 - **Technician Performance Leaderboard** - Gamified leaderboard with weekly challenges
 
 ### P2
+- Dedicated "Workshop Bench View" with visual Kanban board
+- Dedicated "Dispatch Map View" for field jobs using GPS coords
 - Deeper CRM integrations (Xero, Pax8, Domotz)
 - Cross-platform scripting library
 - Advanced client off-boarding / tenant lifecycle
@@ -81,6 +78,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Decompose monolithic seed.py and navigation.js
 - Bluetooth barcode scanner integration
 - Fix recharts console warnings on Reports page
+- Refactor TicketsPage.jsx (3300+ lines) into sub-components
 
 ## Known Issues
 - recharts console warnings on ReportsPage (cosmetic, P3)
