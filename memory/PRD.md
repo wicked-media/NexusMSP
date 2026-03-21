@@ -16,20 +16,11 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - **Client Portal**: Self-service portal for clients
 - **AI Features**: AI copilot, intelligent routing, voice-to-ticket
 
-## User Personas
-- **MSP Admin**: Full platform control, branding, client management
-- **Technician**: Ticket handling, workshop repairs, on-site work
-- **Client**: Self-service portal access, ticket submission
-
-## Authentication
-- JWT-based custom auth with email/password
-- Demo credentials: admin@nexusops.io / admin123
-
 ## Tech Stack
-- **Frontend**: React + Vite, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
+- **Frontend**: React, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
 - **Backend**: FastAPI (Python), Motor (async MongoDB)
 - **Database**: MongoDB
-- **Integrations**: Resend (email), Stripe, RustDesk, qrcode, fpdf2, emergentintegrations (Multi-LLM)
+- **Integrations**: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations
 
 ## What's Been Implemented
 
@@ -51,31 +42,30 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 15. Ticket lifecycle automation (auto-close resolved after 24h)
 16. Gamification & leaderboard system
 17. SLA timer & penalties
-18. Change management
-19. Escalation matrix
-20. Incident heatmap
-21. Skills matrix
-22. Tech utilization tracking
-23. **Workshop Enrichment (Phase 1-3)** - COMPLETED 2026-03-20
-    - Diagnostic repair notes system
-    - Before/during/after photo attachments
-    - Diagnostic checklists (5 device templates: laptop, desktop, phone, printer, network)
-    - Full audit trail
-    - Visual progress tracker (6 stages)
-    - Customer email/SMS notifications with templates
-    - Quote/estimate builder with send & approval workflow
-    - Push-to-invoice (new or existing)
+18. Change management / Escalation matrix / Incident heatmap
+19. Skills matrix / Tech utilization tracking
+20. **Workshop Enrichment (All Phases)** - COMPLETED 2026-03-20
+    - Repair notes, before/during/after photos, diagnostic checklists (5 templates)
+    - Full audit trail, visual progress tracker (6 stages)
+    - Customer notifications with templates, quote builder, push-to-invoice
     - Enhanced device intake (condition, accessories, password, warranty)
-    - Workshop job PDF generation (branded job card)
-    - QR code label generation
-    - Repair history lookup by serial/customer
-    - Workshop queue/kanban view
+    - PDF job card, QR code labels, repair history, workshop queue
+21. **Cabling/WISP Enrichment (All Phases)** - COMPLETED 2026-03-21
+    - Field notes, site photos (5 types: survey/before/during/after/completion)
+    - Enhanced checklists (5 templates: installation/maintenance/troubleshooting/decommission/site_survey)
+    - Full audit trail, visual progress tracker (5 stages)
+    - Customer notifications with templates (en route/on site/completed)
+    - Quote builder, push-to-invoice (materials + labour)
+    - Equipment tracking (CPE/router/antenna with serial/MAC/IP)
+    - Materials tracking with quantity/unit/cost
+    - Site survey & access info (GPS, mounting, weather, safety, power)
+    - PDF completion report, QR code labels, job history, dispatch queue
 
 ## Prioritized Backlog
 
 ### P0 (Next Up)
 - **Purchase Order PDF Generation** - Generate branded PO PDFs with company logo
-- **PO Approval Workflow** - Draft → Pending Approval → Approved → Submitted
+- **PO Approval Workflow** - Draft -> Pending Approval -> Approved -> Submitted
 - **PO Vendor Emailing** - Auto-email PO PDFs to vendors
 - **Goods Received Tracking** - Track received items against PO line items
 
@@ -85,7 +75,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 ### P2
 - Deeper CRM integrations (Xero, Pax8, Domotz)
 - Cross-platform scripting library
-- Advanced client off-boarding and tenant lifecycle management
+- Advanced client off-boarding / tenant lifecycle
 
 ### P3
 - Decompose monolithic seed.py and navigation.js
@@ -95,3 +85,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 ## Known Issues
 - recharts console warnings on ReportsPage (cosmetic, P3)
 - Missing aria-describedby for some DialogContent (accessibility, P3)
+
+## Authentication
+- JWT-based custom auth
+- Demo: admin@nexusops.io / admin123
