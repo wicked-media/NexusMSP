@@ -447,7 +447,7 @@ async def update_field_job(job_id: str, data: dict, current_user: dict = Depends
     allowed = {"field_status", "description", "assigned_to", "assigned_to_name", "scheduled_date",
                "scheduled_time", "estimated_duration", "checklist", "signal_strength",
                "speed_test_down", "speed_test_up", "completion_notes", "zone", "priority",
-               "customer_name", "customer_phone", "service_address", "job_category"}
+               "customer_name", "customer_phone", "customer_email", "service_address", "job_category"}
     update = {k: v for k, v in data.items() if k in allowed}
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.field_jobs.update_one({"id": job_id}, {"$set": update})
@@ -460,6 +460,13 @@ async def update_field_job_status(job_id: str, data: dict, current_user: dict = 
     if new_status == "completed":
         update["completed_at"] = datetime.now(timezone.utc).isoformat()
     await db.field_jobs.update_one({"id": job_id}, {"$set": update})
+    try:
+        from app.routers.field_enhanced import _fj_audit
+        job = await db.field_jobs.find_one({"id": job_id}, {"_id": 0})
+        old_status = job.get("field_status", "unknown") if job else "unknown"
+        await _fj_audit(job_id, "status_changed", f"Status changed to {new_status}", current_user)
+    except Exception:
+        pass
     return {"message": f"Status updated to {new_status}"}
 
 @router.delete("/field-jobs/{job_id}")

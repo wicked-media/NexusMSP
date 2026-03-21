@@ -148,6 +148,33 @@ export default function TicketsPage() {
   const [wsIntakeForm, setWsIntakeForm] = useState({ condition_on_arrival: "", accessories_received: [], customer_password: "", warranty_status: "unknown", warranty_expiry: "", customer_email: "" });
   const [wsTemplateDialog, setWsTemplateDialog] = useState(false);
   const [wsTemplates, setWsTemplates] = useState({});
+  // Field job enrichment state
+  const [fjNotes, setFjNotes] = useState([]);
+  const [fjNewNote, setFjNewNote] = useState("");
+  const [fjPhotos, setFjPhotos] = useState([]);
+  const [fjPhotoUploading, setFjPhotoUploading] = useState(false);
+  const [fjChecklist, setFjChecklist] = useState([]);
+  const [fjNewCheckItem, setFjNewCheckItem] = useState("");
+  const [fjAuditLog, setFjAuditLog] = useState([]);
+  const [fjQuote, setFjQuote] = useState(null);
+  const [fjQuoteDialog, setFjQuoteDialog] = useState(false);
+  const [fjQuoteItems, setFjQuoteItems] = useState([{ description: "", qty: 1, price: 0 }]);
+  const [fjQuoteNotes, setFjQuoteNotes] = useState("");
+  const [fjEquipment, setFjEquipment] = useState([]);
+  const [fjEquipDialog, setFjEquipDialog] = useState(false);
+  const [fjEquipForm, setFjEquipForm] = useState({ equipment_type: "", brand: "", model: "", serial_number: "", mac_address: "", ip_address: "", config_notes: "", action: "installed" });
+  const [fjMaterials, setFjMaterials] = useState([]);
+  const [fjMatDialog, setFjMatDialog] = useState(false);
+  const [fjMatForm, setFjMatForm] = useState({ material: "", quantity: 1, unit: "meters", unit_cost: 0 });
+  const [fjSiteInfo, setFjSiteInfo] = useState({});
+  const [fjSiteDialog, setFjSiteDialog] = useState(false);
+  const [fjJobHistory, setFjJobHistory] = useState([]);
+  const [fjNotifyDialog, setFjNotifyDialog] = useState(false);
+  const [fjNotifyForm, setFjNotifyForm] = useState({ email: "", subject: "", message: "" });
+  const [fjInvoiceDialog, setFjInvoiceDialog] = useState(false);
+  const [fjInvoiceList, setFjInvoiceList] = useState([]);
+  const [fjTemplateDialog, setFjTemplateDialog] = useState(false);
+  const [fjTemplates, setFjTemplates] = useState({});
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [triageResult, setTriageResult] = useState(null);
@@ -796,6 +823,223 @@ export default function TicketsPage() {
     ready_for_pickup: { label: "Ready for Pickup", class: "bg-green-500/20 text-green-400", icon: "check" },
     collected: { label: "Collected", class: "bg-gray-500/20 text-gray-400", icon: "package" },
     cancelled: { label: "Cancelled", class: "bg-red-500/20 text-red-400", icon: "x" },
+  };
+
+  // ============ FIELD JOB ENRICHMENT HANDLERS ============
+
+  const fetchFjJobDetail = async (job) => {
+    setViewFjJob(job);
+    setFjNotes([]); setFjPhotos([]); setFjChecklist([]); setFjAuditLog([]); setFjQuote(null); setFjEquipment([]); setFjMaterials([]); setFjSiteInfo({}); setFjJobHistory([]);
+    try {
+      const [notesRes, photosRes, clRes, auditRes, quoteRes, equipRes, matRes, siteRes, histRes] = await Promise.all([
+        axios.get(`${API}/field-jobs/${job.id}/notes`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/photos`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/enhanced-checklist`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/audit-log`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/quote`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/field-jobs/${job.id}/equipment`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/materials`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/site-info`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/field-jobs/${job.id}/job-history`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setFjNotes(notesRes.data || []);
+      setFjPhotos(photosRes.data || []);
+      setFjChecklist(clRes.data || []);
+      setFjAuditLog(auditRes.data || []);
+      setFjQuote(quoteRes.data);
+      setFjEquipment(equipRes.data || []);
+      setFjMaterials(matRes.data || []);
+      setFjSiteInfo(siteRes.data || {});
+      setFjJobHistory(histRes.data || []);
+    } catch { /* silent */ }
+  };
+
+  const handleAddFjNote = async () => {
+    if (!fjNewNote.trim() || !viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/notes`, { content: fjNewNote, note_type: "field" }, { headers });
+      setFjNewNote("");
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/notes`, { headers });
+      setFjNotes(r.data || []);
+      toast.success("Note added");
+    } catch { toast.error("Failed to add note"); }
+  };
+
+  const handleFjPhotoUpload = async (e, photoType = "general") => {
+    const file = e.target.files?.[0];
+    if (!file || !viewFjJob) return;
+    setFjPhotoUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/photos?photo_type=${photoType}`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/photos`, { headers });
+      setFjPhotos(r.data || []);
+      toast.success("Photo uploaded");
+    } catch { toast.error("Upload failed"); }
+    finally { setFjPhotoUploading(false); e.target.value = ""; }
+  };
+
+  const handleDeleteFjPhoto = async (photoId) => {
+    if (!viewFjJob) return;
+    try {
+      await axios.delete(`${API}/field-jobs/${viewFjJob.id}/photos/${photoId}`, { headers });
+      setFjPhotos(prev => prev.filter(p => p.id !== photoId));
+      toast.success("Photo deleted");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleLoadFjTemplate = async (template) => {
+    if (!viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist`, { template }, { headers });
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist`, { headers });
+      setFjChecklist(r.data || []);
+      setFjTemplateDialog(false);
+      toast.success(`${template} checklist loaded`);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleToggleFjCheckItem = async (itemId, checked) => {
+    if (!viewFjJob) return;
+    try {
+      await axios.put(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist/${itemId}`, { checked: !checked }, { headers });
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist`, { headers });
+      setFjChecklist(r.data || []);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleAddFjCheckItem = async () => {
+    if (!fjNewCheckItem.trim() || !viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist/add-item`, { item: fjNewCheckItem.trim() }, { headers });
+      setFjNewCheckItem("");
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/enhanced-checklist`, { headers });
+      setFjChecklist(r.data || []);
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleSaveFjQuote = async () => {
+    if (!viewFjJob) return;
+    const lineItems = fjQuoteItems.filter(i => i.description).map(i => ({
+      description: i.description, quantity: Number(i.qty) || 1, unit_price: Number(i.price) || 0, total: (Number(i.qty) || 1) * (Number(i.price) || 0),
+    }));
+    try {
+      const r = await axios.post(`${API}/field-jobs/${viewFjJob.id}/quote`, { line_items: lineItems, notes: fjQuoteNotes }, { headers });
+      setFjQuote(r.data);
+      setFjQuoteDialog(false);
+      toast.success("Quote saved");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleSendFjQuote = async () => {
+    if (!viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/quote/send`, { email: viewFjJob.customer_email || fjSiteInfo.customer_email }, { headers });
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/quote`, { headers });
+      setFjQuote(r.data);
+      toast.success("Quote sent");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleApproveFjQuote = async () => {
+    if (!viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/quote/approve`, {}, { headers });
+      const r = await axios.get(`${API}/field-jobs/${viewFjJob.id}/quote`, { headers });
+      setFjQuote(r.data);
+      toast.success("Quote approved");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleAddFjEquipment = async () => {
+    if (!viewFjJob || !fjEquipForm.equipment_type) return;
+    try {
+      const r = await axios.post(`${API}/field-jobs/${viewFjJob.id}/equipment`, fjEquipForm, { headers });
+      setFjEquipment(prev => [...prev, r.data]);
+      setFjEquipDialog(false);
+      setFjEquipForm({ equipment_type: "", brand: "", model: "", serial_number: "", mac_address: "", ip_address: "", config_notes: "", action: "installed" });
+      toast.success("Equipment added");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleDeleteFjEquipment = async (equipId) => {
+    if (!viewFjJob) return;
+    try {
+      await axios.delete(`${API}/field-jobs/${viewFjJob.id}/equipment/${equipId}`, { headers });
+      setFjEquipment(prev => prev.filter(e => e.id !== equipId));
+      toast.success("Removed");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleAddFjMaterial = async () => {
+    if (!viewFjJob || !fjMatForm.material) return;
+    try {
+      const r = await axios.post(`${API}/field-jobs/${viewFjJob.id}/materials`, fjMatForm, { headers });
+      setFjMaterials(prev => [...prev, r.data]);
+      setFjMatDialog(false);
+      setFjMatForm({ material: "", quantity: 1, unit: "meters", unit_cost: 0 });
+      toast.success("Material added");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleDeleteFjMaterial = async (matId) => {
+    if (!viewFjJob) return;
+    try {
+      await axios.delete(`${API}/field-jobs/${viewFjJob.id}/materials/${matId}`, { headers });
+      setFjMaterials(prev => prev.filter(m => m.id !== matId));
+      toast.success("Removed");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleSaveFjSiteInfo = async () => {
+    if (!viewFjJob) return;
+    try {
+      await axios.put(`${API}/field-jobs/${viewFjJob.id}/site-info`, fjSiteInfo, { headers });
+      setFjSiteDialog(false);
+      toast.success("Site info saved");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleFjNotifyCustomer = async () => {
+    if (!viewFjJob) return;
+    try {
+      await axios.post(`${API}/field-jobs/${viewFjJob.id}/notify-customer`, fjNotifyForm, { headers });
+      setFjNotifyDialog(false);
+      setFjNotifyForm({ email: "", subject: "", message: "" });
+      toast.success("Customer notified");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleFjPushToInvoice = async (invoiceId) => {
+    if (!viewFjJob) return;
+    try {
+      const r = await axios.post(`${API}/field-jobs/${viewFjJob.id}/to-invoice`, { invoice_id: invoiceId || null }, { headers });
+      toast.success(r.data.message);
+      setFjInvoiceDialog(false);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleDownloadFjPdf = async () => {
+    if (!viewFjJob) return;
+    try {
+      const res = await axios.get(`${API}/field-jobs/${viewFjJob.id}/pdf`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url; a.download = `FieldJob_${viewFjJob.job_number}.pdf`; a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
+    } catch { toast.error("Failed"); }
+  };
+
+  const handleDownloadFjQr = async () => {
+    if (!viewFjJob) return;
+    try {
+      const res = await axios.get(`${API}/field-jobs/${viewFjJob.id}/qr-code`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url; a.download = `QR_${viewFjJob.job_number}.png`; a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("QR code downloaded");
+    } catch { toast.error("Failed"); }
   };
 
   const FJ_STATUSES = {
@@ -2496,75 +2740,583 @@ export default function TicketsPage() {
 
   // ============ FIELD JOB DETAIL VIEW ============
   if (viewFjJob) {
+    const fjStages = [
+      { key: "scheduled", label: "Scheduled", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+      { key: "en_route", label: "En Route", color: "from-cyan-500 to-cyan-600", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
+      { key: "on_site", label: "On Site", color: "from-purple-500 to-purple-600", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
+      { key: "in_progress", label: "In Progress", color: "from-amber-500 to-amber-600", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
+      { key: "completed", label: "Completed", color: "from-green-500 to-green-600", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
+    ];
+    const fjIdx = fjStages.findIndex(s => s.key === viewFjJob.field_status);
+    const fjActiveIdx = fjIdx >= 0 ? fjIdx : 0;
+    const fjProgress = Math.round((fjActiveIdx / (fjStages.length - 1)) * 100);
+    const fjCheckDone = fjChecklist.filter(c => c.checked).length;
+    const fjMatTotal = fjMaterials.reduce((s, m) => s + (m.total || 0), 0);
+
     return (
       <div className="space-y-4" data-testid="fj-detail">
-        <div className="flex items-center gap-3">
+        {/* Header */}
+        <div className="flex items-center gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => setViewFjJob(null)} data-testid="fj-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
           <div className="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Wifi className="w-4 h-4 text-cyan-400" /></div>
           <span className="font-mono font-semibold">{viewFjJob.job_number}</span>
           <Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge>
           <Badge variant="outline" className="text-xs capitalize">{viewFjJob.job_category}</Badge>
+          <Badge variant="outline" className="text-xs capitalize">{viewFjJob.priority}</Badge>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
+            <Button variant="outline" size="sm" onClick={() => setFjSiteDialog(true)} data-testid="fj-site-btn"><MapPin className="w-3 h-3 mr-1" />Site Info</Button>
+            <Button variant="outline" size="sm" onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }} data-testid="fj-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
+            <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }} data-testid="fj-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
+            <Button variant="outline" size="sm" onClick={handleDownloadFjPdf} data-testid="fj-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
+            <Button variant="outline" size="sm" onClick={handleDownloadFjQr} data-testid="fj-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+          </div>
         </div>
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-8 space-y-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Job Details</CardTitle></CardHeader>
+
+        {/* Progress Tracker */}
+        <Card className="overflow-hidden" data-testid="fj-progress-bar">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Job Progress</span>
+              <span className="text-xs font-mono text-muted-foreground">{fjProgress}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
+              <div className={`h-full rounded-full bg-gradient-to-r ${fjStages[fjActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, fjProgress)}%` }} />
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {fjStages.map((stage, i) => {
+                const isActive = i === fjActiveIdx;
+                const isPast = i < fjActiveIdx;
+                return (
+                  <button key={stage.key} onClick={() => handleFjStatus(viewFjJob.id, stage.key)}
+                    className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
+                    data-testid={`fj-progress-${stage.key}`}>
+                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                      {isPast ? <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : i + 1}
+                    </div>
+                    <span className={`text-[9px] font-semibold block ${isActive ? stage.text : isPast ? "text-emerald-400" : "text-muted-foreground/60"}`}>{stage.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Main content */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Job Details */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Job Details</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="grid grid-cols-3 gap-3">
-                  <div><span className="text-muted-foreground block">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
-                  <div><span className="text-muted-foreground block">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
-                  <div><span className="text-muted-foreground block">Zone</span><Badge variant="outline">{viewFjJob.zone || "Unassigned"}</Badge></div>
+                  <div><span className="text-muted-foreground block text-xs">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Zone</span><Badge variant="outline">{viewFjJob.zone || "Unassigned"}</Badge></div>
                 </div>
                 <Separator />
-                <div><span className="text-muted-foreground block">Address</span><span>{viewFjJob.service_address || "-"}</span></div>
-                <div><span className="text-muted-foreground block">Description</span><span>{viewFjJob.description || "-"}</span></div>
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <div><span className="text-muted-foreground block">Scheduled</span><span className="font-medium">{viewFjJob.scheduled_date} {viewFjJob.scheduled_time}</span></div>
-                  <div><span className="text-muted-foreground block">Est. Duration</span><span>{viewFjJob.estimated_duration} min</span></div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Installation Checklist</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {(viewFjJob.checklist || []).map((c, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 hover:bg-muted/30 cursor-pointer" onClick={() => {
-                    const newCl = [...viewFjJob.checklist]; newCl[i] = { ...c, checked: !c.checked };
-                    setViewFjJob({ ...viewFjJob, checklist: newCl }); handleFjChecklist(viewFjJob.id, newCl);
-                  }} data-testid={`checklist-${i}`}>
-                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${c.checked ? "bg-green-500 border-green-500" : "border-muted-foreground"}`}>
-                      {c.checked && <CheckCircle className="w-3 h-3 text-white" />}
-                    </div>
-                    <span className={`text-sm ${c.checked ? "line-through text-muted-foreground" : ""}`}>{c.item}</span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-            <Card className="border-cyan-500/20"><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed Test</CardTitle></CardHeader>
-              <CardContent>
+                <div><span className="text-muted-foreground block text-xs">Service Address</span><span className="flex items-center gap-1"><MapPin className="w-3 h-3 text-cyan-400" />{viewFjJob.service_address || "-"}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Description</span><p className="text-sm">{viewFjJob.description || "-"}</p></div>
+                <Separator />
                 <div className="grid grid-cols-3 gap-3">
-                  <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
-                  <div><Label className="text-xs">Download (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
-                  <div><Label className="text-xs">Upload (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                  <div><span className="text-muted-foreground block text-xs">Scheduled</span><span className="font-medium">{viewFjJob.scheduled_date} {viewFjJob.scheduled_time}</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Est. Duration</span><span>{viewFjJob.estimated_duration || 60} min</span></div>
+                  <div><span className="text-muted-foreground block text-xs">Category</span><Badge variant="outline" className="capitalize">{viewFjJob.job_category}</Badge></div>
                 </div>
               </CardContent>
             </Card>
+
+            {/* Tabs */}
+            <Tabs defaultValue="notes">
+              <TabsList className="w-full grid grid-cols-8">
+                <TabsTrigger value="notes" data-testid="fj-notes-tab"><MessageSquare className="w-3 h-3 mr-1" />Notes ({fjNotes.length})</TabsTrigger>
+                <TabsTrigger value="checklist" data-testid="fj-checklist-tab"><ListChecks className="w-3 h-3 mr-1" />Checklist ({fjCheckDone}/{fjChecklist.length})</TabsTrigger>
+                <TabsTrigger value="photos" data-testid="fj-photos-tab"><Camera className="w-3 h-3 mr-1" />Photos ({fjPhotos.length})</TabsTrigger>
+                <TabsTrigger value="equipment" data-testid="fj-equip-tab"><Cpu className="w-3 h-3 mr-1" />Equipment ({fjEquipment.length})</TabsTrigger>
+                <TabsTrigger value="materials" data-testid="fj-mat-tab"><Package className="w-3 h-3 mr-1" />Materials ({fjMaterials.length})</TabsTrigger>
+                <TabsTrigger value="quote" data-testid="fj-quote-tab"><DollarSign className="w-3 h-3 mr-1" />Quote</TabsTrigger>
+                <TabsTrigger value="history" data-testid="fj-history-tab"><History className="w-3 h-3 mr-1" />History ({fjJobHistory.length})</TabsTrigger>
+                <TabsTrigger value="audit" data-testid="fj-audit-tab"><Eye className="w-3 h-3 mr-1" />Audit</TabsTrigger>
+              </TabsList>
+
+              {/* NOTES */}
+              <TabsContent value="notes" className="space-y-3">
+                <div className="space-y-2">
+                  <Textarea placeholder="Add a field note..." value={fjNewNote} onChange={e => setFjNewNote(e.target.value)} rows={3} data-testid="fj-note-input" />
+                  <Button size="sm" onClick={handleAddFjNote} disabled={!fjNewNote.trim()} data-testid="fj-add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
+                </div>
+                <ScrollArea className="h-[350px]">
+                  {fjNotes.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No field notes yet</p></div>
+                  ) : (
+                    <div className="space-y-2">
+                      {fjNotes.map(n => (
+                        <div key={n.id} className="p-3 rounded-lg border bg-muted/10">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center text-[10px] font-bold text-cyan-400">{(n.user_name || "?")[0]}</span>
+                            <span className="text-xs font-semibold">{n.user_name}</span>
+                            <span className="text-[10px] text-muted-foreground ml-auto">{n.created_at?.slice(0, 16).replace("T", " ")}</span>
+                          </div>
+                          <p className="text-sm whitespace-pre-wrap pl-8">{n.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+
+              {/* CHECKLIST */}
+              <TabsContent value="checklist" className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Add checklist item..." value={fjNewCheckItem} onChange={e => setFjNewCheckItem(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAddFjCheckItem()} data-testid="fj-check-input" />
+                  <Button size="sm" onClick={handleAddFjCheckItem} disabled={!fjNewCheckItem.trim()}><Plus className="w-3 h-3 mr-1" />Add</Button>
+                  <Button size="sm" variant="outline" onClick={async () => { try { const r = await axios.get(`${API}/field-jobs/enhanced-templates`, { headers }); setFjTemplates(r.data || {}); setFjTemplateDialog(true); } catch {} }} data-testid="fj-load-template-btn"><ClipboardList className="w-3 h-3 mr-1" />Templates</Button>
+                </div>
+                {fjChecklist.length > 0 && <div className="text-xs text-muted-foreground">{fjCheckDone} / {fjChecklist.length} completed</div>}
+                <ScrollArea className="h-[320px]">
+                  {fjChecklist.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><ListChecks className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No checklist items. Load a template or add manually.</p></div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {fjChecklist.map(item => (
+                        <div key={item.id} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${item.checked ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/10 border-border/50 hover:bg-muted/20"}`}
+                          onClick={() => handleToggleFjCheckItem(item.id, item.checked)} data-testid={`fj-check-${item.id}`}>
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${item.checked ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>
+                            {item.checked && <CheckCircle className="w-3 h-3 text-white" />}
+                          </div>
+                          <span className={`text-sm flex-1 ${item.checked ? "line-through text-muted-foreground" : ""}`}>{item.item}</span>
+                          {item.checked_by_name && <span className="text-[10px] text-muted-foreground">{item.checked_by_name}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+
+              {/* PHOTOS */}
+              <TabsContent value="photos" className="space-y-3">
+                <div className="flex items-center gap-2">
+                  {["site_survey", "before", "during", "after", "completion"].map(type => (
+                    <label key={type} className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={e => handleFjPhotoUpload(e, type)} />
+                      <Button variant="outline" size="sm" asChild><span><Camera className="w-3 h-3 mr-1" />{type.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}</span></Button>
+                    </label>
+                  ))}
+                  {fjPhotoUploading && <Loader2 className="w-4 h-4 animate-spin" />}
+                </div>
+                {fjPhotos.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground"><ImageIcon className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No photos yet. Upload site survey, installation, or completion photos.</p></div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    {fjPhotos.map(p => (
+                      <div key={p.id} className="relative group rounded-lg border overflow-hidden">
+                        <img src={`${API}/uploads/field_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type.replace("_", " ")}</Badge></div>
+                        <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteFjPhoto(p.id)}><X className="w-3 h-3" /></Button>
+                        <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* EQUIPMENT */}
+              <TabsContent value="equipment" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">{fjEquipment.length} equipment items tracked</p>
+                  <Button size="sm" onClick={() => setFjEquipDialog(true)} data-testid="fj-add-equip"><Plus className="w-3 h-3 mr-1" />Add Equipment</Button>
+                </div>
+                {fjEquipment.length > 0 ? (
+                  <Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Brand/Model</TableHead><TableHead>Serial</TableHead><TableHead>MAC</TableHead><TableHead>IP</TableHead><TableHead>Action</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                    <TableBody>{fjEquipment.map(eq => (
+                      <TableRow key={eq.id}>
+                        <TableCell className="font-medium text-xs">{eq.equipment_type}</TableCell>
+                        <TableCell className="text-xs">{eq.brand} {eq.model}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{eq.serial_number || "-"}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{eq.mac_address || "-"}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{eq.ip_address || "-"}</TableCell>
+                        <TableCell><Badge variant="outline" className={`text-[9px] ${eq.action === "installed" ? "text-green-400 border-green-500/30" : "text-red-400 border-red-500/30"}`}>{eq.action}</Badge></TableCell>
+                        <TableCell><Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleDeleteFjEquipment(eq.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                      </TableRow>
+                    ))}</TableBody>
+                  </Table>
+                ) : <div className="text-center py-8 text-muted-foreground text-sm"><Cpu className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No equipment tracked yet</p></div>}
+              </TabsContent>
+
+              {/* MATERIALS */}
+              <TabsContent value="materials" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">{fjMaterials.length} materials used — Total: <span className="text-green-400 font-mono">${fjMatTotal.toFixed(2)}</span></p>
+                  <Button size="sm" onClick={() => setFjMatDialog(true)} data-testid="fj-add-mat"><Plus className="w-3 h-3 mr-1" />Add Material</Button>
+                </div>
+                {fjMaterials.length > 0 ? (
+                  <Table><TableHeader><TableRow><TableHead>Material</TableHead><TableHead className="text-right">Qty</TableHead><TableHead>Unit</TableHead><TableHead className="text-right">Cost</TableHead><TableHead className="text-right">Total</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                    <TableBody>{fjMaterials.map(m => (
+                      <TableRow key={m.id}>
+                        <TableCell className="font-medium">{m.material}</TableCell>
+                        <TableCell className="text-right font-mono">{m.quantity}</TableCell>
+                        <TableCell className="text-xs">{m.unit}</TableCell>
+                        <TableCell className="text-right font-mono">${(m.unit_cost || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono font-bold">${(m.total || 0).toFixed(2)}</TableCell>
+                        <TableCell><Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleDeleteFjMaterial(m.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                      </TableRow>
+                    ))}</TableBody>
+                  </Table>
+                ) : <div className="text-center py-8 text-muted-foreground text-sm"><Package className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No materials logged yet</p></div>}
+              </TabsContent>
+
+              {/* QUOTE */}
+              <TabsContent value="quote" className="space-y-3">
+                {fjQuote ? (
+                  <Card className="border-amber-500/20">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-amber-400" />Service Quote</CardTitle>
+                        <Badge className={`text-[10px] ${fjQuote.status === "approved" ? "bg-green-500/20 text-green-400" : fjQuote.status === "sent" ? "bg-blue-500/20 text-blue-400" : fjQuote.status === "declined" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"}`}>{fjQuote.status}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {fjQuote.line_items?.map((li, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm">
+                          <span>{li.description}</span>
+                          <span className="font-mono">{li.quantity} x ${li.unit_price?.toFixed(2)} = ${li.total?.toFixed(2)}</span>
+                        </div>
+                      ))}
+                      <Separator />
+                      <div className="flex justify-between font-bold"><span>Total</span><span className="text-green-400 font-mono">${fjQuote.total?.toFixed(2)}</span></div>
+                      {fjQuote.notes && <p className="text-xs text-muted-foreground">{fjQuote.notes}</p>}
+                      <div className="flex gap-2 pt-2">
+                        {fjQuote.status === "draft" && <Button size="sm" onClick={handleSendFjQuote}><Send className="w-3 h-3 mr-1" />Send to Customer</Button>}
+                        {fjQuote.status === "sent" && <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApproveFjQuote}><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
+                        <Button size="sm" variant="outline" onClick={() => { setFjQuoteItems(fjQuote.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote.notes || ""); setFjQuoteDialog(true); }}>Edit Quote</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <DollarSign className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No quote created yet</p>
+                    <Button size="sm" className="mt-3" onClick={() => { setFjQuoteItems([{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(""); setFjQuoteDialog(true); }} data-testid="fj-create-quote-btn"><Plus className="w-3 h-3 mr-1" />Create Quote</Button>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* HISTORY */}
+              <TabsContent value="history" className="space-y-3">
+                {fjJobHistory.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground"><History className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No previous jobs found at this address / for this customer</p></div>
+                ) : (
+                  <ScrollArea className="h-[350px]">
+                    <div className="space-y-2">
+                      {fjJobHistory.map(h => (
+                        <Card key={h.id} className="border-cyan-500/10 hover:border-cyan-500/30 cursor-pointer transition-colors" onClick={() => fetchFjJobDetail(h)}>
+                          <CardContent className="py-2.5 px-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-muted-foreground">{h.job_number}</span>
+                                <Badge className={FJ_STATUSES[h.field_status]?.class + " text-[9px]"}>{FJ_STATUSES[h.field_status]?.label}</Badge>
+                                <Badge variant="outline" className="text-[9px] capitalize">{h.job_category}</Badge>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground">{h.scheduled_date}</span>
+                            </div>
+                            <p className="text-sm">{h.description || "Field Job"}</p>
+                            <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1">
+                              <span><MapPin className="w-2.5 h-2.5 inline mr-0.5" />{h.service_address}</span>
+                              <span>{h.zone}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </TabsContent>
+
+              {/* AUDIT LOG */}
+              <TabsContent value="audit" className="space-y-3">
+                <ScrollArea className="h-[350px]">
+                  {fjAuditLog.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground"><Eye className="w-10 h-10 mx-auto mb-2 opacity-20" /><p>No audit entries yet</p></div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {fjAuditLog.map(entry => (
+                        <div key={entry.id} className="flex items-start gap-3 p-2 rounded-lg bg-muted/10 text-sm">
+                          <div className="w-2 h-2 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-xs">{entry.user_name}</span>
+                              <Badge variant="outline" className="text-[9px]">{entry.action?.replace(/_/g, " ")}</Badge>
+                              <span className="text-[10px] text-muted-foreground ml-auto">{entry.created_at?.slice(0, 16).replace("T", " ")}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{entry.details}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
           </div>
-          <div className="col-span-4 space-y-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
+
+          {/* Sidebar */}
+          <div className="space-y-4">
+            {/* Signal & Speed Test */}
+            <Card className="border-cyan-500/20">
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Down (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
+                  <div><Label className="text-xs">Up (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Cost Summary */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Cost Summary</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Materials</span><span className="font-mono">${fjMatTotal.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Equipment</span><span className="font-mono">{fjEquipment.length} items</span></div>
+                <Separator />
+                <div className="flex justify-between font-bold"><span>Materials Total</span><span className="text-green-400">${fjMatTotal.toFixed(2)}</span></div>
+              </CardContent>
+            </Card>
+
+            {/* Update Status */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
+              <CardContent className="space-y-1.5">
                 {Object.entries(FJ_STATUSES).filter(([k]) => k !== viewFjJob.field_status).map(([k, v]) => (
-                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)}>{v.label}</Button>
+                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)} data-testid={`fj-status-${k}`}>{v.label}</Button>
                 ))}
               </CardContent>
             </Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Info</CardTitle></CardHeader>
+
+            {/* Assignment */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <div><span className="text-muted-foreground block">Assigned</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
-                <div><span className="text-muted-foreground block">Category</span><Badge variant="outline" className="capitalize">{viewFjJob.job_category}</Badge></div>
-                <div><span className="text-muted-foreground block">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Technician</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Created by</span><span>{viewFjJob.created_by_name}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
               </CardContent>
             </Card>
           </div>
         </div>
+
+        {/* ============ DIALOGS ============ */}
+
+        {/* Quote Builder */}
+        <Dialog open={fjQuoteDialog} onOpenChange={setFjQuoteDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader><DialogTitle>Service Quote Builder</DialogTitle></DialogHeader>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {fjQuoteItems.map((item, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...fjQuoteItems]; n[i].description = e.target.value; setFjQuoteItems(n); }} placeholder="Installation / Cable / Labour" /></div>
+                  <div className="col-span-2"><Label className="text-xs">Qty</Label><Input type="number" min="1" value={item.qty} onChange={e => { const n = [...fjQuoteItems]; n[i].qty = parseInt(e.target.value) || 1; setFjQuoteItems(n); }} /></div>
+                  <div className="col-span-3"><Label className="text-xs">Price</Label><Input type="number" step="0.01" value={item.price} onChange={e => { const n = [...fjQuoteItems]; n[i].price = parseFloat(e.target.value) || 0; setFjQuoteItems(n); }} /></div>
+                  <div className="col-span-1"><Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setFjQuoteItems(prev => prev.filter((_, j) => j !== i))}><X className="w-4 h-4" /></Button></div>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setFjQuoteItems(prev => [...prev, { description: "", qty: 1, price: 0 }])}><Plus className="w-3 h-3 mr-1" />Add Line</Button>
+              <div className="flex justify-between font-bold text-lg border-t pt-3">
+                <span>Total</span>
+                <span className="text-green-400">${fjQuoteItems.reduce((s, i) => s + (Number(i.qty) || 1) * (Number(i.price) || 0), 0).toFixed(2)}</span>
+              </div>
+              <div><Label className="text-xs">Notes</Label><Textarea value={fjQuoteNotes} onChange={e => setFjQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes..." /></div>
+            </div>
+            <DialogFooter><Button onClick={handleSaveFjQuote} data-testid="fj-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Equipment */}
+        <Dialog open={fjEquipDialog} onOpenChange={setFjEquipDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Equipment</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Type</Label>
+                  <Select value={fjEquipForm.equipment_type || "cpe"} onValueChange={v => setFjEquipForm({ ...fjEquipForm, equipment_type: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cpe">CPE / Radio</SelectItem>
+                      <SelectItem value="router">Router</SelectItem>
+                      <SelectItem value="switch">Switch</SelectItem>
+                      <SelectItem value="antenna">Antenna / Dish</SelectItem>
+                      <SelectItem value="ups">UPS / Power</SelectItem>
+                      <SelectItem value="cable_box">Cable Box / Enclosure</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Action</Label>
+                  <Select value={fjEquipForm.action} onValueChange={v => setFjEquipForm({ ...fjEquipForm, action: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="installed">Installed</SelectItem>
+                      <SelectItem value="replaced">Replaced</SelectItem>
+                      <SelectItem value="removed">Removed</SelectItem>
+                      <SelectItem value="inspected">Inspected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Brand</Label><Input value={fjEquipForm.brand} onChange={e => setFjEquipForm({ ...fjEquipForm, brand: e.target.value })} placeholder="Ubiquiti, Mikrotik..." /></div>
+                <div><Label>Model</Label><Input value={fjEquipForm.model} onChange={e => setFjEquipForm({ ...fjEquipForm, model: e.target.value })} placeholder="LiteBeam 5AC..." /></div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>Serial #</Label><Input value={fjEquipForm.serial_number} onChange={e => setFjEquipForm({ ...fjEquipForm, serial_number: e.target.value })} className="font-mono text-xs" /></div>
+                <div><Label>MAC Address</Label><Input value={fjEquipForm.mac_address} onChange={e => setFjEquipForm({ ...fjEquipForm, mac_address: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" className="font-mono text-xs" /></div>
+                <div><Label>IP Address</Label><Input value={fjEquipForm.ip_address} onChange={e => setFjEquipForm({ ...fjEquipForm, ip_address: e.target.value })} placeholder="192.168.1.1" className="font-mono text-xs" /></div>
+              </div>
+              <div><Label>Config Notes</Label><Textarea value={fjEquipForm.config_notes} onChange={e => setFjEquipForm({ ...fjEquipForm, config_notes: e.target.value })} rows={2} placeholder="SSID, channel, frequency, etc." /></div>
+            </div>
+            <DialogFooter><Button onClick={handleAddFjEquipment} disabled={!fjEquipForm.equipment_type} data-testid="fj-save-equip"><Plus className="w-4 h-4 mr-1" />Add Equipment</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Material */}
+        <Dialog open={fjMatDialog} onOpenChange={setFjMatDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Material Used</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>Material</Label><Input value={fjMatForm.material} onChange={e => setFjMatForm({ ...fjMatForm, material: e.target.value })} placeholder="Cat6 cable, RJ45 connectors, Cable ties..." data-testid="fj-mat-name" /></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>Quantity</Label><Input type="number" min="1" value={fjMatForm.quantity} onChange={e => setFjMatForm({ ...fjMatForm, quantity: parseInt(e.target.value) || 1 })} /></div>
+                <div><Label>Unit</Label>
+                  <Select value={fjMatForm.unit} onValueChange={v => setFjMatForm({ ...fjMatForm, unit: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="meters">Meters</SelectItem>
+                      <SelectItem value="feet">Feet</SelectItem>
+                      <SelectItem value="each">Each</SelectItem>
+                      <SelectItem value="box">Box</SelectItem>
+                      <SelectItem value="roll">Roll</SelectItem>
+                      <SelectItem value="pack">Pack</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Unit Cost ($)</Label><Input type="number" step="0.01" value={fjMatForm.unit_cost} onChange={e => setFjMatForm({ ...fjMatForm, unit_cost: parseFloat(e.target.value) || 0 })} /></div>
+              </div>
+              <div className="text-right font-bold text-green-400">Total: ${((fjMatForm.quantity || 1) * (fjMatForm.unit_cost || 0)).toFixed(2)}</div>
+            </div>
+            <DialogFooter><Button onClick={handleAddFjMaterial} disabled={!fjMatForm.material} data-testid="fj-save-mat"><Plus className="w-4 h-4 mr-1" />Add Material</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Site Info Dialog */}
+        <Dialog open={fjSiteDialog} onOpenChange={setFjSiteDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader><DialogTitle>Site Survey & Access Info</DialogTitle></DialogHeader>
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+              <div><Label>Customer Email</Label><Input value={fjSiteInfo.customer_email || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, customer_email: e.target.value })} placeholder="customer@example.com" /></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>GPS Latitude</Label><Input value={fjSiteInfo.gps_lat || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, gps_lat: e.target.value })} placeholder="-36.8485" className="font-mono text-xs" /></div>
+                <div><Label>GPS Longitude</Label><Input value={fjSiteInfo.gps_lng || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, gps_lng: e.target.value })} placeholder="174.7633" className="font-mono text-xs" /></div>
+                <div><Label>Elevation</Label><Input value={fjSiteInfo.elevation || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, elevation: e.target.value })} placeholder="12m" /></div>
+              </div>
+              <div><Label>Access Notes</Label><Textarea value={fjSiteInfo.access_notes || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, access_notes: e.target.value })} rows={2} placeholder="Gate code, parking instructions, roof access..." /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Mounting Type</Label>
+                  <Select value={fjSiteInfo.mounting_type || "wall"} onValueChange={v => setFjSiteInfo({ ...fjSiteInfo, mounting_type: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="wall">Wall Mount</SelectItem>
+                      <SelectItem value="roof">Roof Mount</SelectItem>
+                      <SelectItem value="pole">Pole Mount</SelectItem>
+                      <SelectItem value="tower">Tower</SelectItem>
+                      <SelectItem value="indoor">Indoor</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Cable Entry Point</Label><Input value={fjSiteInfo.cable_entry_point || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, cable_entry_point: e.target.value })} placeholder="Through wall, conduit, etc." /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Power Source</Label><Input value={fjSiteInfo.power_source || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, power_source: e.target.value })} placeholder="Mains, PoE, Solar..." /></div>
+                <div><Label>Weather Conditions</Label>
+                  <Select value={fjSiteInfo.weather_conditions || "clear"} onValueChange={v => setFjSiteInfo({ ...fjSiteInfo, weather_conditions: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="clear">Clear</SelectItem>
+                      <SelectItem value="cloudy">Cloudy</SelectItem>
+                      <SelectItem value="rain">Rain</SelectItem>
+                      <SelectItem value="wind">Windy</SelectItem>
+                      <SelectItem value="storm">Storm</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div><Label>Safety Hazards</Label><Textarea value={fjSiteInfo.safety_hazards || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, safety_hazards: e.target.value })} rows={2} placeholder="Working at heights, power lines nearby, aggressive dog..." /></div>
+              <div><Label>Existing Infrastructure</Label><Textarea value={fjSiteInfo.existing_infrastructure || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, existing_infrastructure: e.target.value })} rows={2} placeholder="Existing cabling, conduits, junction boxes..." /></div>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-1.5 text-sm"><Checkbox checked={fjSiteInfo.ladder_required || false} onCheckedChange={c => setFjSiteInfo({ ...fjSiteInfo, ladder_required: c })} />Ladder Required</label>
+                <label className="flex items-center gap-1.5 text-sm"><Checkbox checked={fjSiteInfo.roof_access || false} onCheckedChange={c => setFjSiteInfo({ ...fjSiteInfo, roof_access: c })} />Roof Access</label>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={handleSaveFjSiteInfo} data-testid="fj-save-site"><CheckCircle className="w-4 h-4 mr-1" />Save Site Info</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Customer Notification */}
+        <Dialog open={fjNotifyDialog} onOpenChange={setFjNotifyDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div><Label>Email</Label><Input value={fjNotifyForm.email} onChange={e => setFjNotifyForm({ ...fjNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="fj-notify-email" /></div>
+              <div><Label>Subject</Label><Input value={fjNotifyForm.subject} onChange={e => setFjNotifyForm({ ...fjNotifyForm, subject: e.target.value })} /></div>
+              <div><Label>Message</Label><Textarea value={fjNotifyForm.message} onChange={e => setFjNotifyForm({ ...fjNotifyForm, message: e.target.value })} rows={4} placeholder="Your installation is scheduled..." data-testid="fj-notify-message" /></div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={() => setFjNotifyForm(prev => ({ ...prev, message: `Hi ${viewFjJob.customer_name},\n\nOur technician is on the way to your location at ${viewFjJob.service_address}.\n\nJob: ${viewFjJob.job_number}\nETA: Approximately 30 minutes\n\nRegards,\nNexusOps Field Services`, subject: `Technician En Route - ${viewFjJob.job_number}` }))}>En Route</Button>
+                <Button variant="outline" size="sm" onClick={() => setFjNotifyForm(prev => ({ ...prev, message: `Hi ${viewFjJob.customer_name},\n\nOur technician has arrived at ${viewFjJob.service_address} and is beginning work.\n\nJob: ${viewFjJob.job_number}\n\nRegards,\nNexusOps Field Services`, subject: `Technician On Site - ${viewFjJob.job_number}` }))}>On Site</Button>
+                <Button variant="outline" size="sm" onClick={() => setFjNotifyForm(prev => ({ ...prev, message: `Hi ${viewFjJob.customer_name},\n\nGreat news! Your ${viewFjJob.job_category} job has been completed at ${viewFjJob.service_address}.\n\nJob: ${viewFjJob.job_number}\nSignal: ${viewFjJob.signal_strength || "N/A"} dBm\nSpeed: ${viewFjJob.speed_test_down || "N/A"} / ${viewFjJob.speed_test_up || "N/A"} Mbps\n\nPlease don't hesitate to contact us if you have any issues.\n\nRegards,\nNexusOps Field Services`, subject: `Job Completed - ${viewFjJob.job_number}` }))}>Completed</Button>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={handleFjNotifyCustomer} data-testid="fj-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Push to Invoice */}
+        <Dialog open={fjInvoiceDialog} onOpenChange={setFjInvoiceDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Push Field Job to Invoice</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Materials (${fjMatTotal.toFixed(2)}) + Labour will be added to the invoice.</p>
+              <Button className="w-full" onClick={() => handleFjPushToInvoice(null)} data-testid="fj-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
+              {fjInvoiceList.length > 0 && <>
+                <Separator />
+                <p className="text-xs text-muted-foreground">Or add to existing:</p>
+                <ScrollArea className="h-[200px]">
+                  {fjInvoiceList.slice(0, 20).map(inv => (
+                    <Button key={inv.id} variant="outline" className="w-full justify-start mb-1 text-xs" size="sm" onClick={() => handleFjPushToInvoice(inv.id)}>
+                      {inv.invoice_number} - {inv.client_name} (${inv.total?.toFixed(2)})
+                    </Button>
+                  ))}
+                </ScrollArea>
+              </>}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Checklist Template Picker */}
+        <Dialog open={fjTemplateDialog} onOpenChange={setFjTemplateDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Load Field Checklist Template</DialogTitle></DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Select a job category template to load pre-built checklist items.</p>
+              {Object.entries(fjTemplates).map(([key, items]) => (
+                <Button key={key} variant="outline" className="w-full justify-between" onClick={() => handleLoadFjTemplate(key)} data-testid={`fj-template-${key}`}>
+                  <span className="capitalize font-medium">{key.replace("_", " ")}</span>
+                  <Badge variant="secondary" className="text-[10px]">{items.length} items</Badge>
+                </Button>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -2828,7 +3580,7 @@ export default function TicketsPage() {
           const fjStatus = FJ_STATUSES[j.field_status] || FJ_STATUSES.scheduled;
           return (
             <Card key={`fj-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-cyan-500"
-              onClick={() => setViewFjJob(j)} data-testid={`fj-job-${j.id}`}>
+              onClick={() => fetchFjJobDetail(j)} data-testid={`fj-job-${j.id}`}>
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-cyan-500/10">
