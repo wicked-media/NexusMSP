@@ -47,37 +47,55 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 16. Billing Command Center (MRR/ARR gauges, health score, collection streak, cash flow forecast, chase)
 
 ### Phase 5: SOC & Security Enrichment (DONE - 2026-03-21)
-17. **Security Dashboard** - Unified SOC hub with threat level banner, endpoint health, active incidents, dark web summary, vulnerability summary, identity threats
-18. **SOC Alert Feed** - Live alert stream with technician tools: Acknowledge, Create Ticket from Alert, Isolate Endpoint, Remediate, Close. Severity/status filters, MITRE ATT&CK tags, recommended remediation steps
-19. **Endpoint Security** - 30 managed endpoints with AV status, firewall, patch status, risk scores, scan/isolate/unisolate actions
-20. **Dark Web Monitor** - Credential leak detection, domain monitoring, breach source tracking, affected user counts
-21. **Vulnerability Scanner** - CVE tracking, CVSS scores, exploit-in-wild detection, patch availability, severity filtering
-22. **Phishing Simulation** - Campaign management with click rates, open rates, report rates, per-org tracking
-23. **Identity Threat Detection** - Impossible travel, brute force, MFA fatigue, token theft detection with location/IP tracking
-24. **Ransomware Canary** - Deployed canary files across endpoints, triggered alerts, emergency isolate
-25. **Threat Timeline** - Chronological security event view
-26. **Huntress Integration (Mock-Ready)** - Settings page for API key, auto-sync, mock data generators ready for real Huntress REST API connection
+17. Security Dashboard - Unified SOC hub
+18. SOC Alert Feed - Live alert stream with technician tools
+19. Endpoint Security - 30 managed endpoints with AV/firewall/patch
+20. Dark Web Monitor - Credential leak detection
+21. Vulnerability Scanner - CVE tracking, CVSS scores
+22. Phishing Simulation - Campaign management
+23. Identity Threat Detection - Impossible travel, brute force, MFA fatigue
+24. Ransomware Canary - Canary files, emergency isolate
+25. Threat Timeline - Chronological security events
+26. Huntress Integration (Mock-Ready)
 
 ### Phase 5b: Smart Automation (DONE - 2026-03-21)
-27. **AI Thank-You Detection** - Auto-close tickets when clients reply with "thanks/ty/cheers" (configurable keywords)
-28. **Stale Ticket Reminders** - Auto-ping clients on tickets inactive for X days (configurable)
-29. **Billing Reconciliation** - Compare RMM agent counts vs contract seats per client, flag revenue leakage
+27. AI Thank-You Detection
+28. Stale Ticket Reminders
+29. Billing Reconciliation
 
 ### Phase 6: Client Onboarding Wizard (DONE - 2026-03-21)
-30. **Client Onboarding Wizard (Enhanced)** - Comprehensive 8-step guided wizard consolidating two previous modules:
-    - Template selection (Small Office, Mid-Market, Enterprise, Break/Fix)
-    - Steps: Company Profile → Contacts & Access → Asset Discovery → Contracts & Billing → Security & Compliance → Monitoring & Automation → Documentation → Go Live
-    - Preflight checklist with critical/non-critical items
-    - Health score tracking, pause/resume, audit log
-    - Side effects: auto-creates clients, contacts, devices, contracts, tickets
-    - First ticket creation on Go Live
-    - Backend: `/api/onboarding-enhanced/*` (11 endpoints), Collection: `onboarding_enhanced`
-    - Frontend: `/onboarding` and `/onboarding-workflows` both point to unified wizard
+30. Client Onboarding Wizard (Enhanced) - 8-step guided wizard
+
+### Phase 7: Advanced MSP Module Enrichment (DONE - 2026-03-21)
+All 16+ advanced MSP modules enriched from placeholders to enterprise-grade UIs:
+
+**Batch 1 (AI & Operations):**
+31. AI Auto-Resolution Engine - Autonomous issue detection with runbook matching, approve/reject, confidence scoring
+32. QBR Generator - Client QBR cards with security/uptime/SLA metrics, per-client drill-down
+33. Comms Timeline - Client communication history, interaction types, activity timeline
+34. Tech Utilization - Billable hours, revenue per tech, utilization target tracking
+
+**Batch 2 (Infrastructure & Compliance):**
+35. Backup Dashboard - Multi-vendor backup health (Veeam/Datto/Acronis), client backup cards, failure tracking
+36. Warranty Tracker - Manufacturer breakdown, expiry alerts, active/expired/unknown status
+37. Compliance Frameworks - NIST/CIS/SOC2/HIPAA with control categories, progress bars, gap analysis
+38. Client Budget - Budget vs spend charts, forecast overruns, utilization tracking
+
+**Batch 3 (Analytics & Automation):**
+39. Vendor Scorecard - Performance table, spend analytics (pie/bar charts), risk & compliance tab, vendor detail dialog
+40. SLA Penalty Calculator - Auto-calculate penalties, credit resolution progress, breach timeline, issue credits
+41. Alert Suppression Engine - Rule management with create/toggle/delete, analytics by match type/scope, noise reduction impact
+42. Incident Heatmap - Day x Hour density grid, hover tooltip, hourly trend chart, priority distribution, category/client breakdown
+43. Predictive Failure Detection - ML-powered predictions with risk scoring, urgent alerts banner, failure type breakdown, detail dialog
+44. Resource Capacity Planner - Team utilization gauge, scaling scenarios, workload ratios, 6-month trend chart, hiring alerts
+45. Auto-Documentation Generator - AI doc generation (Network/Asset/DR), template cards, client grouping, document section preview
+46. Natural Language Search - Plain English query engine, suggestion chips, query history, result highlighting, device/ticket/stat results
+
+**Already Enterprise-Grade (no changes needed):**
+47. Leaderboard - XP podium, profiles, activity heatmap, badge system
+48. IT Documentation - Password vault, docs management, CRUD, client filtering
 
 ## Prioritized Backlog
-
-### P1
-- Technician Performance Leaderboard
 
 ### P2
 - Workshop Bench View (Kanban)
@@ -92,12 +110,16 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Fix recharts console warnings
 - Connect real Huntress API (when user provides API key)
 - SentinelOne / CrowdStrike connectors
+- Fix aria-describedby for DialogContent (accessibility)
+- Clean up TEST_ prefixed devices from previous test data
 
 ## Mocked Features
 - All SOC/security data uses mock generators (realistic randomized data) - ready for real Huntress API
 - AI routing (mock)
 - Voice-to-text (mock)
 - Email sending (requires Resend API key)
+- Predictive failure predictions (mock ML data)
+- NLP query (keyword matching, not real NLP)
 
 ## Authentication
 - JWT-based custom auth
