@@ -18,12 +18,16 @@ import {
   Plus, Search, Loader2, FileText, Edit, Trash2, DollarSign, Package,
   Truck, CheckCircle, Clock, ArrowLeft, Send, XCircle, Eye, ShoppingCart,
   AlertTriangle, Scan, History, ChevronRight, PackageCheck, Box, RefreshCw,
-  BellRing
+  BellRing, Mail, Download, Copy, ThumbsUp, ThumbsDown, MessageSquare,
+  BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers
 } from "lucide-react";
 import { format } from "date-fns";
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
+  pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
+  approved: { label: "Approved", class: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: ThumbsUp, glow: "" },
+  rejected: { label: "Rejected", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: ThumbsDown, glow: "" },
   submitted: { label: "Ordered", class: "bg-blue-500/20 text-blue-400 border-blue-500/30", icon: Send, glow: "ring-1 ring-blue-500/30" },
   partial: { label: "Partial", class: "bg-amber-500/20 text-amber-400 border-amber-500/30", icon: PackageCheck, glow: "ring-1 ring-amber-500/30 animate-pulse" },
   received: { label: "Received", class: "bg-green-500/20 text-green-400 border-green-500/30", icon: CheckCircle, glow: "" },
@@ -52,10 +56,19 @@ export default function PurchaseOrdersPage() {
   const [viewPO, setViewPO] = useState(null);
   const [detailTab, setDetailTab] = useState("items");
   const [auditLog, setAuditLog] = useState([]);
+  const [poNotes, setPoNotes] = useState([]);
+  const [newNote, setNewNote] = useState("");
   const [receiveDialog, setReceiveDialog] = useState(false);
   const [receiveItems, setReceiveItems] = useState([]);
   const [scannerInput, setScannerInput] = useState("");
   const scanRef = useRef(null);
+  const [approvalDialog, setApprovalDialog] = useState(null);
+  const [approvalNotes, setApprovalNotes] = useState("");
+  const [emailVendorDialog, setEmailVendorDialog] = useState(false);
+  const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
+  const [spendAnalytics, setSpendAnalytics] = useState(null);
+  const [analyticsTab, setAnalyticsTab] = useState("list");
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [form, setForm] = useState({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
@@ -89,13 +102,22 @@ export default function PurchaseOrdersPage() {
 
   const fetchPODetail = async (poId) => {
     try {
-      const [poRes, auditRes] = await Promise.all([
+      const [poRes, auditRes, notesRes] = await Promise.all([
         axios.get(`${API}/purchase-orders/${poId}`, { headers }),
         axios.get(`${API}/purchase-orders/${poId}/audit-log`, { headers }),
+        axios.get(`${API}/purchase-orders/${poId}/notes`, { headers }),
       ]);
       setViewPO(poRes.data);
       setAuditLog(auditRes.data);
+      setPoNotes(notesRes.data);
     } catch { toast.error("Failed to load PO details"); }
+  };
+
+  const fetchSpendAnalytics = async () => {
+    try {
+      const res = await axios.get(`${API}/purchase-orders/analytics/spend`, { headers });
+      setSpendAnalytics(res.data);
+    } catch { toast.error("Failed to load analytics"); }
   };
 
   const resetForm = () => setForm({
@@ -108,9 +130,7 @@ export default function PurchaseOrdersPage() {
     setEditing(null);
     if (vendorPreset) {
       setForm({ ...resetFormObj(), vendor: vendorPreset.name, vendor_id: vendorPreset.id, vendor_contact: vendorPreset.contact_name || "", vendor_email: vendorPreset.email || "" });
-    } else {
-      resetForm();
-    }
+    } else { resetForm(); }
     setIsFormOpen(true);
   };
 
@@ -134,12 +154,9 @@ export default function PurchaseOrdersPage() {
     setIsFormOpen(true);
   };
 
-  const addLineItem = () => {
-    setForm(f => ({
-      ...f,
-      line_items: [...f.line_items, { product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending" }]
-    }));
-  };
+  const addLineItem = () => setForm(f => ({
+    ...f, line_items: [...f.line_items, { product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending" }]
+  }));
 
   const updateLineItem = (idx, field, value) => {
     setForm(f => {
@@ -154,7 +171,6 @@ export default function PurchaseOrdersPage() {
   };
 
   const removeLineItem = (idx) => setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
-
   const calcSubtotal = () => form.line_items.reduce((s, li) => s + (li.quantity * li.unit_price), 0);
   const calcTax = () => form.line_items.reduce((s, li) => {
     const prod = products.find(p => p.id === li.product_id);
@@ -197,6 +213,87 @@ export default function PurchaseOrdersPage() {
     } catch { toast.error("Failed to update status"); }
   };
 
+  // --- Approval Workflow ---
+  const handleSubmitForApproval = async (po) => {
+    setApprovalDialog("submit");
+    setApprovalNotes("");
+  };
+
+  const handleApprove = async () => {
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/approve`, { notes: approvalNotes }, { headers });
+      toast.success("PO Approved!");
+      setApprovalDialog(null);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleReject = async () => {
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/reject`, { reason: approvalNotes }, { headers });
+      toast.success("PO Rejected");
+      setApprovalDialog(null);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const handleSubmitApproval = async () => {
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/submit-for-approval`, {
+        approver_id: approvalNotes ? "" : "", approver_name: ""
+      }, { headers });
+      toast.success("Submitted for approval");
+      setApprovalDialog(null);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  // --- PDF ---
+  const handleDownloadPdf = async (po) => {
+    setPdfLoading(true);
+    try {
+      const res = await axios.get(`${API}/purchase-orders/${po.id}/pdf`, { headers, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url;
+      a.download = `PO_${po.po_number}.pdf`; a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF Downloaded");
+    } catch { toast.error("Failed to generate PDF"); }
+    finally { setPdfLoading(false); }
+  };
+
+  // --- Email Vendor ---
+  const handleEmailVendor = async () => {
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/email-vendor`, emailForm, { headers });
+      toast.success("PO emailed to vendor");
+      setEmailVendorDialog(false);
+      fetchPODetail(viewPO.id);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to email"); }
+  };
+
+  // --- Duplicate ---
+  const handleDuplicate = async (po) => {
+    try {
+      const res = await axios.post(`${API}/purchase-orders/${po.id}/duplicate`, {}, { headers });
+      toast.success(`Duplicated as ${res.data.po_number}`);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  // --- Notes ---
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/notes`, { content: newNote, note_type: "general" }, { headers });
+      setNewNote("");
+      const res = await axios.get(`${API}/purchase-orders/${viewPO.id}/notes`, { headers });
+      setPoNotes(res.data);
+      toast.success("Note added");
+    } catch { toast.error("Failed to add note"); }
+  };
+
+  // --- Receive Stock ---
   const openReceiveDialog = (po) => {
     const items = (po.line_items || []).filter(li => (li.received_qty || 0) < li.quantity);
     setReceiveItems(items.map(li => ({ ...li, receive_now: 0 })));
@@ -213,8 +310,7 @@ export default function PurchaseOrdersPage() {
       const res = await axios.post(`${API}/purchase-orders/${viewPO.id}/receive`, { items }, { headers });
       toast.success(res.data.message);
       setReceiveDialog(false);
-      fetchPODetail(viewPO.id);
-      fetchData();
+      fetchPODetail(viewPO.id); fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to receive"); }
   };
 
@@ -227,11 +323,8 @@ export default function PurchaseOrdersPage() {
         ri.product_id === prod.id ? { ...ri, receive_now: Math.min(ri.receive_now + 1, ri.quantity - (ri.received_qty || 0)) } : ri
       ));
       toast.success(`Scanned: ${prod.name}`);
-    } else {
-      toast.error(`Product not found: ${scannerInput}`);
-    }
-    setScannerInput("");
-    scanRef.current?.focus();
+    } else { toast.error(`Product not found: ${scannerInput}`); }
+    setScannerInput(""); scanRef.current?.focus();
   };
 
   const handleCheckEscalations = async () => {
@@ -338,7 +431,6 @@ export default function PurchaseOrdersPage() {
       <DialogContent className="max-w-2xl">
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Box className="w-5 h-5 text-green-400" />Receive Stock - {viewPO?.po_number}</DialogTitle></DialogHeader>
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-          {/* Scanner */}
           <Card className="border-cyan-500/30 bg-cyan-500/5">
             <CardContent className="py-3">
               <form onSubmit={handleScanReceive} className="flex items-center gap-3">
@@ -382,6 +474,57 @@ export default function PurchaseOrdersPage() {
     </Dialog>
   );
 
+  // ========== APPROVAL DIALOG ==========
+  const approvalDialogEl = (
+    <Dialog open={!!approvalDialog} onOpenChange={v => { if (!v) setApprovalDialog(null); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {approvalDialog === "submit" && <><Send className="w-5 h-5 text-blue-400" />Submit for Approval</>}
+            {approvalDialog === "approve" && <><ThumbsUp className="w-5 h-5 text-green-400" />Approve Purchase Order</>}
+            {approvalDialog === "reject" && <><ThumbsDown className="w-5 h-5 text-red-400" />Reject Purchase Order</>}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {viewPO && (
+            <div className="p-3 rounded-lg bg-muted/30 border text-sm">
+              <p className="font-mono font-medium">{viewPO.po_number}</p>
+              <p className="text-muted-foreground">Vendor: {viewPO.vendor} | Total: ${(viewPO.total || 0).toFixed(2)}</p>
+            </div>
+          )}
+          <div>
+            <Label>{approvalDialog === "reject" ? "Rejection Reason" : "Notes (optional)"}</Label>
+            <Textarea value={approvalNotes} onChange={e => setApprovalNotes(e.target.value)} rows={3} placeholder={approvalDialog === "reject" ? "Reason for rejection..." : "Additional notes..."} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setApprovalDialog(null)}>Cancel</Button>
+          {approvalDialog === "submit" && <Button onClick={handleSubmitApproval} className="bg-blue-600 hover:bg-blue-700" data-testid="confirm-submit-approval"><Send className="w-4 h-4 mr-1" />Submit</Button>}
+          {approvalDialog === "approve" && <Button onClick={handleApprove} className="bg-green-600 hover:bg-green-700" data-testid="confirm-approve-btn"><ThumbsUp className="w-4 h-4 mr-1" />Approve</Button>}
+          {approvalDialog === "reject" && <Button variant="destructive" onClick={handleReject} data-testid="confirm-reject-btn"><ThumbsDown className="w-4 h-4 mr-1" />Reject</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // ========== EMAIL VENDOR DIALOG ==========
+  const emailVendorDialogEl = (
+    <Dialog open={emailVendorDialog} onOpenChange={setEmailVendorDialog}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email PO to Vendor</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Vendor Email</Label><Input value={emailForm.email} onChange={e => setEmailForm({ ...emailForm, email: e.target.value })} placeholder="vendor@example.com" data-testid="vendor-email-input" /></div>
+          <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} /></div>
+          <div><Label>Message</Label><Textarea value={emailForm.message} onChange={e => setEmailForm({ ...emailForm, message: e.target.value })} rows={3} /></div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setEmailVendorDialog(false)}>Cancel</Button>
+          <Button onClick={handleEmailVendor} className="bg-blue-600 hover:bg-blue-700" data-testid="send-vendor-email-btn"><Send className="w-4 h-4 mr-1" />Send Email</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewPO) {
     const po = viewPO;
@@ -396,13 +539,39 @@ export default function PurchaseOrdersPage() {
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => { setViewPO(null); setDetailTab("items"); }} data-testid="back-to-pos"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-mono font-semibold">{po.po_number}</span>
+          <span className="font-mono font-semibold text-lg">{po.po_number}</span>
           <Badge className={STATUS_CONFIG[po.status]?.class + " " + (STATUS_CONFIG[po.status]?.glow || "")}>
             <StatusIcon className="w-3 h-3 mr-1" />{STATUS_CONFIG[po.status]?.label}
           </Badge>
           {isOverdue && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>}
           {po.escalated && <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30"><BellRing className="w-3 h-3 mr-1" />Escalated</Badge>}
         </div>
+
+        {/* Approval Pipeline */}
+        <Card className="border-slate-700/50 overflow-hidden">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center justify-between gap-2">
+              {["draft", "pending_approval", "approved", "submitted", "partial", "received"].map((stage, i, arr) => {
+                const isCurrent = po.status === stage;
+                const isPast = arr.indexOf(po.status) > i;
+                const isRejected = po.status === "rejected" && stage === "pending_approval";
+                return (
+                  <div key={stage} className="flex items-center gap-2 flex-1">
+                    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      isCurrent ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/40" :
+                      isRejected ? "bg-red-500/20 text-red-400" :
+                      isPast ? "bg-green-500/20 text-green-400" : "bg-muted/30 text-muted-foreground"
+                    }`}>
+                      {isPast ? <CheckCircle className="w-3 h-3" /> : isCurrent ? <Clock className="w-3 h-3 animate-pulse" /> : <div className="w-3 h-3 rounded-full border border-current opacity-40" />}
+                      <span className="hidden md:inline">{STATUS_CONFIG[stage]?.label || stage}</span>
+                    </div>
+                    {i < arr.length - 1 && <div className={`h-0.5 flex-1 rounded ${isPast ? "bg-green-500/40" : "bg-muted/20"}`} />}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Receiving Progress */}
         {(po.status === "submitted" || po.status === "partial") && (
@@ -422,6 +591,7 @@ export default function PurchaseOrdersPage() {
             <Tabs value={detailTab} onValueChange={setDetailTab}>
               <TabsList>
                 <TabsTrigger value="items" data-testid="tab-po-items">Items ({(po.line_items || []).length})</TabsTrigger>
+                <TabsTrigger value="notes" data-testid="tab-po-notes">Notes ({poNotes.length})</TabsTrigger>
                 <TabsTrigger value="audit" data-testid="tab-po-audit">Audit Trail ({auditLog.length})</TabsTrigger>
               </TabsList>
 
@@ -481,6 +651,34 @@ export default function PurchaseOrdersPage() {
                 </Card>
               </TabsContent>
 
+              <TabsContent value="notes">
+                <Card className="mt-2">
+                  <CardContent className="p-4 space-y-4">
+                    <div className="flex gap-2">
+                      <Textarea value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Add a note or comment..." rows={2} className="flex-1" data-testid="po-note-input" />
+                      <Button onClick={handleAddNote} className="self-end" data-testid="add-po-note-btn"><MessageSquare className="w-4 h-4 mr-1" />Add</Button>
+                    </div>
+                    <Separator />
+                    {poNotes.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground text-sm">No notes yet</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {poNotes.map(n => (
+                          <div key={n.id} className="p-3 rounded-lg border bg-muted/20" data-testid={`po-note-${n.id}`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-medium">{n.user_name}</span>
+                              <Badge variant="outline" className="text-[9px]">{n.note_type}</Badge>
+                              <span className="text-[10px] text-muted-foreground ml-auto">{n.created_at ? format(new Date(n.created_at), "MMM d, HH:mm") : ""}</span>
+                            </div>
+                            <p className="text-sm">{n.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
               <TabsContent value="audit">
                 <Card className="mt-2">
                   <CardContent className="p-0">
@@ -492,8 +690,8 @@ export default function PurchaseOrdersPage() {
                         <TableBody>
                           {auditLog.map(l => (
                             <TableRow key={l.id}>
-                              <TableCell><Badge variant="outline" className="text-xs capitalize">{l.action?.replace("_", " ")}</Badge></TableCell>
-                              <TableCell className="text-sm">{l.details}</TableCell>
+                              <TableCell><Badge variant="outline" className="text-xs capitalize">{l.action?.replace(/_/g, " ")}</Badge></TableCell>
+                              <TableCell className="text-sm max-w-xs truncate">{l.details}</TableCell>
                               <TableCell className="text-sm font-medium">{l.user_name}</TableCell>
                               <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{l.created_at ? format(new Date(l.created_at), "MMM d, HH:mm") : ""}</TableCell>
                             </TableRow>
@@ -506,7 +704,31 @@ export default function PurchaseOrdersPage() {
               </TabsContent>
             </Tabs>
 
-            {po.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{po.notes}</p></CardContent></Card>}
+            {po.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">PO Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{po.notes}</p></CardContent></Card>}
+
+            {/* Approval Info */}
+            {po.approved_by_name && (
+              <Card className="border-green-500/20">
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <ThumbsUp className="w-5 h-5 text-green-400" />
+                  <div>
+                    <p className="text-sm font-medium text-green-400">Approved by {po.approved_by_name}</p>
+                    <p className="text-xs text-muted-foreground">{po.approved_at ? format(new Date(po.approved_at), "MMM d, yyyy HH:mm") : ""} {po.approval_notes ? `- ${po.approval_notes}` : ""}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {po.rejected_by_name && (
+              <Card className="border-red-500/20">
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <ThumbsDown className="w-5 h-5 text-red-400" />
+                  <div>
+                    <p className="text-sm font-medium text-red-400">Rejected by {po.rejected_by_name}</p>
+                    <p className="text-xs text-muted-foreground">{po.rejected_at ? format(new Date(po.rejected_at), "MMM d, yyyy HH:mm") : ""} {po.rejection_reason ? `- ${po.rejection_reason}` : ""}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="col-span-4 space-y-4">
@@ -514,6 +736,7 @@ export default function PurchaseOrdersPage() {
               <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div><span className="text-muted-foreground block">Vendor</span><span className="font-medium">{po.vendor}</span></div>
+                {po.vendor_email && <div><span className="text-muted-foreground block">Vendor Email</span><span className="font-medium text-blue-400">{po.vendor_email}</span></div>}
                 <Separator />
                 <div><span className="text-muted-foreground block">Assigned To</span><span className="font-medium">{po.assigned_to_name || "Unassigned"}</span></div>
                 <Separator />
@@ -522,26 +745,152 @@ export default function PurchaseOrdersPage() {
                 <Separator />
                 <div><span className="text-muted-foreground block">Created By</span><span className="font-medium">{po.created_by_name || "System"}</span></div>
                 <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{po.created_at ? format(new Date(po.created_at), "MMM d, yyyy HH:mm") : "N/A"}</span></div>
+                {po.emailed_to && <><Separator /><div><span className="text-muted-foreground block">Emailed To</span><span className="font-medium text-blue-400">{po.emailed_to}</span><span className="block text-xs text-muted-foreground">{po.emailed_at ? format(new Date(po.emailed_at), "MMM d, HH:mm") : ""}</span></div></>}
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {po.status === "draft" && <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleStatusChange(po, "submitted")} data-testid="submit-po"><Send className="w-4 h-4 mr-1" />Submit to Vendor</Button>}
+                {/* Approval Workflow */}
+                {po.status === "draft" && (
+                  <Button className="w-full bg-purple-600 hover:bg-purple-700" onClick={() => handleSubmitForApproval(po)} data-testid="submit-for-approval-btn">
+                    <Send className="w-4 h-4 mr-1" />Submit for Approval
+                  </Button>
+                )}
+                {po.status === "pending_approval" && (
+                  <>
+                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
+                      <ThumbsUp className="w-4 h-4 mr-1" />Approve
+                    </Button>
+                    <Button variant="destructive" className="w-full" onClick={() => { setApprovalDialog("reject"); setApprovalNotes(""); }} data-testid="reject-po-btn">
+                      <ThumbsDown className="w-4 h-4 mr-1" />Reject
+                    </Button>
+                  </>
+                )}
+                {(po.status === "approved" || po.status === "draft") && (
+                  <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleStatusChange(po, "submitted")} data-testid="submit-po">
+                    <Send className="w-4 h-4 mr-1" />Submit to Vendor
+                  </Button>
+                )}
                 {(po.status === "submitted" || po.status === "partial") && (
                   <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => openReceiveDialog(po)} data-testid="receive-stock-btn">
                     <PackageCheck className="w-4 h-4 mr-1" />Receive Stock
                   </Button>
                 )}
-                {(po.status === "draft" || po.status === "submitted") && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(po, "cancelled")}><XCircle className="w-4 h-4 mr-1" />Cancel</Button>}
-                <Button variant="outline" className="w-full" onClick={() => openEdit(po)} data-testid="edit-po"><Edit className="w-4 h-4 mr-1" />Edit</Button>
-                <Button variant="destructive" className="w-full" onClick={() => handleDelete(po.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+                <Separator />
+                {/* PDF & Email */}
+                <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handleDownloadPdf(po)} disabled={pdfLoading} data-testid="download-po-pdf">
+                  {pdfLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}Download PDF
+                </Button>
+                <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => {
+                  setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
+                  setEmailVendorDialog(true);
+                }} data-testid="email-vendor-btn">
+                  <Mail className="w-4 h-4 mr-1" />Email to Vendor
+                </Button>
+                <Separator />
+                {/* Utility Actions */}
+                <Button variant="outline" className="w-full" onClick={() => handleDuplicate(po)} data-testid="duplicate-po-btn">
+                  <Copy className="w-4 h-4 mr-1" />Duplicate PO
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => openEdit(po)} data-testid="edit-po">
+                  <Edit className="w-4 h-4 mr-1" />Edit
+                </Button>
+                {(po.status === "draft" || po.status === "submitted") && (
+                  <Button variant="outline" className="w-full text-amber-400" onClick={() => handleStatusChange(po, "cancelled")}>
+                    <XCircle className="w-4 h-4 mr-1" />Cancel PO
+                  </Button>
+                )}
+                <Button variant="destructive" className="w-full" onClick={() => handleDelete(po.id)} data-testid="delete-po-btn">
+                  <Trash2 className="w-4 h-4 mr-1" />Delete
+                </Button>
               </CardContent>
             </Card>
           </div>
         </div>
-        {formDialog}
-        {receiveStockDialog}
+        {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}
+      </div>
+    );
+  }
+
+  // ========== ANALYTICS VIEW ==========
+  if (analyticsTab === "analytics") {
+    if (!spendAnalytics) fetchSpendAnalytics();
+    return (
+      <div className="space-y-6" data-testid="po-analytics">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">PO Spend Analytics</h1>
+            <p className="text-muted-foreground">Overview of purchase order spending</p>
+          </div>
+          <Button variant="outline" onClick={() => setAnalyticsTab("list")} data-testid="back-to-po-list"><ArrowLeft className="w-4 h-4 mr-1" />Back to POs</Button>
+        </div>
+        {!spendAnalytics ? (
+          <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-4">
+              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total Spend</p><p className="text-2xl font-bold text-green-500">${(spendAnalytics.total_spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></CardContent></Card>
+              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total POs</p><p className="text-2xl font-bold">{spendAnalytics.total_pos || 0}</p></CardContent></Card>
+              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Avg PO Value</p><p className="text-2xl font-bold">${(spendAnalytics.avg_po_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></CardContent></Card>
+            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <Card>
+                <CardHeader><CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4" />Top Vendors by Spend</CardTitle></CardHeader>
+                <CardContent>
+                  {(spendAnalytics.top_vendors || []).length === 0 ? <p className="text-sm text-muted-foreground">No data</p> : (
+                    <div className="space-y-2">
+                      {spendAnalytics.top_vendors.map((v, i) => (
+                        <div key={i} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
+                            <span className="text-sm font-medium">{v.vendor}</span>
+                          </div>
+                          <span className="font-mono text-sm">${v.spend.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="w-4 h-4" />Monthly Spend Trend</CardTitle></CardHeader>
+                <CardContent>
+                  {(spendAnalytics.monthly_spend || []).length === 0 ? <p className="text-sm text-muted-foreground">No data</p> : (
+                    <div className="space-y-1">
+                      {spendAnalytics.monthly_spend.map((m, i) => {
+                        const maxSpend = Math.max(...spendAnalytics.monthly_spend.map(x => x.spend));
+                        const pct = maxSpend > 0 ? (m.spend / maxSpend * 100) : 0;
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-16">{m.month}</span>
+                            <div className="flex-1 h-5 bg-muted/20 rounded overflow-hidden">
+                              <div className="h-full bg-blue-500/40 rounded transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs font-mono w-20 text-right">${m.spend.toLocaleString()}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader><CardTitle className="text-sm">Status Breakdown</CardTitle></CardHeader>
+              <CardContent>
+                <div className="flex gap-4 flex-wrap">
+                  {Object.entries(spendAnalytics.status_breakdown || {}).map(([status, count]) => (
+                    <div key={status} className="flex items-center gap-2">
+                      <Badge className={(STATUS_CONFIG[status]?.class || "bg-gray-500/20 text-gray-400") + " text-xs"}>{STATUS_CONFIG[status]?.label || status}</Badge>
+                      <span className="font-mono text-sm font-bold">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     );
   }
@@ -555,7 +904,12 @@ export default function PurchaseOrdersPage() {
           <p className="text-muted-foreground">{pos.length} purchase orders</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleCheckEscalations} data-testid="check-escalations-btn"><BellRing className="w-4 h-4 mr-1" />Check Escalations</Button>
+          <Button variant="outline" size="sm" onClick={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} data-testid="po-analytics-btn">
+            <BarChart3 className="w-4 h-4 mr-1" />Analytics
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleCheckEscalations} data-testid="check-escalations-btn">
+            <BellRing className="w-4 h-4 mr-1" />Check Escalations
+          </Button>
           <Button onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1" />New Purchase Order</Button>
         </div>
       </div>
@@ -577,10 +931,12 @@ export default function PurchaseOrdersPage() {
           <Input className="pl-9" placeholder="Search PO#, vendor..." value={search} onChange={e => setSearch(e.target.value)} data-testid="po-search" />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[150px]" data-testid="po-status-filter"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[170px]" data-testid="po-status-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="pending_approval">Pending Approval</SelectItem>
+            <SelectItem value="approved">Approved</SelectItem>
             <SelectItem value="submitted">Ordered</SelectItem>
             <SelectItem value="partial">Partial</SelectItem>
             <SelectItem value="received">Received</SelectItem>
@@ -628,14 +984,13 @@ export default function PurchaseOrdersPage() {
                     <TableCell>
                       <div className="flex items-center gap-1">
                         {isOverdue && <AlertTriangle className="w-3 h-3 text-red-400 animate-pulse" />}
-                        <span className={`text-sm ${isOverdue ? "text-red-400" : "text-muted-foreground"}`}>
-                          {po.expected_delivery || "-"}
-                        </span>
+                        <span className={`text-sm ${isOverdue ? "text-red-400" : "text-muted-foreground"}`}>{po.expected_delivery || "-"}</span>
                       </div>
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(po)}><Edit className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Download PDF" onClick={() => handleDownloadPdf(po)}><Download className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Duplicate" onClick={() => handleDuplicate(po)}><Copy className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(po.id)}><Trash2 className="w-3 h-3" /></Button>
                       </div>
                     </TableCell>
@@ -647,8 +1002,7 @@ export default function PurchaseOrdersPage() {
         </CardContent>
       </Card>
 
-      {formDialog}
-      {receiveStockDialog}
+      {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}
     </div>
   );
 }

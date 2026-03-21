@@ -324,7 +324,7 @@ class LineItem(BaseModel):
 class InvoiceCreate(BaseModel):
     client_id: Optional[str] = None
     contract_id: Optional[str] = None
-    due_date: str
+    due_date: Optional[str] = None
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
     tax_rate: float = 0.0
@@ -347,7 +347,7 @@ class Invoice(BaseModel):
     tax_rate: float = 0.0
     total: float = 0.0
     amount_paid: float = 0.0
-    due_date: str
+    due_date: Optional[str] = None
     paid_date: Optional[str] = None
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
