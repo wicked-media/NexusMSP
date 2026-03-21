@@ -1,33 +1,20 @@
 <analysis>**original_problem_statement:**
-The user's primary goal is to continue the rapid, parallel development of the NexusOps RMM/PSA platform. Following the successful enrichment of Workshop and Cabling/WISP Field Jobs, the user has requested a massive upgrade to the **Purchase Order, Invoices, and Billing** modules. 
-PRODUCT REQUIREMENTS: Make the PO, Invoices, and Billing modules exceptionally feature-rich, comprehensive, and cool to ensure NexusOps stands out uniquely compared to standard PAS/RMM tools. 
+The user's primary goal is to continue the rapid, parallel development of the NexusOps RMM/PSA platform. PRODUCT REQUIREMENTS: Make the Purchase Order, Invoices, and Billing modules exceptionally feature-rich and unique compared to standard RMM tools. Furthermore, build a dedicated Billing Command Center, heavily enrich 10 SOC/Security dashboard pages (using Huntress-like mock data), and finally, revamp the Client Onboarding flow into a comprehensive, step-by-step wizard without duplicating existing onboarding modules.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A highly complex, feature-rich RMM/PSA platform. In the latest session, the agent successfully implemented deep, tabbed enrichment views for both Workshop Jobs and Cabling/WISP Field Jobs (including progress trackers, parts, checklists, QR codes, and PDF generation). The existing Purchase Order and Invoices modules currently support standard CRUD, Stripe payments, PDF generation, and basic stock receiving, but lack the premium unique features the user is now requesting.
+A highly complex, feature-rich RMM/PSA platform. It has highly enriched Ticket, Workshop, PO, and Invoices modules. A new Billing Command Center and 10 fully mocked, highly detailed SOC/Security modules are now present. For client onboarding, there are currently two basic placeholder modules ( and  with corresponding backend routers) that need to be consolidated and enriched.
 
 **Last working item**: 
-    - **Last item agent was working:** The agent started addressing the user's latest request to enrich POs, Invoices, and Billing. The agent reviewed existing endpoints and created two new backend router files ( and ) in parallel to prepare for the heavy feature implementation. 
+    - **Last item agent was working:** The agent was evaluating the existing Client Onboarding files (, , , ) to plan the revamp and enrichment of the Client Onboarding flow. The goal is to build a guided step-by-step flow (company info → contacts → asset import → contract setup → first ticket) without duplicating existing modules.
     - **Status:** IN PROGRESS
-    - **Agent Testing Done:** N
-    - **Which testing method agent to use?** testing_agent_v3_fork (For testing the large batch of new billing/PO features across both frontend and backend once implementation is complete).
+    - **Agent Testing Done:** N (Just started reading files)
+    - **Which testing method agent to use?**  (Once the comprehensive onboarding wizard is fully implemented).
     - **User Testing Done:** N
 
 **All Pending/In progress Issue list**: 
-  - **Issue 1: Implement Comprehensive Enhancements for POs, Invoices, and Billing (P0)**
-     - Attempted fixes: Agent just created  and . No logic or frontend UI has been built yet.
-     - Next debug checklist: 
-       1. Implement premium backend logic in  and  (e.g., advanced approval workflows, intelligent invoice matching, automated vendor chasing, gamified billing metrics).
-       2. Register these new routers if not automatically discovered.
-       3. Revamp  and  to match the cool, comprehensive aesthetic built in the Tickets/Workshop modules.
-     - Why fix this issue and what will be achieved with the fix? Fulfills the user's core request to make the financial/purchasing side of the platform stand out against competitor RMM tools.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Both
-     - Blocked on other issue: None
-
-  - **Issue 2:  console warnings on Reports page (P3)**
+  - **Issue 1:  console warnings on ReportsPage (P3)**
      - Attempted fixes: None. Carry-over from previous sessions.
      - Next debug checklist: Inspect  and adjust recharts component props (likely width/height) to resolve console warnings.
      - Why fix this issue and what will be achieved with the fix? Clean console and prevent rendering bugs.
@@ -37,9 +24,9 @@ A highly complex, feature-rich RMM/PSA platform. In the latest session, the agen
      - Blocked on other issue: None
 
 **In progress Task List**:
-  - **Task 1: PO & Invoice Overhaul (P0)**
-     - Where to resume: Open  and  to add advanced routes. Then modify frontend React pages.
-     - What will be achieved with this? A unique, market-leading billing and purchasing module.
+  - **Task 1: Consolidate and Enrich Client Onboarding Wizard (P0)**
+     - Where to resume: Review  and . Combine their concepts, enhance the UI into a true guided step-by-step flow, and update .
+     - What will be achieved with this? A seamless, feature-rich wizard for MSPs to onboard new clients, fulfilling the user's explicit request.
      - Status: IN PROGRESS
      - Should Test frontend/backend/both after fix? Both
      - Blocked on something: None
@@ -59,9 +46,9 @@ A highly complex, feature-rich RMM/PSA platform. In the latest session, the agen
     - Bluetooth barcode scanner integration (P3)
 
 **Completed work in this session**
-- Workshop Ticket Enrichment (DONE) - Tested via  (iteration_53).
-- Cabling/WISP Field Job Enrichment (DONE) - Tested via  (iteration_54).
-- Added , ,  backend dependencies and integrated static file serving for uploads (DONE).
+- **PO & Invoice Overhaul** (DONE) - Created  and  with massive frontend upgrades. Tested via  (iteration_55). Fixed a  Pydantic model validation bug.
+- **Billing Command Center** (DONE) - Built  with gamified MRR/ARR, cash flow, and health gauges. Tested via  (iteration_56). Fixed an  issue in the chase endpoint.
+- **Massive SOC/Security Enrichment** (DONE) - Created  and heavily enriched 10 frontend pages (Security Dashboard, SOC Feed, Endpoints, Dark Web, etc.) with mock Huntress data. Manually tested backend and frontend. Fixed an immutable  update bug.
 
 **Earlier issues found/mentioned but not fixed**
    - Issue 1:  console warnings on 
@@ -70,9 +57,15 @@ A highly complex, feature-rich RMM/PSA platform. In the latest session, the agen
    - Should Test frontend/backend/both after fix: Frontend
    - Is recurring issue? Y
 
+   - Issue 2: Missing  for some DialogContent (P3)
+   - Debug checklist: Add appropriate  properties to Shadcn Dialogs.
+   - Why to solve this issue and what will be achieved with this: Accessibility compliance.
+   - Should Test frontend/backend/both after fix: Frontend
+   - Is recurring issue? N
+
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork:  console warnings (Check 1st <LLM message history> array entry)
-  - Recurrence count: 3+
+  - Issue recurrence in previous fork:  console warnings on 
+  - Recurrence count: 4+
   - Status: NOT STARTED
 
 **Code Architecture**
@@ -80,68 +73,65 @@ A highly complex, feature-rich RMM/PSA platform. In the latest session, the agen
 
 **Key Technical Concepts**
 - FastAPI Backend with MongoDB ( async).
-- React Frontend (Shadcn UI, TailwindCSS, Lucide Icons).
-- Use of supplementary route files (e.g., ) to extend existing data domains without breaking legacy endpoints.
-- Static File Serving: Configured for image uploads (e.g., workshop photos) mounted at .
+- React Frontend (Shadcn UI, TailwindCSS, Recharts).
+- The use of mock data (specifically for SOC/Huntress integration) that generates realistic incident payloads to act as a placeholder until real API keys are provided.
 
 **key DB schema**
-  - workshop_jobs: {{id, customer_name, condition, accessories, checklist, status}}
-  - field_jobs: {{id, customer_name, schedule, signal_metrics, status}}
-  - purchase_orders: {{po_number, vendor, items, status, total}}
-  - invoices: {{invoice_number, client_id, items, status, total_mrr}}
+  - : {invoice_number, client_id, status, due_date}
+  - : {po_number, vendor, items, status, total}
+  - : {id, client_name, steps_completed, created_at}
+  - : {id, step_name, status, category}
 
 **changes in tech stack**
-  - Added python packages: , ,  for QR code and PDF generation.
+  - None explicitly added in this session.
 
-**All files of reference**
-  -  (Created, needs implementation)
-  -  (Created, needs implementation)
-  -  (Target for UI overhaul)
-  -  (Target for UI overhaul)
-  -  (Reference for the cool tabbed layout used in recent enrichments)
+**All files of reference** 
+  -  (Existing UI to overhaul)
+  -  (Existing UI to consolidate)
+  -  (Backend router to enhance)
+  -  (Backend router to consolidate)
 
 **Areas that need refactoring**: 
--  has swelled to over 3300 lines due to the Workshop and WISP enrichments. Strongly consider breaking this into sub-components (e.g., , ).
+- The Onboarding flow is currently split between  and . These should be consolidated to avoid redundant modules.
+-  (>3000 lines) requires breaking down into sub-components.
 
 **key api endpoints**
--  (To be created)
--  (To be created)
+- 
 - 
 - 
 
 **Critical Info for New Agent**
-- **User Intent**: The user wants the new PO and Invoice modules to be uniquely cool and comprehensive compared to competitors. Think outside the box: suggest/implement advanced UI elements (animated workflows, timeline audits, drag-and-drop receipt matching, advanced AI summaries, etc.).
-- **New Files Created**:  and  were just created by the previous agent. Ensure you start by writing the logic in these files and hook them up to the React frontend.
-- **Pre-existing Code**: The app already has standard PDF generation and Stripe payment endpoints for invoices. Don't reinvent basic CRUD; focus strictly on *enhancements*.
-- **Data Models**: When creating new ticket/PO fields, ALWAYS use  in Pydantic models to prevent  crashes from legacy MongoDB documents that lack the new fields.
+- **MongoDB  Bugs:** In the last session, the agent repeatedly hit bugs related to  and Pydantic validation failures. **Always exclude  from Mongo projections () and ensure you don't accidentally pass an  back during document updates.**
+- **User Intent (Onboarding):** The user explicitly requested *not* to double up on modules. Review the two existing onboarding pages, figure out how to merge or replace them cleanly, and build a single, comprehensive step-by-step wizard.
+- **Testing Agent Warning:** The  was terminated prematurely during iteration_57 (SOC module). The main agent manually verified the endpoints via Bash, but regression on SOC may be slightly less rigorous than previous modules. 
 
 **documents and test reports created in this job**
-  -  (Workshop testing)
-  -  (Cabling/WISP testing)
-  -  (Updated with Phase 1-3 completions)
+  -  (PO/Invoices Testing)
+  -  (Billing Dashboard Testing)
+  -  (Partial SOC Testing)
+  -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1.  - **Status: IN PROGRESS**. Agent started by creating backend files.
- 2.  - **Status: ADDRESSED**. Prompted the agent's query.
- 3.  - **Status: COMPLETED**. Agent finalized field job testing.
- 4.  - **Status: COMPLETED**. Implemented full field job enrichment.
- 5.  - **Status: COMPLETED**. Approval for the workshop enrichment.
- 6.  - **Status: COMPLETED**. Initiated workshop features.
- 7.  - **Status: COMPLETED**.
+ 1.  - **Status: COMPLETED**.
+ 2.  - **Status: COMPLETED**. (Agent researched and proposed Huntress-mocked SOC dashboard).
+ 3.  - **Status: COMPLETED**. (Built the 10 SOC pages and backend router).
+ 4.  - **Status: COMPLETED**. (Agent resumed testing after subagent termination).
+ 5.  - **Status: IN PROGRESS**. (Agent discovered existing onboarding files and began reading them).
 
 **Project Health Check:**
 - Broken: No
-- Mocked: Yes (AI routing, revenue predictions, voice-to-text transcriptions).
+- Mocked: Yes (AI routing, email via Resend, voice-to-text transcriptions, Huntress SOC data feeds).
 
-**3rd Party Integrations** 
+**3rd Party Integrations**
   • Stripe (Payments) — requires User API Key
   • emergentintegrations (LLMs) — uses Emergent LLM Key
   • Resend (Emails) — requires User API Key
+  *(Huntress integration mocked for now, no keys required yet)*
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Iterations 53 & 54 used  successfully)
+  - Testing agent used after significant changes: YES (Iterations 55, 56. Iteration 57 was partial)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , 
+  - Test files created: , , 
   - Known regressions: None
 
 **Credentials to test flow:**
@@ -149,4 +139,17 @@ A highly complex, feature-rich RMM/PSA platform. In the latest session, the agen
 - Password: 
 
 **What agent forgot to execute**
-- Nothing was forgotten. The agent cleanly handed over exactly after setting up the foundational files for the user's latest PO/Invoice overhaul request.</analysis>
+- The agent properly handed off right after discovering the existing codebase for the client onboarding feature to avoid duplicate work. Proceed immediately with consolidating and enriching the Client Onboarding flow.
+
+**Debugging checklist for current issue (Onboarding Revamp):**
+    Frontend files to check: 
+    - 
+    - 
+  
+    Backend files to check:
+    - 
+    - 
+
+    Database to check:
+    -  collection
+    -  collection</analysis>

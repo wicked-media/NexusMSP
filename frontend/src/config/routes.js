@@ -192,7 +192,7 @@ export const routeConfig = [
   // Phase E: Operations
   { path: "/hardware-refresh", component: page("HardwareRefreshPage"), auth: true, layout: true },
   { path: "/geo-map", component: page("GeoMapPage"), auth: true, layout: true },
-  { path: "/onboarding-workflows", component: page("OnboardingWorkflowsPage"), auth: true, layout: true },
+  { path: "/onboarding-workflows", component: page("OnboardingWizardPage"), auth: true, layout: true },
 
   // Special: Wallboard (no MainLayout)
   { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://nexus-financial.preview.emergentagent.com"
+    BASE_URL = "https://client-flow-15.preview.emergentagent.com"
 
 # Test credentials
 TEST_EMAIL = "admin@nexusops.io"
