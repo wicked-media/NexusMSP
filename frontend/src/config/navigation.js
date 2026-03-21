@@ -202,7 +202,6 @@ export const navGroups = [
       { path: "/nps-tracker", icon: ThumbsUp, label: "NPS Tracker" },
       { path: "/client-budget", icon: DollarSign, label: "Client Budgets" },
       { path: "/geo-map", icon: MapPinned, label: "Geo Map" },
-      { path: "/onboarding", icon: ClipboardList, label: "Client Onboarding" },
       { path: "/hardware-refresh", icon: HardDrive, label: "HW Refresh" },
       { path: "/dark-web-monitor", icon: Eye, label: "Dark Web Monitor" },
       { path: "/phishing-sim", icon: Crosshair, label: "Phishing Sim" },
