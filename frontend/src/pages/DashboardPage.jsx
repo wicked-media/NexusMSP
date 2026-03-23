@@ -14,7 +14,8 @@ import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownRight,
   RefreshCw, MessageSquare, Activity, Package, ShoppingCart, AlertCircle, CheckCircle, XCircle,
   FileText, CreditCard, Zap, Server, Laptop, Wifi, Shield, ShieldAlert, HardDrive, Cpu, MemoryStick,
-  Download, ExternalLink, Plus, ShieldCheck, ShieldX, Search, Terminal, UserCog, CalendarDays
+  Download, ExternalLink, Plus, ShieldCheck, ShieldX, Search, Terminal, UserCog, CalendarDays,
+  BellOff, Flame, Calculator, Building2, BarChart3, Brain, DatabaseBackup, ChevronRight
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar
@@ -56,6 +57,7 @@ export default function DashboardPage() {
   const [devices, setDevices] = useState([]);
   const [deviceStats, setDeviceStats] = useState({});
   const [compliance, setCompliance] = useState(null);
+  const [mspIntel, setMspIntel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -88,6 +90,32 @@ export default function DashboardPage() {
       setDevices(devicesRes.data);
       setDeviceStats(devStatsRes.data);
       setCompliance(complianceRes.data);
+
+      // Cross-module MSP Intelligence
+      const [backupRes, predRes, vendorRes, slaRes, aiRes, suppressRes, compFwRes, capacityRes, incidentRes] = await Promise.all([
+        axios.get(`${API}/backup-dashboard/overview`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/predictive-failure/overview`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/vendor-scorecard/overview`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/sla-penalties/dashboard`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/ai-resolution/suggestions`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/alert-suppression/stats`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/compliance-frameworks/overview`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/capacity-planner/overview`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/incident-heatmap/data`, { headers }).catch(() => ({ data: null })),
+      ]);
+      setMspIntel({
+        backup: backupRes.data?.summary,
+        predictions: predRes.data?.summary,
+        urgentPredictions: (predRes.data?.predictions || []).filter(p => p.days_until_failure <= 7),
+        vendors: vendorRes.data?.summary,
+        slaPenalties: slaRes.data?.stats,
+        aiResolution: aiRes.data?.summary,
+        suppression: suppressRes.data,
+        complianceFw: compFwRes.data?.summary,
+        frameworks: compFwRes.data?.frameworks,
+        capacity: capacityRes.data?.current,
+        incidents: incidentRes.data?.insights,
+      });
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
     } finally {
@@ -252,6 +280,113 @@ export default function DashboardPage() {
 
       {/* SLA Countdown + Device Fleet */}
       <div className="grid grid-cols-12 gap-4">
+
+        {/* MSP Intelligence Hub - Command Center Strip */}
+        {mspIntel && (
+          <div className="col-span-12 space-y-4" data-testid="msp-intelligence-hub">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center"><Brain className="w-4 h-4 text-white" /></div>
+              <h2 className="text-lg font-bold tracking-tight">MSP Command Center</h2>
+              <Badge variant="outline" className="text-[10px] ml-1">Cross-Module Intelligence</Badge>
+            </div>
+
+            {/* 8-Tile Intelligence Strip */}
+            <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+              {[
+                { label: "Backup Health", value: mspIntel.backup ? `${mspIntel.backup.success_rate}%` : "N/A", icon: HardDrive, color: (mspIntel.backup?.success_rate || 0) >= 90 ? "text-emerald-400" : (mspIntel.backup?.success_rate || 0) >= 70 ? "text-amber-400" : "text-red-400", bg: (mspIntel.backup?.success_rate || 0) >= 90 ? "border-emerald-500/20" : "border-red-500/20", path: "/backup-dashboard" },
+                { label: "Failure Alerts", value: mspIntel.predictions?.critical || 0, icon: AlertTriangle, color: (mspIntel.predictions?.critical || 0) > 0 ? "text-red-400" : "text-emerald-400", bg: (mspIntel.predictions?.critical || 0) > 0 ? "border-red-500/20 bg-red-500/5" : "border-border/30", path: "/predictive-failure" },
+                { label: "AI Resolved", value: mspIntel.aiResolution ? `${mspIntel.aiResolution.auto_resolved}/${mspIntel.aiResolution.total}` : "0", icon: Zap, color: "text-purple-400", bg: "border-purple-500/20", path: "/ai-resolution" },
+                { label: "Noise Silenced", value: mspIntel.suppression ? mspIntel.suppression.total_suppressed?.toLocaleString() : "0", icon: BellOff, color: "text-amber-400", bg: "border-amber-500/20", path: "/alert-suppression" },
+                { label: "SLA Penalties", value: mspIntel.slaPenalties ? `$${mspIntel.slaPenalties.pending_credits?.toLocaleString()}` : "$0", icon: Calculator, color: (mspIntel.slaPenalties?.pending_credits || 0) > 0 ? "text-red-400" : "text-emerald-400", bg: (mspIntel.slaPenalties?.pending_credits || 0) > 0 ? "border-red-500/20" : "border-border/30", path: "/sla-penalties" },
+                { label: "Compliance", value: mspIntel.complianceFw ? `${Math.round(mspIntel.complianceFw.avg_compliance_pct)}%` : "N/A", icon: Shield, color: (mspIntel.complianceFw?.avg_compliance_pct || 0) >= 80 ? "text-emerald-400" : "text-amber-400", bg: "border-border/30", path: "/compliance-frameworks" },
+                { label: "Team Util", value: mspIntel.capacity ? `${mspIntel.capacity.utilization_pct}%` : "N/A", icon: Users, color: (mspIntel.capacity?.utilization_pct || 0) >= 90 ? "text-red-400" : (mspIntel.capacity?.utilization_pct || 0) >= 75 ? "text-amber-400" : "text-emerald-400", bg: "border-border/30", path: "/capacity-planner" },
+                { label: "Incidents", value: mspIntel.incidents?.total_incidents || 0, icon: Flame, color: (mspIntel.incidents?.total_incidents || 0) > 20 ? "text-red-400" : "text-blue-400", bg: "border-border/30", path: "/incident-heatmap" },
+              ].map(tile => (
+                <div key={tile.label} className={`p-2.5 rounded-lg border ${tile.bg} bg-card cursor-pointer hover:bg-muted/50 transition-all hover:scale-[1.02]`} onClick={() => navigate(tile.path)} data-testid={`intel-${tile.label.toLowerCase().replace(/\s/g, "-")}`}>
+                  <div className="flex items-center justify-between mb-0.5"><tile.icon className={`w-3.5 h-3.5 ${tile.color}`} /><ChevronRight className="w-3 h-3 text-muted-foreground/50" /></div>
+                  <p className={`text-lg font-black leading-tight ${tile.color}`}>{tile.value}</p>
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">{tile.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Expanded Intelligence Cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {/* Urgent Predictions */}
+              <Card className="border-border/40">
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-red-400" />Urgent Failures</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => navigate("/predictive-failure")} className="text-xs h-6 px-2">View <ExternalLink className="w-3 h-3 ml-1" /></Button>
+                </CardHeader>
+                <CardContent>
+                  {(mspIntel.urgentPredictions || []).length === 0 ? (
+                    <div className="text-center py-4"><ShieldCheck className="w-6 h-6 mx-auto text-emerald-400/30 mb-1" /><p className="text-xs text-emerald-400">No urgent failures</p></div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {mspIntel.urgentPredictions.slice(0, 4).map(p => (
+                        <div key={p.id} className="flex items-center gap-2 p-1.5 rounded bg-red-500/5 border border-red-500/10">
+                          <HardDrive className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{p.device_name}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{p.prediction}</p>
+                          </div>
+                          <span className="text-xs font-black text-red-400">{p.days_until_failure}d</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Backup Status */}
+              <Card className="border-border/40">
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2"><HardDrive className="w-4 h-4 text-blue-400" />Backup Status</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => navigate("/backup-dashboard")} className="text-xs h-6 px-2">View <ExternalLink className="w-3 h-3 ml-1" /></Button>
+                </CardHeader>
+                <CardContent>
+                  {mspIntel.backup ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-2xl font-black ${mspIntel.backup.success_rate >= 90 ? "text-emerald-400" : mspIntel.backup.success_rate >= 70 ? "text-amber-400" : "text-red-400"}`}>{mspIntel.backup.success_rate}%</span>
+                        <span className="text-xs text-muted-foreground">{mspIntel.backup.total_jobs} jobs</span>
+                      </div>
+                      <Progress value={mspIntel.backup.success_rate} className="h-2 mb-2" />
+                      <div className="grid grid-cols-3 gap-1.5 text-center">
+                        <div className="p-1.5 rounded bg-emerald-500/10 border border-emerald-500/20"><p className="text-sm font-bold text-emerald-400">{mspIntel.backup.successful}</p><p className="text-[9px] text-muted-foreground">OK</p></div>
+                        <div className="p-1.5 rounded bg-red-500/10 border border-red-500/20"><p className="text-sm font-bold text-red-400">{mspIntel.backup.failed}</p><p className="text-[9px] text-muted-foreground">Failed</p></div>
+                        <div className="p-1.5 rounded bg-blue-500/10 border border-blue-500/20"><p className="text-sm font-bold text-blue-400">{mspIntel.backup.running}</p><p className="text-[9px] text-muted-foreground">Running</p></div>
+                      </div>
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground text-center py-4">No backup data</p>}
+                </CardContent>
+              </Card>
+
+              {/* Compliance Posture */}
+              <Card className="border-border/40">
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-400" />Compliance Posture</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => navigate("/compliance-frameworks")} className="text-xs h-6 px-2">View <ExternalLink className="w-3 h-3 ml-1" /></Button>
+                </CardHeader>
+                <CardContent>
+                  {mspIntel.frameworks ? (
+                    <div className="space-y-2">
+                      {mspIntel.frameworks.slice(0, 4).map(fw => (
+                        <div key={fw.id || fw.name}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs font-medium">{fw.name}</span>
+                            <span className={`text-xs font-bold ${fw.compliance_pct >= 80 ? "text-emerald-400" : fw.compliance_pct >= 60 ? "text-amber-400" : "text-red-400"}`}>{Math.round(fw.compliance_pct)}%</span>
+                          </div>
+                          <Progress value={fw.compliance_pct} className="h-1.5" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground text-center py-4">No compliance data</p>}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
         {/* SLA Countdown Widget */}
         <Card className="col-span-4" data-testid="sla-countdown-widget">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">

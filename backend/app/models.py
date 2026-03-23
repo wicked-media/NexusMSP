@@ -103,8 +103,9 @@ class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     ticket_number: Optional[str] = None
-    title: str
-    description: str
+    title: str = ""
+    subject: Optional[str] = None
+    description: str = ""
     client_id: Optional[str] = None
     client_name: Optional[str] = None
     priority: str = "medium"
@@ -156,7 +157,8 @@ class DeviceCreate(BaseModel):
 class Device(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
+    name: str = ""
+    hostname: Optional[str] = None
     client_id: Optional[str] = None
     client_name: Optional[str] = None
     device_type: str = "workstation"
