@@ -15,85 +15,49 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - **Scheduling & Dispatch**: Smart scheduling, dispatch board, on-call management
 - **Reporting**: Dashboards, analytics, SLA compliance, revenue reports
 - **White Label**: Full branding customization, custom domains
-- **Client Portal**: Self-service portal for clients
+- **Client Portal**: Multi-tenant self-service portal for clients (email/password + 2FA)
 - **AI Features**: AI copilot, intelligent routing, voice-to-ticket
+- **MSP Command Center**: Cross-module intelligence dashboard aggregating all 16+ advanced modules
 
 ## Tech Stack
 - Frontend: React, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
 - Backend: FastAPI (Python), Motor (async MongoDB)
 - Database: MongoDB
-- Integrations: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations
+- Integrations: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations, pyotp
 
 ## Completed Features
 
 ### Phase 1-3: Core Platform (DONE)
-1. Full ticketing system (SLA, workshop, cabling/WISP)
-2. Client management, Contracts, Vendors
-3. Invoice & billing system with Stripe
-4. Asset lifecycle management
-5. RMM monitoring dashboard
-6. Network management & zero-trust
-7. Scheduling & dispatch
-8. Reporting & analytics
-9. White label / branding
-10. AI copilot & intelligent routing
-11. Client self-service portal
-12. Voice-to-ticket, Gamification, SLA, Change Mgmt
+1-12. Full ticketing, CRM, invoicing, RMM, networking, scheduling, reporting, white-label, AI copilot, client portal, voice-to-ticket, gamification
 
-### Phase 4: Deep Enrichments (DONE - 2026-03-21)
-13. Workshop Enrichment (photos, checklists, QR codes, PDF job cards)
-14. Cabling/WISP Enrichment (site photos, materials, dispatch queue)
-15. PO/Invoice/Billing Overhaul (approval workflows, PDF, email, clone, credit notes, aging, revenue analytics)
-16. Billing Command Center (MRR/ARR gauges, health score, collection streak, cash flow forecast, chase)
+### Phase 4-5: Deep Enrichments (DONE)
+13-29. Workshop/Cabling enrichment, PO/Invoice/Billing overhaul, Billing Command Center, SOC & Security (10 modules), Smart Automation (3 modules)
 
-### Phase 5: SOC & Security Enrichment (DONE - 2026-03-21)
-17. Security Dashboard - Unified SOC hub
-18. SOC Alert Feed - Live alert stream with technician tools
-19. Endpoint Security - 30 managed endpoints with AV/firewall/patch
-20. Dark Web Monitor - Credential leak detection
-21. Vulnerability Scanner - CVE tracking, CVSS scores
-22. Phishing Simulation - Campaign management
-23. Identity Threat Detection - Impossible travel, brute force, MFA fatigue
-24. Ransomware Canary - Canary files, emergency isolate
-25. Threat Timeline - Chronological security events
-26. Huntress Integration (Mock-Ready)
-
-### Phase 5b: Smart Automation (DONE - 2026-03-21)
-27. AI Thank-You Detection
-28. Stale Ticket Reminders
-29. Billing Reconciliation
-
-### Phase 6: Client Onboarding Wizard (DONE - 2026-03-21)
-30. Client Onboarding Wizard (Enhanced) - 8-step guided wizard
+### Phase 6: Client Onboarding Wizard (DONE)
+30. 8-step guided onboarding wizard
 
 ### Phase 7: Advanced MSP Module Enrichment (DONE - 2026-03-21)
-All 16+ advanced MSP modules enriched from placeholders to enterprise-grade UIs:
+31-48. All 16+ advanced MSP modules enriched to enterprise-grade UIs (AI Resolution, QBR Generator, Comms Timeline, Tech Utilization, Backup Dashboard, Warranty Tracker, Compliance Frameworks, Client Budget, Vendor Scorecard, SLA Penalties, Alert Suppression, Incident Heatmap, Predictive Failure, Capacity Planner, Auto Documentation, NLP Query, Leaderboard, IT Documentation)
 
-**Batch 1 (AI & Operations):**
-31. AI Auto-Resolution Engine - Autonomous issue detection with runbook matching, approve/reject, confidence scoring
-32. QBR Generator - Client QBR cards with security/uptime/SLA metrics, per-client drill-down
-33. Comms Timeline - Client communication history, interaction types, activity timeline
-34. Tech Utilization - Billable hours, revenue per tech, utilization target tracking
+### Phase 8: MSP Command Center Dashboard (DONE - 2026-03-21)
+49. Cross-module intelligence hub merged into main dashboard — 8-tile intelligence strip + 3 detail cards (Urgent Failures, Backup Status, Compliance Posture)
 
-**Batch 2 (Infrastructure & Compliance):**
-35. Backup Dashboard - Multi-vendor backup health (Veeam/Datto/Acronis), client backup cards, failure tracking
-36. Warranty Tracker - Manufacturer breakdown, expiry alerts, active/expired/unknown status
-37. Compliance Frameworks - NIST/CIS/SOC2/HIPAA with control categories, progress bars, gap analysis
-38. Client Budget - Budget vs spend charts, forecast overruns, utilization tracking
+### Phase 9: Multi-Tenant Client Portal (DONE - 2026-03-23)
+50. **Portal Login** — Email/password authentication with TOTP-based 2FA support
+51. **Portal Dashboard** — Client-scoped overview (open tickets, online devices, outstanding invoices, resolved count) + quick links
+52. **Portal Tickets** — View all client tickets + create new support tickets from portal
+53. **Portal Devices** — Client device fleet with CPU/RAM/Disk usage and online/offline status
+54. **Portal Invoices** — Client invoice list with status and amounts
+55. **Portal Backups** — Client backup job status with success rate tracking
+56. **Portal Compliance** — Framework compliance posture (NIST, CIS, SOC 2, HIPAA)
+57. **Portal QBR Reports** — Quarterly business review access
+58. **Portal Settings** — Profile management + 2FA setup/disable with QR code provisioning
+59. **Portal Layout** — Dark zinc theme, sidebar navigation with MSP branding + client logo spot, user info + sign out
 
-**Batch 3 (Analytics & Automation):**
-39. Vendor Scorecard - Performance table, spend analytics (pie/bar charts), risk & compliance tab, vendor detail dialog
-40. SLA Penalty Calculator - Auto-calculate penalties, credit resolution progress, breach timeline, issue credits
-41. Alert Suppression Engine - Rule management with create/toggle/delete, analytics by match type/scope, noise reduction impact
-42. Incident Heatmap - Day x Hour density grid, hover tooltip, hourly trend chart, priority distribution, category/client breakdown
-43. Predictive Failure Detection - ML-powered predictions with risk scoring, urgent alerts banner, failure type breakdown, detail dialog
-44. Resource Capacity Planner - Team utilization gauge, scaling scenarios, workload ratios, 6-month trend chart, hiring alerts
-45. Auto-Documentation Generator - AI doc generation (Network/Asset/DR), template cards, client grouping, document section preview
-46. Natural Language Search - Plain English query engine, suggestion chips, query history, result highlighting, device/ticket/stat results
-
-**Already Enterprise-Grade (no changes needed):**
-47. Leaderboard - XP podium, profiles, activity heatmap, badge system
-48. IT Documentation - Password vault, docs management, CRUD, client filtering
+**Backend**: `/api/portal/v2/*` — 15 endpoints (login, verify-2fa, setup-2fa, enable-2fa, disable-2fa, me, update profile, dashboard, tickets GET/POST, devices, invoices, backups, compliance, qbr)
+**Frontend**: Self-contained SPA at `/portal-app` with independent auth context
+**Test user**: john@acmecorp.com / portal123 (Acme Corporation, client-001)
+**Bug fixes**: Fixed Ticket.title and Device.name model defaults that caused 500 errors on /api/tickets and /api/devices
 
 ## Prioritized Backlog
 
@@ -101,26 +65,27 @@ All 16+ advanced MSP modules enriched from placeholders to enterprise-grade UIs:
 - Workshop Bench View (Kanban)
 - Dispatch Map View (GPS)
 - CRM integrations (Xero, Pax8, Domotz)
-- Client Payment Portal (self-service invoices)
+- Workflow Automation Builder (IF/THEN rules)
+- Scheduled PDF Reports (auto-generate weekly/monthly)
+- Knowledge Base / Wiki for techs
+- Profitability Dashboard (revenue vs cost per client)
+- Admin portal user management page (invite/remove client portal users from MSP admin)
 
 ### P3
 - Decompose monolithic seed.py and navigation.js
 - Refactor TicketsPage.jsx into sub-components
 - Bluetooth barcode scanner integration
 - Fix recharts console warnings
-- Connect real Huntress API (when user provides API key)
-- SentinelOne / CrowdStrike connectors
-- Fix aria-describedby for DialogContent (accessibility)
-- Clean up TEST_ prefixed devices from previous test data
+- Accessibility fixes (aria-describedby)
+- Clean up TEST_ prefixed data from testing
 
 ## Mocked Features
-- All SOC/security data uses mock generators (realistic randomized data) - ready for real Huntress API
-- AI routing (mock)
-- Voice-to-text (mock)
-- Email sending (requires Resend API key)
+- SOC/security data (mock generators)
+- AI routing, Voice-to-text (mock)
 - Predictive failure predictions (mock ML data)
-- NLP query (keyword matching, not real NLP)
+- NLP query (keyword matching)
+- Compliance frameworks (fallback if DB empty)
 
 ## Authentication
-- JWT-based custom auth
-- Demo: admin@nexusops.io / admin123
+- MSP Admin: JWT-based custom auth — admin@nexusops.io / admin123
+- Client Portal: JWT portal tokens with TOTP 2FA — john@acmecorp.com / portal123
