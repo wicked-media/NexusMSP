@@ -207,5 +207,6 @@ export const routeConfig = [
 
   // Public routes (no auth, no layout)
   { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },
+  { path: "/portal-app", component: page("TenantPortalApp"), auth: false, layout: false },
   { path: "/status-board/:clientId", component: page("StatusBoardPage"), auth: false, layout: false },
 ];
