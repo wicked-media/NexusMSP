@@ -110,7 +110,7 @@ export default function RemoteAccessPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await axios.put(`${API}/rustdesk/config`, settingsForm, { headers });
+      await axios.post(`${API}/rustdesk/config`, settingsForm, { headers });
       toast.success("Settings saved");
       setShowSettings(false);
       fetchData();
