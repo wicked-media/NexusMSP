@@ -75,7 +75,7 @@ export const navGroups = [
       { path: "/vault", icon: KeyRound, label: "Password Vault" },
       { path: "/runbooks", icon: Workflow, label: "Runbook Automation" },
       { path: "/scripting", icon: Terminal, label: "Scripting" },
-      { path: "/remote-access", icon: Laptop, label: "Remote Access" },
+      { path: "/remote-access", icon: Laptop, label: "Remote Devices" },
     ]
   },
   {

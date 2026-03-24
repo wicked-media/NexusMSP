@@ -130,3 +130,109 @@ async def get_rustdesk_sessions(
         query["client_id"] = client_id
     sessions = await db.rustdesk_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(100)
     return sessions
+
+
+@router.get("/rustdesk/all-devices")
+async def get_all_remote_devices(current_user: dict = Depends(get_current_user)):
+    """Get all managed devices enriched with their RustDesk registration status"""
+    # Get all managed devices
+    devices = await db.devices.find({}, {
+        "_id": 0, "id": 1, "name": 1, "hostname": 1, "client_id": 1, "client_name": 1,
+        "device_type": 1, "os": 1, "status": 1, "ip_address": 1, "rustdesk_id": 1,
+    }).to_list(500)
+    # Get all registered RustDesk device entries
+    rd_devices = await db.rustdesk_devices.find({}, {"_id": 0}).to_list(500)
+    rd_by_linked = {r.get("linked_device_id"): r for r in rd_devices if r.get("linked_device_id")}
+    rd_by_id = {r.get("id"): r for r in rd_devices}
+
+    enriched = []
+    for d in devices:
+        rd = rd_by_linked.get(d["id"])
+        entry = {
+            **d,
+            "rd_registered": bool(rd or d.get("rustdesk_id")),
+            "rd_id": rd.get("rustdesk_id") if rd else d.get("rustdesk_id"),
+            "rd_password": rd.get("rustdesk_password") if rd else None,
+            "rd_entry_id": rd.get("id") if rd else None,
+            "rd_last_connected": rd.get("last_connected") if rd else None,
+            "rd_notes": rd.get("notes") if rd else None,
+        }
+        enriched.append(entry)
+
+    # Add standalone RustDesk entries not linked to a managed device
+    linked_ids = {r.get("linked_device_id") for r in rd_devices if r.get("linked_device_id")}
+    for rd in rd_devices:
+        if rd.get("linked_device_id") not in [d["id"] for d in devices]:
+            enriched.append({
+                "id": rd.get("id"),
+                "name": rd.get("device_name", "Unlinked Device"),
+                "hostname": None,
+                "client_id": rd.get("client_id"),
+                "client_name": rd.get("client_name"),
+                "device_type": "unknown",
+                "os": rd.get("os"),
+                "status": rd.get("status", "configured"),
+                "ip_address": None,
+                "rd_registered": True,
+                "rd_id": rd.get("rustdesk_id"),
+                "rd_password": rd.get("rustdesk_password"),
+                "rd_entry_id": rd.get("id"),
+                "rd_last_connected": rd.get("last_connected"),
+                "rd_notes": rd.get("notes"),
+            })
+
+    return enriched
+
+
+@router.put("/rustdesk/assign/{device_id}")
+async def assign_rustdesk_id(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Assign or update a RustDesk ID directly on a managed device, and create/update the rustdesk_devices entry"""
+    rd_id = data.get("rustdesk_id", "").strip()
+    rd_password = data.get("rustdesk_password", "").strip()
+    if not rd_id:
+        raise HTTPException(status_code=400, detail="RustDesk ID is required")
+
+    # Update the main device record
+    result = await db.devices.update_one({"id": device_id}, {"$set": {"rustdesk_id": rd_id}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "name": 1, "client_id": 1, "client_name": 1, "os": 1})
+
+    # Upsert a rustdesk_devices entry linked to this device
+    existing = await db.rustdesk_devices.find_one({"linked_device_id": device_id}, {"_id": 0})
+    if existing:
+        await db.rustdesk_devices.update_one(
+            {"linked_device_id": device_id},
+            {"$set": {"rustdesk_id": rd_id, "rustdesk_password": rd_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    else:
+        entry = {
+            "id": str(uuid.uuid4()), "client_id": device.get("client_id", ""),
+            "client_name": device.get("client_name", ""), "device_name": device.get("name", ""),
+            "rustdesk_id": rd_id, "rustdesk_password": rd_password, "os": device.get("os", ""),
+            "status": "configured", "last_connected": None, "notes": "",
+            "linked_device_id": device_id, "created_by": current_user["id"],
+            "created_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.rustdesk_devices.insert_one(entry)
+        entry.pop("_id", None)
+
+    return {"message": "RustDesk ID assigned", "rustdesk_id": rd_id}
+
+
+@router.post("/rustdesk/quick-connect")
+async def quick_connect(data: dict, current_user: dict = Depends(get_current_user)):
+    """Quick connect by RustDesk ID — logs session without requiring device registration"""
+    rd_id = data.get("rustdesk_id", "").strip()
+    if not rd_id:
+        raise HTTPException(status_code=400, detail="RustDesk ID required")
+
+    # Log the session
+    await db.rustdesk_sessions.insert_one({
+        "id": str(uuid.uuid4()), "device_id": None, "client_id": None,
+        "rustdesk_id": rd_id, "user_id": current_user["id"], "user_name": current_user["name"],
+        "status": "initiated", "started_at": datetime.now(timezone.utc).isoformat(), "ended_at": None,
+    })
+
+    return {"message": "Connection initiated", "rustdesk_id": rd_id, "connection_url": f"rustdesk://{rd_id}"}
