@@ -21,27 +21,30 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 30. 8-step guided onboarding wizard
 
 ### Phase 7: Advanced MSP Module Enrichment (DONE - 2026-03-21)
-31-48. All 16+ advanced MSP modules enriched (AI Resolution, QBR Generator, Comms Timeline, Tech Utilization, Backup Dashboard, Warranty Tracker, Compliance Frameworks, Client Budget, Vendor Scorecard, SLA Penalties, Alert Suppression, Incident Heatmap, Predictive Failure, Capacity Planner, Auto Documentation, NLP Query, Leaderboard, IT Documentation)
+31-48. All 16+ advanced MSP modules enriched to enterprise-grade
 
 ### Phase 8: MSP Command Center Dashboard (DONE - 2026-03-21)
-49. Cross-module intelligence hub — 8-tile strip + 3 detail cards (Urgent Failures, Backup Status, Compliance Posture)
+49. Cross-module intelligence hub — 8-tile strip + 3 detail cards
 
 ### Phase 9: Multi-Tenant Client Portal (DONE - 2026-03-23)
-50-59. Full portal SPA at `/portal-app` with email/password + TOTP 2FA, 8 client-scoped views (Dashboard, Tickets+Create, Devices, Invoices, Backups, Compliance, QBR, Settings), dark zinc theme, MSP branding + client logo spot
-- Backend: `/api/portal/v2/*` — 15 endpoints
-- Test user: john@acmecorp.com / portal123 (Acme Corporation)
+50-59. Full portal SPA at /portal-app with email/password + TOTP 2FA, 8 client-scoped views
 
 ### Phase 10: Admin Portal User Management (DONE - 2026-03-23)
-60. **Portal User Management Admin Page** — Full CRUD for portal users from MSP admin panel
-    - Stats dashboard (Total Users, Active, With 2FA, Clients)
-    - User table with search + client filter, permissions icons, 2FA status, last login, active/inactive toggle
-    - Invite User dialog (client selector, name, email, password, role, 4 permission toggles, primary contact flag)
-    - Edit User dialog (name, phone, role, status, permissions)
-    - Reset Password dialog
-    - Delete user with confirmation
-    - By Client tab (grouped cards + "Clients Without Portal Access" with quick-invite)
-    - Activity Log tab
-    - Copy Portal Link button
+60. Portal User Management admin page with full CRUD, by-client view, permissions
+
+### Phase 11: Remote Devices Module Rebuild (DONE - 2026-03-24)
+61. **Remote Devices Module** — Complete rebuild of the Remote Access page into a comprehensive device management hub:
+    - **Server Status Bar** — Live connection indicator with server URL
+    - **Quick Connect** — Enter any RustDesk ID and connect instantly, sessions logged
+    - **All Devices Table** — 135 devices with name/client/type/OS/status/RustDesk ID/Last Connected columns
+    - **Assign ID** — Register any managed device with its RustDesk ID + optional password
+    - **Connect Buttons** — One-click remote connect via `rustdesk://` protocol for registered devices
+    - **Registered Devices Tab** — Card view of all RustDesk-registered devices with connect
+    - **Session History** — Full remote session audit trail
+    - **Server Settings** — Configure server URL, API key, relay server
+    - **Search & Filters** — By name, hostname, RustDesk ID, client; filter by type and registration status
+    - **Backend**: Added GET /api/rustdesk/all-devices (merges devices + rustdesk_devices), PUT /api/rustdesk/assign/{id}, POST /api/rustdesk/quick-connect
+    - **Bug Fix**: Previously "ID does not exist" because rustdesk_devices collection was empty and no UI existed to populate it. Now devices are properly linked.
 
 ## Prioritized Backlog
 
@@ -49,19 +52,18 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Workshop Bench View (Kanban drag-and-drop)
 - Dispatch Map View (GPS field jobs)
 - Workflow Automation Builder (IF/THEN rules)
-- Scheduled PDF Reports (auto-generate weekly/monthly)
-- Knowledge Base / Wiki for techs
-- Profitability Dashboard (revenue vs cost per client)
+- Scheduled PDF Reports
+- Knowledge Base / Wiki
+- Profitability Dashboard
 - CRM integrations (Xero, Pax8, Domotz)
 
 ### P3
-- Implement /api/client-portal/access-logs endpoint for Activity Log
+- Implement /api/client-portal/access-logs endpoint
 - Decompose monolithic seed.py and navigation.js
 - Refactor TicketsPage.jsx into sub-components
-- Bluetooth barcode scanner
 - Fix recharts console warnings
-- Accessibility fixes (aria-describedby)
+- Accessibility fixes
 
 ## Authentication
-- MSP Admin: JWT auth — admin@nexusops.io / admin123
-- Client Portal: JWT portal tokens with TOTP 2FA — john@acmecorp.com / portal123
+- MSP Admin: JWT auth — aaron@stech.com.au / admin123
+- Client Portal: JWT portal tokens + TOTP 2FA — john@acmecorp.com / portal123
