@@ -33,18 +33,15 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 60. Portal User Management admin page with full CRUD, by-client view, permissions
 
 ### Phase 11: Remote Devices Module Rebuild (DONE - 2026-03-24)
-61. **Remote Devices Module** — Complete rebuild of the Remote Access page into a comprehensive device management hub:
-    - **Server Status Bar** — Live connection indicator with server URL
-    - **Quick Connect** — Enter any RustDesk ID and connect instantly, sessions logged
-    - **All Devices Table** — 135 devices with name/client/type/OS/status/RustDesk ID/Last Connected columns
-    - **Assign ID** — Register any managed device with its RustDesk ID + optional password
-    - **Connect Buttons** — One-click remote connect via `rustdesk://` protocol for registered devices
-    - **Registered Devices Tab** — Card view of all RustDesk-registered devices with connect
-    - **Session History** — Full remote session audit trail
-    - **Server Settings** — Configure server URL, API key, relay server
-    - **Search & Filters** — By name, hostname, RustDesk ID, client; filter by type and registration status
-    - **Backend**: Added GET /api/rustdesk/all-devices (merges devices + rustdesk_devices), PUT /api/rustdesk/assign/{id}, POST /api/rustdesk/quick-connect
-    - **Bug Fix**: Previously "ID does not exist" because rustdesk_devices collection was empty and no UI existed to populate it. Now devices are properly linked.
+61. Complete rebuild with RustDesk ID assignment, quick connect, session history, server settings
+
+### Phase 12: Technicians Page Overhaul (DONE - 2026-03-25)
+62. **Edit Bug Fix** — Edit dialog now opens immediately from technician detail view (was only appearing after clicking Back)
+63. **Categories/Roles** — 9 categories (SLA, Workshop, Cabling, Network, WISP, Field Service, Security, Cloud, Helpdesk) with color-coded badges, toggle selectors, and category filter
+64. **Archive/Delete System** — Archive (soft-deactivate, preserves history, restorable), Permanent Delete (with confirmation dialog), Active/Archived toggle view
+65. **Quick Stats Strip** — 5-metric dashboard strip (Active Techs, On Call Now, Overdue Tickets, Open Tickets, Avg Hours/Week)
+66. **Bulk Actions** — Checkbox selection, bulk Archive, bulk Set Categories, bulk Restore/Delete for archived techs
+67. **Backend Endpoints** — POST /api/technicians/{id}/archive, POST /api/technicians/{id}/restore, POST /api/technicians/bulk-action
 
 ## Prioritized Backlog
 
@@ -63,7 +60,8 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Refactor TicketsPage.jsx into sub-components
 - Fix recharts console warnings
 - Accessibility fixes
+- DB query optimization (N+1 patterns in tickets.py, clients.py)
 
 ## Authentication
-- MSP Admin: JWT auth — aaron@stech.com.au / admin123
-- Client Portal: JWT portal tokens + TOTP 2FA — john@acmecorp.com / portal123
+- MSP Admin: aaron@stech.com.au / admin123
+- Client Portal: john@acmecorp.com / portal123
