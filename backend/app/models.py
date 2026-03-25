@@ -28,8 +28,11 @@ class User(BaseModel):
     email_signature_html: Optional[str] = None
     phone: Optional[str] = None
     specialties: List[str] = []
+    categories: List[str] = []
     is_active: bool = True
     is_admin: bool = False
+    archived: bool = False
+    archived_at: Optional[str] = None
     about_me: Optional[str] = None
     hire_date: Optional[str] = None
     birthday: Optional[str] = None

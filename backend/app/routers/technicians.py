@@ -51,6 +51,32 @@ async def get_technicians_overview(current_user: dict = Depends(get_current_user
         })
     return result
 
+@router.post("/technicians/bulk-action")
+async def bulk_action_technicians(data: dict, current_user: dict = Depends(get_current_user)):
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Only admins can perform bulk actions")
+    ids = data.get("tech_ids", [])
+    action = data.get("action", "")
+    if not ids:
+        raise HTTPException(status_code=400, detail="No technicians selected")
+    if action == "archive":
+        await db.users.update_many({"id": {"$in": ids}}, {"$set": {"is_active": False, "archived": True, "archived_at": datetime.now(timezone.utc).isoformat()}})
+        return {"message": f"{len(ids)} technicians archived"}
+    elif action == "restore":
+        await db.users.update_many({"id": {"$in": ids}}, {"$set": {"is_active": True, "archived": False, "archived_at": None}})
+        return {"message": f"{len(ids)} technicians restored"}
+    elif action == "set_categories":
+        categories = data.get("categories", [])
+        await db.users.update_many({"id": {"$in": ids}}, {"$set": {"categories": categories}})
+        return {"message": f"Categories updated for {len(ids)} technicians"}
+    elif action == "delete":
+        await db.users.delete_many({"id": {"$in": ids}})
+        return {"message": f"{len(ids)} technicians permanently deleted"}
+    raise HTTPException(status_code=400, detail="Invalid action")
+
+
+
 @router.post("/technicians")
 async def create_technician(tech_data: dict, current_user: dict = Depends(get_current_user)):
     from passlib.context import CryptContext
@@ -67,6 +93,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
         hourly_rate=float(tech_data.get("hourly_rate", 75)),
         phone=tech_data.get("phone", ""),
         specialties=tech_data.get("specialties", []),
+        categories=tech_data.get("categories", []),
         is_active=tech_data.get("is_active", True),
         is_admin=tech_data.get("is_admin", False),
     )
@@ -82,9 +109,9 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
 
 @router.put("/technicians/{tech_id}")
 async def update_technician(tech_id: str, tech_data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "is_active",
+    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "categories", "is_active",
                "email_signature", "email_signature_html", "signature_config", "avatar",
-               "job_title", "permissions", "is_admin"}
+               "job_title", "permissions", "is_admin", "archived", "archived_at"}
     # Only admins can set is_admin and permissions
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
@@ -97,10 +124,34 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
     await db.users.update_one({"id": tech_id}, {"$set": update})
     return {"message": "Technician updated"}
 
+@router.post("/technicians/{tech_id}/archive")
+async def archive_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Only admins can archive technicians")
+    await db.users.update_one({"id": tech_id}, {"$set": {
+        "is_active": False, "archived": True,
+        "archived_at": datetime.now(timezone.utc).isoformat()
+    }})
+    return {"message": "Technician archived"}
+
+@router.post("/technicians/{tech_id}/restore")
+async def restore_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Only admins can restore technicians")
+    await db.users.update_one({"id": tech_id}, {"$set": {
+        "is_active": True, "archived": False, "archived_at": None
+    }})
+    return {"message": "Technician restored"}
+
 @router.delete("/technicians/{tech_id}")
 async def delete_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
-    await db.users.update_one({"id": tech_id}, {"$set": {"is_active": False}})
-    return {"message": "Technician deactivated"}
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Only admins can permanently delete technicians")
+    await db.users.delete_one({"id": tech_id})
+    return {"message": "Technician permanently deleted"}
 
 @router.get("/technicians/{tech_id}/dashboard")
 async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(get_current_user)):

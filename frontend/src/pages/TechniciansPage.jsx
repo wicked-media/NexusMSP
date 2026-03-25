@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -23,10 +24,22 @@ import {
   Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff,
   Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
   Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
-  Radio, Cable, ServerCrash, Siren, Settings
+  Radio, Cable, ServerCrash, Siren, Settings, Archive, ArchiveRestore, Trash2,
+  Users, UserX, Tags, ChevronDown, SquareCheckBig
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
+const TECH_CATEGORIES = [
+  { value: "sla", label: "SLA", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" },
+  { value: "workshop", label: "Workshop", color: "bg-purple-500/20 text-purple-400 border-purple-500/40" },
+  { value: "cabling", label: "Cabling", color: "bg-amber-500/20 text-amber-400 border-amber-500/40" },
+  { value: "network", label: "Network", color: "bg-blue-500/20 text-blue-400 border-blue-500/40" },
+  { value: "wisp", label: "WISP", color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/40" },
+  { value: "field_service", label: "Field Service", color: "bg-orange-500/20 text-orange-400 border-orange-500/40" },
+  { value: "security", label: "Security", color: "bg-red-500/20 text-red-400 border-red-500/40" },
+  { value: "cloud", label: "Cloud", color: "bg-indigo-500/20 text-indigo-400 border-indigo-500/40" },
+  { value: "helpdesk", label: "Helpdesk", color: "bg-teal-500/20 text-teal-400 border-teal-500/40" },
+];
 const MODULES = [
   { key: "tickets", label: "Tickets", icon: Ticket },
   { key: "clients", label: "Clients", icon: User },
@@ -60,12 +73,30 @@ const statusConfig = {
   closed: { label: "Closed", class: "text-gray-500 border-gray-500/30" }
 };
 
+const ON_CALL_CATEGORIES = {
+  sla: { label: "SLA", icon: Shield, bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
+  wisp: { label: "WISP", icon: Wifi, bg: "bg-cyan-500/20", text: "text-cyan-400", border: "border-cyan-500/40", ring: "ring-cyan-500/50", glow: "shadow-cyan-500/20 shadow-lg" },
+  workshop: { label: "WORKSHOP", icon: Wrench, bg: "bg-purple-500/20", text: "text-purple-400", border: "border-purple-500/40", ring: "ring-purple-500/50", glow: "shadow-purple-500/20 shadow-lg" },
+  cabling: { label: "CABLING", icon: Cable, bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40", ring: "ring-amber-500/50", glow: "shadow-amber-500/20 shadow-lg" },
+  network: { label: "NETWORK", icon: Radio, bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/40", ring: "ring-blue-500/50", glow: "shadow-blue-500/20 shadow-lg" },
+  emergency: { label: "EMERGENCY", icon: Siren, bg: "bg-red-500/20", text: "text-red-400", border: "border-red-500/40", ring: "ring-red-500/50", glow: "shadow-red-500/20 shadow-lg" },
+  general: { label: "ON CALL", icon: PhoneCall, bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
+};
+
+function getCategoryBadge(catValue) {
+  const c = TECH_CATEGORIES.find(x => x.value === catValue);
+  if (!c) return null;
+  return <Badge key={catValue} variant="outline" className={`text-[10px] ${c.color} border`}>{c.label}</Badge>;
+}
+
 export default function TechniciansPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const [techs, setTechs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [viewMode, setViewMode] = useState("active"); // active | archived
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingTech, setEditingTech] = useState(null);
   const [viewingTech, setViewingTech] = useState(null);
@@ -74,7 +105,6 @@ export default function TechniciansPage() {
   const [techActivity, setTechActivity] = useState(null);
   const [techRemoteSessions, setTechRemoteSessions] = useState(null);
   const [specialtyInput, setSpecialtyInput] = useState("");
-  const [mainTab, setMainTab] = useState("overview");
   const [detailTab, setDetailTab] = useState("tickets");
   const [leaderboard, setLeaderboard] = useState(null);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -105,9 +135,14 @@ export default function TechniciansPage() {
   const [swapDialog, setSwapDialog] = useState(false);
   const [swapShift, setSwapShift] = useState(null);
   const [swapTechId, setSwapTechId] = useState("");
+  const [selectedTechs, setSelectedTechs] = useState(new Set());
+  const [bulkCategoryDialog, setBulkCategoryDialog] = useState(false);
+  const [bulkCategories, setBulkCategories] = useState([]);
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [formData, setFormData] = useState({
     name: "", email: "", password: "nexusops123", role: "technician", job_title: "",
-    hourly_rate: "75", phone: "", specialties: [], is_admin: false
+    hourly_rate: "75", phone: "", specialties: [], categories: [], is_admin: false
   });
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -136,11 +171,11 @@ export default function TechniciansPage() {
     } catch { toast.error("Failed to load leaderboard"); }
   };
 
-  useEffect(() => { fetchTechs(); fetchLeaderboard(); fetchAllAchievements(); }, []);
-
   const fetchAllAchievements = async () => {
     try { const r = await axios.get(`${API}/achievements`, { headers }); setAllAchievements(r.data); } catch {}
   };
+
+  useEffect(() => { fetchTechs(); fetchLeaderboard(); fetchAllAchievements(); }, []);
 
   const fetchTechDashboard = async (tech) => {
     setViewingTech(tech);
@@ -158,7 +193,6 @@ export default function TechniciansPage() {
       setTechActivity(actRes.data);
       setTechRemoteSessions(remRes.data);
       setTechAchievements(achRes.data);
-      // Auto-check achievements
       axios.post(`${API}/technicians/${tech.id}/achievements/check`, {}, { headers }).then(r => {
         if (r.data.newly_awarded?.length > 0) {
           r.data.newly_awarded.forEach(n => toast.success(`Badge Unlocked: ${n}`));
@@ -230,21 +264,58 @@ export default function TechniciansPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
   };
 
-  const handleDeactivate = async (id) => {
+  const handleArchive = async (id) => {
     try {
-      await axios.delete(`${API}/technicians/${id}`, { headers });
-      toast.success("Technician deactivated"); fetchTechs();
-    } catch { toast.error("Failed"); }
+      await axios.post(`${API}/technicians/${id}/archive`, {}, { headers });
+      toast.success("Technician archived");
+      fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to archive"); }
   };
 
-  const resetForm = () => setFormData({ name: "", email: "", password: "nexusops123", role: "technician", job_title: "", hourly_rate: "75", phone: "", specialties: [], is_admin: false });
+  const handleRestore = async (id) => {
+    try {
+      await axios.post(`${API}/technicians/${id}/restore`, {}, { headers });
+      toast.success("Technician restored");
+      fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to restore"); }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await axios.delete(`${API}/technicians/${deleteTarget.id}`, { headers });
+      toast.success("Technician permanently deleted");
+      setDeleteConfirmDialog(false);
+      setDeleteTarget(null);
+      fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to delete"); }
+  };
+
+  const handleBulkAction = async (action) => {
+    const ids = [...selectedTechs];
+    if (!ids.length) { toast.error("No technicians selected"); return; }
+    try {
+      if (action === "set_categories") {
+        await axios.post(`${API}/technicians/bulk-action`, { tech_ids: ids, action, categories: bulkCategories }, { headers });
+        setBulkCategoryDialog(false);
+        setBulkCategories([]);
+      } else {
+        await axios.post(`${API}/technicians/bulk-action`, { tech_ids: ids, action }, { headers });
+      }
+      toast.success(`Bulk ${action} completed`);
+      setSelectedTechs(new Set());
+      fetchTechs();
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
+  };
+
+  const resetForm = () => setFormData({ name: "", email: "", password: "nexusops123", role: "technician", job_title: "", hourly_rate: "75", phone: "", specialties: [], categories: [], is_admin: false });
 
   const openEdit = (tech) => {
     setEditingTech(tech);
     setFormData({
       name: tech.name, email: tech.email, password: "", role: tech.role || "technician",
       job_title: tech.job_title || "", hourly_rate: String(tech.hourly_rate || 75),
-      phone: tech.phone || "", specialties: tech.specialties || [], is_admin: tech.is_admin || false,
+      phone: tech.phone || "", specialties: tech.specialties || [], categories: tech.categories || [], is_admin: tech.is_admin || false,
     });
     setIsCreateOpen(true);
   };
@@ -270,7 +341,7 @@ export default function TechniciansPage() {
       }, { headers });
       toast.success("Permissions updated");
       setPermDialog(false); fetchTechs();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed — only admins can modify permissions"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed - only admins can modify permissions"); }
   };
 
   const togglePerm = (module, action) => {
@@ -304,20 +375,20 @@ export default function TechniciansPage() {
   };
 
   const generateSignatureHtml = (c) => {
-    if (c.template === "minimal") {
-      return `<div style="font-family:Arial,sans-serif;font-size:13px;color:#333"><strong>${c.full_name}</strong>${c.job_title ? ` | ${c.job_title}` : ""}<br>${c.company}${c.phone ? ` | ${c.phone}` : ""}${c.email ? ` | ${c.email}` : ""}${c.website ? `<br><a href="${c.website}" style="color:#0066cc">${c.website}</a>` : ""}</div>`;
-    }
-    if (c.template === "technical") {
-      return `<table cellpadding="0" cellspacing="0" style="font-family:Consolas,monospace;font-size:12px;color:#e0e0e0;background:#1a1a2e;padding:16px;border-radius:8px;border-left:4px solid #00d4aa"><tr><td><div style="color:#00d4aa;font-size:15px;font-weight:bold">${c.full_name}</div><div style="color:#7b8794;margin:4px 0">${c.job_title || "Engineer"} @ ${c.company}</div><div style="margin-top:8px;color:#a0a0a0">${c.email ? `<span>${c.email}</span>` : ""}${c.phone ? ` | ${c.phone}` : ""}</div>${c.certifications ? `<div style="margin-top:6px;color:#00d4aa;font-size:11px">${c.certifications}</div>` : ""}${c.website ? `<div style="margin-top:6px"><a href="${c.website}" style="color:#4da6ff">${c.website}</a></div>` : ""}</td></tr></table>`;
-    }
-    if (c.template === "modern") {
-      return `<table cellpadding="0" cellspacing="0" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;border-collapse:collapse"><tr><td style="padding-right:16px;border-right:3px solid #10b981"><div style="font-size:16px;font-weight:700;color:#111">${c.full_name}</div><div style="color:#10b981;font-size:12px;font-weight:600;margin:2px 0">${c.job_title}</div><div style="color:#666;font-size:12px">${c.company}</div></td><td style="padding-left:16px;font-size:12px;color:#555">${c.email ? `<div>${c.email}</div>` : ""}${c.phone ? `<div>${c.phone}</div>` : ""}${c.website ? `<div><a href="${c.website}" style="color:#10b981;text-decoration:none">${c.website}</a></div>` : ""}${c.linkedin ? `<div><a href="${c.linkedin}" style="color:#0077b5;text-decoration:none">LinkedIn</a></div>` : ""}</td></tr></table>`;
-    }
-    // Professional (default)
+    if (c.template === "minimal") return `<div style="font-family:Arial,sans-serif;font-size:13px;color:#333"><strong>${c.full_name}</strong>${c.job_title ? ` | ${c.job_title}` : ""}<br>${c.company}${c.phone ? ` | ${c.phone}` : ""}${c.email ? ` | ${c.email}` : ""}${c.website ? `<br><a href="${c.website}" style="color:#0066cc">${c.website}</a>` : ""}</div>`;
+    if (c.template === "technical") return `<table cellpadding="0" cellspacing="0" style="font-family:Consolas,monospace;font-size:12px;color:#e0e0e0;background:#1a1a2e;padding:16px;border-radius:8px;border-left:4px solid #00d4aa"><tr><td><div style="color:#00d4aa;font-size:15px;font-weight:bold">${c.full_name}</div><div style="color:#7b8794;margin:4px 0">${c.job_title || "Engineer"} @ ${c.company}</div><div style="margin-top:8px;color:#a0a0a0">${c.email ? `<span>${c.email}</span>` : ""}${c.phone ? ` | ${c.phone}` : ""}</div>${c.certifications ? `<div style="margin-top:6px;color:#00d4aa;font-size:11px">${c.certifications}</div>` : ""}${c.website ? `<div style="margin-top:6px"><a href="${c.website}" style="color:#4da6ff">${c.website}</a></div>` : ""}</td></tr></table>`;
+    if (c.template === "modern") return `<table cellpadding="0" cellspacing="0" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;border-collapse:collapse"><tr><td style="padding-right:16px;border-right:3px solid #10b981"><div style="font-size:16px;font-weight:700;color:#111">${c.full_name}</div><div style="color:#10b981;font-size:12px;font-weight:600;margin:2px 0">${c.job_title}</div><div style="color:#666;font-size:12px">${c.company}</div></td><td style="padding-left:16px;font-size:12px;color:#555">${c.email ? `<div>${c.email}</div>` : ""}${c.phone ? `<div>${c.phone}</div>` : ""}${c.website ? `<div><a href="${c.website}" style="color:#10b981;text-decoration:none">${c.website}</a></div>` : ""}${c.linkedin ? `<div><a href="${c.linkedin}" style="color:#0077b5;text-decoration:none">LinkedIn</a></div>` : ""}</td></tr></table>`;
     return `<table cellpadding="0" cellspacing="0" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#333;border-collapse:collapse"><tr><td style="vertical-align:top;padding-right:16px;border-right:2px solid #1a56db"><div style="font-size:15px;font-weight:bold;color:#1a1a2e">${c.full_name}</div><div style="color:#1a56db;font-size:12px;margin:2px 0">${c.job_title}</div><div style="color:#555;font-size:12px;font-weight:600">${c.company}</div></td><td style="vertical-align:top;padding-left:16px;font-size:12px;color:#555;line-height:1.6">${c.phone ? `<div>P: ${c.phone}</div>` : ""}${c.email ? `<div>E: <a href="mailto:${c.email}" style="color:#1a56db;text-decoration:none">${c.email}</a></div>` : ""}${c.website ? `<div>W: <a href="${c.website}" style="color:#1a56db;text-decoration:none">${c.website}</a></div>` : ""}${c.linkedin ? `<div><a href="${c.linkedin}" style="color:#0077b5;text-decoration:none">LinkedIn Profile</a></div>` : ""}</td></tr>${c.certifications ? `<tr><td colspan="2" style="padding-top:8px;border-top:1px solid #e5e7eb;margin-top:8px;font-size:11px;color:#888">${c.certifications}</td></tr>` : ""}</table>`;
   };
 
   const addSpecialty = () => { if (specialtyInput.trim()) { setFormData(p => ({ ...p, specialties: [...p.specialties, specialtyInput.trim()] })); setSpecialtyInput(""); } };
+
+  const toggleCategory = (catValue) => {
+    setFormData(p => {
+      const cats = p.categories.includes(catValue) ? p.categories.filter(c => c !== catValue) : [...p.categories, catValue];
+      return { ...p, categories: cats };
+    });
+  };
 
   const handleCreateOnCallShift = async () => {
     if (!onCallForm.tech_id || !onCallForm.start_time || !onCallForm.end_time) { toast.error("Tech, start and end required"); return; }
@@ -353,21 +424,31 @@ export default function TechniciansPage() {
   };
 
   const isOnCall = (techId) => activeOnCall.some(s => s.tech_id === techId);
-
-  const ON_CALL_CATEGORIES = {
-    sla: { label: "SLA", icon: Shield, color: "emerald", bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
-    wisp: { label: "WISP", icon: Wifi, color: "cyan", bg: "bg-cyan-500/20", text: "text-cyan-400", border: "border-cyan-500/40", ring: "ring-cyan-500/50", glow: "shadow-cyan-500/20 shadow-lg" },
-    workshop: { label: "WORKSHOP", icon: Wrench, color: "purple", bg: "bg-purple-500/20", text: "text-purple-400", border: "border-purple-500/40", ring: "ring-purple-500/50", glow: "shadow-purple-500/20 shadow-lg" },
-    cabling: { label: "CABLING", icon: Cable, color: "amber", bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/40", ring: "ring-amber-500/50", glow: "shadow-amber-500/20 shadow-lg" },
-    network: { label: "NETWORK", icon: Radio, color: "blue", bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/40", ring: "ring-blue-500/50", glow: "shadow-blue-500/20 shadow-lg" },
-    emergency: { label: "EMERGENCY", icon: Siren, color: "red", bg: "bg-red-500/20", text: "text-red-400", border: "border-red-500/40", ring: "ring-red-500/50", glow: "shadow-red-500/20 shadow-lg" },
-    general: { label: "ON CALL", icon: PhoneCall, color: "emerald", bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },
-  };
-
   const getOnCallConfig = (category) => ON_CALL_CATEGORIES[category] || ON_CALL_CATEGORIES.general;
   const getOnCallShift = (techId) => activeOnCall.find(s => s.tech_id === techId);
 
-  const filtered = techs.filter(t => !searchQuery || t.name?.toLowerCase().includes(searchQuery.toLowerCase()) || t.email?.toLowerCase().includes(searchQuery.toLowerCase()) || (t.job_title || "").toLowerCase().includes(searchQuery.toLowerCase()));
+  const toggleSelectTech = (id) => {
+    setSelectedTechs(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+
+  // Computed stats
+  const activeTechs = techs.filter(t => !t.archived && t.is_active !== false);
+  const archivedTechs = techs.filter(t => t.archived);
+  const totalOverdue = techs.reduce((s, t) => s + (t.overdue_count || 0), 0);
+  const totalOpen = activeTechs.reduce((s, t) => s + (t.open_count || 0), 0);
+  const avgHours = activeTechs.length ? (activeTechs.reduce((s, t) => s + (t.hours_this_week || 0), 0) / activeTechs.length).toFixed(1) : 0;
+
+  const displayTechs = viewMode === "archived" ? archivedTechs : activeTechs;
+  const filtered = displayTechs.filter(t => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch = !q || t.name?.toLowerCase().includes(q) || t.email?.toLowerCase().includes(q) || (t.job_title || "").toLowerCase().includes(q);
+    const matchCat = filterCategory === "all" || (t.categories || []).includes(filterCategory);
+    return matchSearch && matchCat;
+  });
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -381,8 +462,9 @@ export default function TechniciansPage() {
           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">{technician.name?.charAt(0)?.toUpperCase()}</div>
           <div>
             <h1 className="text-2xl font-bold">{technician.name}</h1>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
               {technician.job_title && <Badge variant="secondary" className="text-xs">{technician.job_title}</Badge>}
+              {(technician.categories || []).map(c => getCategoryBadge(c))}
               <Mail className="w-3 h-3" />{technician.email}
               {technician.phone && <><Phone className="w-3 h-3 ml-2" />{technician.phone}</>}
             </div>
@@ -391,9 +473,10 @@ export default function TechniciansPage() {
             {technician.is_admin && <Badge className="bg-amber-600"><Crown className="w-3 h-3 mr-1" />Admin</Badge>}
             <Badge variant="outline" className="capitalize">{technician.role}</Badge>
             <Badge className={technician.is_active !== false ? "bg-green-600" : "bg-gray-500"}>{technician.is_active !== false ? "Active" : "Inactive"}</Badge>
-            <Button variant="outline" size="sm" onClick={() => openEdit(technician)}><Edit className="w-4 h-4 mr-1" />Edit</Button>
+            <Button variant="outline" size="sm" onClick={() => openEdit(technician)} data-testid="detail-edit-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
             <Button variant="outline" size="sm" onClick={() => openPermissions(technician)} data-testid="manage-permissions-btn"><Shield className="w-4 h-4 mr-1" />Permissions</Button>
             <Button variant="outline" size="sm" onClick={() => openSignature(technician)} data-testid="email-signature-btn"><Mail className="w-4 h-4 mr-1" />Signature</Button>
+            <Button variant="outline" size="sm" className="text-amber-500 border-amber-500/30 hover:bg-amber-500/10" onClick={() => handleArchive(technician.id)} data-testid="detail-archive-btn"><Archive className="w-4 h-4 mr-1" />Archive</Button>
           </div>
         </div>
 
@@ -461,10 +544,7 @@ export default function TechniciansPage() {
                               <div className="flex-1 bg-emerald-500/50 rounded-t" style={{ height: `${(m.closed / maxVal) * 100}%`, minHeight: m.closed > 0 ? "4px" : "0" }} title={`Closed: ${m.closed}`} />
                             </div>
                             <p className="text-[10px] text-muted-foreground">{m.label}</p>
-                            <div className="flex gap-2 text-[10px]">
-                              <span className="text-blue-400">{m.opened}</span>
-                              <span className="text-emerald-400">{m.closed}</span>
-                            </div>
+                            <div className="flex gap-2 text-[10px]"><span className="text-blue-400">{m.opened}</span><span className="text-emerald-400">{m.closed}</span></div>
                           </div>
                         );
                       })}
@@ -501,19 +581,11 @@ export default function TechniciansPage() {
           </TabsContent>
 
           <TabsContent value="permissions">
-            <div className="mt-4">
-              <PermissionsGrid permissions={technician.permissions || {}} readOnly />
-            </div>
+            <div className="mt-4"><PermissionsGrid permissions={technician.permissions || {}} /></div>
           </TabsContent>
 
           <TabsContent value="achievements">
-            <AchievementsTab
-              earned={techAchievements}
-              allDefs={allAchievements}
-              techName={technician.name}
-              techId={technician.id}
-              onAward={() => { setAwardTarget(viewingTech); setAwardDialog(true); }}
-            />
+            <AchievementsTab earned={techAchievements} allDefs={allAchievements} techName={technician.name} techId={technician.id} onAward={() => { setAwardTarget(viewingTech); setAwardDialog(true); }} />
           </TabsContent>
 
           <TabsContent value="profile">
@@ -548,8 +620,8 @@ export default function TechniciansPage() {
           </Card>
         )}
 
-        {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} />}
-        {sigDialog && <SignatureDialog sigConfig={sigConfig} setSigConfig={setSigConfig} handleSaveSignature={handleSaveSignature} setSigDialog={setSigDialog} generateSignatureHtml={generateSignatureHtml} />}
+        {/* DIALOGS rendered inside detail view so they work when detail view is active */}
+        {renderAllDialogs()}
       </div>
     );
   }
@@ -578,10 +650,7 @@ export default function TechniciansPage() {
                       {i === 0 ? <Crown className="w-5 h-5" /> : i === 1 ? <Award className="w-5 h-5" /> : i === 2 ? <Star className="w-5 h-5" /> : `#${entry.rank}`}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold">{entry.name}</p>
-                        {entry.job_title && <Badge variant="secondary" className="text-[10px]">{entry.job_title}</Badge>}
-                      </div>
+                      <div className="flex items-center gap-2"><p className="font-semibold">{entry.name}</p>{entry.job_title && <Badge variant="secondary" className="text-[10px]">{entry.job_title}</Badge>}</div>
                       <p className="text-xs text-muted-foreground">{entry.email}</p>
                     </div>
                   </div>
@@ -601,11 +670,237 @@ export default function TechniciansPage() {
     );
   }
 
+  // ========== SHARED DIALOG RENDERER ==========
+  function renderAllDialogs() {
+    return (
+      <>
+        {/* CREATE/EDIT DIALOG */}
+        <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingTech(null); }}>
+          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+            <DialogHeader><DialogTitle>{editingTech ? "Edit Technician" : "Add Technician"}</DialogTitle><DialogDescription>Fill in the details below.</DialogDescription></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Full Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="tech-name" /></div>
+                <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} data-testid="tech-email" /></div>
+              </div>
+              {!editingTech && <div><Label>Password</Label><Input type="password" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} /></div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Job Title</Label>
+                  <Select value={formData.job_title} onValueChange={v => setFormData({ ...formData, job_title: v })}>
+                    <SelectTrigger data-testid="tech-job-title"><SelectValue placeholder="Select title" /></SelectTrigger>
+                    <SelectContent>{JOB_TITLES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Role</Label>
+                  <Select value={formData.role} onValueChange={v => setFormData({ ...formData, role: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="technician">Technician</SelectItem>
+                      <SelectItem value="dispatcher">Dispatcher</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Hourly Rate ($)</Label><Input type="number" value={formData.hourly_rate} onChange={e => setFormData({ ...formData, hourly_rate: e.target.value })} /></div>
+                <div><Label>Phone</Label><Input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
+              </div>
+              {/* CATEGORIES */}
+              <div>
+                <Label className="flex items-center gap-1.5 mb-2"><Tags className="w-3.5 h-3.5" />Categories / Roles</Label>
+                <div className="flex gap-2 flex-wrap">
+                  {TECH_CATEGORIES.map(cat => (
+                    <button key={cat.value} type="button" onClick={() => toggleCategory(cat.value)}
+                      className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${formData.categories.includes(cat.value) ? cat.color + " ring-1" : "bg-muted/30 text-muted-foreground border-muted hover:border-primary/40"}`}
+                      data-testid={`cat-toggle-${cat.value}`}>
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Specialties</Label>
+                <div className="flex gap-2 flex-wrap mb-2">{formData.specialties.map((s, i) => (<Badge key={i} variant="secondary" className="cursor-pointer" onClick={() => setFormData(p => ({ ...p, specialties: p.specialties.filter((_, j) => j !== i) }))}>{s} <XCircle className="w-3 h-3 ml-1" /></Badge>))}</div>
+                <div className="flex gap-2"><Input className="flex-1" placeholder="e.g. Networking, Azure" value={specialtyInput} onChange={e => setSpecialtyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addSpecialty())} /><Button type="button" variant="outline" size="sm" onClick={addSpecialty}>Add</Button></div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={handleCreate} data-testid="save-tech-btn">{editingTech ? "Update" : "Add"} Technician</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} />}
+        {sigDialog && <SignatureDialog sigConfig={sigConfig} setSigConfig={setSigConfig} handleSaveSignature={handleSaveSignature} setSigDialog={setSigDialog} generateSignatureHtml={generateSignatureHtml} />}
+
+        {/* Profile Edit Dialog */}
+        <Dialog open={profileDialog} onOpenChange={setProfileDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Edit Profile - {profileTarget?.name}</DialogTitle><DialogDescription>Update profile details below.</DialogDescription></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>About Me</Label><Textarea value={profileData.about_me} onChange={e => setProfileData({...profileData, about_me: e.target.value})} placeholder="Tell us about yourself..." rows={4} data-testid="profile-about-me" /></div>
+              <div><Label>Hire Date</Label><Input type="date" value={profileData.hire_date} onChange={e => setProfileData({...profileData, hire_date: e.target.value})} data-testid="profile-hire-date" /></div>
+              <div><Label>Birthday</Label><Input type="date" value={profileData.birthday} onChange={e => setProfileData({...profileData, birthday: e.target.value})} data-testid="profile-birthday" /></div>
+            </div>
+            <DialogFooter><Button onClick={updateProfile} data-testid="save-profile-btn">Save Profile</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Award Badge Dialog */}
+        <Dialog open={awardDialog} onOpenChange={setAwardDialog}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader><DialogTitle>Award Badge - {awardTarget?.name}</DialogTitle><DialogDescription>Select a badge to award.</DialogDescription></DialogHeader>
+            <div className="grid grid-cols-2 gap-2">
+              {allAchievements.map(a => (
+                <Button key={a.id} variant="outline" className="h-auto py-3 flex flex-col items-center gap-1 hover:border-primary" onClick={() => awardBadge(a)} data-testid={`award-${a.id}`}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: a.color + "30", color: a.color }}><AchievementIcon icon={a.icon} /></div>
+                  <span className="text-xs font-medium">{a.name}</span>
+                  <span className="text-[10px] text-muted-foreground text-center">{a.description}</span>
+                </Button>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Teams Status Dialog */}
+        <Dialog open={teamsStatusDialog} onOpenChange={setTeamsStatusDialog}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Update Teams Status</DialogTitle><DialogDescription>Set your availability.</DialogDescription></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>Availability</Label>
+                <Select value={teamsData.availability} onValueChange={v => setTeamsData({...teamsData, availability: v})}>
+                  <SelectTrigger data-testid="teams-availability"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Available">Available</SelectItem>
+                    <SelectItem value="Busy">Busy</SelectItem>
+                    <SelectItem value="DoNotDisturb">Do Not Disturb</SelectItem>
+                    <SelectItem value="Away">Away</SelectItem>
+                    <SelectItem value="Offline">Offline</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Status Message</Label><Input value={teamsData.status_message} onChange={e => setTeamsData({...teamsData, status_message: e.target.value})} placeholder="What are you working on?" data-testid="teams-status-msg" /></div>
+            </div>
+            <DialogFooter><Button onClick={updateTeamsStatus} data-testid="save-teams-status"><MessageSquare className="w-4 h-4 mr-1" />Update Status</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ON-CALL SCHEDULE DIALOG */}
+        <Dialog open={onCallDialog} onOpenChange={setOnCallDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" />Schedule On-Call Shift</DialogTitle><DialogDescription>Assign a technician to an on-call shift.</DialogDescription></DialogHeader>
+            <div className="space-y-4">
+              <div><Label>Technician</Label>
+                <Select value={onCallForm.tech_id || "__none"} onValueChange={v => { const t = techs.find(x => x.id === v); setOnCallForm(f => ({ ...f, tech_id: v === "__none" ? "" : v, tech_name: t?.name || "" })); }}>
+                  <SelectTrigger data-testid="on-call-tech-select"><SelectValue placeholder="Select technician" /></SelectTrigger>
+                  <SelectContent>{activeTechs.map(t => <SelectItem key={t.id} value={t.id}>{t.name} - {t.job_title || t.role}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Category</Label>
+                  <Select value={onCallForm.category} onValueChange={v => setOnCallForm(f => ({ ...f, category: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="general">General</SelectItem>
+                      <SelectItem value="sla">SLA</SelectItem>
+                      <SelectItem value="wisp">WISP</SelectItem>
+                      <SelectItem value="cabling">Cabling</SelectItem>
+                      <SelectItem value="workshop">Workshop</SelectItem>
+                      <SelectItem value="network">Network</SelectItem>
+                      <SelectItem value="emergency">Emergency</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Shift Type</Label>
+                  <Select value={onCallForm.shift_type} onValueChange={v => setOnCallForm(f => ({ ...f, shift_type: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="primary">Primary</SelectItem>
+                      <SelectItem value="secondary">Secondary</SelectItem>
+                      <SelectItem value="backup">Backup</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Start</Label><Input type="datetime-local" value={onCallForm.start_time} onChange={e => setOnCallForm(f => ({ ...f, start_time: e.target.value }))} data-testid="on-call-start" /></div>
+                <div><Label>End</Label><Input type="datetime-local" value={onCallForm.end_time} onChange={e => setOnCallForm(f => ({ ...f, end_time: e.target.value }))} data-testid="on-call-end" /></div>
+              </div>
+              <div><Label>Notes</Label><Input value={onCallForm.notes} onChange={e => setOnCallForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" /></div>
+            </div>
+            <DialogFooter><Button onClick={handleCreateOnCallShift} data-testid="confirm-on-call-btn"><PhoneCall className="w-4 h-4 mr-1" />Schedule & Notify</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* SWAP DIALOG */}
+        <Dialog open={swapDialog} onOpenChange={setSwapDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-amber-400" />Swap On-Call Shift</DialogTitle><DialogDescription>Swap the on-call shift between technicians.</DialogDescription></DialogHeader>
+            <div className="space-y-4">
+              {swapShift && <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-sm">Current: <span className="font-semibold">{swapShift.tech_name}</span></p><p className="text-xs text-muted-foreground">{swapShift.start_time?.slice(0, 16)} - {swapShift.end_time?.slice(0, 16)} ({swapShift.category})</p></div>}
+              <div><Label>Swap To</Label>
+                <Select value={swapTechId || "__none"} onValueChange={v => setSwapTechId(v === "__none" ? "" : v)}>
+                  <SelectTrigger data-testid="swap-tech-select"><SelectValue placeholder="Select new tech" /></SelectTrigger>
+                  <SelectContent>{techs.filter(t => t.id !== swapShift?.tech_id).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">Both technicians will be notified of the swap.</p>
+            </div>
+            <DialogFooter><Button onClick={handleSwapShift} disabled={!swapTechId} data-testid="confirm-swap-btn"><ArrowRightLeft className="w-4 h-4 mr-1" />Confirm Swap</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* DELETE CONFIRM DIALOG */}
+        <Dialog open={deleteConfirmDialog} onOpenChange={setDeleteConfirmDialog}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-500"><Trash2 className="w-5 h-5" />Permanently Delete</DialogTitle>
+              <DialogDescription>This action cannot be undone. The technician will be permanently removed from the system. Ticket history and logs will be preserved.</DialogDescription>
+            </DialogHeader>
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <p className="text-sm font-medium">{deleteTarget?.name}</p>
+              <p className="text-xs text-muted-foreground">{deleteTarget?.email}</p>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setDeleteConfirmDialog(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={handlePermanentDelete} data-testid="confirm-delete-btn"><Trash2 className="w-4 h-4 mr-1" />Delete Forever</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* BULK CATEGORY DIALOG */}
+        <Dialog open={bulkCategoryDialog} onOpenChange={setBulkCategoryDialog}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Set Categories for {selectedTechs.size} Technicians</DialogTitle><DialogDescription>Select categories to assign.</DialogDescription></DialogHeader>
+            <div className="flex gap-2 flex-wrap">
+              {TECH_CATEGORIES.map(cat => (
+                <button key={cat.value} type="button"
+                  onClick={() => setBulkCategories(prev => prev.includes(cat.value) ? prev.filter(c => c !== cat.value) : [...prev, cat.value])}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${bulkCategories.includes(cat.value) ? cat.color + " ring-1" : "bg-muted/30 text-muted-foreground border-muted hover:border-primary/40"}`}>
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+            <DialogFooter><Button onClick={() => handleBulkAction("set_categories")} data-testid="bulk-set-categories-btn"><Tags className="w-4 h-4 mr-1" />Apply Categories</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   // ========== LIST VIEW ==========
   return (
     <div className="space-y-4" data-testid="technicians-page">
+      {/* Quick Stats Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="border-blue-500/20 bg-blue-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Users className="w-8 h-8 text-blue-400 opacity-60" /><div><p className="text-2xl font-bold">{activeTechs.length}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Active Techs</p></div></CardContent></Card>
+        <Card className="border-emerald-500/20 bg-emerald-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><PhoneCall className="w-8 h-8 text-emerald-400 opacity-60" /><div><p className="text-2xl font-bold">{activeOnCall.length}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">On Call Now</p></div></CardContent></Card>
+        <Card className="border-orange-500/20 bg-orange-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><AlertTriangle className="w-8 h-8 text-orange-400 opacity-60" /><div><p className="text-2xl font-bold text-orange-500">{totalOverdue}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Overdue Tickets</p></div></CardContent></Card>
+        <Card className="border-cyan-500/20 bg-cyan-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Ticket className="w-8 h-8 text-cyan-400 opacity-60" /><div><p className="text-2xl font-bold">{totalOpen}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Open Tickets</p></div></CardContent></Card>
+        <Card className="border-purple-500/20 bg-purple-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Clock className="w-8 h-8 text-purple-400 opacity-60" /><div><p className="text-2xl font-bold">{avgHours}h</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Avg Hours/Week</p></div></CardContent></Card>
+      </div>
+
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Technicians</h1><p className="text-muted-foreground">{techs.length} team members</p></div>
+        <div><h1 className="text-3xl font-bold tracking-tight">Technicians</h1><p className="text-muted-foreground">{activeTechs.length} active, {archivedTechs.length} archived</p></div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleCheckReorder} data-testid="check-reorder-btn"><RefreshCw className="w-4 h-4 mr-1" />Check Reorder</Button>
           <Button variant="outline" onClick={() => setShowLeaderboard(true)} data-testid="leaderboard-btn"><Trophy className="w-4 h-4 mr-1 text-yellow-500" />Leaderboard</Button>
@@ -613,21 +908,49 @@ export default function TechniciansPage() {
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Search by name, email, or title..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="tech-search" />
+      {/* Search, Filters, View Toggle */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-9" placeholder="Search by name, email, or title..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="tech-search" />
+        </div>
+        <Select value={filterCategory} onValueChange={setFilterCategory}>
+          <SelectTrigger className="w-40" data-testid="filter-category"><SelectValue placeholder="All Categories" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {TECH_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <div className="flex rounded-lg border overflow-hidden">
+          <button onClick={() => { setViewMode("active"); setSelectedTechs(new Set()); }} className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === "active" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} data-testid="view-active"><Users className="w-3.5 h-3.5 inline mr-1" />Active ({activeTechs.length})</button>
+          <button onClick={() => { setViewMode("archived"); setSelectedTechs(new Set()); }} className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === "archived" ? "bg-amber-600 text-white" : "hover:bg-muted"}`} data-testid="view-archived"><Archive className="w-3.5 h-3.5 inline mr-1" />Archived ({archivedTechs.length})</button>
+        </div>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedTechs.size > 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="py-2.5 px-4 flex items-center justify-between">
+            <span className="text-sm font-medium"><SquareCheckBig className="w-4 h-4 inline mr-1.5 text-primary" />{selectedTechs.size} selected</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkCategoryDialog(true)} data-testid="bulk-categories-btn"><Tags className="w-3 h-3 mr-1" />Set Categories</Button>
+              {viewMode === "active" && <Button size="sm" variant="outline" className="h-7 text-xs text-amber-500 border-amber-500/30" onClick={() => handleBulkAction("archive")} data-testid="bulk-archive-btn"><Archive className="w-3 h-3 mr-1" />Archive</Button>}
+              {viewMode === "archived" && <Button size="sm" variant="outline" className="h-7 text-xs text-green-500 border-green-500/30" onClick={() => handleBulkAction("restore")} data-testid="bulk-restore-btn"><ArchiveRestore className="w-3 h-3 mr-1" />Restore</Button>}
+              {viewMode === "archived" && <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleBulkAction("delete")} data-testid="bulk-delete-btn"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>}
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedTechs(new Set())}><XCircle className="w-3 h-3 mr-1" />Clear</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ON-CALL ROSTER */}
-      {activeOnCall.length > 0 && (
+      {viewMode === "active" && activeOnCall.length > 0 && (
         <Card className="border-emerald-500/30 bg-gradient-to-r from-emerald-500/5 via-transparent to-cyan-500/5 overflow-hidden">
           <CardContent className="py-3 px-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                    <PhoneCall className="w-5 h-5 text-emerald-400" />
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center"><PhoneCall className="w-5 h-5 text-emerald-400" /></div>
                   <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full animate-ping" />
                   <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full" />
                 </div>
@@ -656,20 +979,17 @@ export default function TechniciansPage() {
           </CardContent>
         </Card>
       )}
-      {activeOnCall.length === 0 && (
+      {viewMode === "active" && activeOnCall.length === 0 && (
         <Card className="border-dashed border-muted-foreground/20">
           <CardContent className="py-3 px-4 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-muted-foreground">
-              <PhoneCall className="w-5 h-5 opacity-40" />
-              <span className="text-sm">No one currently on call</span>
-            </div>
+            <div className="flex items-center gap-3 text-muted-foreground"><PhoneCall className="w-5 h-5 opacity-40" /><span className="text-sm">No one currently on call</span></div>
             <Button size="sm" variant="outline" onClick={() => setOnCallDialog(true)} data-testid="schedule-on-call-empty-btn"><Plus className="w-3 h-3 mr-1" />Schedule On-Call</Button>
           </CardContent>
         </Card>
       )}
 
-      {/* On-Call Roster List (collapsed) */}
-      {onCallRoster.length > 0 && (
+      {/* On-Call Roster List */}
+      {viewMode === "active" && onCallRoster.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2">
             <Calendar className="w-4 h-4" />View Full Roster ({onCallRoster.length} shifts)
@@ -683,8 +1003,7 @@ export default function TechniciansPage() {
               return (
                 <div key={shift.id} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isActive ? `${cfg.border} ${cfg.bg} ${cfg.glow}` : "bg-muted/20"}`} data-testid={`roster-shift-${shift.id}`}>
                   <div className="flex items-center gap-3">
-                    {isActive && <Icon className={`w-4 h-4 ${cfg.text} animate-pulse`} />}
-                    {!isActive && <Clock className="w-4 h-4 text-muted-foreground" />}
+                    {isActive ? <Icon className={`w-4 h-4 ${cfg.text} animate-pulse`} /> : <Clock className="w-4 h-4 text-muted-foreground" />}
                     <div>
                       <p className="text-sm font-medium">{shift.tech_name}</p>
                       <p className="text-xs text-muted-foreground">{shift.start_time?.slice(0, 16)} - {shift.end_time?.slice(0, 16)}</p>
@@ -704,275 +1023,121 @@ export default function TechniciansPage() {
         </details>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map(tech => (
-          <Card key={tech.id} className={`cursor-pointer hover:border-primary/50 transition-colors relative ${tech.no_notes_count > 0 ? 'border-red-500/30' : ''}`} onClick={() => fetchTechDashboard(tech)} data-testid={`tech-card-${tech.id}`}>
-            <CardContent className="pt-4">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="relative"
-                    onMouseEnter={() => { setHoveredTech(tech.id); fetchTechStatus(tech.id); }}
-                    onMouseLeave={() => setHoveredTech(null)}
-                  >
-                    {tech.avatar ? (
-                      <img src={tech.avatar} alt={tech.name} className="w-12 h-12 rounded-full object-cover border-2 border-primary/30" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">{tech.name?.charAt(0)?.toUpperCase()}</div>
-                    )}
-                    {/* Hover Card */}
-                    {hoveredTech === tech.id && techStatusCard && (
-                      <div className="absolute left-14 top-0 z-50 w-72 rounded-xl border bg-card shadow-xl p-4 space-y-2 animate-in fade-in-0 zoom-in-95" data-testid={`hover-card-${tech.id}`} onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full ${techStatusCard.status_type === "remote" ? "bg-green-500 animate-pulse" : techStatusCard.status_type === "active" ? "bg-blue-500" : "bg-zinc-400"}`} />
-                          <span className="text-sm font-medium">{techStatusCard.status_text}</span>
-                        </div>
-                        {techStatusCard.active_sessions?.length > 0 && (
-                          <div className="text-xs space-y-1">
-                            {techStatusCard.active_sessions.map(s => (
-                              <div key={s.id} className="flex items-center gap-1.5 text-emerald-400">
-                                <Monitor className="w-3 h-3" />
-                                <span>{s.device_name} ({s.client_name})</span>
-                                <span className="text-muted-foreground">{s.live_duration_minutes}m</span>
-                              </div>
-                            ))}
+      {/* TECH CARDS GRID */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          {viewMode === "archived" ? <><Archive className="w-12 h-12 mx-auto mb-3 opacity-40" /><p className="text-lg font-medium">No Archived Technicians</p><p className="text-sm">Archived technicians will appear here</p></> : <><UserX className="w-12 h-12 mx-auto mb-3 opacity-40" /><p className="text-lg font-medium">No Technicians Found</p><p className="text-sm">Try adjusting your search or filters</p></>}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(tech => (
+            <Card key={tech.id} className={`hover:border-primary/50 transition-colors relative ${tech.no_notes_count > 0 ? 'border-red-500/30' : ''} ${selectedTechs.has(tech.id) ? 'ring-2 ring-primary border-primary' : ''} ${tech.archived ? 'opacity-75' : ''}`} data-testid={`tech-card-${tech.id}`}>
+              <CardContent className="pt-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    {/* Checkbox for selection */}
+                    <div onClick={e => e.stopPropagation()}>
+                      <Checkbox checked={selectedTechs.has(tech.id)} onCheckedChange={() => toggleSelectTech(tech.id)} data-testid={`select-tech-${tech.id}`} />
+                    </div>
+                    <div className="relative cursor-pointer" onClick={() => fetchTechDashboard(tech)}
+                      onMouseEnter={() => { setHoveredTech(tech.id); fetchTechStatus(tech.id); }}
+                      onMouseLeave={() => setHoveredTech(null)}>
+                      {tech.avatar ? (
+                        <img src={tech.avatar} alt={tech.name} className="w-12 h-12 rounded-full object-cover border-2 border-primary/30" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">{tech.name?.charAt(0)?.toUpperCase()}</div>
+                      )}
+                      {hoveredTech === tech.id && techStatusCard && (
+                        <div className="absolute left-14 top-0 z-50 w-72 rounded-xl border bg-card shadow-xl p-4 space-y-2 animate-in fade-in-0 zoom-in-95" data-testid={`hover-card-${tech.id}`} onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2.5 h-2.5 rounded-full ${techStatusCard.status_type === "remote" ? "bg-green-500 animate-pulse" : techStatusCard.status_type === "active" ? "bg-blue-500" : "bg-zinc-400"}`} />
+                            <span className="text-sm font-medium">{techStatusCard.status_text}</span>
                           </div>
-                        )}
-                        {techStatusCard.assigned_tickets?.length > 0 && (
-                          <div className="text-xs space-y-1 border-t pt-2">
-                            <p className="text-muted-foreground">Assigned Tickets:</p>
-                            {techStatusCard.assigned_tickets.slice(0, 3).map(t => (
-                              <div key={t.id} className="flex items-center gap-1.5">
-                                <Ticket className="w-3 h-3 text-blue-400" />
-                                <span className="truncate">{t.ticket_number}: {t.title}</span>
-                              </div>
-                            ))}
-                            {techStatusCard.assigned_tickets.length > 3 && <p className="text-muted-foreground">+{techStatusCard.assigned_tickets.length - 3} more</p>}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground pt-1 border-t">
-                          <Trophy className="w-3 h-3 text-amber-500" />{techStatusCard.achievement_count} badges
+                          {techStatusCard.active_sessions?.length > 0 && (
+                            <div className="text-xs space-y-1">
+                              {techStatusCard.active_sessions.map(s => (
+                                <div key={s.id} className="flex items-center gap-1.5 text-emerald-400"><Monitor className="w-3 h-3" /><span>{s.device_name} ({s.client_name})</span><span className="text-muted-foreground">{s.live_duration_minutes}m</span></div>
+                              ))}
+                            </div>
+                          )}
+                          {techStatusCard.assigned_tickets?.length > 0 && (
+                            <div className="text-xs space-y-1 border-t pt-2">
+                              <p className="text-muted-foreground">Assigned Tickets:</p>
+                              {techStatusCard.assigned_tickets.slice(0, 3).map(t => (
+                                <div key={t.id} className="flex items-center gap-1.5"><Ticket className="w-3 h-3 text-blue-400" /><span className="truncate">{t.ticket_number}: {t.title}</span></div>
+                              ))}
+                              {techStatusCard.assigned_tickets.length > 3 && <p className="text-muted-foreground">+{techStatusCard.assigned_tickets.length - 3} more</p>}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground pt-1 border-t"><Trophy className="w-3 h-3 text-amber-500" />{techStatusCard.achievement_count} badges</div>
                         </div>
+                      )}
+                    </div>
+                    <div className="cursor-pointer" onClick={() => fetchTechDashboard(tech)}>
+                      <p className="font-semibold">{tech.name}</p>
+                      <p className="text-xs text-muted-foreground">{tech.email}</p>
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {tech.job_title && <Badge variant="secondary" className="text-[10px]">{tech.job_title}</Badge>}
+                        <Badge variant="outline" className="text-[10px] capitalize">{tech.role}</Badge>
+                        {tech.is_admin && <Badge className="bg-amber-600 text-[10px]"><Crown className="w-2 h-2 mr-0.5" />Admin</Badge>}
+                        {tech.archived && <Badge className="bg-zinc-600 text-[10px]"><Archive className="w-2 h-2 mr-0.5" />Archived</Badge>}
+                        {isOnCall(tech.id) && (() => {
+                          const shift = getOnCallShift(tech.id);
+                          const cfg = getOnCallConfig(shift?.category);
+                          const Icon = cfg.icon;
+                          return <Badge className={`${cfg.bg} ${cfg.text} ${cfg.border} text-[10px] animate-pulse ring-1 ${cfg.ring} ${cfg.glow}`} data-testid={`on-call-badge-${tech.id}`}><Icon className="w-2.5 h-2.5 mr-0.5" />{cfg.label}</Badge>;
+                        })()}
                       </div>
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-semibold">{tech.name}</p>
-                    <p className="text-xs text-muted-foreground">{tech.email}</p>
-                    <div className="flex gap-1 mt-1 flex-wrap">
-                      {tech.job_title && <Badge variant="secondary" className="text-[10px]">{tech.job_title}</Badge>}
-                      <Badge variant="outline" className="text-[10px] capitalize">{tech.role}</Badge>
-                      {tech.is_admin && <Badge className="bg-amber-600 text-[10px]"><Crown className="w-2 h-2 mr-0.5" />Admin</Badge>}
-                      {isOnCall(tech.id) && (() => {
-                        const shift = getOnCallShift(tech.id);
-                        const cfg = getOnCallConfig(shift?.category);
-                        const Icon = cfg.icon;
-                        return <Badge className={`${cfg.bg} ${cfg.text} ${cfg.border} text-[10px] animate-pulse ring-1 ${cfg.ring} ${cfg.glow}`} data-testid={`on-call-badge-${tech.id}`}><Icon className="w-2.5 h-2.5 mr-0.5" />{cfg.label}</Badge>;
-                      })()}
+                      {/* Category badges */}
+                      {(tech.categories || []).length > 0 && (
+                        <div className="flex gap-1 mt-1 flex-wrap">{tech.categories.map(c => getCategoryBadge(c))}</div>
+                      )}
                     </div>
                   </div>
+                  <div className="flex flex-col gap-1" onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openPermissions(tech)} title="Permissions"><Shield className="w-3 h-3" /></Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(tech)} title="Edit"><Edit className="w-3 h-3" /></Button>
+                    {!tech.archived && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-amber-500" onClick={() => handleArchive(tech.id)} title="Archive"><Archive className="w-3 h-3" /></Button>}
+                    {tech.archived && (
+                      <>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-500" onClick={() => handleRestore(tech.id)} title="Restore"><ArchiveRestore className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => { setDeleteTarget(tech); setDeleteConfirmDialog(true); }} title="Delete Permanently"><Trash2 className="w-3 h-3" /></Button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openPermissions(tech)} title="Permissions"><Shield className="w-3 h-3" /></Button>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(tech)}><Edit className="w-3 h-3" /></Button>
+                <Separator className="my-3" />
+                <div className="grid grid-cols-4 gap-2 text-center cursor-pointer" onClick={() => fetchTechDashboard(tech)}>
+                  <div><p className="text-lg font-bold text-blue-500">{tech.open_count}</p><p className="text-[10px] text-muted-foreground">Open</p></div>
+                  <div><p className={`text-lg font-bold ${tech.no_notes_count > 0 ? 'text-red-500' : 'text-green-500'}`}>{tech.no_notes_count}</p><p className="text-[10px] text-muted-foreground">No Notes</p></div>
+                  <div><p className={`text-lg font-bold ${tech.overdue_count > 0 ? 'text-orange-500' : 'text-green-500'}`}>{tech.overdue_count}</p><p className="text-[10px] text-muted-foreground">Overdue</p></div>
+                  <div><p className="text-lg font-bold text-cyan-500">{tech.hours_this_week}h</p><p className="text-[10px] text-muted-foreground">This Week</p></div>
                 </div>
-              </div>
-              <Separator className="my-3" />
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <div><p className="text-lg font-bold text-blue-500">{tech.open_count}</p><p className="text-[10px] text-muted-foreground">Open</p></div>
-                <div><p className={`text-lg font-bold ${tech.no_notes_count > 0 ? 'text-red-500' : 'text-green-500'}`}>{tech.no_notes_count}</p><p className="text-[10px] text-muted-foreground">No Notes</p></div>
-                <div><p className={`text-lg font-bold ${tech.overdue_count > 0 ? 'text-orange-500' : 'text-green-500'}`}>{tech.overdue_count}</p><p className="text-[10px] text-muted-foreground">Overdue</p></div>
-                <div><p className="text-lg font-bold text-cyan-500">{tech.hours_this_week}h</p><p className="text-[10px] text-muted-foreground">This Week</p></div>
-              </div>
-              {tech.no_notes_count > 0 && (
-                <div className="mt-3 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" /><p className="text-xs text-red-400">{tech.no_notes_count} ticket{tech.no_notes_count > 1 ? 's' : ''} with no notes</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                {tech.no_notes_count > 0 && (
+                  <div className="mt-3 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" /><p className="text-xs text-red-400">{tech.no_notes_count} ticket{tech.no_notes_count > 1 ? 's' : ''} with no notes</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {/* CREATE/EDIT DIALOG */}
-      <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingTech(null); }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{editingTech ? "Edit Technician" : "Add Technician"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Full Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="tech-name" /></div>
-              <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} data-testid="tech-email" /></div>
-            </div>
-            {!editingTech && <div><Label>Password</Label><Input type="password" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} /></div>}
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Job Title</Label>
-                <Select value={formData.job_title} onValueChange={v => setFormData({ ...formData, job_title: v })}>
-                  <SelectTrigger data-testid="tech-job-title"><SelectValue placeholder="Select title" /></SelectTrigger>
-                  <SelectContent>{JOB_TITLES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Role</Label>
-                <Select value={formData.role} onValueChange={v => setFormData({ ...formData, role: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="technician">Technician</SelectItem>
-                    <SelectItem value="dispatcher">Dispatcher</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Hourly Rate ($)</Label><Input type="number" value={formData.hourly_rate} onChange={e => setFormData({ ...formData, hourly_rate: e.target.value })} /></div>
-              <div><Label>Phone</Label><Input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
-            </div>
-            <div>
-              <Label>Specialties</Label>
-              <div className="flex gap-2 flex-wrap mb-2">{formData.specialties.map((s, i) => (<Badge key={i} variant="secondary" className="cursor-pointer" onClick={() => setFormData(p => ({ ...p, specialties: p.specialties.filter((_, j) => j !== i) }))}>{s} <XCircle className="w-3 h-3 ml-1" /></Badge>))}</div>
-              <div className="flex gap-2"><Input className="flex-1" placeholder="e.g. Networking, Azure" value={specialtyInput} onChange={e => setSpecialtyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addSpecialty())} /><Button type="button" variant="outline" size="sm" onClick={addSpecialty}>Add</Button></div>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleCreate} data-testid="save-tech-btn">{editingTech ? "Update" : "Add"} Technician</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} />}
-      {sigDialog && <SignatureDialog sigConfig={sigConfig} setSigConfig={setSigConfig} handleSaveSignature={handleSaveSignature} setSigDialog={setSigDialog} generateSignatureHtml={generateSignatureHtml} />}
-
-      {/* Profile Edit Dialog */}
-      <Dialog open={profileDialog} onOpenChange={setProfileDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Edit Profile - {profileTarget?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>About Me</Label><Textarea value={profileData.about_me} onChange={e => setProfileData({...profileData, about_me: e.target.value})} placeholder="Tell us about yourself..." rows={4} data-testid="profile-about-me" /></div>
-            <div><Label>Hire Date</Label><Input type="date" value={profileData.hire_date} onChange={e => setProfileData({...profileData, hire_date: e.target.value})} data-testid="profile-hire-date" /></div>
-            <div><Label>Birthday</Label><Input type="date" value={profileData.birthday} onChange={e => setProfileData({...profileData, birthday: e.target.value})} data-testid="profile-birthday" /></div>
-          </div>
-          <DialogFooter><Button onClick={updateProfile} data-testid="save-profile-btn">Save Profile</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Award Badge Dialog */}
-      <Dialog open={awardDialog} onOpenChange={setAwardDialog}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Award Badge - {awardTarget?.name}</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-2">
-            {allAchievements.map(a => (
-              <Button key={a.id} variant="outline" className="h-auto py-3 flex flex-col items-center gap-1 hover:border-primary" onClick={() => awardBadge(a)} data-testid={`award-${a.id}`}>
-                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: a.color + "30", color: a.color }}>
-                  <AchievementIcon icon={a.icon} />
-                </div>
-                <span className="text-xs font-medium">{a.name}</span>
-                <span className="text-[10px] text-muted-foreground text-center">{a.description}</span>
-              </Button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Teams Status Dialog */}
-      <Dialog open={teamsStatusDialog} onOpenChange={setTeamsStatusDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Update Teams Status</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Availability</Label>
-              <Select value={teamsData.availability} onValueChange={v => setTeamsData({...teamsData, availability: v})}>
-                <SelectTrigger data-testid="teams-availability"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Available">Available</SelectItem>
-                  <SelectItem value="Busy">Busy</SelectItem>
-                  <SelectItem value="DoNotDisturb">Do Not Disturb</SelectItem>
-                  <SelectItem value="Away">Away</SelectItem>
-                  <SelectItem value="Offline">Offline</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div><Label>Status Message</Label><Input value={teamsData.status_message} onChange={e => setTeamsData({...teamsData, status_message: e.target.value})} placeholder="What are you working on?" data-testid="teams-status-msg" /></div>
-          </div>
-          <DialogFooter><Button onClick={updateTeamsStatus} data-testid="save-teams-status"><MessageSquare className="w-4 h-4 mr-1" />Update Status</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ON-CALL SCHEDULE DIALOG */}
-      <Dialog open={onCallDialog} onOpenChange={setOnCallDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" />Schedule On-Call Shift</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div><Label>Technician</Label>
-              <Select value={onCallForm.tech_id || "__none"} onValueChange={v => { const t = techs.find(x => x.id === v); setOnCallForm(f => ({ ...f, tech_id: v === "__none" ? "" : v, tech_name: t?.name || "" })); }}>
-                <SelectTrigger data-testid="on-call-tech-select"><SelectValue placeholder="Select technician" /></SelectTrigger>
-                <SelectContent>{techs.map(t => <SelectItem key={t.id} value={t.id}>{t.name} - {t.job_title || t.role}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Category</Label>
-                <Select value={onCallForm.category} onValueChange={v => setOnCallForm(f => ({ ...f, category: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="general">General</SelectItem>
-                    <SelectItem value="sla">SLA</SelectItem>
-                    <SelectItem value="wisp">WISP</SelectItem>
-                    <SelectItem value="cabling">Cabling</SelectItem>
-                    <SelectItem value="workshop">Workshop</SelectItem>
-                    <SelectItem value="network">Network</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Shift Type</Label>
-                <Select value={onCallForm.shift_type} onValueChange={v => setOnCallForm(f => ({ ...f, shift_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="primary">Primary</SelectItem>
-                    <SelectItem value="secondary">Secondary</SelectItem>
-                    <SelectItem value="backup">Backup</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Start</Label><Input type="datetime-local" value={onCallForm.start_time} onChange={e => setOnCallForm(f => ({ ...f, start_time: e.target.value }))} data-testid="on-call-start" /></div>
-              <div><Label>End</Label><Input type="datetime-local" value={onCallForm.end_time} onChange={e => setOnCallForm(f => ({ ...f, end_time: e.target.value }))} data-testid="on-call-end" /></div>
-            </div>
-            <div><Label>Notes</Label><Input value={onCallForm.notes} onChange={e => setOnCallForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" /></div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateOnCallShift} data-testid="confirm-on-call-btn"><PhoneCall className="w-4 h-4 mr-1" />Schedule & Notify</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* SWAP DIALOG */}
-      <Dialog open={swapDialog} onOpenChange={setSwapDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-amber-400" />Swap On-Call Shift</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            {swapShift && <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-sm">Current: <span className="font-semibold">{swapShift.tech_name}</span></p><p className="text-xs text-muted-foreground">{swapShift.start_time?.slice(0, 16)} - {swapShift.end_time?.slice(0, 16)} ({swapShift.category})</p></div>}
-            <div><Label>Swap To</Label>
-              <Select value={swapTechId || "__none"} onValueChange={v => setSwapTechId(v === "__none" ? "" : v)}>
-                <SelectTrigger data-testid="swap-tech-select"><SelectValue placeholder="Select new tech" /></SelectTrigger>
-                <SelectContent>{techs.filter(t => t.id !== swapShift?.tech_id).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <p className="text-xs text-muted-foreground">Both technicians will be notified of the swap.</p>
-          </div>
-          <DialogFooter><Button onClick={handleSwapShift} disabled={!swapTechId} data-testid="confirm-swap-btn"><ArrowRightLeft className="w-4 h-4 mr-1" />Confirm Swap</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ALL DIALOGS */}
+      {renderAllDialogs()}
     </div>
   );
 }
 
 // ========== PERMISSIONS GRID (read-only in detail) ==========
-function PermissionsGrid({ permissions, readOnly = false }) {
+function PermissionsGrid({ permissions }) {
   return (
     <Card>
       <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4" />Module Permissions</CardTitle></CardHeader>
       <CardContent className="p-0">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Module</TableHead>
-              {ACTIONS.map(a => <TableHead key={a} className="text-center capitalize text-xs">{a}</TableHead>)}
-            </TableRow>
-          </TableHeader>
+          <TableHeader><TableRow><TableHead>Module</TableHead>{ACTIONS.map(a => <TableHead key={a} className="text-center capitalize text-xs">{a}</TableHead>)}</TableRow></TableHeader>
           <TableBody>
             {MODULES.map(mod => (
               <TableRow key={mod.key}>
@@ -996,7 +1161,7 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
   return (
     <Dialog open onOpenChange={v => { if (!v) setPermDialog(false); }}>
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Manage Permissions - {permTarget?.name}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Manage Permissions - {permTarget?.name}</DialogTitle><DialogDescription>Configure module access permissions.</DialogDescription></DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
             <div className="flex items-center gap-3">
@@ -1012,9 +1177,7 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
             ))}
           </div>
           <Table>
-            <TableHeader>
-              <TableRow><TableHead>Module</TableHead>{ACTIONS.map(a => <TableHead key={a} className="text-center capitalize text-xs">{a}</TableHead>)}</TableRow>
-            </TableHeader>
+            <TableHeader><TableRow><TableHead>Module</TableHead>{ACTIONS.map(a => <TableHead key={a} className="text-center capitalize text-xs">{a}</TableHead>)}</TableRow></TableHeader>
             <TableBody>
               {MODULES.map(mod => (
                 <TableRow key={mod.key}>
@@ -1041,7 +1204,7 @@ function SignatureDialog({ sigConfig, setSigConfig, handleSaveSignature, setSigD
   return (
     <Dialog open onOpenChange={v => { if (!v) setSigDialog(false); }}>
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Email Signature Builder</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Email Signature Builder</DialogTitle><DialogDescription>Design your email signature.</DialogDescription></DialogHeader>
         <div className="grid grid-cols-2 gap-6">
           <div className="space-y-3">
             <div><Label>Template Style</Label>
@@ -1068,9 +1231,7 @@ function SignatureDialog({ sigConfig, setSigConfig, handleSaveSignature, setSigD
           </div>
           <div>
             <Label className="mb-2 block">Preview</Label>
-            <div className="p-4 rounded-lg border bg-white min-h-[200px]">
-              <div dangerouslySetInnerHTML={{ __html: generateSignatureHtml(c) }} />
-            </div>
+            <div className="p-4 rounded-lg border bg-white min-h-[200px]"><div dangerouslySetInnerHTML={{ __html: generateSignatureHtml(c) }} /></div>
             <p className="text-xs text-muted-foreground mt-2">This signature will be used in outgoing emails from the ticket system.</p>
           </div>
         </div>
@@ -1128,41 +1289,18 @@ function RemoteSessionsTab({ sessions, techName }) {
           <CardHeader className="pb-2"><CardTitle className="text-sm">Session History</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Device</TableHead><TableHead>Type</TableHead><TableHead>Device Type</TableHead>
-                  <TableHead>Status</TableHead><TableHead>Duration</TableHead>
-                  <TableHead>Lock Status</TableHead><TableHead>Started</TableHead><TableHead>Notes</TableHead>
-                </TableRow>
-              </TableHeader>
+              <TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Type</TableHead><TableHead>Device Type</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead><TableHead>Lock Status</TableHead><TableHead>Started</TableHead><TableHead>Notes</TableHead></TableRow></TableHeader>
               <TableBody>
                 {sessionList.map(s => (
                   <TableRow key={s.id} data-testid={`session-row-${s.id}`}>
                     <TableCell className="font-medium">{s.device_name || s.device_id}</TableCell>
                     <TableCell><Badge variant="outline" className="text-xs capitalize">{(s.session_type || "remote").replace("_", " ")}</Badge></TableCell>
                     <TableCell><Badge variant="secondary" className="text-xs capitalize">{s.device_type || "unknown"}</Badge></TableCell>
+                    <TableCell>{s.status === "active" ? <Badge className="bg-green-600 text-white text-xs"><Wifi className="w-3 h-3 mr-1" />Active</Badge> : <Badge variant="outline" className="text-xs text-zinc-400"><WifiOff className="w-3 h-3 mr-1" />Ended</Badge>}</TableCell>
+                    <TableCell className="text-sm">{s.status === "active" ? <span className="text-green-500">{s.live_duration_minutes || "0"}m (live)</span> : `${s.duration_minutes || 0}m`}</TableCell>
                     <TableCell>
-                      {s.status === "active" ? (
-                        <Badge className="bg-green-600 text-white text-xs"><Wifi className="w-3 h-3 mr-1" />Active</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs text-zinc-400"><WifiOff className="w-3 h-3 mr-1" />Ended</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {s.status === "active" ? (
-                        <span className="text-green-500">{s.live_duration_minutes || "0"}m (live)</span>
-                      ) : (
-                        `${s.duration_minutes || 0}m`
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        {lockIcons[s.lock_action_on_disconnect] || lockIcons.no_change}
-                        <span className="text-xs capitalize">{s.lock_action_on_disconnect || "n/a"}</span>
-                      </div>
-                      {s.was_locked_before_disconnect != null && (
-                        <p className="text-[10px] text-muted-foreground mt-0.5">Before: {s.was_locked_before_disconnect ? "Locked" : "Unlocked"}</p>
-                      )}
+                      <div className="flex items-center gap-1.5">{lockIcons[s.lock_action_on_disconnect] || lockIcons.no_change}<span className="text-xs capitalize">{s.lock_action_on_disconnect || "n/a"}</span></div>
+                      {s.was_locked_before_disconnect != null && <p className="text-[10px] text-muted-foreground mt-0.5">Before: {s.was_locked_before_disconnect ? "Locked" : "Unlocked"}</p>}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{s.started_at ? formatDistanceToNow(new Date(s.started_at), { addSuffix: true }) : "-"}</TableCell>
                     <TableCell className="text-xs max-w-[150px] truncate">{s.notes || "-"}</TableCell>
@@ -1185,7 +1323,6 @@ function ActivityLogTab({ activity, techName, navigate }) {
     ...activity_logs.map(l => ({ ...l, _type: "activity", _time: l.created_at })),
     ...remote_sessions.map(s => ({ ...s, _type: "session", _time: s.started_at, action: s.status === "active" ? "remote_connect" : "remote_disconnect", entity_type: "device", entity_name: s.device_name })),
   ].sort((a, b) => (b._time || "").localeCompare(a._time || "")).slice(0, 200);
-
   const actionColors = {
     created: "bg-green-500/20 text-green-400 border-green-500/30",
     updated: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -1237,6 +1374,7 @@ function ActivityLogTab({ activity, techName, navigate }) {
     </div>
   );
 }
+
 // ========== ACHIEVEMENT ICON MAPPER ==========
 const ICON_MAP = { trophy: Trophy, target: Target, zap: Zap, award: Award, crown: Crown, gem: Gem, "dollar-sign": DollarSign, "credit-card": CreditCard, banknote: DollarSign, monitor: Monitor, wifi: Wifi, calendar: Calendar, shield: Shield, star: Star, cake: Cake, rocket: Rocket, layers: Layers };
 function AchievementIcon({ icon, className = "w-4 h-4" }) {
@@ -1257,8 +1395,6 @@ function AchievementsTab({ earned = [], allDefs = [], techName, techId, onAward 
         </div>
         <Button size="sm" variant="outline" onClick={onAward} data-testid="award-badge-btn"><Award className="w-3.5 h-3.5 mr-1" />Award Badge</Button>
       </div>
-
-      {/* Earned Badges - Showcase */}
       {earned.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Earned Badges</h3>
@@ -1279,8 +1415,6 @@ function AchievementsTab({ earned = [], allDefs = [], techName, techId, onAward 
           </div>
         </div>
       )}
-
-      {/* All Badges by Category */}
       {categories.map(cat => (
         <div key={cat}>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 capitalize">{cat}</h3>
@@ -1311,7 +1445,6 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
   return (
     <div className="space-y-4 mt-4" data-testid="profile-tab">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Avatar Upload */}
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm">Profile Picture</CardTitle></CardHeader>
           <CardContent className="flex flex-col items-center gap-3">
@@ -1322,9 +1455,7 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
             )}
             <label className="cursor-pointer">
               <input type="file" accept="image/*" className="hidden" onChange={e => onUploadAvatar(e.target.files?.[0])} data-testid="avatar-file-input" />
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs hover:bg-muted transition-colors">
-                <Camera className="w-3.5 h-3.5" />Change Photo
-              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs hover:bg-muted transition-colors"><Camera className="w-3.5 h-3.5" />Change Photo</div>
             </label>
             {avatarFile && (
               <div className="text-xs text-center">
@@ -1334,8 +1465,6 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
             )}
           </CardContent>
         </Card>
-
-        {/* About Me */}
         <Card className="md:col-span-2">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm">About</CardTitle>
@@ -1345,10 +1474,7 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div>
-              <Label className="text-xs text-muted-foreground">About Me</Label>
-              <p className="text-sm mt-0.5">{t.about_me || <span className="italic text-muted-foreground">No bio added yet</span>}</p>
-            </div>
+            <div><Label className="text-xs text-muted-foreground">About Me</Label><p className="text-sm mt-0.5">{t.about_me || <span className="italic text-muted-foreground">No bio added yet</span>}</p></div>
             <Separator />
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs text-muted-foreground">Hire Date</Label><p className="text-sm">{t.hire_date || "Not set"}</p></div>
@@ -1358,11 +1484,11 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
               <div><Label className="text-xs text-muted-foreground">Phone</Label><p className="text-sm">{t.phone || "Not set"}</p></div>
               <div><Label className="text-xs text-muted-foreground">Hourly Rate</Label><p className="text-sm">${t.hourly_rate || "75"}/hr</p></div>
             </div>
+            {(t.categories || []).length > 0 && (
+              <div><Label className="text-xs text-muted-foreground">Categories</Label><div className="flex gap-1 flex-wrap mt-1">{t.categories.map(c => getCategoryBadge(c))}</div></div>
+            )}
             {t.specialties?.length > 0 && (
-              <div>
-                <Label className="text-xs text-muted-foreground">Specialties</Label>
-                <div className="flex gap-1 flex-wrap mt-1">{t.specialties.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
-              </div>
+              <div><Label className="text-xs text-muted-foreground">Specialties</Label><div className="flex gap-1 flex-wrap mt-1">{t.specialties.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div></div>
             )}
           </CardContent>
         </Card>
@@ -1370,4 +1496,3 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
     </div>
   );
 }
-
