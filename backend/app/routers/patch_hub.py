@@ -254,6 +254,286 @@ async def compliance_by_client(current_user: dict = Depends(get_current_user)):
     return sorted(result, key=lambda x: x["compliance_pct"])
 
 
+
+# ─── Agent Management: Download & Device Reporting ───
+
+@router.get("/patch-hub/agent/download-script")
+async def get_agent_script(current_user: dict = Depends(get_current_user)):
+    """Generate the NexusOps Patch Agent PowerShell script for deployment"""
+    # Get the base URL from request context - for now use a placeholder the admin sets
+    settings = await db.settings.find_one({"type": "patch_agent"}, {"_id": 0})
+    api_url = settings.get("api_url", "https://your-nexusops-url.com/api") if settings else "https://your-nexusops-url.com/api"
+    api_key = settings.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
+
+    script = f'''#Requires -RunAsAdministrator
+# ═══════════════════════════════════════════════════════════════
+# NexusOps Patch Agent v1.0 - Automated Patch Monitoring
+# Deploy alongside RustDesk for unified remote management
+# ═══════════════════════════════════════════════════════════════
+
+$NexusOpsAPI = "{api_url}"
+$AgentKey = "{api_key}"
+$ReportInterval = 3600  # Report every hour (seconds)
+$ServiceName = "NexusOpsPatchAgent"
+$LogPath = "$env:ProgramData\\NexusOps\\patch-agent.log"
+
+function Write-AgentLog {{
+    param([string]$Message, [string]$Level = "INFO")
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $entry = "[$ts] [$Level] $Message"
+    Add-Content -Path $LogPath -Value $entry -ErrorAction SilentlyContinue
+    if ($Level -eq "ERROR") {{ Write-Error $Message }} else {{ Write-Host $entry }}
+}}
+
+function Get-PendingWindowsUpdates {{
+    try {{
+        $session = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $session.CreateUpdateSearcher()
+        $result = $searcher.Search("IsInstalled=0 AND IsHidden=0")
+        $updates = @()
+        foreach ($update in $result.Updates) {{
+            $severity = "optional"
+            if ($update.MsrcSeverity) {{ $severity = $update.MsrcSeverity.ToLower() }}
+            $kbNumbers = @()
+            foreach ($kb in $update.KBArticleIDs) {{ $kbNumbers += "KB$kb" }}
+            $updates += @{{
+                title = $update.Title
+                kb_ids = $kbNumbers
+                severity = $severity
+                size_mb = [math]::Round($update.MaxDownloadSize / 1MB, 1)
+                categories = @($update.Categories | ForEach-Object {{ $_.Name }})
+                is_downloaded = $update.IsDownloaded
+                reboot_required = $update.RebootRequired
+                published = $update.LastDeploymentChangeTime.ToString("yyyy-MM-dd")
+                cve_ids = @($update.CveIDs)
+            }}
+        }}
+        return $updates
+    }} catch {{
+        Write-AgentLog "Failed to query Windows Update: $_" "ERROR"
+        return @()
+    }}
+}}
+
+function Get-InstalledSoftware {{
+    try {{
+        $apps = @()
+        $regPaths = @(
+            "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+            "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"
+        )
+        foreach ($path in $regPaths) {{
+            Get-ItemProperty $path -ErrorAction SilentlyContinue | Where-Object {{ $_.DisplayName }} | ForEach-Object {{
+                $apps += @{{
+                    name = $_.DisplayName
+                    version = $_.DisplayVersion
+                    publisher = $_.Publisher
+                    install_date = $_.InstallDate
+                }}
+            }}
+        }}
+        return $apps | Sort-Object {{ $_.name }} -Unique
+    }} catch {{
+        Write-AgentLog "Failed to enumerate software: $_" "ERROR"
+        return @()
+    }}
+}}
+
+function Get-SystemInfo {{
+    try {{
+        $os = Get-CimInstance Win32_OperatingSystem
+        $cs = Get-CimInstance Win32_ComputerSystem
+        $bios = Get-CimInstance Win32_BIOS
+        $lastBoot = $os.LastBootUpTime
+        $uptime = (Get-Date) - $lastBoot
+        $pendingReboot = (Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired") -or
+                         (Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending")
+        return @{{
+            hostname = $env:COMPUTERNAME
+            domain = $cs.Domain
+            os_name = $os.Caption
+            os_version = $os.Version
+            os_build = $os.BuildNumber
+            architecture = $os.OSArchitecture
+            manufacturer = $cs.Manufacturer
+            model = $cs.Model
+            serial_number = $bios.SerialNumber
+            total_ram_gb = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
+            last_boot = $lastBoot.ToString("yyyy-MM-ddTHH:mm:ss")
+            uptime_hours = [math]::Round($uptime.TotalHours, 1)
+            pending_reboot = $pendingReboot
+            last_patch_scan = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+        }}
+    }} catch {{
+        Write-AgentLog "Failed to collect system info: $_" "ERROR"
+        return @{{ hostname = $env:COMPUTERNAME; error = $_.ToString() }}
+    }}
+}}
+
+function Get-WindowsDefenderStatus {{
+    try {{
+        $defender = Get-MpComputerStatus -ErrorAction SilentlyContinue
+        if ($defender) {{
+            return @{{
+                antivirus_enabled = $defender.AntivirusEnabled
+                realtime_protection = $defender.RealTimeProtectionEnabled
+                definition_age_days = $defender.AntivirusSignatureAge
+                last_scan = $defender.LastFullScanEndTime.ToString("yyyy-MM-dd")
+                definition_version = $defender.AntivirusSignatureVersion
+            }}
+        }}
+        return @{{ antivirus_enabled = $false; error = "Defender not available" }}
+    }} catch {{
+        return @{{ antivirus_enabled = $false; error = $_.ToString() }}
+    }}
+}}
+
+function Send-PatchReport {{
+    $report = @{{
+        agent_version = "1.0.0"
+        reported_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        system_info = Get-SystemInfo
+        pending_updates = Get-PendingWindowsUpdates
+        installed_software = Get-InstalledSoftware
+        defender_status = Get-WindowsDefenderStatus
+    }}
+    $json = $report | ConvertTo-Json -Depth 5 -Compress
+    try {{
+        $headers = @{{
+            "Content-Type" = "application/json"
+            "X-Agent-Key" = $AgentKey
+        }}
+        $response = Invoke-RestMethod -Uri "$NexusOpsAPI/patch-hub/agent/report" -Method POST -Body $json -Headers $headers -TimeoutSec 30
+        Write-AgentLog "Report sent successfully. Server response: $($response.status)"
+    }} catch {{
+        Write-AgentLog "Failed to send report: $_" "ERROR"
+    }}
+}}
+
+# ── Main Loop / One-Shot Mode ──
+function Start-PatchAgent {{
+    New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force -ErrorAction SilentlyContinue | Out-Null
+    Write-AgentLog "NexusOps Patch Agent starting..."
+    Write-AgentLog "API: $NexusOpsAPI"
+    Write-AgentLog "Hostname: $env:COMPUTERNAME"
+
+    if ($args -contains "-once") {{
+        Write-AgentLog "Running single report..."
+        Send-PatchReport
+        return
+    }}
+
+    Write-AgentLog "Starting monitoring loop (interval: ${{ReportInterval}}s)"
+    while ($true) {{
+        Send-PatchReport
+        Start-Sleep -Seconds $ReportInterval
+    }}
+}}
+
+# ── Install as Windows Service (optional) ──
+function Install-AsService {{
+    $scriptPath = $MyInvocation.ScriptName
+    $nssm = "$env:ProgramData\\NexusOps\\nssm.exe"
+    if (-not (Test-Path $nssm)) {{
+        Write-Host "Download NSSM from https://nssm.cc and place at $nssm to install as service"
+        return
+    }}
+    & $nssm install $ServiceName powershell.exe "-ExecutionPolicy Bypass -File `"$scriptPath`""
+    & $nssm set $ServiceName DisplayName "NexusOps Patch Agent"
+    & $nssm set $ServiceName Description "Monitors Windows Update status and reports to NexusOps RMM"
+    & $nssm set $ServiceName Start SERVICE_AUTO_START
+    & $nssm start $ServiceName
+    Write-Host "Service installed and started!"
+}}
+
+# Run
+Start-PatchAgent
+'''
+    return {
+        "script": script,
+        "filename": "NexusOps-PatchAgent.ps1",
+        "version": "1.0.0",
+        "instructions": [
+            "1. Download the script to the client machine",
+            "2. Open PowerShell as Administrator",
+            "3. Run: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine",
+            "4. Run: .\\NexusOps-PatchAgent.ps1",
+            "5. For one-shot mode: .\\NexusOps-PatchAgent.ps1 -once",
+            "6. To install as a Windows service, call Install-AsService from the script"
+        ],
+        "deploy_command": 'powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri \'YOUR_NEXUSOPS_URL/api/patch-hub/agent/download-script\' -OutFile NexusOps-PatchAgent.ps1; .\\NexusOps-PatchAgent.ps1"'
+    }
+
+
+@router.post("/patch-hub/agent/report")
+async def receive_agent_report(data: dict):
+    """Receive patch status report from deployed agent"""
+    system_info = data.get("system_info", {})
+    hostname = system_info.get("hostname", "UNKNOWN")
+
+    report = {
+        "id": f"rpt-{uuid.uuid4().hex[:8]}",
+        "hostname": hostname,
+        "agent_version": data.get("agent_version", "unknown"),
+        "reported_at": data.get("reported_at", datetime.now(timezone.utc).isoformat()),
+        "system_info": system_info,
+        "pending_updates_count": len(data.get("pending_updates", [])),
+        "pending_updates": data.get("pending_updates", [])[:50],
+        "installed_software_count": len(data.get("installed_software", [])),
+        "defender_status": data.get("defender_status", {}),
+        "critical_updates": len([u for u in data.get("pending_updates", []) if u.get("severity") in ("critical", "important")]),
+    }
+
+    # Upsert - update existing device report or insert new
+    await db.agent_reports.update_one(
+        {"hostname": hostname},
+        {"$set": report, "$setOnInsert": {"first_seen": datetime.now(timezone.utc).isoformat()}},
+        upsert=True
+    )
+
+    # Also update the device in the main devices collection if it exists
+    await db.devices.update_one(
+        {"name": {"$regex": f"^{hostname}$", "$options": "i"}},
+        {"$set": {
+            "pending_patches": report["pending_updates_count"],
+            "patch_status": "current" if report["pending_updates_count"] == 0 else "critical" if report["critical_updates"] > 0 else "needs_attention",
+            "last_patch_scan": report["reported_at"],
+            "agent_version": report["agent_version"],
+        }},
+    )
+
+    return {"status": "received", "hostname": hostname, "pending_count": report["pending_updates_count"]}
+
+
+@router.get("/patch-hub/agent/reports")
+async def get_agent_reports(current_user: dict = Depends(get_current_user)):
+    """Get all agent reports from deployed devices"""
+    reports = await db.agent_reports.find({}, {"_id": 0}).sort("reported_at", -1).to_list(200)
+    return {
+        "total_reporting": len(reports),
+        "healthy": len([r for r in reports if r.get("pending_updates_count", 0) == 0]),
+        "needs_attention": len([r for r in reports if 0 < r.get("pending_updates_count", 0) <= 5]),
+        "critical": len([r for r in reports if r.get("pending_updates_count", 0) > 5]),
+        "reports": reports,
+    }
+
+
+@router.post("/patch-hub/agent/settings")
+async def save_agent_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    """Save agent configuration (API URL, key, etc.)"""
+    settings = {
+        "type": "patch_agent",
+        "api_url": data.get("api_url", ""),
+        "agent_api_key": data.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}"),
+        "report_interval": data.get("report_interval", 3600),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": current_user.get("name"),
+    }
+    await db.settings.update_one({"type": "patch_agent"}, {"$set": settings}, upsert=True)
+    return {"status": "saved", "settings": settings}
+
+
+
 # ─── Seed Helpers ───
 
 def _get_remediation_suggestion(error_code, kb_id):

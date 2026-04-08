@@ -7,8 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
-import { Shield, AlertTriangle, CheckCircle, XCircle, Clock, RotateCcw, Play, Pause, ChevronRight, Search, Filter, Download, ArrowUpDown, Layers, Zap, TestTube, FileCode, Ban } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Shield, AlertTriangle, CheckCircle, XCircle, Clock, RotateCcw, Play, Pause, ChevronRight, Search, Filter, Download, ArrowUpDown, Layers, Zap, TestTube, FileCode, Ban, Terminal, Settings, Copy, Monitor, Server, Wifi, WifiOff, Cpu, HardDrive } from "lucide-react";
+import { toast } from "sonner";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { formatDistanceToNow } from "date-fns";
 
 export default function PatchHubPage() {
   const { token } = useAuth();
@@ -24,6 +29,9 @@ export default function PatchHubPage() {
   const [compliance, setCompliance] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [agentScript, setAgentScript] = useState(null);
+  const [agentReports, setAgentReports] = useState(null);
+  const [agentSettings, setAgentSettings] = useState({ api_url: "", agent_api_key: "", report_interval: 3600 });
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -72,6 +80,14 @@ export default function PatchHubPage() {
         const res = await axios.get(`${API}/patch-hub/history`, { headers });
         setHistory(res.data);
       }
+      if (tab === "agent") {
+        const [scriptRes, reportsRes] = await Promise.all([
+          axios.get(`${API}/patch-hub/agent/download-script`, { headers }),
+          axios.get(`${API}/patch-hub/agent/reports`, { headers }),
+        ]);
+        setAgentScript(scriptRes.data);
+        setAgentReports(reportsRes.data);
+      }
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -101,7 +117,7 @@ export default function PatchHubPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid grid-cols-8 w-full">
+        <TabsList className="grid grid-cols-9 w-full">
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="intelligence" data-testid="tab-intelligence">Intelligence</TabsTrigger>
           <TabsTrigger value="rings" data-testid="tab-rings">Rings</TabsTrigger>
@@ -110,6 +126,7 @@ export default function PatchHubPage() {
           <TabsTrigger value="rollback" data-testid="tab-rollback">Rollback</TabsTrigger>
           <TabsTrigger value="testing" data-testid="tab-testing">Testing</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
+          <TabsTrigger value="agent" data-testid="tab-agent" className="gap-1"><Terminal className="w-3 h-3" />Agent</TabsTrigger>
         </TabsList>
 
         {/* ─── DASHBOARD TAB ─── */}
@@ -418,6 +435,150 @@ export default function PatchHubPage() {
               ))}
             </div>
           </CardContent></Card>
+        </TabsContent>
+
+        {/* ─── AGENT TAB ─── */}
+        <TabsContent value="agent" className="space-y-6" data-testid="agent-tab-content">
+          {/* Agent Overview */}
+          <div className="grid grid-cols-4 gap-4">
+            <Card><CardContent className="pt-4">
+              <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Reporting Devices</span><Monitor className="w-5 h-5 text-blue-500" /></div>
+              <div className="text-3xl font-bold mt-1">{agentReports?.total_reporting || 0}</div>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4">
+              <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Healthy</span><CheckCircle className="w-5 h-5 text-green-500" /></div>
+              <div className="text-3xl font-bold mt-1 text-green-500">{agentReports?.healthy || 0}</div>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4">
+              <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Needs Attention</span><AlertTriangle className="w-5 h-5 text-amber-500" /></div>
+              <div className="text-3xl font-bold mt-1 text-amber-500">{agentReports?.needs_attention || 0}</div>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4">
+              <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Critical</span><XCircle className="w-5 h-5 text-red-500" /></div>
+              <div className="text-3xl font-bold mt-1 text-red-500">{agentReports?.critical || 0}</div>
+            </CardContent></Card>
+          </div>
+
+          {/* Deploy Agent */}
+          <Card className="border-blue-500/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2"><Terminal className="w-5 h-5 text-blue-500" />Deploy Patch Agent</CardTitle>
+              <p className="text-sm text-muted-foreground">Download and deploy the NexusOps Patch Agent alongside RustDesk on client devices. The agent runs as a background service and reports Windows Update status back to this dashboard.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {agentScript && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="text-xs">v{agentScript.version}</Badge>
+                    <Badge variant="outline" className="text-xs">PowerShell</Badge>
+                    <Badge variant="outline" className="text-xs">Windows</Badge>
+                  </div>
+
+                  {/* Quick Deploy Command */}
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">One-Line Deploy Command (run on client as Admin)</Label>
+                    <div className="relative">
+                      <pre className="bg-zinc-900 text-emerald-400 text-xs p-3 pr-10 rounded-lg overflow-x-auto font-mono">{agentScript.deploy_command}</pre>
+                      <Button variant="ghost" size="sm" className="absolute top-1 right-1 h-7 w-7 p-0" onClick={() => { navigator.clipboard.writeText(agentScript.deploy_command); toast.success("Copied to clipboard"); }} data-testid="copy-deploy-cmd"><Copy className="w-3.5 h-3.5" /></Button>
+                    </div>
+                  </div>
+
+                  {/* Instructions */}
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Deployment Steps</Label>
+                    <div className="space-y-1.5">
+                      {agentScript.instructions.map((step, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm">
+                          <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">{i + 1}</div>
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Full Script Preview */}
+                  <details className="group">
+                    <summary className="cursor-pointer text-sm font-medium flex items-center gap-2 hover:text-primary">
+                      <FileCode className="w-4 h-4" />View Full Agent Script
+                      <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+                    </summary>
+                    <div className="mt-2 relative">
+                      <pre className="bg-zinc-900 text-zinc-300 text-[11px] p-4 rounded-lg overflow-auto max-h-[400px] font-mono leading-relaxed">{agentScript.script}</pre>
+                      <Button variant="outline" size="sm" className="absolute top-2 right-2 h-7 text-xs" onClick={() => {
+                        const blob = new Blob([agentScript.script], { type: "text/plain" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = agentScript.filename;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        toast.success("Script downloaded");
+                      }} data-testid="download-agent-script"><Download className="w-3 h-3 mr-1" />Download .ps1</Button>
+                    </div>
+                  </details>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Reporting Devices Table */}
+          {(agentReports?.reports || []).length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Server className="w-5 h-5 text-emerald-500" />Reporting Devices ({agentReports.reports.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {agentReports.reports.map(r => (
+                    <div key={r.id || r.hostname} className="flex items-center gap-4 p-3 rounded-lg border hover:bg-muted/30 transition-colors" data-testid={`agent-report-${r.hostname}`}>
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${r.critical_updates > 0 ? "bg-red-500/20" : r.pending_updates_count > 0 ? "bg-amber-500/20" : "bg-emerald-500/20"}`}>
+                        <Monitor className={`w-5 h-5 ${r.critical_updates > 0 ? "text-red-400" : r.pending_updates_count > 0 ? "text-amber-400" : "text-emerald-400"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{r.hostname}</p>
+                        <div className="flex gap-3 text-xs text-muted-foreground">
+                          <span>{r.system_info?.os_name || "Unknown OS"}</span>
+                          <span>{r.system_info?.os_version}</span>
+                          {r.system_info?.uptime_hours && <span>Up {Math.round(r.system_info.uptime_hours)}h</span>}
+                        </div>
+                      </div>
+                      <div className="text-center">
+                        <p className={`text-lg font-bold ${r.pending_updates_count === 0 ? "text-emerald-500" : r.critical_updates > 0 ? "text-red-500" : "text-amber-500"}`}>{r.pending_updates_count}</p>
+                        <p className="text-[9px] text-muted-foreground">pending</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-red-500">{r.critical_updates || 0}</p>
+                        <p className="text-[9px] text-muted-foreground">critical</p>
+                      </div>
+                      <div className="text-center">
+                        {r.defender_status?.antivirus_enabled ? (
+                          <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30"><Shield className="w-3 h-3 mr-1" />Protected</Badge>
+                        ) : (
+                          <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Unprotected</Badge>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <Badge variant="secondary" className="text-[10px]">v{r.agent_version}</Badge>
+                        {r.system_info?.pending_reboot && <Badge variant="destructive" className="text-[10px] ml-1">Reboot</Badge>}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground w-20 text-right">{r.reported_at ? formatDistanceToNow(new Date(r.reported_at), { addSuffix: true }) : "Never"}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* No Reports Yet */}
+          {(!agentReports?.reports || agentReports.reports.length === 0) && (
+            <Card className="border-dashed">
+              <CardContent className="py-12 text-center">
+                <Monitor className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
+                <p className="text-lg font-medium text-muted-foreground">No Devices Reporting Yet</p>
+                <p className="text-sm text-muted-foreground/70 mt-1 max-w-md mx-auto">Deploy the NexusOps Patch Agent to client devices using the script above. Devices will start reporting within minutes of deployment.</p>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>
