@@ -15,46 +15,42 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 1-12. Ticketing, CRM, invoicing, RMM, networking, scheduling, reporting, white-label, AI copilot, client portal, voice-to-ticket, gamification
 
 ### Phase 4-5: Deep Enrichments (DONE)
-13-29. Workshop/Cabling enrichment, PO/Invoice/Billing overhaul, Billing Command Center, SOC & Security (10 modules), Smart Automation (3 modules)
+13-29. Workshop/Cabling, PO/Invoice/Billing, Billing Command Center, SOC & Security (10 modules), Smart Automation (3 modules)
 
-### Phase 6: Client Onboarding Wizard (DONE)
-30. 8-step guided onboarding wizard
+### Phase 6-8: Onboarding, MSP Modules, Dashboard (DONE)
+30-49. Onboarding wizard, 16+ advanced MSP modules, Command Center Dashboard
 
-### Phase 7: Advanced MSP Module Enrichment (DONE - 2026-03-21)
-31-48. All 16+ advanced MSP modules enriched to enterprise-grade
-
-### Phase 8: MSP Command Center Dashboard (DONE - 2026-03-21)
-49. Cross-module intelligence hub
-
-### Phase 9: Multi-Tenant Client Portal (DONE - 2026-03-23)
-50-59. Full portal SPA at /portal-app with email/password + TOTP 2FA
-
-### Phase 10: Admin Portal User Management (DONE - 2026-03-23)
-60. Portal User Management admin page
-
-### Phase 11: Remote Devices Module Rebuild (DONE - 2026-03-24)
-61. Complete rebuild with RustDesk ID assignment, quick connect, session history
+### Phase 9-11: Portal, Admin, Remote Devices (DONE)
+50-61. Multi-tenant portal, admin user mgmt, RustDesk rebuild
 
 ### Phase 12: Technicians Page Overhaul (DONE - 2026-03-25)
-62-67. Edit bug fix, Categories/Roles (9 categories), Archive/Delete system, Quick Stats Strip, Bulk Actions
+62-67. Edit bug fix, Categories, Archive/Delete, Quick Stats, Bulk Actions
 
 ### Phase 13: Dashboard Redesign (DONE - 2026-04-08)
-68-72. Clean 4-metric design, Attention Banner, Ctrl+K Quick Search, Collapsible Insights, Auto-refresh
+68-72. Clean 4-metric design, Attention Banner, Ctrl+K Quick Search, Collapsible Insights
 
-### Phase 14: Patch Management Agent System (DONE - 2026-04-08)
-73-78. PowerShell agent script, Agent tab in Patch Hub, Device reporting API, Agent reports dashboard, One-line deploy, Windows service install
+### Phase 14: Patch Agent System (DONE - 2026-04-08)
+73-78. PowerShell agent, Agent tab, Device reporting API, One-line deploy
 
 ### Phase 15: Auto-Deploy Agent via RustDesk (DONE - 2026-04-08)
-79. **Deploy Agent Button** — Per-device "Deploy" button in Remote Devices table queues deployment + shows PowerShell command dialog
-80. **Bulk Deploy** — Select multiple devices via checkboxes, deploy agent to all at once
-81. **Agent Deployments Tab** — New tab in Remote Devices showing deployment stats (Total/Pending/Deployed/Failed) and full deployment tracker table
-82. **Mark Deployed** — Techs confirm deployment completion after running the script via RustDesk
-83. **Deploy Command Dialog** — Shows the PowerShell command with copy button and step-by-step instructions
-84. **Agent Status Column** — Device table shows Deploy/Pending/Deployed status badges per device
+79-84. Per-device deploy button, Bulk deploy, Deployments tab, Mark deployed, Agent status column
+
+### Phase 16: Navigation Consolidation & Module Toggle (DONE - 2026-04-08)
+85. **Navigation Consolidation** — Reduced 130+ sidebar items to ~35 clean modules in 7 groups with collapsible sub-menus
+86. **Sidebar Groups**: Service Desk, Infrastructure, Business, Security, AI & Intelligence, Reports & Comms, Platform
+87. **Collapsible Sub-Menus** — Click parent to expand children, auto-expands current route's parent
+88. **Module Search** — Type-ahead search across all modules in sidebar (Ctrl+K)
+89. **Module Visibility Toggle** — Admins can toggle which sidebar groups each technician sees (7 switches in Permissions dialog)
+90. **Backend Support** — `enabled_modules` array saved per user, returned in login response, filtered in sidebar
 
 ## Prioritized Backlog
 
-### P2
+### P1 — Release Readiness (Next Up)
+- Microsoft SSO (OAuth2 one-click sign-in)
+- Email-to-Lead (configurable mailbox auto-generates leads)
+- Global Settings page (centralized mailbox, integrations, module visibility, branding)
+
+### P2 — Feature Expansion
 - Workshop Bench View (Kanban drag-and-drop)
 - Dispatch Map View (GPS field jobs)
 - Workflow Automation Builder (IF/THEN rules)
@@ -63,12 +59,11 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Profitability Dashboard
 - CRM integrations (Xero, Pax8, Domotz)
 
-### P3
-- Decompose monolithic seed.py and navigation.js
+### P3 — Tech Debt
+- Decompose monolithic seed.py
 - Refactor TicketsPage.jsx into sub-components
 - Fix recharts console warnings
-- Accessibility fixes (aria-describedby)
-- DB query optimization (N+1 patterns in tickets.py, clients.py)
+- DB query optimization (N+1 patterns)
 
 ## Authentication
 - MSP Admin: aaron@stech.com.au / admin123
