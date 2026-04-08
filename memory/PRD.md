@@ -24,24 +24,34 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 31-48. All 16+ advanced MSP modules enriched to enterprise-grade
 
 ### Phase 8: MSP Command Center Dashboard (DONE - 2026-03-21)
-49. Cross-module intelligence hub — 8-tile strip + 3 detail cards
+49. Cross-module intelligence hub
 
 ### Phase 9: Multi-Tenant Client Portal (DONE - 2026-03-23)
-50-59. Full portal SPA at /portal-app with email/password + TOTP 2FA, 8 client-scoped views
+50-59. Full portal SPA at /portal-app with email/password + TOTP 2FA
 
 ### Phase 10: Admin Portal User Management (DONE - 2026-03-23)
-60. Portal User Management admin page with full CRUD, by-client view, permissions
+60. Portal User Management admin page
 
 ### Phase 11: Remote Devices Module Rebuild (DONE - 2026-03-24)
-61. Complete rebuild with RustDesk ID assignment, quick connect, session history, server settings
+61. Complete rebuild with RustDesk ID assignment, quick connect, session history
 
 ### Phase 12: Technicians Page Overhaul (DONE - 2026-03-25)
-62. **Edit Bug Fix** — Edit dialog now opens immediately from technician detail view (was only appearing after clicking Back)
-63. **Categories/Roles** — 9 categories (SLA, Workshop, Cabling, Network, WISP, Field Service, Security, Cloud, Helpdesk) with color-coded badges, toggle selectors, and category filter
-64. **Archive/Delete System** — Archive (soft-deactivate, preserves history, restorable), Permanent Delete (with confirmation dialog), Active/Archived toggle view
-65. **Quick Stats Strip** — 5-metric dashboard strip (Active Techs, On Call Now, Overdue Tickets, Open Tickets, Avg Hours/Week)
-66. **Bulk Actions** — Checkbox selection, bulk Archive, bulk Set Categories, bulk Restore/Delete for archived techs
-67. **Backend Endpoints** — POST /api/technicians/{id}/archive, POST /api/technicians/{id}/restore, POST /api/technicians/bulk-action
+62-67. Edit bug fix, Categories/Roles (9 categories), Archive/Delete system, Quick Stats Strip, Bulk Actions
+
+### Phase 13: Dashboard Redesign (DONE - 2026-04-08)
+68. **Clean Dashboard** — Replaced noisy 11-card + 8-tile layout with focused 4-metric design
+69. **Attention Banner** — Clickable alerts only showing items needing action (SLA Breaches, Offline Devices, Outstanding, Need Patching, Critical Tickets, Failure Predictions)
+70. **Quick Search** — Ctrl+K command palette with ticket/device search + quick actions
+71. **Collapsible Insights** — Failure Predictions, Backups, Compliance behind toggle
+72. **Auto-refresh** — Dashboard refreshes every 60 seconds
+
+### Phase 14: Patch Management Agent System (DONE - 2026-04-08)
+73. **PowerShell Agent Script** — Dynamically generated, deployable alongside RustDesk on client devices
+74. **Agent Tab in Patch Hub** — 9th tab showing reporting devices, deploy instructions, script download
+75. **Device Reporting API** — POST /api/patch-hub/agent/report (unauthenticated for agents)
+76. **Agent Reports Dashboard** — Shows per-device patch status, pending updates, Defender status
+77. **One-Line Deploy** — Copy-paste command for technicians to deploy agent on client machines
+78. **Windows Service Install** — Script includes Install-AsService function using NSSM
 
 ## Prioritized Backlog
 
@@ -55,11 +65,10 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - CRM integrations (Xero, Pax8, Domotz)
 
 ### P3
-- Implement /api/client-portal/access-logs endpoint
 - Decompose monolithic seed.py and navigation.js
 - Refactor TicketsPage.jsx into sub-components
 - Fix recharts console warnings
-- Accessibility fixes
+- Accessibility fixes (aria-describedby)
 - DB query optimization (N+1 patterns in tickets.py, clients.py)
 
 ## Authentication
