@@ -111,7 +111,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
 async def update_technician(tech_id: str, tech_data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "categories", "is_active",
                "email_signature", "email_signature_html", "signature_config", "avatar",
-               "job_title", "permissions", "is_admin", "archived", "archived_at"}
+               "job_title", "permissions", "is_admin", "archived", "archived_at", "enabled_modules"}
     # Only admins can set is_admin and permissions
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
@@ -319,6 +319,8 @@ async def update_technician_permissions(tech_id: str, data: dict, current_user: 
         update["is_admin"] = data["is_admin"]
     if "job_title" in data:
         update["job_title"] = data["job_title"]
+    if "enabled_modules" in data:
+        update["enabled_modules"] = data["enabled_modules"]
     if update:
         await db.users.update_one({"id": tech_id}, {"$set": update})
     return {"message": "Permissions updated"}

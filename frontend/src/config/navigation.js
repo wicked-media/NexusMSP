@@ -15,203 +15,388 @@ import {
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic
+  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown
 } from "lucide-react";
 
+/*
+ * CONSOLIDATED NAVIGATION
+ * ~35 top-level items (down from 130+)
+ * Items with `children` expand on click to reveal sub-pages
+ * Items without `children` navigate directly
+ */
 export const navGroups = [
   {
-    title: "Main",
+    id: "service_desk",
+    title: "Service Desk",
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-      { path: "/tickets", icon: Ticket, label: "Tickets" },
-      { path: "/kanban-tickets", icon: FolderKanban, label: "Kanban Board" },
-      { path: "/intelligent-routing", icon: Brain, label: "Smart Routing" },
-      { path: "/voice-ticket", icon: Mic, label: "Voice to Ticket" },
-      { path: "/sla-timer", icon: Timer, label: "SLA Timer" },
-      { path: "/sla-penalties", icon: Calculator, label: "SLA Penalties" },
-      { path: "/dispatch-board", icon: MapPin, label: "Dispatch Board" },
-      { path: "/escalation-matrix", icon: Bell, label: "Escalation Matrix" },
-      { path: "/change-management", icon: GitBranch, label: "Change Mgmt" },
-      { path: "/incident-heatmap", icon: Flame, label: "Incident Heatmap" },
-      { path: "/technicians", icon: UserCog, label: "Technicians" },
-      { path: "/skills-matrix", icon: Award, label: "Skills Matrix" },
-      { path: "/tech-utilization", icon: Clock, label: "Tech Utilization" },
-      { path: "/leaderboard", icon: Trophy, label: "Leaderboard" },
-      { path: "/scheduling", icon: CalendarDays, label: "Scheduling" },
-      { path: "/smart-scheduling", icon: Navigation, label: "Smart Routing" },
-      { path: "/mobile-tech", icon: Smartphone, label: "Mobile Tech" },
-      { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
+      {
+        path: "/tickets", icon: Ticket, label: "Tickets",
+        children: [
+          { path: "/tickets", label: "All Tickets" },
+          { path: "/kanban-tickets", label: "Kanban Board" },
+          { path: "/sla-timer", label: "SLA Timer" },
+          { path: "/sla-penalties", label: "SLA Penalties" },
+        ]
+      },
+      {
+        path: "/dispatch-board", icon: MapPin, label: "Dispatch & Escalation",
+        children: [
+          { path: "/dispatch-board", label: "Dispatch Board" },
+          { path: "/escalation-matrix", label: "Escalation Matrix" },
+          { path: "/intelligent-routing", label: "Smart Routing" },
+        ]
+      },
+      {
+        path: "/change-management", icon: GitBranch, label: "Change & Incidents",
+        children: [
+          { path: "/change-management", label: "Change Management" },
+          { path: "/incident-heatmap", label: "Incident Heatmap" },
+          { path: "/postmortem", label: "Post-Mortems" },
+          { path: "/alert-suppression", label: "Alert Suppression" },
+        ]
+      },
+      {
+        path: "/technicians", icon: UserCog, label: "Team Management",
+        children: [
+          { path: "/technicians", label: "Technicians" },
+          { path: "/skills-matrix", label: "Skills Matrix" },
+          { path: "/tech-utilization", label: "Utilization" },
+          { path: "/leaderboard", label: "Leaderboard" },
+        ]
+      },
+      {
+        path: "/scheduling", icon: CalendarDays, label: "Scheduling",
+        children: [
+          { path: "/scheduling", label: "Calendar" },
+          { path: "/smart-scheduling", label: "Smart Routing" },
+          { path: "/maintenance-scheduler", label: "Maintenance" },
+        ]
+      },
+      {
+        path: "/live-chat", icon: MessageSquare, label: "Live Support",
+        children: [
+          { path: "/live-chat", label: "Live Chat" },
+          { path: "/voice-ticket", label: "Voice to Ticket" },
+          { path: "/script-ticket", label: "Script-to-Ticket" },
+        ]
+      },
       { path: "/approvals", icon: CheckSquare, label: "Approvals" },
-      { path: "/postmortem", icon: FileSearch, label: "Post-Mortems" },
-      { path: "/live-chat", icon: MessageSquare, label: "Live Chat" },
-      { path: "/custom-monitors", icon: Activity, label: "Custom Monitors" },
-      { path: "/script-ticket", icon: Terminal, label: "Script-to-Ticket" },
-      { path: "/alert-suppression", icon: BellOff, label: "Alert Suppression" },
-      { path: "/maintenance-scheduler", icon: CalendarClock, label: "Maintenance" },
+      { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
+      { path: "/mobile-tech", icon: Smartphone, label: "Mobile Tech" },
     ]
   },
   {
+    id: "infrastructure",
     title: "Infrastructure",
     items: [
-      { path: "/devices", icon: Monitor, label: "Devices" },
-      { path: "/bulk-actions", icon: Zap, label: "Bulk Actions" },
-      { path: "/topology", icon: Wifi, label: "Network Topology" },
-      { path: "/networking", icon: Wifi, label: "Networking" },
-      { path: "/dns-monitor", icon: Globe, label: "DNS Monitor" },
-      { path: "/bandwidth-monitor", icon: Gauge, label: "Bandwidth" },
-      { path: "/dmarc-compliance", icon: ShieldCheck, label: "Email Security" },
-      { path: "/splynx-dashboard", icon: Activity, label: "ISP Health" },
-      { path: "/assets", icon: Package, label: "Assets" },
-      { path: "/qr-assets", icon: QrCode, label: "QR Asset Tags" },
-      { path: "/asset-lifecycle", icon: Wrench, label: "Asset Lifecycle" },
-      { path: "/asset-depreciation", icon: RefreshCw, label: "Depreciation" },
-      { path: "/warranty-tracker", icon: Shield, label: "Warranty Tracker" },
-      { path: "/backup-compliance", icon: HardDrive, label: "Backup Compliance" },
-      { path: "/backup-dashboard", icon: HardDrive, label: "Backup Dashboard" },
-      { path: "/patch-compliance", icon: ShieldCheck, label: "Patch Compliance" },
-      { path: "/procurement-planner", icon: ShoppingBag, label: "Procurement" },
-      { path: "/predictive-maintenance", icon: Cpu, label: "Predictive AI" },
-      { path: "/doc-scanner", icon: ScanLine, label: "Document Scanner" },
-      { path: "/vault", icon: KeyRound, label: "Password Vault" },
-      { path: "/runbooks", icon: Workflow, label: "Runbook Automation" },
-      { path: "/scripting", icon: Terminal, label: "Scripting" },
-      { path: "/remote-access", icon: Laptop, label: "Remote Devices" },
+      {
+        path: "/devices", icon: Monitor, label: "Devices",
+        children: [
+          { path: "/devices", label: "All Devices" },
+          { path: "/bulk-actions", label: "Bulk Actions" },
+          { path: "/remote-access", label: "Remote Access" },
+          { path: "/custom-monitors", label: "Custom Monitors" },
+        ]
+      },
+      {
+        path: "/networking", icon: Wifi, label: "Network",
+        children: [
+          { path: "/networking", label: "Overview" },
+          { path: "/topology", label: "Topology" },
+          { path: "/dns-monitor", label: "DNS Monitor" },
+          { path: "/bandwidth-monitor", label: "Bandwidth" },
+          { path: "/dmarc-compliance", label: "Email Security" },
+          { path: "/splynx-dashboard", label: "ISP Health" },
+        ]
+      },
+      {
+        path: "/assets", icon: Package, label: "Assets",
+        children: [
+          { path: "/assets", label: "All Assets" },
+          { path: "/qr-assets", label: "QR Asset Tags" },
+          { path: "/asset-lifecycle", label: "Lifecycle" },
+          { path: "/asset-depreciation", label: "Depreciation" },
+          { path: "/warranty-tracker", label: "Warranty" },
+          { path: "/procurement-planner", label: "Procurement" },
+        ]
+      },
+      {
+        path: "/backup-dashboard", icon: HardDrive, label: "Backups",
+        children: [
+          { path: "/backup-dashboard", label: "Dashboard" },
+          { path: "/backup-compliance", label: "Compliance" },
+          { path: "/backup-verify", label: "Verify" },
+        ]
+      },
+      {
+        path: "/patch-hub", icon: Layers, label: "Patch Management",
+        children: [
+          { path: "/patch-hub", label: "Patch Hub" },
+          { path: "/patch-compliance", label: "Compliance" },
+          { path: "/third-party-patching", label: "3rd Party" },
+        ]
+      },
+      {
+        path: "/vault", icon: KeyRound, label: "Security Tools",
+        children: [
+          { path: "/vault", label: "Password Vault" },
+          { path: "/runbooks", label: "Runbook Automation" },
+          { path: "/scripting", label: "Scripting" },
+          { path: "/doc-scanner", label: "Document Scanner" },
+        ]
+      },
     ]
   },
   {
+    id: "business",
     title: "Business",
     items: [
-      { path: "/clients", icon: Users, label: "Clients" },
-      { path: "/client-health", icon: Activity, label: "Client Health" },
-      { path: "/client-timeline", icon: History, label: "Client Timeline" },
-      { path: "/client-compare", icon: BarChart, label: "Client Compare" },
-      { path: "/client-risk", icon: ShieldAlert, label: "Client Risk" },
-      { path: "/csat-surveys", icon: Star, label: "CSAT Surveys" },
-      { path: "/client-reports", icon: FileText, label: "Client Reports" },
-      { path: "/sla-report-gen", icon: FileBarChart, label: "Client SLA Reports" },
-      { path: "/client-portal-admin", icon: Users, label: "Client Portal" },
-      { path: "/client-portal", icon: Globe, label: "Self-Service Portal" },
-      { path: "/onboarding", icon: Zap, label: "Client Onboarding" },
-      { path: "/sentiment", icon: Heart, label: "Client Sentiment" },
-      { path: "/it-roadmap", icon: Map, label: "IT Roadmap" },
-      { path: "/upsell", icon: TrendingUp, label: "Upsell Detector" },
-      { path: "/revenue-forecast", icon: TrendingUp, label: "Revenue Forecast" },
-      { path: "/rpe-dashboard", icon: Target, label: "Revenue/Endpoint" },
-      { path: "/contract-profit", icon: DollarSign, label: "Contract Profit" },
-      { path: "/profitability-heatmap", icon: BarChart3, label: "Profitability Map" },
-      { path: "/cost-per-ticket", icon: DollarSign, label: "Cost/Ticket" },
-      { path: "/roi-reports", icon: FileBarChart, label: "ROI Reports" },
-      { path: "/leads", icon: UserPlus, label: "Leads & CRM" },
-      { path: "/loyalty", icon: Gift, label: "Loyalty & Renewals" },
-      { path: "/campaigns", icon: Mail, label: "Email Campaigns" },
-      { path: "/products", icon: Package, label: "Products" },
-      { path: "/billing-dashboard", icon: BarChart3, label: "Billing Command" },
-      { path: "/purchase-orders", icon: ShoppingCart, label: "Purchase Orders" },
-      { path: "/stocktake", icon: Package, label: "Stocktake" },
-      { path: "/vendors", icon: Building2, label: "Vendors" },
-      { path: "/vendor-scorecard", icon: Star, label: "Vendor Scorecard" },
-      { path: "/rentals", icon: Phone, label: "Phone Rentals" },
+      {
+        path: "/clients", icon: Users, label: "Clients",
+        children: [
+          { path: "/clients", label: "All Clients" },
+          { path: "/client-health", label: "Health" },
+          { path: "/client-timeline", label: "Timeline" },
+          { path: "/client-compare", label: "Compare" },
+          { path: "/client-risk", label: "Risk" },
+          { path: "/sentiment", label: "Sentiment" },
+          { path: "/csat-surveys", label: "CSAT Surveys" },
+          { path: "/onboarding", label: "Onboarding" },
+        ]
+      },
+      {
+        path: "/client-portal-admin", icon: Globe, label: "Client Portal",
+        children: [
+          { path: "/client-portal-admin", label: "Portal Admin" },
+          { path: "/client-portal", label: "Self-Service" },
+        ]
+      },
+      {
+        path: "/leads", icon: UserPlus, label: "Leads & CRM",
+        children: [
+          { path: "/leads", label: "Leads" },
+          { path: "/campaigns", label: "Campaigns" },
+          { path: "/loyalty", label: "Loyalty & Renewals" },
+          { path: "/upsell", label: "Upsell Detector" },
+        ]
+      },
+      {
+        path: "/invoices", icon: Receipt, label: "Invoicing",
+        children: [
+          { path: "/invoices", label: "Invoices" },
+          { path: "/recurring-invoices", label: "Recurring" },
+          { path: "/estimates", label: "Estimates" },
+        ]
+      },
+      {
+        path: "/billing-dashboard", icon: BarChart3, label: "Billing",
+        children: [
+          { path: "/billing-dashboard", label: "Command Center" },
+          { path: "/billing-recon", label: "Reconciliation" },
+          { path: "/usage-billing", label: "Usage Billing" },
+          { path: "/late-payment", label: "Late Payment AI" },
+          { path: "/pricing-calc", label: "Pricing Calculator" },
+        ]
+      },
+      {
+        path: "/financial-reports", icon: DollarSign, label: "Financial Analytics",
+        children: [
+          { path: "/financial-reports", label: "Financial Reports" },
+          { path: "/revenue-forecast", label: "Revenue Forecast" },
+          { path: "/rpe-dashboard", label: "Revenue/Endpoint" },
+          { path: "/contract-profit", label: "Contract Profit" },
+          { path: "/profitability-heatmap", label: "Profitability Map" },
+          { path: "/cost-per-ticket", label: "Cost/Ticket" },
+          { path: "/roi-reports", label: "ROI Reports" },
+          { path: "/revenue-tracker", label: "Revenue Tracker" },
+          { path: "/revenue-tracking", label: "Revenue/Ticket" },
+        ]
+      },
+      {
+        path: "/products", icon: Package, label: "Products & Inventory",
+        children: [
+          { path: "/products", label: "Products" },
+          { path: "/stocktake", label: "Stocktake" },
+          { path: "/rentals", label: "Phone Rentals" },
+        ]
+      },
+      {
+        path: "/purchase-orders", icon: ShoppingCart, label: "POs & Vendors",
+        children: [
+          { path: "/purchase-orders", label: "Purchase Orders" },
+          { path: "/vendors", label: "Vendors" },
+          { path: "/vendor-scorecard", label: "Vendor Scorecard" },
+        ]
+      },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
-      { path: "/invoices", icon: Receipt, label: "Invoices" },
-      { path: "/estimates", icon: FileText, label: "Estimates" },
-      { path: "/recurring-invoices", icon: RefreshCw, label: "Recurring Invoices" },
-      { path: "/billing-recon", icon: DollarSign, label: "Billing Recon" },
-      { path: "/xero", icon: CreditCard, label: "Xero Accounting" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
       { path: "/license-management", icon: Layers, label: "License Mgmt" },
-      { path: "/usage-billing", icon: Receipt, label: "Usage Billing" },
-      { path: "/pricing-calc", icon: Banknote, label: "Pricing Calculator" },
-      { path: "/late-payment", icon: BadgeDollarSign, label: "Late Payment AI" },
-      { path: "/qbr-generator", icon: FileSpreadsheet, label: "QBR Generator" },
-      { path: "/revenue-tracker", icon: Coins, label: "Revenue Tracker" },
-      { path: "/revenue-tracking", icon: DollarSign, label: "Revenue/Ticket" },
     ]
   },
   {
-    title: "Communication",
+    id: "security",
+    title: "Security",
     items: [
-      { path: "/email", icon: Mail, label: "Email" },
-      { path: "/o365-setup", icon: Mail, label: "O365 Mailbox" },
-      { path: "/comms-timeline", icon: MessageCircle, label: "Comms Timeline" },
-      { path: "/documentation", icon: Key, label: "IT Docs" },
-      { path: "/capacity-planner", icon: Users, label: "Capacity Planner" },
-      { path: "/auto-documentation", icon: FileText, label: "Auto-Docs" },
-      { path: "/knowledge-base", icon: BookOpen, label: "Knowledge Base" },
+      {
+        path: "/security-dashboard", icon: Shield, label: "SOC Dashboard",
+        children: [
+          { path: "/security-dashboard", label: "Overview" },
+          { path: "/soc-feed", label: "SOC Feed" },
+          { path: "/soc-realtime", label: "Live Feed" },
+          { path: "/threat-timeline", label: "Threat Timeline" },
+          { path: "/identity-threats", label: "Identity Threats" },
+        ]
+      },
+      {
+        path: "/endpoint-security", icon: ShieldCheck, label: "Endpoint Security",
+        children: [
+          { path: "/endpoint-security", label: "Scores" },
+          { path: "/vulnerability-scanner", label: "Vuln Scanner" },
+          { path: "/zero-trust", label: "Zero Trust" },
+          { path: "/dark-web-monitor", label: "Dark Web Monitor" },
+          { path: "/phishing-sim", label: "Phishing Sim" },
+        ]
+      },
+      {
+        path: "/ransomware-canary", icon: Flame, label: "Ransomware Defense",
+        children: [
+          { path: "/ransomware-canary", label: "Canary" },
+          { path: "/ransomware-tabletop", label: "Tabletop" },
+          { path: "/remediation-playbooks", label: "Remediation" },
+        ]
+      },
+      {
+        path: "/compliance-frameworks", icon: ShieldAlert, label: "Compliance",
+        children: [
+          { path: "/compliance-frameworks", label: "Frameworks" },
+          { path: "/compliance", label: "Reports" },
+          { path: "/compliance-report-gen", label: "Generator" },
+          { path: "/mfa-management", label: "MFA Management" },
+          { path: "/password-rotation", label: "Password Rotation" },
+          { path: "/audit-trail", label: "Audit Trail" },
+        ]
+      },
     ]
   },
   {
-    title: "Security Operations",
-    items: [
-      { path: "/security-dashboard", icon: Shield, label: "Security SOC" },
-      { path: "/endpoint-security", icon: ShieldCheck, label: "Endpoint Scores" },
-      { path: "/threat-timeline", icon: Flame, label: "Threat Timeline" },
-      { path: "/identity-threats", icon: Eye, label: "Identity Threats" },
-      { path: "/ransomware-canary", icon: FileWarning, label: "Ransomware Canary" },
-      { path: "/remediation-playbooks", icon: Workflow, label: "Remediation" },
-      { path: "/soc-feed", icon: Activity, label: "SOC Feed" },
-      { path: "/vulnerability-scanner", icon: Bug, label: "Vuln Scanner" },
-      { path: "/third-party-patching", icon: ShieldCheck, label: "3rd Party Patches" },
-      { path: "/audit-trail", icon: ClipboardList, label: "Audit Trail" },
-      { path: "/zero-trust", icon: Fingerprint, label: "Zero Trust" },
-      { path: "/ransomware-tabletop", icon: Swords, label: "Ransomware Tabletop" },
-      { path: "/soc-realtime", icon: Radio, label: "Live SOC Feed" },
-    ]
-  },
-  {
-    title: "Security & Compliance",
-    items: [
-      { path: "/compliance", icon: ShieldAlert, label: "Compliance Reports" },
-      { path: "/compliance-report-gen", icon: FileText, label: "Compliance Gen" },
-      { path: "/mfa-management", icon: Lock, label: "MFA Management" },
-      { path: "/password-rotation", icon: RefreshCw, label: "Password Rotation" },
-    ]
-  },
-  {
-    title: "Integrations",
-    items: [
-      { path: "/proxmox", icon: Server, label: "Proxmox" },
-      { path: "/domotz", icon: Network, label: "Domotz" },
-      { path: "/acronis", icon: Shield, label: "Acronis" },
-      { path: "/pax8", icon: Cloud, label: "Pax8" },
-      { path: "/gradient", icon: DollarSign, label: "Gradient MSP" },
-      { path: "/webhook-builder", icon: Webhook, label: "Webhook Builder" },
-      { path: "/git-scripts", icon: GitMerge, label: "Git Scripts Sync" },
-      { path: "/channel-mode", icon: Building, label: "Channel / MSP Mode" },
-    ]
-  },
-  {
+    id: "intelligence",
     title: "AI & Intelligence",
     items: [
-      { path: "/nlp-query", icon: Search, label: "NLP Search" },
-      { path: "/ai-resolution", icon: BrainCircuit, label: "AI Auto-Resolve" },
-      { path: "/patch-hub", icon: Layers, label: "Patch Hub" },
-      { path: "/self-healing", icon: HeartPulse, label: "AI Self-Healing" },
-      { path: "/predictive-failure", icon: AlertTriangle, label: "Predictive Failure" },
+      {
+        path: "/nlp-query", icon: BrainCircuit, label: "AI Copilot",
+        children: [
+          { path: "/nlp-query", label: "NLP Search" },
+          { path: "/ai-resolution", label: "Auto-Resolve" },
+          { path: "/self-healing", label: "Self-Healing" },
+          { path: "/predictive-failure", label: "Predictive Failure" },
+          { path: "/predictive-maintenance", label: "Predictive AI" },
+        ]
+      },
       { path: "/dashboard-builder", icon: LayoutGrid, label: "Dashboard Builder" },
+      {
+        path: "/knowledge-base", icon: BookOpen, label: "Knowledge & Docs",
+        children: [
+          { path: "/knowledge-base", label: "Knowledge Base" },
+          { path: "/documentation", label: "IT Docs" },
+          { path: "/auto-documentation", label: "Auto-Docs" },
+          { path: "/capacity-planner", label: "Capacity Planner" },
+        ]
+      },
     ]
   },
   {
-    title: "System",
+    id: "reports",
+    title: "Reports & Comms",
     items: [
-      { path: "/health-radar", icon: Radar, label: "Health Radar" },
-      { path: "/benchmarking", icon: BarChart3, label: "Benchmarking" },
-      { path: "/white-label", icon: Paintbrush, label: "White Label" },
-      { path: "/expiry-tracker", icon: CalendarClock, label: "Expiry Tracker" },
-      { path: "/executive-reports", icon: FileBarChart, label: "Exec Reports" },
-      { path: "/nps-tracker", icon: ThumbsUp, label: "NPS Tracker" },
-      { path: "/client-budget", icon: DollarSign, label: "Client Budgets" },
-      { path: "/geo-map", icon: MapPinned, label: "Geo Map" },
-      { path: "/hardware-refresh", icon: HardDrive, label: "HW Refresh" },
-      { path: "/dark-web-monitor", icon: Eye, label: "Dark Web Monitor" },
-      { path: "/phishing-sim", icon: Crosshair, label: "Phishing Sim" },
-      { path: "/backup-verify", icon: TestTube, label: "Backup Verify" },
-      { path: "/compliance-frameworks", icon: Shield, label: "Compliance" },
-      { path: "/reports", icon: BarChart3, label: "Reports" },
-      { path: "/financial-reports", icon: Wallet, label: "Financial Reports" },
-      { path: "/ticket-settings", icon: Tags, label: "Ticket Settings" },
-      { path: "/ticket-ping-settings", icon: Volume2, label: "Ping & Escalation" },
-      { path: "/settings", icon: Settings, label: "Settings" },
+      {
+        path: "/reports", icon: BarChart3, label: "Reports",
+        children: [
+          { path: "/reports", label: "Reports" },
+          { path: "/executive-reports", label: "Executive" },
+          { path: "/client-reports", label: "Client Reports" },
+          { path: "/sla-report-gen", label: "SLA Reports" },
+          { path: "/qbr-generator", label: "QBR Generator" },
+          { path: "/it-roadmap", label: "IT Roadmap" },
+        ]
+      },
+      {
+        path: "/email", icon: Mail, label: "Communications",
+        children: [
+          { path: "/email", label: "Email" },
+          { path: "/o365-setup", label: "O365 Mailbox" },
+          { path: "/comms-timeline", label: "Timeline" },
+        ]
+      },
     ]
   },
+  {
+    id: "platform",
+    title: "Platform",
+    items: [
+      {
+        path: "/settings", icon: Settings, label: "Settings",
+        children: [
+          { path: "/settings", label: "General" },
+          { path: "/ticket-settings", label: "Ticket Settings" },
+          { path: "/ticket-ping-settings", label: "Ping & Escalation" },
+          { path: "/white-label", label: "White Label" },
+          { path: "/channel-mode", label: "Channel / MSP Mode" },
+        ]
+      },
+      {
+        path: "/health-radar", icon: Radar, label: "System Health",
+        children: [
+          { path: "/health-radar", label: "Health Radar" },
+          { path: "/benchmarking", label: "Benchmarking" },
+          { path: "/nps-tracker", label: "NPS Tracker" },
+          { path: "/expiry-tracker", label: "Expiry Tracker" },
+          { path: "/geo-map", label: "Geo Map" },
+          { path: "/hardware-refresh", label: "HW Refresh" },
+          { path: "/client-budget", label: "Client Budgets" },
+        ]
+      },
+      {
+        path: "/proxmox", icon: Server, label: "Integrations",
+        children: [
+          { path: "/proxmox", label: "Proxmox" },
+          { path: "/domotz", label: "Domotz" },
+          { path: "/acronis", label: "Acronis" },
+          { path: "/pax8", label: "Pax8" },
+          { path: "/gradient", label: "Gradient MSP" },
+          { path: "/xero", label: "Xero Accounting" },
+          { path: "/webhook-builder", label: "Webhook Builder" },
+          { path: "/git-scripts", label: "Git Scripts Sync" },
+        ]
+      },
+    ]
+  },
+];
+
+// Flat list of all items for search/routing
+export function getAllNavItems() {
+  const items = [];
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      items.push({ ...item, group: group.title, groupId: group.id });
+      if (item.children) {
+        for (const child of item.children) {
+          items.push({ ...child, icon: item.icon, group: group.title, groupId: group.id, parentLabel: item.label });
+        }
+      }
+    }
+  }
+  return items;
+}
+
+// Module group IDs for toggle (what admins can enable/disable per tech)
+export const MODULE_GROUPS = [
+  { id: "service_desk", label: "Service Desk", description: "Tickets, dispatch, scheduling, live support" },
+  { id: "infrastructure", label: "Infrastructure", description: "Devices, network, assets, backups, patching" },
+  { id: "business", label: "Business", description: "Clients, invoicing, billing, financials" },
+  { id: "security", label: "Security", description: "SOC, endpoint security, compliance" },
+  { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
+  { id: "reports", label: "Reports & Comms", description: "Reports, email, communications" },
+  { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
 ];

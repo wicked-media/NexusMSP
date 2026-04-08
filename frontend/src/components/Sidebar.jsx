@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API } from "@/App";
-import { navGroups } from "@/config/navigation";
+import { navGroups, getAllNavItems } from "@/config/navigation";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
@@ -78,36 +78,49 @@ function NotificationBell({ token, collapsed }) {
   const typeIcon = { sla_breach: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT" };
 
   return (
-    <div className="relative px-3 py-2" ref={ref}>
-      <button onClick={() => setIsOpen(!isOpen)} className={`relative flex items-center gap-2 w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all ${collapsed ? "justify-center" : ""}`} data-testid="notification-bell">
-        <Bell className="w-[18px] h-[18px]" />
-        {!collapsed && <span className="text-[13px] font-medium">Notifications</span>}
-        {unreadCount > 0 && (
-          <span className="absolute top-1 right-2 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">{unreadCount > 9 ? "9+" : unreadCount}</span>
-        )}
-      </button>
-      {isOpen && (
-        <div className="absolute left-full top-0 ml-2 w-80 bg-card border rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-dropdown">
+    <div className={`px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className={`relative flex items-center gap-2 rounded-lg transition-all duration-150 hover:bg-muted ${
+              collapsed ? 'p-2 justify-center' : 'w-full px-3 py-2'
+            }`}
+            data-testid="notification-bell"
+          >
+            <Bell className="w-[18px] h-[18px] text-muted-foreground" />
+            {!collapsed && <span className="text-[12px] text-muted-foreground">Notifications</span>}
+            {unreadCount > 0 && (
+              <span className="absolute top-1 left-5 w-4 h-4 bg-red-500 rounded-full text-[9px] text-white font-bold flex items-center justify-center">{unreadCount > 9 ? '9+' : unreadCount}</span>
+            )}
+          </button>
+        </TooltipTrigger>
+        {collapsed && <TooltipContent side="right">Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
+      </Tooltip>
+      {isOpen && !collapsed && (
+        <div className="absolute left-[260px] top-16 w-80 bg-card border rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-panel">
           <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="font-semibold text-sm">Notifications</span>
+            <span className="text-sm font-semibold">Notifications</span>
             {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
           </div>
           <div className="max-h-80 overflow-y-auto">
-            {notifications.length > 0 ? notifications.map(n => (
-              <div key={n.id} className={`flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/50 transition-colors cursor-pointer ${!n.read ? "bg-primary/5" : ""}`}
-                onClick={() => handleNotificationClick(n)} data-testid={`notification-item-${n.id}`}>
-                <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${severityColor[n.severity] || "bg-blue-500"}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-mono text-muted-foreground bg-muted px-1 rounded">{typeIcon[n.type] || "SYS"}</span>
-                    <p className="text-xs font-medium truncate">{n.title}</p>
+            {notifications.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No notifications</p>
+            ) : notifications.map(n => (
+              <div key={n.id} onClick={() => handleNotificationClick(n)}
+                className={`px-4 py-3 border-b border-border/30 cursor-pointer hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${severityColor[n.severity] || 'bg-blue-500'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded">{typeIcon[n.type] || 'SYS'}</span>
+                      <p className="text-xs font-medium truncate">{n.message}</p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</p>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{n.message}</p>
                 </div>
               </div>
-            )) : (
-              <div className="text-center py-8 text-muted-foreground text-sm">No notifications</div>
-            )}
+            ))}
           </div>
         </div>
       )}
@@ -115,52 +128,105 @@ function NotificationBell({ token, collapsed }) {
   );
 }
 
-// Nav item component that avoids className function + TooltipTrigger asChild conflict
-const NavItem = ({ item, collapsed }) => {
+// NavItem with optional collapsible children
+const NavItem = ({ item, collapsed, expandedMenus, toggleMenu }) => {
   const location = useLocation();
-  const isActive = item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path);
+  const navigate = useNavigate();
+  const hasChildren = item.children && item.children.length > 0;
+  const isExpanded = expandedMenus.has(item.path);
+
+  // Check if this item or any child is active
+  const isActive = location.pathname === item.path;
+  const isChildActive = hasChildren && item.children.some(c => location.pathname === c.path);
+  const isHighlighted = isActive || isChildActive;
+
+  const handleClick = () => {
+    if (hasChildren) {
+      if (collapsed) {
+        navigate(item.path);
+      } else {
+        toggleMenu(item.path);
+      }
+    } else {
+      navigate(item.path);
+    }
+  };
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Link
-          to={item.path}
-          className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
-            isActive
-              ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground hover:translate-x-1'
-          } ${collapsed ? 'justify-center' : ''}`}
-          data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-        >
-          <item.icon className="h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 group-hover:scale-110" strokeWidth={1.75} />
-          {!collapsed && (
-            <span className="text-[13px] font-medium">{item.label}</span>
+        <div>
+          <button
+            onClick={handleClick}
+            className={`flex items-center w-full rounded-lg transition-all duration-150 group ${
+              collapsed
+                ? `p-2.5 justify-center ${isHighlighted ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
+                : `px-3 py-1.5 gap-2.5 ${isHighlighted ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
+            }`}
+            data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
+          >
+            {item.icon && <item.icon className={`flex-shrink-0 ${collapsed ? 'w-[18px] h-[18px]' : 'w-4 h-4'}`} />}
+            {!collapsed && (
+              <>
+                <span className="text-[12px] flex-1 text-left truncate">{item.label}</span>
+                {hasChildren && (
+                  <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                )}
+              </>
+            )}
+          </button>
+          {/* Children */}
+          {!collapsed && hasChildren && isExpanded && (
+            <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
+              {item.children.map(child => {
+                const childActive = location.pathname === child.path;
+                return (
+                  <Link
+                    key={child.path}
+                    to={child.path}
+                    className={`flex items-center px-2.5 py-1 rounded text-[11px] transition-all ${
+                      childActive ? 'text-primary font-medium bg-primary/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    data-testid={`nav-child-${child.path.replace(/\//g, '-').replace(/^-/, '')}`}
+                  >
+                    {child.label}
+                  </Link>
+                );
+              })}
+            </div>
           )}
-        </Link>
+        </div>
       </TooltipTrigger>
       {collapsed && (
         <TooltipContent side="right" className="font-medium">
           {item.label}
+          {hasChildren && (
+            <div className="mt-1 pt-1 border-t border-border/50 space-y-0.5">
+              {item.children.map(c => (
+                <Link key={c.path} to={c.path} className="block text-xs text-muted-foreground hover:text-foreground py-0.5">{c.label}</Link>
+              ))}
+            </div>
+          )}
         </TooltipContent>
       )}
     </Tooltip>
   );
 };
 
-// Sidebar Search Component - searches all modules/pages
+// Sidebar Search Component
 function SidebarSearch() {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
-  // Flatten all nav items for searching
-  const allItems = navGroups.flatMap(g => g.items.map(item => ({ ...item, group: g.title })));
+  const allItems = getAllNavItems();
   const filtered = query.trim()
     ? allItems.filter(item =>
         item.label.toLowerCase().includes(query.toLowerCase()) ||
         item.group.toLowerCase().includes(query.toLowerCase()) ||
-        item.path.toLowerCase().includes(query.toLowerCase())
+        item.path.toLowerCase().includes(query.toLowerCase()) ||
+        (item.parentLabel || "").toLowerCase().includes(query.toLowerCase())
       ).slice(0, 8)
     : [];
 
@@ -199,15 +265,15 @@ function SidebarSearch() {
         <div className="absolute left-3 right-3 top-full mt-1 bg-card border rounded-lg shadow-xl z-50 overflow-hidden" data-testid="sidebar-search-results">
           {filtered.map((item, i) => (
             <button
-              key={item.path}
+              key={`${item.path}-${i}`}
               onMouseDown={() => { navigate(item.path); setQuery(""); }}
               className="flex items-center gap-2.5 w-full px-3 py-2 text-left hover:bg-muted/70 transition-colors border-b border-border/30 last:border-0"
               data-testid={`search-result-${i}`}
             >
-              <item.icon className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
+              {item.icon && <item.icon className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />}
               <div className="min-w-0">
                 <p className="text-[12px] font-medium truncate">{item.label}</p>
-                <p className="text-[10px] text-muted-foreground/60 truncate">{item.group}</p>
+                <p className="text-[10px] text-muted-foreground/60 truncate">{item.parentLabel ? `${item.parentLabel} > ` : ''}{item.group}</p>
               </div>
             </button>
           ))}
@@ -221,11 +287,45 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [expandedMenus, setExpandedMenus] = useState(new Set());
+
+  // Get user's enabled modules (default: all enabled)
+  const enabledModules = user?.enabled_modules || navGroups.map(g => g.id);
 
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
+
+  const toggleMenu = (path) => {
+    setExpandedMenus(prev => {
+      const n = new Set(prev);
+      if (n.has(path)) n.delete(path); else n.add(path);
+      return n;
+    });
+  };
+
+  // Auto-expand the group containing the current route
+  useEffect(() => {
+    for (const group of navGroups) {
+      for (const item of group.items) {
+        if (item.children) {
+          const isChildActive = item.children.some(c => location.pathname === c.path);
+          if (isChildActive || location.pathname === item.path) {
+            setExpandedMenus(prev => {
+              const n = new Set(prev);
+              n.add(item.path);
+              return n;
+            });
+          }
+        }
+      }
+    }
+  }, [location.pathname]);
+
+  // Filter nav groups by enabled modules
+  const visibleGroups = navGroups.filter(g => enabledModules.includes(g.id));
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -283,11 +383,11 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
         {/* Navigation */}
         <ScrollArea className="flex-1">
           <nav className="py-3 px-3">
-            {navGroups.map((group, groupIndex) => (
-              <div key={group.title} className={groupIndex > 0 ? 'mt-5' : ''}>
+            {visibleGroups.map((group, groupIndex) => (
+              <div key={group.id} className={groupIndex > 0 ? 'mt-4' : ''}>
                 {!collapsed && (
-                  <div className="px-3 mb-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-widest text-primary/80">
+                  <div className="px-3 mb-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
                       {group.title}
                     </span>
                   </div>
@@ -295,9 +395,9 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                 {collapsed && groupIndex > 0 && (
                   <div className="mx-3 mb-2 border-t border-border/50" />
                 )}
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {group.items.map((item) => (
-                    <NavItem key={item.path} item={item} collapsed={collapsed} />
+                    <NavItem key={item.path} item={item} collapsed={collapsed} expandedMenus={expandedMenus} toggleMenu={toggleMenu} />
                   ))}
                 </div>
               </div>

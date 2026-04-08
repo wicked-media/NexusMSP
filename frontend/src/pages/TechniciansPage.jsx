@@ -112,6 +112,7 @@ export default function TechniciansPage() {
   const [permDialog, setPermDialog] = useState(false);
   const [permTarget, setPermTarget] = useState(null);
   const [permData, setPermData] = useState({});
+  const [enabledModules, setEnabledModules] = useState([]);
   const [isAdminToggle, setIsAdminToggle] = useState(false);
   const [sigDialog, setSigDialog] = useState(false);
   const [sigTarget, setSigTarget] = useState(null);
@@ -324,6 +325,7 @@ export default function TechniciansPage() {
     setPermTarget(tech);
     setPermData(tech.permissions || {});
     setIsAdminToggle(tech.is_admin || false);
+    setEnabledModules(tech.enabled_modules || ["service_desk", "infrastructure", "business", "security", "intelligence", "reports", "platform"]);
     setPermDialog(true);
   };
 
@@ -337,7 +339,7 @@ export default function TechniciansPage() {
   const handleSavePermissions = async () => {
     try {
       await axios.put(`${API}/technicians/${permTarget.id}/permissions`, {
-        permissions: permData, is_admin: isAdminToggle, job_title: permTarget.job_title
+        permissions: permData, is_admin: isAdminToggle, job_title: permTarget.job_title, enabled_modules: enabledModules
       }, { headers });
       toast.success("Permissions updated");
       setPermDialog(false); fetchTechs();
@@ -729,7 +731,7 @@ export default function TechniciansPage() {
           </DialogContent>
         </Dialog>
 
-        {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} />}
+        {permDialog && <PermissionsDialog permTarget={permTarget} permData={permData} isAdminToggle={isAdminToggle} setIsAdminToggle={setIsAdminToggle} permPresets={permPresets} applyPreset={applyPreset} togglePerm={togglePerm} handleSavePermissions={handleSavePermissions} setPermDialog={setPermDialog} enabledModules={enabledModules} setEnabledModules={setEnabledModules} />}
         {sigDialog && <SignatureDialog sigConfig={sigConfig} setSigConfig={setSigConfig} handleSaveSignature={handleSaveSignature} setSigDialog={setSigDialog} generateSignatureHtml={generateSignatureHtml} />}
 
         {/* Profile Edit Dialog */}
@@ -1157,7 +1159,23 @@ function PermissionsGrid({ permissions }) {
 }
 
 // ========== PERMISSIONS DIALOG ==========
-function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminToggle, permPresets, applyPreset, togglePerm, handleSavePermissions, setPermDialog }) {
+function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminToggle, permPresets, applyPreset, togglePerm, handleSavePermissions, setPermDialog, enabledModules, setEnabledModules }) {
+  const MODULE_GROUPS = [
+    { id: "service_desk", label: "Service Desk", desc: "Tickets, dispatch, scheduling, live support", icon: Ticket },
+    { id: "infrastructure", label: "Infrastructure", desc: "Devices, network, assets, backups, patching", icon: Monitor },
+    { id: "business", label: "Business", desc: "Clients, invoicing, billing, financials", icon: DollarSign },
+    { id: "security", label: "Security", desc: "SOC, endpoint security, compliance", icon: Shield },
+    { id: "intelligence", label: "AI & Intelligence", desc: "AI copilot, predictions, knowledge base", icon: Zap },
+    { id: "reports", label: "Reports & Comms", desc: "Reports, email, communications", icon: BarChart3 },
+    { id: "platform", label: "Platform", desc: "Settings, integrations, system health", icon: Settings },
+  ];
+
+  const toggleModule = (moduleId) => {
+    setEnabledModules(prev =>
+      prev.includes(moduleId) ? prev.filter(m => m !== moduleId) : [...prev, moduleId]
+    );
+  };
+
   return (
     <Dialog open onOpenChange={v => { if (!v) setPermDialog(false); }}>
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
@@ -1176,6 +1194,33 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
               <Button key={p} variant="outline" size="sm" className="text-xs h-7" onClick={() => applyPreset(p)} data-testid={`preset-${p.replace(/\s/g, "-").toLowerCase()}`}>{p}</Button>
             ))}
           </div>
+
+          {/* MODULE VISIBILITY TOGGLE */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold">Sidebar Module Visibility</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Toggle which module groups this technician can see in their sidebar navigation.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {MODULE_GROUPS.map(mg => {
+                const isEnabled = isAdminToggle || enabledModules.includes(mg.id);
+                const Icon = mg.icon;
+                return (
+                  <div key={mg.id} className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all ${isEnabled ? "border-primary/30 bg-primary/5" : "border-border/40 opacity-50"}`}>
+                    <Switch checked={isEnabled} onCheckedChange={() => toggleModule(mg.id)} disabled={isAdminToggle} data-testid={`module-toggle-${mg.id}`} />
+                    <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium">{mg.label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{mg.desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <Separator />
+
           <Table>
             <TableHeader><TableRow><TableHead>Module</TableHead>{ACTIONS.map(a => <TableHead key={a} className="text-center capitalize text-xs">{a}</TableHead>)}</TableRow></TableHeader>
             <TableBody>
