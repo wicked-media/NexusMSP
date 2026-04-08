@@ -39,19 +39,18 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 62-67. Edit bug fix, Categories/Roles (9 categories), Archive/Delete system, Quick Stats Strip, Bulk Actions
 
 ### Phase 13: Dashboard Redesign (DONE - 2026-04-08)
-68. **Clean Dashboard** — Replaced noisy 11-card + 8-tile layout with focused 4-metric design
-69. **Attention Banner** — Clickable alerts only showing items needing action (SLA Breaches, Offline Devices, Outstanding, Need Patching, Critical Tickets, Failure Predictions)
-70. **Quick Search** — Ctrl+K command palette with ticket/device search + quick actions
-71. **Collapsible Insights** — Failure Predictions, Backups, Compliance behind toggle
-72. **Auto-refresh** — Dashboard refreshes every 60 seconds
+68-72. Clean 4-metric design, Attention Banner, Ctrl+K Quick Search, Collapsible Insights, Auto-refresh
 
 ### Phase 14: Patch Management Agent System (DONE - 2026-04-08)
-73. **PowerShell Agent Script** — Dynamically generated, deployable alongside RustDesk on client devices
-74. **Agent Tab in Patch Hub** — 9th tab showing reporting devices, deploy instructions, script download
-75. **Device Reporting API** — POST /api/patch-hub/agent/report (unauthenticated for agents)
-76. **Agent Reports Dashboard** — Shows per-device patch status, pending updates, Defender status
-77. **One-Line Deploy** — Copy-paste command for technicians to deploy agent on client machines
-78. **Windows Service Install** — Script includes Install-AsService function using NSSM
+73-78. PowerShell agent script, Agent tab in Patch Hub, Device reporting API, Agent reports dashboard, One-line deploy, Windows service install
+
+### Phase 15: Auto-Deploy Agent via RustDesk (DONE - 2026-04-08)
+79. **Deploy Agent Button** — Per-device "Deploy" button in Remote Devices table queues deployment + shows PowerShell command dialog
+80. **Bulk Deploy** — Select multiple devices via checkboxes, deploy agent to all at once
+81. **Agent Deployments Tab** — New tab in Remote Devices showing deployment stats (Total/Pending/Deployed/Failed) and full deployment tracker table
+82. **Mark Deployed** — Techs confirm deployment completion after running the script via RustDesk
+83. **Deploy Command Dialog** — Shows the PowerShell command with copy button and step-by-step instructions
+84. **Agent Status Column** — Device table shows Deploy/Pending/Deployed status badges per device
 
 ## Prioritized Backlog
 
