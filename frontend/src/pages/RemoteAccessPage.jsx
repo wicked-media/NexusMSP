@@ -16,8 +16,10 @@ import { toast } from "sonner";
 import {
   Laptop, Monitor, Server, Wifi, WifiOff, Settings, Plus, RefreshCw, Loader2,
   ExternalLink, Copy, Search, Play, Clock, Shield, Download, ChevronRight,
-  Link2, Unlink, Eye, EyeOff, Pencil, Check, X, History, Zap, Globe
+  Link2, Unlink, Eye, EyeOff, Pencil, Check, X, History, Zap, Globe,
+  Terminal, Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
@@ -39,6 +41,12 @@ export default function RemoteAccessPage() {
   const [showPassword, setShowPassword] = useState({});
   const [connecting, setConnecting] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedDevices, setSelectedDevices] = useState(new Set());
+  const [deployments, setDeployments] = useState(null);
+  const [deployingDevice, setDeployingDevice] = useState(null);
+  const [deployCmd, setDeployCmd] = useState("");
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [showBulkDeploy, setShowBulkDeploy] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
@@ -52,6 +60,8 @@ export default function RemoteAccessPage() {
       setDevices(dRes.data);
       setSessions(sRes.data);
       setConfig(cRes.data?.value || cRes.data);
+      // Fetch deployments
+      axios.get(`${API}/rustdesk/agent-deployments`, { headers }).then(r => setDeployments(r.data)).catch(() => {});
     } catch { toast.error("Failed to load remote access data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -119,6 +129,54 @@ export default function RemoteAccessPage() {
   };
 
   const copyToClipboard = (text) => { navigator.clipboard.writeText(text); toast.success("Copied to clipboard"); };
+
+  // Deploy agent to single device
+  const deployAgent = async (device) => {
+    setDeployingDevice(device.id);
+    try {
+      const res = await axios.post(`${API}/rustdesk/devices/${device.id}/deploy-agent`, {}, { headers });
+      setDeployCmd(res.data.deployment.deploy_command);
+      setShowDeployDialog(true);
+      toast.success(`Agent deployment queued for ${device.name || device.hostname}`);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to queue deployment"); }
+    finally { setDeployingDevice(null); }
+  };
+
+  // Mark agent as deployed (tech confirms)
+  const markDeployed = async (deviceId) => {
+    try {
+      await axios.post(`${API}/rustdesk/devices/${deviceId}/deploy-agent/complete`, {}, { headers });
+      toast.success("Agent marked as deployed");
+      fetchData();
+    } catch { toast.error("Failed to mark as deployed"); }
+  };
+
+  // Bulk deploy agent
+  const bulkDeployAgent = async () => {
+    const ids = [...selectedDevices];
+    if (!ids.length) { toast.error("Select devices first"); return; }
+    try {
+      const res = await axios.post(`${API}/rustdesk/deploy-agent/bulk`, { device_ids: ids }, { headers });
+      toast.success(res.data.message);
+      setSelectedDevices(new Set());
+      setShowBulkDeploy(false);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk deploy failed"); }
+  };
+
+  const toggleDeviceSelect = (id) => {
+    setSelectedDevices(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+
+  const getDeployStatus = (deviceId) => {
+    if (!deployments?.deployments) return null;
+    return deployments.deployments.find(d => d.device_id === deviceId);
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -208,6 +266,7 @@ export default function RemoteAccessPage() {
         <TabsList>
           <TabsTrigger value="devices">All Devices ({devices.length})</TabsTrigger>
           <TabsTrigger value="registered">Registered ({registered.length})</TabsTrigger>
+          <TabsTrigger value="deployments" data-testid="tab-deployments"><Rocket className="w-3 h-3 mr-1" />Agent Deployments ({deployments?.total || 0})</TabsTrigger>
           <TabsTrigger value="sessions">Session History ({sessions.length})</TabsTrigger>
         </TabsList>
 
@@ -236,20 +295,36 @@ export default function RemoteAccessPage() {
             </Select>
           </div>
 
+          {/* Bulk Actions */}
+          {selectedDevices.size > 0 && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="py-2.5 px-4 flex items-center justify-between">
+                <span className="text-sm font-medium"><SquareCheckBig className="w-4 h-4 inline mr-1.5 text-primary" />{selectedDevices.size} selected</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={bulkDeployAgent} data-testid="bulk-deploy-btn"><Rocket className="w-3 h-3" />Deploy Agent to Selected</Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedDevices(new Set())}><XCircle className="w-3 h-3 mr-1" />Clear</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-border/40">
             <CardContent className="p-0">
               <Table>
                 <TableHeader><TableRow>
+                  <TableHead className="w-10"></TableHead>
                   <TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Type / OS</TableHead>
-                  <TableHead>Status</TableHead><TableHead>RustDesk ID</TableHead><TableHead>Last Connected</TableHead><TableHead></TableHead>
+                  <TableHead>Status</TableHead><TableHead>RustDesk ID</TableHead><TableHead>Agent</TableHead><TableHead>Last Connected</TableHead><TableHead></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {filtered.length === 0 ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No devices match your filters</TableCell></TableRow>
                   ) : filtered.map(d => {
                     const Icon = TYPE_ICONS[d.device_type] || Monitor;
+                    const dep = getDeployStatus(d.id);
                     return (
                       <TableRow key={d.id} data-testid={`device-row-${d.id}`}>
+                        <TableCell onClick={e => e.stopPropagation()}><Checkbox checked={selectedDevices.has(d.id)} onCheckedChange={() => toggleDeviceSelect(d.id)} /></TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Icon className="w-4 h-4 text-muted-foreground" />
@@ -285,6 +360,21 @@ export default function RemoteAccessPage() {
                             </div>
                           ) : (
                             <span className="text-xs text-muted-foreground/50">Not assigned</span>
+                          )}
+                        </TableCell>
+                        {/* Agent Status */}
+                        <TableCell>
+                          {dep?.status === "deployed" ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Deployed</Badge>
+                          ) : dep?.status === "pending" ? (
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-400/30"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px] text-emerald-400" onClick={() => markDeployed(d.id)} title="Mark as deployed"><Check className="w-3 h-3" /></Button>
+                            </div>
+                          ) : (
+                            <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300" onClick={() => deployAgent(d)} disabled={deployingDevice === d.id} data-testid={`deploy-agent-${d.id}`}>
+                              {deployingDevice === d.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}Deploy
+                            </Button>
                           )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{d.rd_last_connected ? new Date(d.rd_last_connected).toLocaleString() : "—"}</TableCell>
@@ -350,6 +440,107 @@ export default function RemoteAccessPage() {
                 );
               })}
             </div>
+          )}
+        </TabsContent>
+
+        {/* Agent Deployments Tab */}
+        <TabsContent value="deployments" className="mt-4 space-y-4" data-testid="deployments-tab">
+          {/* Deployment Stats */}
+          <div className="grid grid-cols-4 gap-3">
+            <Card className="border-blue-500/20"><CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Total</p><Rocket className="w-4 h-4 text-blue-400" /></div>
+              <p className="text-2xl font-bold text-blue-400">{deployments?.total || 0}</p>
+            </CardContent></Card>
+            <Card className="border-amber-500/20"><CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Pending</p><Clock className="w-4 h-4 text-amber-400" /></div>
+              <p className="text-2xl font-bold text-amber-400">{deployments?.pending || 0}</p>
+            </CardContent></Card>
+            <Card className="border-emerald-500/20"><CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Deployed</p><CheckCircle className="w-4 h-4 text-emerald-400" /></div>
+              <p className="text-2xl font-bold text-emerald-400">{deployments?.deployed || 0}</p>
+            </CardContent></Card>
+            <Card className="border-red-500/20"><CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Failed</p><XCircle className="w-4 h-4 text-red-400" /></div>
+              <p className="text-2xl font-bold text-red-400">{deployments?.failed || 0}</p>
+            </CardContent></Card>
+          </div>
+
+          {/* How it works */}
+          <Card className="border-blue-500/10 bg-blue-500/5">
+            <CardContent className="py-4">
+              <div className="flex items-start gap-3">
+                <Terminal className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold mb-1">Deploy Patch Agent via RustDesk</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Click "Deploy" on any device in the All Devices tab, or select multiple devices and click "Deploy Agent to Selected".
+                    Connect to the device via RustDesk, then paste and run the deployment command. The agent runs as a background service,
+                    reporting Windows Update status, installed software, and Defender status back to NexusOps every hour.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Deployment List */}
+          {(deployments?.deployments || []).length > 0 ? (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead>
+                    <TableHead>Queued By</TableHead><TableHead>Queued</TableHead><TableHead>Deployed</TableHead><TableHead></TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {deployments.deployments.map(dep => (
+                      <TableRow key={dep.id} data-testid={`deployment-${dep.id}`}>
+                        <TableCell className="font-medium text-sm">{dep.device_name}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-xs">{dep.client_name || "—"}</Badge></TableCell>
+                        <TableCell>
+                          {dep.status === "deployed" ? (
+                            <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Deployed</Badge>
+                          ) : dep.status === "pending" ? (
+                            <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30 animate-pulse"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{dep.queued_by}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{dep.queued_at ? new Date(dep.queued_at).toLocaleString() : "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{dep.deployed_at ? new Date(dep.deployed_at).toLocaleString() : "—"}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {dep.status === "pending" && (
+                              <>
+                                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setDeployCmd(dep.deploy_command); setShowDeployDialog(true); }} data-testid={`view-cmd-${dep.id}`}>
+                                  <Terminal className="w-3 h-3 mr-1" />View CMD
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-emerald-400" onClick={() => markDeployed(dep.device_id)} data-testid={`mark-deployed-${dep.id}`}>
+                                  <Check className="w-3 h-3 mr-1" />Done
+                                </Button>
+                              </>
+                            )}
+                            {dep.status === "deployed" && dep.deploy_command && (
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { navigator.clipboard.writeText(dep.deploy_command); toast.success("Command copied"); }}>
+                                <Copy className="w-3 h-3 mr-1" />CMD
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-dashed">
+              <CardContent className="py-12 text-center">
+                <Rocket className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" />
+                <p className="text-muted-foreground">No deployments queued yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Select devices and click "Deploy" to start rolling out the Patch Agent</p>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
@@ -423,6 +614,31 @@ export default function RemoteAccessPage() {
             <div className="space-y-2"><Label>Relay Server</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /></div>
             <DialogFooter><Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button></DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deploy Agent Command Dialog */}
+      <Dialog open={showDeployDialog} onOpenChange={setShowDeployDialog}>
+        <DialogContent className="max-w-lg" aria-describedby="deploy-cmd-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-blue-400" />Deploy Patch Agent</DialogTitle>
+            <DialogDescription id="deploy-cmd-desc">Connect to the device via RustDesk, open PowerShell as Administrator, and run this command:</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative">
+              <pre className="bg-zinc-900 text-emerald-400 text-xs p-4 rounded-lg overflow-x-auto font-mono leading-relaxed">{deployCmd}</pre>
+              <Button variant="outline" size="sm" className="absolute top-2 right-2 h-7 text-xs" onClick={() => { navigator.clipboard.writeText(deployCmd); toast.success("Command copied!"); }} data-testid="copy-deploy-dialog-cmd"><Copy className="w-3 h-3 mr-1" />Copy</Button>
+            </div>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">1</div><span>Connect to the device via RustDesk</span></div>
+              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">2</div><span>Open PowerShell as Administrator</span></div>
+              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">3</div><span>Paste and run the command above</span></div>
+              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">4</div><span>Come back here and click "Done" to mark as deployed</span></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeployDialog(false)}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

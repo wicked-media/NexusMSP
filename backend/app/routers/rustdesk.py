@@ -236,3 +236,108 @@ async def quick_connect(data: dict, current_user: dict = Depends(get_current_use
     })
 
     return {"message": "Connection initiated", "rustdesk_id": rd_id, "connection_url": f"rustdesk://{rd_id}"}
+
+
+# ─── Patch Agent Deployment via RustDesk ───
+
+@router.post("/rustdesk/devices/{device_id}/deploy-agent")
+async def deploy_agent_to_device(device_id: str, current_user: dict = Depends(get_current_user)):
+    """Queue a patch agent deployment for a device. Generates the deploy command and tracks status."""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    # Get agent settings for the API URL
+    settings = await db.settings.find_one({"type": "patch_agent"}, {"_id": 0})
+    api_url = settings.get("api_url", "") if settings else ""
+    agent_key = settings.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
+
+    deploy_cmd = f'powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri \'{api_url}/patch-hub/agent/download-script\' -OutFile NexusOps-PatchAgent.ps1; .\\NexusOps-PatchAgent.ps1"'
+
+    deployment = {
+        "id": f"dep-{uuid.uuid4().hex[:8]}",
+        "device_id": device_id,
+        "device_name": device.get("name", device.get("hostname", "Unknown")),
+        "client_id": device.get("client_id", ""),
+        "client_name": device.get("client_name", ""),
+        "status": "pending",
+        "deploy_command": deploy_cmd,
+        "queued_by": current_user.get("name", ""),
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "deployed_at": None,
+        "agent_version": "1.0.0",
+    }
+
+    await db.agent_deployments.update_one(
+        {"device_id": device_id},
+        {"$set": deployment, "$setOnInsert": {"first_queued": datetime.now(timezone.utc).isoformat()}},
+        upsert=True
+    )
+
+    # Mark device as pending agent deployment
+    await db.devices.update_one({"id": device_id}, {"$set": {"agent_deploy_status": "pending", "agent_deploy_queued_at": deployment["queued_at"]}})
+
+    return {"message": "Agent deployment queued", "deployment": deployment}
+
+
+@router.post("/rustdesk/devices/{device_id}/deploy-agent/complete")
+async def mark_agent_deployed(device_id: str, current_user: dict = Depends(get_current_user)):
+    """Mark a device's agent deployment as complete (tech confirms after running the script)."""
+    await db.agent_deployments.update_one(
+        {"device_id": device_id},
+        {"$set": {"status": "deployed", "deployed_at": datetime.now(timezone.utc).isoformat(), "deployed_by": current_user.get("name", "")}}
+    )
+    await db.devices.update_one({"id": device_id}, {"$set": {"agent_deploy_status": "deployed", "agent_version": "1.0.0"}})
+    return {"message": "Agent deployment marked complete"}
+
+
+@router.post("/rustdesk/deploy-agent/bulk")
+async def bulk_deploy_agent(data: dict, current_user: dict = Depends(get_current_user)):
+    """Queue agent deployment for multiple devices at once."""
+    device_ids = data.get("device_ids", [])
+    if not device_ids:
+        raise HTTPException(status_code=400, detail="No devices specified")
+
+    settings = await db.settings.find_one({"type": "patch_agent"}, {"_id": 0})
+    api_url = settings.get("api_url", "") if settings else ""
+    agent_key = settings.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
+
+    devices = await db.devices.find({"id": {"$in": device_ids}}, {"_id": 0}).to_list(500)
+    queued = 0
+    for device in devices:
+        deploy_cmd = f'powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri \'{api_url}/patch-hub/agent/download-script\' -OutFile NexusOps-PatchAgent.ps1; .\\NexusOps-PatchAgent.ps1"'
+        deployment = {
+            "id": f"dep-{uuid.uuid4().hex[:8]}",
+            "device_id": device["id"],
+            "device_name": device.get("name", device.get("hostname", "Unknown")),
+            "client_id": device.get("client_id", ""),
+            "client_name": device.get("client_name", ""),
+            "status": "pending",
+            "deploy_command": deploy_cmd,
+            "queued_by": current_user.get("name", ""),
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "deployed_at": None,
+            "agent_version": "1.0.0",
+        }
+        await db.agent_deployments.update_one(
+            {"device_id": device["id"]},
+            {"$set": deployment, "$setOnInsert": {"first_queued": datetime.now(timezone.utc).isoformat()}},
+            upsert=True
+        )
+        await db.devices.update_one({"id": device["id"]}, {"$set": {"agent_deploy_status": "pending"}})
+        queued += 1
+
+    return {"message": f"Agent deployment queued for {queued} devices", "queued_count": queued}
+
+
+@router.get("/rustdesk/agent-deployments")
+async def get_agent_deployments(current_user: dict = Depends(get_current_user)):
+    """Get all agent deployment statuses."""
+    deployments = await db.agent_deployments.find({}, {"_id": 0}).sort("queued_at", -1).to_list(500)
+    return {
+        "total": len(deployments),
+        "pending": len([d for d in deployments if d.get("status") == "pending"]),
+        "deployed": len([d for d in deployments if d.get("status") == "deployed"]),
+        "failed": len([d for d in deployments if d.get("status") == "failed"]),
+        "deployments": deployments,
+    }
