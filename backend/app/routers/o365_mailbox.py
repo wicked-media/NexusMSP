@@ -122,10 +122,8 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
 @router.post("/o365/webhook/incoming-email")
 async def handle_incoming_email(data: dict):
     """Webhook endpoint for incoming emails. Microsoft Graph calls this when new email arrives.
-    Creates a lead automatically from the email content."""
+    Creates a lead or ticket automatically from the email content."""
     settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if settings and not settings.get("email_to_lead_enabled", True):
-        return {"status": "skipped", "reason": "email-to-lead disabled"}
     
     sender_email = data.get("from_address", data.get("from", ""))
     sender_name = data.get("from_name", data.get("sender_name", "Unknown"))
@@ -134,6 +132,44 @@ async def handle_incoming_email(data: dict):
     
     if not sender_email:
         raise HTTPException(status_code=400, detail="from_address is required")
+    
+    # Check if sender is a known client contact → create ticket
+    email_to_ticket = settings.get("email_to_ticket_enabled", False) if settings else False
+    if email_to_ticket:
+        # Check if this email belongs to a known client
+        client = await db.clients.find_one({"$or": [
+            {"email": sender_email},
+            {"contacts.email": sender_email}
+        ]}, {"_id": 0})
+        
+        if client:
+            # Create a ticket for the known client
+            ticket = {
+                "id": str(uuid.uuid4()),
+                "title": subject or "Email Support Request",
+                "description": body[:2000] if body else "Received via email",
+                "status": "open",
+                "priority": "medium",
+                "category": "email",
+                "client_id": client.get("id", ""),
+                "client_name": client.get("company_name", client.get("name", "")),
+                "contact_name": sender_name,
+                "contact_email": sender_email,
+                "source": "email",
+                "assigned_to": "",
+                "assigned_to_name": "",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "notes": [],
+                "tags": ["email-generated"],
+            }
+            await db.tickets.insert_one(ticket)
+            return {"status": "ticket_created", "ticket_id": ticket["id"], "message": f"Support ticket created for {client.get('company_name', sender_email)}"}
+    
+    # Check if email-to-lead is enabled
+    email_to_lead = settings.get("email_to_lead_enabled", True) if settings else True
+    if not email_to_lead:
+        return {"status": "skipped", "reason": "email-to-lead disabled"}
     
     existing_lead = await db.leads.find_one({"email": sender_email}, {"_id": 0})
     if existing_lead:

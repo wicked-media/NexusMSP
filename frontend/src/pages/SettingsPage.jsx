@@ -15,30 +15,24 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "sonner";
 import { 
-  User, 
-  Bell, 
-  Shield, 
-  Palette, 
-  Mail,
-  Building,
-  Save,
-  Loader2,
-  MessageSquare,
-  Clock,
-  Zap,
-  CreditCard,
-  FileText,
-  AlertTriangle,
-  Wifi,
-  BookOpen,
-  Brain,
-  Trash2,
-  Tag,
-  Wrench
+  User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
+  Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
+  Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
+  CheckCircle, XCircle, KeyRound, Settings2, Plug
 } from "lucide-react";
+
+const TABS = [
+  { id: "general", label: "General", icon: User },
+  { id: "auth", label: "Authentication", icon: KeyRound },
+  { id: "mailbox", label: "Mailbox & Email", icon: Mail },
+  { id: "integrations", label: "Integrations", icon: Plug },
+  { id: "ai", label: "AI & Automation", icon: Brain },
+  { id: "notifications", label: "Notifications", icon: Bell },
+];
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
+  const [activeTab, setActiveTab] = useState("general");
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
   const [profileData, setProfileData] = useState({
@@ -72,13 +66,23 @@ export default function SettingsPage() {
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [msSSO, setMsSSO] = useState({ enabled: false, tenant_id: "", client_id: "", client_secret: "", redirect_uri: "", auto_create_users: true, default_role: "tech" });
   const [msSSOSaving, setMsSSOSaving] = useState(false);
+  // Mailbox state
+  const [mailbox, setMailbox] = useState(null);
+  const [mailboxForm, setMailboxForm] = useState({
+    tenant_id: "", client_id: "", client_secret: "", redirect_uri: "", mailbox_email: "",
+    email_to_lead_enabled: true, email_to_ticket_enabled: false,
+    auto_reply_enabled: false, auto_reply_message: "Thank you for contacting us. We have received your inquiry and will respond shortly.",
+  });
+  const [mailboxSaving, setMailboxSaving] = useState(false);
+  const [mailboxTesting, setMailboxTesting] = useState(false);
+  const [emailLeads, setEmailLeads] = useState([]);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -90,6 +94,8 @@ export default function SettingsPage() {
           axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
           axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" } })),
           axios.get(`${API}/settings/microsoft-sso`, { headers }).catch(() => ({ data: {} })),
+          axios.get(`${API}/settings/o365-mailbox`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -102,6 +108,21 @@ export default function SettingsPage() {
         setSyncro(syncroRes.data);
         if (jnRes.data) setJobNumbering(jnRes.data);
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data }));
+        if (mbxRes.data) {
+          setMailbox(mbxRes.data);
+          if (mbxRes.data.tenant_id) {
+            setMailboxForm(f => ({
+              ...f, tenant_id: mbxRes.data.tenant_id || "", client_id: mbxRes.data.client_id || "",
+              client_secret: mbxRes.data.client_secret ? "********" : "",
+              redirect_uri: mbxRes.data.redirect_uri || "", mailbox_email: mbxRes.data.mailbox_email || "",
+              email_to_lead_enabled: mbxRes.data.email_to_lead_enabled !== false,
+              email_to_ticket_enabled: mbxRes.data.email_to_ticket_enabled || false,
+              auto_reply_enabled: mbxRes.data.auto_reply_enabled || false,
+              auto_reply_message: mbxRes.data.auto_reply_message || f.auto_reply_message,
+            }));
+          }
+        }
+        setEmailLeads(leadsRes.data || []);
         // Load email signature and canned responses
         try {
           const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
@@ -133,13 +154,96 @@ export default function SettingsPage() {
     finally { setJnSaving(false); }
   };
 
+  // Mailbox handlers
+  const handleMailboxConnect = async () => {
+    if (!mailboxForm.tenant_id || !mailboxForm.client_id || !mailboxForm.client_secret || !mailboxForm.mailbox_email) {
+      toast.error("All Azure AD credentials and mailbox email are required"); return;
+    }
+    setMailboxSaving(true);
+    try {
+      await axios.post(`${API}/o365/connect`, mailboxForm, { headers });
+      toast.success("Office 365 mailbox connected!");
+      const [mbxRes, leadsRes] = await Promise.all([
+        axios.get(`${API}/settings/o365-mailbox`, { headers }),
+        axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setMailbox(mbxRes.data); setEmailLeads(leadsRes.data || []);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
+    finally { setMailboxSaving(false); }
+  };
+
+  const handleMailboxDisconnect = async () => {
+    if (!confirm("Disconnect Office 365 mailbox?")) return;
+    try {
+      await axios.post(`${API}/o365/disconnect`, {}, { headers });
+      toast.success("Disconnected"); setMailbox(prev => ({ ...prev, connected: false }));
+    } catch { toast.error("Failed to disconnect"); }
+  };
+
+  const handleMailboxTest = async () => {
+    setMailboxTesting(true);
+    try {
+      const res = await axios.post(`${API}/o365/test-connection`, {}, { headers });
+      if (res.data.success) toast.success("Connection test passed!"); else toast.error(res.data.message);
+    } catch { toast.error("Test failed"); }
+    finally { setMailboxTesting(false); }
+  };
+
+  const handleMailboxSettingsSave = async () => {
+    setMailboxSaving(true);
+    try {
+      await axios.put(`${API}/settings/o365-mailbox`, {
+        email_to_lead_enabled: mailboxForm.email_to_lead_enabled,
+        email_to_ticket_enabled: mailboxForm.email_to_ticket_enabled,
+        auto_reply_enabled: mailboxForm.auto_reply_enabled,
+        auto_reply_message: mailboxForm.auto_reply_message,
+      }, { headers });
+      toast.success("Mailbox settings saved");
+    } catch { toast.error("Failed to save"); }
+    finally { setMailboxSaving(false); }
+  };
+
+  const handleTestIncomingEmail = async () => {
+    try {
+      await axios.post(`${API}/o365/webhook/incoming-email`, {
+        from_address: "demo@testclient.com", from_name: "Demo User",
+        subject: "Interested in your IT services",
+        body: "Hi, we are looking for a managed service provider for our office of 25 people. Can you send us a proposal?",
+      }, { headers });
+      toast.success("Test email processed - check Leads page");
+      const leadsRes = await axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] }));
+      setEmailLeads(leadsRes.data || []);
+    } catch { toast.error("Failed to process test email"); }
+  };
+
+  const mailboxConnected = mailbox?.connected;
+
   return (
-    <div className="space-y-8 max-w-4xl" data-testid="settings-page">
+    <div className="max-w-5xl" data-testid="settings-page">
       {/* Header */}
-      <div>
+      <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Manage your account and preferences</p>
+        <p className="text-muted-foreground">Platform configuration, integrations, and preferences</p>
       </div>
+
+      {/* Tab Navigation */}
+      <div className="flex gap-1 mb-6 border-b border-border/50 pb-px overflow-x-auto" data-testid="settings-tabs">
+        {TABS.map(tab => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${activeTab === tab.id ? "bg-muted text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+              data-testid={`settings-tab-${tab.id}`}>
+              <Icon className="w-4 h-4" />{tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-6">
+
+      {/* ==================== GENERAL TAB ==================== */}
+      {activeTab === "general" && (<>
 
       {/* Profile Section */}
       <Card>
@@ -398,6 +502,43 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Job Numbering - in General tab */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Tag className="w-5 h-5 text-primary" />
+            <CardTitle>Job Numbering</CardTitle>
+          </div>
+          <CardDescription>Configure the prefix for ticket numbers across different job types</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" />SLA Prefix</Label>
+              <Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.sla_prefix || "SLA-"}00001</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Workshop Prefix</Label>
+              <Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.workshop_prefix || "WS-"}00001</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Cabling / WISP Prefix</Label>
+              <Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" />
+              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.cabling_prefix || "CW-"}00001</p>
+            </div>
+          </div>
+          <Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">
+            {jnSaving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : "Save Prefixes"}
+          </Button>
+        </CardContent>
+      </Card>
+      </>)}
+
+      {/* ==================== AUTH TAB ==================== */}
+      {activeTab === "auth" && (<>
+
       {/* Microsoft SSO */}
       <Card className="border-blue-500/20">
         <CardHeader>
@@ -405,7 +546,7 @@ export default function SettingsPage() {
             <Shield className="w-5 h-5 text-blue-500" />
             <CardTitle>Microsoft SSO (Single Sign-On)</CardTitle>
           </div>
-          <CardDescription>Allow technicians to sign in with their Microsoft / Azure AD account. Configure your Azure AD App Registration credentials below.</CardDescription>
+          <CardDescription>Allow technicians to sign in with their Microsoft / Azure AD account</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
@@ -469,6 +610,144 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+      </>)}
+
+      {/* ==================== MAILBOX TAB ==================== */}
+      {activeTab === "mailbox" && (<>
+
+      {/* Mailbox Connection Status */}
+      <Card className={mailboxConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
+        <CardContent className="py-5">
+          <div className="flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${mailboxConnected ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
+              <Mail className={`w-7 h-7 ${mailboxConnected ? "text-emerald-400" : "text-amber-400"}`} />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-semibold text-lg">Office 365 Mailbox</h3>
+                {mailboxConnected ? (
+                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="w-3 h-3 mr-1" />Connected</Badge>
+                ) : (
+                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><XCircle className="w-3 h-3 mr-1" />Not Connected</Badge>
+                )}
+              </div>
+              {mailboxConnected ? (
+                <p className="text-sm text-muted-foreground">Connected to <span className="font-mono text-foreground">{mailbox?.mailbox_email}</span> &middot; Last sync: {mailbox?.last_sync ? new Date(mailbox.last_sync).toLocaleString() : "Never"}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Connect your O365 mailbox to auto-generate leads and tickets from incoming emails.</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {mailboxConnected && (
+                <>
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    try { const r = await axios.post(`${API}/o365/sync-emails`, {}, { headers }); toast.success(r.data.message); } catch { toast.error("Sync failed"); }
+                  }}><RefreshCw className="w-4 h-4 mr-1" />Sync</Button>
+                  <Button variant="outline" size="sm" onClick={handleMailboxTest} disabled={mailboxTesting}>
+                    {mailboxTesting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <TestTube className="w-4 h-4 mr-1" />}Test
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={handleMailboxDisconnect} data-testid="disconnect-mailbox-btn"><Unlink className="w-4 h-4 mr-1" />Disconnect</Button>
+                </>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {!mailboxConnected && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Connect Office 365 Mailbox</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
+              <p className="font-medium text-blue-400 mb-1">Azure AD App Registration Required</p>
+              <p>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline text-blue-400">portal.azure.com</a> &gt; App registrations &gt; New registration. Grant <span className="font-mono">Mail.Read, Mail.Send, Mail.ReadWrite</span> permissions.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Tenant ID *</Label>
+                <Input value={mailboxForm.tenant_id} onChange={e => setMailboxForm({ ...mailboxForm, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-tenant-id" />
+              </div>
+              <div className="space-y-2">
+                <Label>Client ID (Application ID) *</Label>
+                <Input value={mailboxForm.client_id} onChange={e => setMailboxForm({ ...mailboxForm, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-client-id" />
+              </div>
+              <div className="space-y-2">
+                <Label>Client Secret *</Label>
+                <Input type="password" value={mailboxForm.client_secret} onChange={e => setMailboxForm({ ...mailboxForm, client_secret: e.target.value })} placeholder="Enter client secret" data-testid="mbx-client-secret" />
+              </div>
+              <div className="space-y-2">
+                <Label>Mailbox Email *</Label>
+                <Input type="email" value={mailboxForm.mailbox_email} onChange={e => setMailboxForm({ ...mailboxForm, mailbox_email: e.target.value })} placeholder="support@yourdomain.com" data-testid="mbx-email" />
+              </div>
+            </div>
+            <Button onClick={handleMailboxConnect} disabled={mailboxSaving} data-testid="connect-mailbox-btn">
+              {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}Connect Mailbox
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {mailboxConnected && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><UserPlus className="w-5 h-5 text-cyan-400" />Email Routing Rules</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div><p className="text-sm font-medium">Auto-create leads from emails</p><p className="text-xs text-muted-foreground">New emails from unknown senders create a lead</p></div>
+                <Switch checked={mailboxForm.email_to_lead_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_lead_enabled: v })} data-testid="email-to-lead-toggle" />
+              </div>
+              <div className="flex items-center justify-between">
+                <div><p className="text-sm font-medium">Auto-create tickets from emails</p><p className="text-xs text-muted-foreground">Emails from known clients create a support ticket</p></div>
+                <Switch checked={mailboxForm.email_to_ticket_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_ticket_enabled: v })} data-testid="email-to-ticket-toggle" />
+              </div>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <div><p className="text-sm font-medium">Auto-reply to incoming emails</p><p className="text-xs text-muted-foreground">Send acknowledgement reply</p></div>
+                <Switch checked={mailboxForm.auto_reply_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, auto_reply_enabled: v })} />
+              </div>
+              {mailboxForm.auto_reply_enabled && (
+                <div className="space-y-2">
+                  <Label>Auto-reply message</Label>
+                  <Textarea value={mailboxForm.auto_reply_message} onChange={e => setMailboxForm({ ...mailboxForm, auto_reply_message: e.target.value })} rows={3} />
+                </div>
+              )}
+              <Button size="sm" onClick={handleMailboxSettingsSave} disabled={mailboxSaving} data-testid="save-mailbox-settings-btn">
+                {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}Save Settings
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email-Generated Leads</CardTitle>
+                <Button variant="outline" size="sm" onClick={handleTestIncomingEmail} data-testid="test-email-btn"><TestTube className="w-4 h-4 mr-1" />Send Test Email</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {emailLeads.length > 0 ? (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                  {emailLeads.slice(0, 10).map(lead => (
+                    <div key={lead.id} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/30 border border-border/50">
+                      <div><p className="text-sm font-medium">{lead.company_name}</p><p className="text-xs text-muted-foreground">{lead.email} &middot; {lead.contact_name}</p></div>
+                      <Badge variant="outline" className="text-xs">{lead.status}</Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Mail className="w-10 h-10 mx-auto opacity-30 mb-2" />
+                  <p className="text-sm">No email-generated leads yet</p>
+                  <p className="text-xs">Click "Send Test Email" to try it out</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      </>)}
+
+      {/* ==================== NOTIFICATIONS TAB ==================== */}
+      {activeTab === "notifications" && (<>
 
       {/* No-Notes Escalation Threshold */}
       <Card className="border-orange-500/20">
@@ -543,6 +822,10 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+      </>)}
+
+      {/* ==================== INTEGRATIONS TAB ==================== */}
+      {activeTab === "integrations" && (<>
 
       {/* Xero Integration */}
       <Card>
@@ -744,6 +1027,10 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      </>)}
+
+      {/* ==================== AI TAB ==================== */}
+      {activeTab === "ai" && (<>
 
       {/* AI Model Configuration */}
       <Card>
@@ -808,6 +1095,10 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+      </>)}
+
+      {/* ==================== INTEGRATIONS TAB (continued - Hudu, Syncro) ==================== */}
+      {activeTab === "integrations" && (<>
 
       {/* Hudu Integration */}
       <Card>
@@ -949,39 +1240,9 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      </>)}
 
-      {/* Job Numbering */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Tag className="w-5 h-5 text-primary" />
-            <CardTitle>Job Numbering</CardTitle>
-          </div>
-          <CardDescription>Configure the prefix for ticket numbers across different job types</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" />SLA Prefix</Label>
-              <Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.sla_prefix || "SLA-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Workshop Prefix</Label>
-              <Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.workshop_prefix || "WS-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Cabling / WISP Prefix</Label>
-              <Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.cabling_prefix || "CW-"}00001</p>
-            </div>
-          </div>
-          <Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">
-            {jnSaving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : "Save Prefixes"}
-          </Button>
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }
