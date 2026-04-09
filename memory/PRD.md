@@ -7,7 +7,7 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Frontend: React, Shadcn/UI, TailwindCSS, Recharts, TipTap, DnD-kit
 - Backend: FastAPI (Python), Motor (async MongoDB)
 - Database: MongoDB
-- Integrations: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations, pyotp
+- Integrations: Resend, Stripe, RustDesk, qrcode, fpdf2, emergentintegrations, pyotp, httpx
 
 ## Completed Features
 
@@ -36,18 +36,20 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 79-84. Per-device deploy button, Bulk deploy, Deployments tab, Mark deployed, Agent status column
 
 ### Phase 16: Navigation Consolidation & Module Toggle (DONE - 2026-04-08)
-85. **Navigation Consolidation** — Reduced 130+ sidebar items to ~35 clean modules in 7 groups with collapsible sub-menus
-86. **Sidebar Groups**: Service Desk, Infrastructure, Business, Security, AI & Intelligence, Reports & Comms, Platform
-87. **Collapsible Sub-Menus** — Click parent to expand children, auto-expands current route's parent
-88. **Module Search** — Type-ahead search across all modules in sidebar (Ctrl+K)
-89. **Module Visibility Toggle** — Admins can toggle which sidebar groups each technician sees (7 switches in Permissions dialog)
-90. **Backend Support** — `enabled_modules` array saved per user, returned in login response, filtered in sidebar
+85-90. Reduced 130+ sidebar items to ~35 clean modules in 7 groups, collapsible sub-menus, module visibility toggle per technician
+
+### Phase 17: Microsoft OAuth2 SSO (DONE - 2026-04-09)
+91. **Backend SSO Router** (`microsoft_sso.py`) - PKCE OAuth2 flow with state validation, token exchange via Microsoft Graph API, auto user creation
+92. **Login Page SSO Button** - "Sign in with Microsoft" with Windows logo, conditionally shown when SSO enabled
+93. **Auth Callback Page** (`AuthCallbackPage.jsx`) - Handles redirect from Microsoft, processes JWT token
+94. **Settings Page SSO Config** - Admin panel to configure Azure AD Tenant ID, Client ID, Client Secret, Redirect URI, auto-create users toggle, default role
+95. **Public SSO Status API** - `/api/settings/microsoft-sso/status` (no auth) for login page to check if SSO is enabled
+96. **loginWithToken** method added to AuthProvider for SSO token consumption
 
 ## Prioritized Backlog
 
 ### P1 — Release Readiness (Next Up)
-- Microsoft SSO (OAuth2 one-click sign-in)
-- Email-to-Lead (configurable mailbox auto-generates leads)
+- Email-to-Lead (configurable mailbox auto-generates leads) — backend exists (`o365_mailbox.py`), review/polish needed
 - Global Settings page (centralized mailbox, integrations, module visibility, branding)
 
 ### P2 — Feature Expansion
@@ -64,7 +66,29 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 - Refactor TicketsPage.jsx into sub-components
 - Fix recharts console warnings
 - DB query optimization (N+1 patterns)
+- aria-describedby for DialogContent components
 
 ## Authentication
 - MSP Admin: aaron@stech.com.au / admin123
 - Client Portal: john@acmecorp.com / portal123
+- Microsoft SSO: Configure in Settings > Microsoft SSO (requires Azure AD App Registration)
+
+## Key API Endpoints
+- `/api/auth/login` - Standard JWT login
+- `/api/auth/microsoft/login` - Microsoft SSO initiation (redirect)
+- `/api/auth/microsoft/callback` - Microsoft SSO callback handler
+- `/api/settings/microsoft-sso` - SSO configuration (admin)
+- `/api/settings/microsoft-sso/status` - Public SSO status check
+- `/api/technicians/{id}/modules` - Toggle UI visibility
+- `/api/patch-hub/agent/deploy` - Patch agent deployment
+- `/api/portal_v2/*` - Client portal
+- `/api/rustdesk/*` - Remote access
+
+## Architecture
+```
+/app/backend/app/routers/microsoft_sso.py  # Microsoft OAuth2 SSO
+/app/frontend/src/pages/AuthCallbackPage.jsx  # SSO callback handler
+/app/frontend/src/pages/LoginPage.jsx  # Login with SSO button
+/app/frontend/src/pages/SettingsPage.jsx  # SSO config section
+/app/frontend/src/App.js  # AuthProvider with loginWithToken
+```
