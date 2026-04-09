@@ -53,7 +53,7 @@ export default function LoginPage() {
   };
 
   const fillDemoCredentials = () => {
-    setLoginData({ email: "admin@nexusops.io", password: "admin123" });
+    setLoginData({ email: "aaron@stech.com.au", password: "" });
   };
 
   return (
