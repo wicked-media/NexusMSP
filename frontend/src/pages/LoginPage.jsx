@@ -1,22 +1,40 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
-import { useAuth } from "@/App";
+import { useNavigate, Navigate, useSearchParams } from "react-router-dom";
+import { useAuth, API } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import axios from "axios";
 
 export default function LoginPage() {
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [registerData, setRegisterData] = useState({ name: "", email: "", password: "" });
   const canvasRef = useRef(null);
 
+  useEffect(() => {
+    // Check for SSO errors in URL
+    const ssoError = searchParams.get("sso_error");
+    if (ssoError) toast.error(`SSO Error: ${ssoError.replace(/_/g, " ")}`);
+    // Check if Microsoft SSO is enabled
+    axios.get(`${API}/settings/microsoft-sso/status`).then(r => setSsoEnabled(r.data?.enabled)).catch(() => {});
+  }, [searchParams]);
+
   if (user) return <Navigate to="/" replace />;
+
+  const handleMicrosoftLogin = () => {
+    setSsoLoading(true);
+    window.location.href = `${API}/auth/microsoft/login`;
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -183,6 +201,35 @@ export default function LoginPage() {
                   <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="login-submit-button">
                     {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Sign In <ArrowRight className="w-4 h-4 ml-1" /></>}
                   </Button>
+
+                  {ssoEnabled && (
+                    <>
+                      <div className="relative my-4">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-800" /></div>
+                        <div className="relative flex justify-center text-xs"><span className="bg-zinc-900/30 px-3 text-zinc-500">or</span></div>
+                      </div>
+                      <Button
+                        type="button" variant="outline"
+                        className="w-full h-11 border-zinc-700/50 bg-zinc-800/30 hover:bg-zinc-700/50 text-zinc-300 hover:text-white font-medium transition-all"
+                        onClick={handleMicrosoftLogin}
+                        disabled={ssoLoading}
+                        data-testid="microsoft-sso-button"
+                      >
+                        {ssoLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        ) : (
+                          <svg className="w-5 h-5 mr-2" viewBox="0 0 21 21" fill="none">
+                            <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                            <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                            <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                            <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                          </svg>
+                        )}
+                        Sign in with Microsoft
+                      </Button>
+                    </>
+                  )}
+
                   <Button type="button" variant="ghost" className="w-full h-9 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50" onClick={fillDemoCredentials} data-testid="demo-credentials-button">
                     Use Demo Credentials
                   </Button>

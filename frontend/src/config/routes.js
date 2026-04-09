@@ -205,6 +205,9 @@ export const routeConfig = [
   { path: "/revenue-tracking", component: page("RevenueTrackingPage"), auth: true, layout: true },
   { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
 
+  // Auth callback (no auth, no layout)
+  { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
+
   // Public routes (no auth, no layout)
   { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },
   { path: "/portal-app", component: page("TenantPortalApp"), auth: false, layout: false },

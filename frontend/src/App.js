@@ -91,6 +91,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginWithToken = async (newToken) => {
+    localStorage.setItem("nexusops_token", newToken);
+    setToken(newToken);
+    try {
+      const response = await axios.get(`${API}/auth/me`, {
+        headers: { Authorization: `Bearer ${newToken}` }
+      });
+      setUser(response.data);
+      return true;
+    } catch {
+      localStorage.removeItem("nexusops_token");
+      setToken(null);
+      throw new Error("Invalid token");
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem("nexusops_token");
     setToken(null);
@@ -99,7 +115,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, loginWithToken, register, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

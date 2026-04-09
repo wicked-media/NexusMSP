@@ -70,13 +70,15 @@ export default function SettingsPage() {
   const [sigSaving, setSigSaving] = useState(false);
   const [cannedResponses, setCannedResponses] = useState([]);
   const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
+  const [msSSO, setMsSSO] = useState({ enabled: false, tenant_id: "", client_id: "", client_secret: "", redirect_uri: "", auto_create_users: true, default_role: "tech" });
+  const [msSSOSaving, setMsSSOSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -87,6 +89,7 @@ export default function SettingsPage() {
           axios.get(`${API}/ai/config`, { headers }),
           axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
           axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" } })),
+          axios.get(`${API}/settings/microsoft-sso`, { headers }).catch(() => ({ data: {} })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -98,6 +101,7 @@ export default function SettingsPage() {
         if (aiRes.data.provider) setAiConfig(aiRes.data);
         setSyncro(syncroRes.data);
         if (jnRes.data) setJobNumbering(jnRes.data);
+        if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data }));
         // Load email signature and canned responses
         try {
           const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
@@ -391,6 +395,78 @@ export default function SettingsPage() {
             </div>
             <Badge>Dark Mode</Badge>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Microsoft SSO */}
+      <Card className="border-blue-500/20">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-blue-500" />
+            <CardTitle>Microsoft SSO (Single Sign-On)</CardTitle>
+          </div>
+          <CardDescription>Allow technicians to sign in with their Microsoft / Azure AD account. Configure your Azure AD App Registration credentials below.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Enable Microsoft SSO</Label>
+              <p className="text-sm text-muted-foreground">Show "Sign in with Microsoft" button on login page</p>
+            </div>
+            <Switch checked={msSSO.enabled} onCheckedChange={(v) => setMsSSO({ ...msSSO, enabled: v })} data-testid="sso-enabled-switch" />
+          </div>
+          <Separator />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Azure AD Tenant ID</Label>
+              <Input value={msSSO.tenant_id} onChange={e => setMsSSO({ ...msSSO, tenant_id: e.target.value })} placeholder="e.g. common or your-tenant-guid" data-testid="sso-tenant-id" />
+            </div>
+            <div className="space-y-2">
+              <Label>Application (Client) ID</Label>
+              <Input value={msSSO.client_id} onChange={e => setMsSSO({ ...msSSO, client_id: e.target.value })} placeholder="Azure App Client ID" data-testid="sso-client-id" />
+            </div>
+            <div className="space-y-2">
+              <Label>Client Secret (optional for public apps)</Label>
+              <Input type="password" value={msSSO.client_secret} onChange={e => setMsSSO({ ...msSSO, client_secret: e.target.value })} placeholder="Azure App Client Secret" data-testid="sso-client-secret" />
+            </div>
+            <div className="space-y-2">
+              <Label>Redirect URI (auto-detected if blank)</Label>
+              <Input value={msSSO.redirect_uri} onChange={e => setMsSSO({ ...msSSO, redirect_uri: e.target.value })} placeholder="https://your-domain/api/auth/microsoft/callback" data-testid="sso-redirect-uri" />
+            </div>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Auto-Create Users</Label>
+              <p className="text-sm text-muted-foreground">Automatically create a NexusOps account when a new Microsoft user signs in</p>
+            </div>
+            <Switch checked={msSSO.auto_create_users} onCheckedChange={(v) => setMsSSO({ ...msSSO, auto_create_users: v })} data-testid="sso-auto-create-switch" />
+          </div>
+          <div className="space-y-2">
+            <Label>Default Role for SSO Users</Label>
+            <Select value={msSSO.default_role} onValueChange={v => setMsSSO({ ...msSSO, default_role: v })}>
+              <SelectTrigger data-testid="sso-default-role"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="tech">Technician</SelectItem>
+                <SelectItem value="viewer">Viewer</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-sm text-blue-400">
+            <strong>Setup instructions:</strong> Register an app in <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline">Azure Portal → App registrations</a>. Add a Web redirect URI pointing to your NexusOps callback URL. Grant <code>User.Read</code>, <code>email</code>, <code>profile</code>, <code>openid</code> delegated permissions.
+          </div>
+          <Button onClick={async () => {
+            setMsSSOSaving(true);
+            try {
+              await axios.put(`${API}/settings/microsoft-sso`, msSSO, { headers });
+              toast.success("Microsoft SSO settings saved");
+            } catch { toast.error("Failed to save SSO settings"); }
+            finally { setMsSSOSaving(false); }
+          }} disabled={msSSOSaving} data-testid="save-sso-btn">
+            {msSSOSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            Save SSO Settings
+          </Button>
         </CardContent>
       </Card>
 
