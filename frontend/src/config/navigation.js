@@ -43,6 +43,7 @@ export const navGroups = [
         path: "/dispatch-board", icon: MapPin, label: "Dispatch & Escalation",
         children: [
           { path: "/dispatch-board", label: "Dispatch Board" },
+          { path: "/workshop-bench", label: "Workshop Bench" },
           { path: "/escalation-matrix", label: "Escalation Matrix" },
           { path: "/intelligent-routing", label: "Smart Routing" },
         ]

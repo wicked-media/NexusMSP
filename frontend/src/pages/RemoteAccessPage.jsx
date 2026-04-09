@@ -37,7 +37,7 @@ export default function RemoteAccessPage() {
   const [showAssign, setShowAssign] = useState(null);
   const [assignForm, setAssignForm] = useState({ rustdesk_id: "", rustdesk_password: "" });
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ server_url: "", api_key: "", relay_server: "", enabled: true });
+  const [settingsForm, setSettingsForm] = useState({ server_url: "", api_key: "", relay_server: "", enabled: true, auto_sync: true });
   const [showPassword, setShowPassword] = useState({});
   const [connecting, setConnecting] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -269,7 +269,9 @@ export default function RemoteAccessPage() {
                 </span>
                 {config?.server_url && <span className="text-xs text-muted-foreground ml-2">{config.server_url}</span>}
                 {livePeers && <span className="text-xs text-blue-400 ml-2">({livePeers.count} live peers)</span>}
-                {config?.last_sync && <span className="text-xs text-muted-foreground ml-2">Last sync: {new Date(config.last_sync).toLocaleString()}</span>}
+                {config?.auto_sync !== false && serverConfigured && <Badge variant="outline" className="ml-2 text-[10px] text-emerald-400 border-emerald-500/30">Auto-Sync ON</Badge>}
+                {config?.last_auto_sync && <span className="text-xs text-muted-foreground ml-2">Last auto-sync: {new Date(config.last_auto_sync).toLocaleString()}</span>}
+                {config?.last_sync && !config?.last_auto_sync && <span className="text-xs text-muted-foreground ml-2">Last sync: {new Date(config.last_sync).toLocaleString()}</span>}
               </div>
             </div>
             <div className="flex gap-2">
@@ -739,6 +741,10 @@ export default function RemoteAccessPage() {
             <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="rustdesk.yourdomain.com" required data-testid="settings-server" /></div>
             <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /></div>
             <div className="space-y-2"><Label>Relay Server</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /></div>
+            <div className="flex items-center justify-between py-2">
+              <div><Label>Auto-Sync (every 5 min)</Label><p className="text-xs text-muted-foreground">Automatically pull live peer status from server</p></div>
+              <Switch checked={settingsForm.auto_sync !== false} onCheckedChange={v => setSettingsForm({ ...settingsForm, auto_sync: v })} data-testid="settings-auto-sync" />
+            </div>
             <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
               <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro API</p>
               <p>For live peer data, enter the API URL (usually <code>https://your-server:21114</code>) and generate a read/write API token from the RustDesk web console under Settings &gt; API.</p>

@@ -113,7 +113,62 @@ async def startup_event():
         await db.tickets.update_one({"id": t["id"]}, {"$set": {"ticket_number": tn}})
     if tickets_without_number:
         logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
+    # Start RustDesk auto-sync background task
+    import asyncio
+    asyncio.create_task(_rustdesk_auto_sync_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
+
+async def _rustdesk_auto_sync_loop():
+    """Background loop that syncs RustDesk peers every 5 minutes if enabled."""
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            config = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
+            if not config:
+                continue
+            val = config.get("value", {})
+            if not val.get("enabled") or not val.get("server_url") or not val.get("auto_sync", True):
+                continue
+            # Import and call sync logic
+            try:
+                from app.routers.rustdesk import _rustdesk_api_request
+                import httpx
+                server_url = val["server_url"].rstrip("/")
+                api_key = val.get("api_key", "")
+                headers_dict = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+                peers = []
+                async with httpx.AsyncClient(timeout=15.0, verify=False) as cl:
+                    for path in ["/peers", "/v1/peers", "/ab/peers"]:
+                        try:
+                            resp = await cl.get(f"{server_url}/api{path}", headers=headers_dict)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                if isinstance(data, list):
+                                    peers = data; break
+                                elif isinstance(data, dict) and "data" in data:
+                                    peers = data["data"]; break
+                        except Exception:
+                            continue
+                if peers:
+                    import uuid
+                    now = datetime.now(timezone.utc).isoformat()
+                    for p in peers:
+                        rd_id = str(p.get("id") or p.get("Id") or p.get("peer_id") or "")
+                        if not rd_id:
+                            continue
+                        online = p.get("online", False) if isinstance(p.get("online"), bool) else str(p.get("online", "")).lower() in ["true", "1"]
+                        status = "online" if online else "offline"
+                        await db.devices.update_many({"rustdesk_id": rd_id}, {"$set": {"status": status, "rd_last_seen": now}})
+                        await db.rustdesk_devices.update_many({"rustdesk_id": rd_id}, {"$set": {"status": status, "last_online": now if online else None}})
+                    await db.settings.update_one({"key": "rustdesk_config"}, {"$set": {"value.last_auto_sync": now, "value.last_auto_sync_peers": len(peers)}})
+                    logger.info(f"RustDesk auto-sync: {len(peers)} peers synced")
+            except Exception as e:
+                logger.debug(f"RustDesk auto-sync skipped: {e}")
+        except Exception as e:
+            logger.debug(f"RustDesk auto-sync loop error: {e}")
+            import asyncio
+            await asyncio.sleep(60)
 
 # Shutdown event
 @app.on_event("shutdown")

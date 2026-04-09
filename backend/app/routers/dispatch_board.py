@@ -10,11 +10,18 @@ router = APIRouter()
 async def get_dispatch_board(current_user: dict = Depends(get_current_user)):
     """Intelligent dispatch board - all open jobs with tech locations and assignments."""
     # Open tickets/jobs needing dispatch
-    jobs = await db.tickets.find(
+    jobs_raw = await db.tickets.find(
         {"status": {"$in": ["open", "in_progress"]}, "ticket_type": {"$in": ["field_job", "workshop", "sla", None]}},
-        {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "client_name": 1, "client_id": 1,
+        {"_id": 0, "id": 1, "title": 1, "description": 1, "status": 1, "priority": 1, "client_name": 1, "client_id": 1,
          "assigned_to": 1, "assigned_to_name": 1, "ticket_type": 1, "created_at": 1, "category": 1}
     ).sort("created_at", 1).to_list(100)
+    # Ensure every job has a title
+    jobs = []
+    for j in jobs_raw:
+        j["title"] = j.get("title") or j.get("description", "Untitled")[:80]
+        j["priority"] = j.get("priority", "medium")
+        j["client_name"] = j.get("client_name", "")
+        jobs.append(j)
 
     # Technicians with skills and load
     techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
@@ -40,7 +47,7 @@ async def get_dispatch_board(current_user: dict = Depends(get_current_user)):
         available.sort(key=lambda t: (-t.get("skills", {}).get(cat, 0), t["total_open"]))
         best = available[0] if available else None
         suggestions.append({
-            "job_id": job["id"], "job_title": job["title"],
+            "job_id": job["id"], "job_title": job.get("title", job.get("description", "Untitled")),
             "suggested_tech_id": best["id"] if best else None,
             "suggested_tech_name": best["name"] if best else "No available tech",
             "reason": f"Best skill match for {cat}, {best['capacity']} capacity" if best else "All techs busy",

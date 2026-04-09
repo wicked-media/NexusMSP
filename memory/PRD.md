@@ -21,25 +21,34 @@ PKCE OAuth2 flow, login button, callback handler, admin SSO config in Settings
 6-tab Settings, O365 Mailbox inline, email-to-ticket for known clients, email-to-lead for unknowns
 
 ### Phase 19: Notifications Revamp (DONE - 2026-04-09)
-Dedicated `/notifications` page, search/filter/group, 6+ notification types, mark read/delete/bulk, bell "View All" link
+Dedicated /notifications page, search/filter/group, 6+ types, mark read/delete/bulk, bell "View All"
 
 ### Phase 20: Kanban Board (DONE - 2026-04-09)
-HTML5 drag-and-drop 5-column board, SLA badges, priority filter, optimistic updates
+HTML5 drag-and-drop 5-column ticket board, SLA badges, priority filter, optimistic updates
 
 ### Phase 21: Live RustDesk Integration (DONE - 2026-04-09)
-- **Test Connection** — `/api/rustdesk/live/test-connection` probes RustDesk server API
-- **Live Peers** — `/api/rustdesk/live/peers` fetches real peer data (ID, hostname, OS, online/offline, version)
-- **Sync to DB** — `/api/rustdesk/live/sync` matches peers to devices, creates new entries, updates status
-- **Audit Logs** — `/api/rustdesk/live/audit` fetches session history from RustDesk server
-- **UI** — Connection status bar with Test/Sync buttons, Live Online stat, Live Peers tab, LIVE badge on device status, API setup instructions in Settings dialog
+Test connection, live peers, sync to DB, audit logs, LIVE badges, auto-polling every 5 min
+
+### Phase 22: Workshop Bench (DONE - 2026-04-09)
+- 6-column Kanban: Intake → Diagnosing → Parts Ordered → Repairing → Testing/QA → Ready for Pickup
+- Drag-and-drop job cards with job numbers (WS-XXXXX), client/device info, age badges
+- New Job dialog, search, auto turnaround stats
+- Backend: /api/workshop/bench CRUD + /api/workshop/bench/move
+
+### Phase 23: Dispatch Map View (DONE - 2026-04-09)
+- Visual map view with positioned tech markers (green=available, blue=active, red=busy)
+- Unassigned job markers (amber pulse), hover tooltips
+- Smart Assignment Suggestions with one-click Assign
+- Map/Table view toggle, 4-stat bar
+- Technician status grid with capacity tracking
+- Backend: /api/dispatch/board with AI suggestions + /api/dispatch/assign
 
 ## Prioritized Backlog
 
 ### P2 — Feature Expansion
-- Workshop Bench View (Kanban for repairs)
-- Dispatch Map View (GPS field jobs)
-- Workflow Automation Builder (IF/THEN rules)
+- Workflow Automation Builder (IF/THEN visual rules engine)
 - Knowledge Base / Wiki
+- Scheduled PDF Reports
 - CRM integrations (Xero, Pax8, Domotz)
 
 ### P3 — Tech Debt
@@ -51,12 +60,11 @@ HTML5 drag-and-drop 5-column board, SLA badges, priority filter, optimistic upda
 ## Authentication
 - MSP Admin: aaron@stech.com.au / Lucky@2871$!
 - Client Portal: john@acmecorp.com / portal123
-- Microsoft SSO: Settings > Authentication tab
 
 ## Key API Endpoints
 - `/api/auth/login`, `/api/auth/microsoft/*`
 - `/api/settings/microsoft-sso`, `/api/settings/o365-mailbox`
 - `/api/notifications/*`, `/api/kanban-tickets/*`
-- `/api/rustdesk/live/test-connection`, `/api/rustdesk/live/peers`
-- `/api/rustdesk/live/sync`, `/api/rustdesk/live/audit`
-- `/api/rustdesk/config`, `/api/rustdesk/all-devices`
+- `/api/rustdesk/live/*` (test-connection, peers, sync, audit)
+- `/api/workshop/bench`, `/api/workshop/bench/move`
+- `/api/dispatch/board`, `/api/dispatch/assign`
