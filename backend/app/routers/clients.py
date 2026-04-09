@@ -181,6 +181,13 @@ async def mark_notifications_read(data: dict, current_user: dict = Depends(get_c
         await db.notifications.update_many({"user_id": {"$in": [current_user["id"], "all"]}}, {"$set": {"read": True}})
     return {"message": "Notifications marked as read"}
 
+@router.post("/notifications/delete")
+async def delete_notifications(data: dict, current_user: dict = Depends(get_current_user)):
+    ids = data.get("ids", [])
+    if ids:
+        await db.notifications.delete_many({"id": {"$in": ids}})
+    return {"message": f"Deleted {len(ids)} notifications"}
+
 @router.post("/notifications/generate")
 async def generate_notifications(current_user: dict = Depends(get_current_user)):
     """Generate notifications based on current system state"""
@@ -197,6 +204,15 @@ async def generate_notifications(current_user: dict = Depends(get_current_user))
                 await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": t.get("assigned_to", "all"), "type": "sla_breach", "title": f"SLA Breached: {t.get('title','')}", "message": f"Ticket {t.get('ticket_number','')} has breached its SLA", "ref_id": t["id"], "ref_type": "ticket", "severity": "critical", "read": False, "created_at": now.isoformat()})
                 notifs_created += 1
     
+    # SLA Warning (within 2 hours of breach)
+    for t in breaching:
+        sla_due = t.get("sla_due", "")
+        if sla_due and sla_due > now.isoformat() and sla_due < (now + timedelta(hours=2)).isoformat():
+            exists = await db.notifications.find_one({"ref_id": t["id"], "type": "sla_warning"})
+            if not exists:
+                await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": t.get("assigned_to", "all"), "type": "sla_warning", "title": f"SLA Warning: {t.get('title','')}", "message": f"Ticket {t.get('ticket_number','')} SLA due soon", "ref_id": t["id"], "ref_type": "ticket", "severity": "warning", "read": False, "created_at": now.isoformat()})
+                notifs_created += 1
+    
     # Contract renewal reminders (30 days)
     expiring = await db.contracts.find({"status": "active", "end_date": {"$lte": (now + timedelta(days=30)).isoformat(), "$gte": now.isoformat()}}, {"_id": 0}).to_list(50)
     for c in expiring:
@@ -211,6 +227,22 @@ async def generate_notifications(current_user: dict = Depends(get_current_user))
         exists = await db.notifications.find_one({"ref_id": d["id"], "type": "device_offline", "read": False})
         if not exists:
             await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": "all", "type": "device_offline", "title": f"Device Offline: {d.get('name','')}", "message": f"{d.get('name','')} ({d.get('client_name','')}) is offline", "ref_id": d["id"], "ref_type": "device", "severity": "warning", "read": False, "created_at": now.isoformat()})
+            notifs_created += 1
+    
+    # Recently assigned tickets (last hour)
+    recent = await db.tickets.find({"assigned_at": {"$gte": (now - timedelta(hours=1)).isoformat()}, "assigned_to": {"$exists": True, "$ne": ""}}, {"_id": 0}).to_list(50)
+    for t in recent:
+        exists = await db.notifications.find_one({"ref_id": t["id"], "type": "ticket_assigned"})
+        if not exists:
+            await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": t["assigned_to"], "type": "ticket_assigned", "title": f"Ticket Assigned: {t.get('title','')}", "message": f"You were assigned {t.get('ticket_number', '')} - {t.get('title','')}", "ref_id": t["id"], "ref_type": "ticket", "severity": "info", "read": False, "created_at": now.isoformat()})
+            notifs_created += 1
+    
+    # New email leads (last hour)
+    recent_leads = await db.leads.find({"source": "email", "created_at": {"$gte": (now - timedelta(hours=1)).isoformat()}}, {"_id": 0}).to_list(20)
+    for l in recent_leads:
+        exists = await db.notifications.find_one({"ref_id": l["id"], "type": "new_lead"})
+        if not exists:
+            await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": "all", "type": "new_lead", "title": f"New Lead: {l.get('company_name','')}", "message": f"New lead from {l.get('email','')} - {l.get('company_name','')}", "ref_id": l["id"], "ref_type": "lead", "severity": "info", "read": False, "created_at": now.isoformat()})
             notifs_created += 1
     
     return {"message": f"Generated {notifs_created} notifications", "count": notifs_created}

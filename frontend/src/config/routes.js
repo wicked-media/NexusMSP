@@ -207,6 +207,7 @@ export const routeConfig = [
 
   // Auth callback (no auth, no layout)
   { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
+  { path: "/notifications", component: page("NotificationsPage"), auth: true, layout: true },
 
   // Public routes (no auth, no layout)
   { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },

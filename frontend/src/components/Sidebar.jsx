@@ -101,7 +101,9 @@ function NotificationBell({ token, collapsed }) {
         <div className="absolute left-[260px] top-16 w-80 bg-card border rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-panel">
           <div className="flex items-center justify-between px-4 py-3 border-b">
             <span className="text-sm font-semibold">Notifications</span>
-            {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
+            <div className="flex items-center gap-2">
+              {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
+            </div>
           </div>
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
@@ -122,6 +124,10 @@ function NotificationBell({ token, collapsed }) {
               </div>
             ))}
           </div>
+          <button onClick={() => { setIsOpen(false); navigate('/notifications'); }}
+            className="w-full px-4 py-2.5 text-xs text-primary font-medium hover:bg-muted/50 border-t transition-colors" data-testid="view-all-notifications">
+            View All Notifications
+          </button>
         </div>
       )}
     </div>
