@@ -47,6 +47,10 @@ export default function RemoteAccessPage() {
   const [deployCmd, setDeployCmd] = useState("");
   const [showDeployDialog, setShowDeployDialog] = useState(false);
   const [showBulkDeploy, setShowBulkDeploy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState(null);
+  const [livePeers, setLivePeers] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
@@ -62,6 +66,11 @@ export default function RemoteAccessPage() {
       setConfig(cRes.data?.value || cRes.data);
       // Fetch deployments
       axios.get(`${API}/rustdesk/agent-deployments`, { headers }).then(r => setDeployments(r.data)).catch(() => {});
+      // Fetch live peers if server configured
+      const cfg = cRes.data?.value || cRes.data;
+      if (cfg?.enabled && cfg?.server_url) {
+        axios.get(`${API}/rustdesk/live/peers`, { headers }).then(r => setLivePeers(r.data)).catch(() => setLivePeers(null));
+      }
     } catch { toast.error("Failed to load remote access data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -173,6 +182,41 @@ export default function RemoteAccessPage() {
     });
   };
 
+  // Live sync from RustDesk server
+  const syncFromServer = async () => {
+    setSyncing(true);
+    try {
+      const res = await axios.post(`${API}/rustdesk/live/sync`, {}, { headers });
+      toast.success(res.data.message);
+      fetchData();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Sync failed - check server settings");
+    }
+    finally { setSyncing(false); }
+  };
+
+  // Test RustDesk server connection
+  const testConnection = async () => {
+    setTestingConnection(true);
+    setConnectionResult(null);
+    try {
+      const res = await axios.get(`${API}/rustdesk/live/test-connection`, { headers });
+      setConnectionResult(res.data);
+      if (res.data.connected) {
+        toast.success(res.data.message);
+      } else {
+        toast.error(res.data.message || "Connection failed");
+      }
+    } catch { toast.error("Connection test failed"); }
+    finally { setTestingConnection(false); }
+  };
+
+  // Get live status for a device
+  const getLivePeerStatus = (rdId) => {
+    if (!livePeers?.peers || !rdId) return null;
+    return livePeers.peers.find(p => String(p.id) === String(rdId));
+  };
+
   const getDeployStatus = (deviceId) => {
     if (!deployments?.deployments) return null;
     return deployments.deployments.find(d => d.device_id === deviceId);
@@ -224,10 +268,33 @@ export default function RemoteAccessPage() {
                   {serverConfigured ? "RustDesk Server Connected" : "Server Not Configured"}
                 </span>
                 {config?.server_url && <span className="text-xs text-muted-foreground ml-2">{config.server_url}</span>}
+                {livePeers && <span className="text-xs text-blue-400 ml-2">({livePeers.count} live peers)</span>}
+                {config?.last_sync && <span className="text-xs text-muted-foreground ml-2">Last sync: {new Date(config.last_sync).toLocaleString()}</span>}
               </div>
             </div>
-            {!serverConfigured && <Button size="sm" variant="outline" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }}>Configure Now</Button>}
+            <div className="flex gap-2">
+              {serverConfigured && (
+                <>
+                  <Button size="sm" variant="outline" onClick={testConnection} disabled={testingConnection} data-testid="test-connection-btn">
+                    {testingConnection ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wifi className="w-3 h-3 mr-1" />}Test
+                  </Button>
+                  <Button size="sm" variant="default" onClick={syncFromServer} disabled={syncing} data-testid="sync-live-btn">
+                    {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync Live
+                  </Button>
+                </>
+              )}
+              {!serverConfigured && <Button size="sm" variant="outline" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }}>Configure Now</Button>}
+            </div>
           </div>
+          {connectionResult && (
+            <div className={`mt-2 p-2 rounded text-xs ${connectionResult.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+              {connectionResult.message}
+              {connectionResult.peer_count !== null && connectionResult.peer_count !== undefined && <span className="ml-2 font-medium">&middot; {connectionResult.peer_count} peer(s) found</span>}
+              {connectionResult.endpoints_available?.length > 0 && (
+                <span className="ml-2 text-muted-foreground">Endpoints: {connectionResult.endpoints_available.map(e => e.path).join(", ")}</span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -246,11 +313,12 @@ export default function RemoteAccessPage() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         {[
           { label: "Total Devices", value: devices.length, icon: Monitor, color: "text-blue-400" },
           { label: "RustDesk Registered", value: registered.length, icon: Link2, color: "text-emerald-400" },
           { label: "Unregistered", value: unregistered.length, icon: Unlink, color: "text-amber-400" },
+          { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400" },
           { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-purple-400" },
         ].map(st => (
           <Card key={st.label} className="border-border/40">
@@ -266,6 +334,7 @@ export default function RemoteAccessPage() {
         <TabsList>
           <TabsTrigger value="devices">All Devices ({devices.length})</TabsTrigger>
           <TabsTrigger value="registered">Registered ({registered.length})</TabsTrigger>
+          {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Peers ({livePeers.count})</TabsTrigger>}
           <TabsTrigger value="deployments" data-testid="tab-deployments"><Rocket className="w-3 h-3 mr-1" />Agent Deployments ({deployments?.total || 0})</TabsTrigger>
           <TabsTrigger value="sessions">Session History ({sessions.length})</TabsTrigger>
         </TabsList>
@@ -339,10 +408,19 @@ export default function RemoteAccessPage() {
                           <div><span className="text-xs capitalize">{d.device_type}</span>{d.os && <p className="text-[10px] text-muted-foreground">{d.os}</p>}</div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            {d.status === "online" ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3 text-red-400" />}
-                            <span className={`text-xs capitalize ${d.status === "online" ? "text-emerald-400" : "text-muted-foreground"}`}>{d.status}</span>
-                          </div>
+                          {(() => {
+                            const livePeer = getLivePeerStatus(d.rd_id);
+                            const isLive = livePeer?.online;
+                            const statusLabel = livePeer ? (isLive ? "online" : "offline") : d.status;
+                            const isOnline = statusLabel === "online";
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                {isOnline ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3 text-red-400" />}
+                                <span className={`text-xs capitalize ${isOnline ? "text-emerald-400" : "text-muted-foreground"}`}>{statusLabel}</span>
+                                {livePeer && <span className="text-[9px] px-1 rounded bg-blue-500/10 text-blue-400 ml-1">LIVE</span>}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           {d.rd_id ? (
@@ -444,6 +522,55 @@ export default function RemoteAccessPage() {
         </TabsContent>
 
         {/* Agent Deployments Tab */}
+        {/* Live Peers Tab */}
+        {livePeers && (
+          <TabsContent value="live-peers" className="mt-4 space-y-3" data-testid="live-peers-tab">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-muted-foreground">Real-time peer data from <span className="font-mono text-xs">{livePeers.server_url}</span> {livePeers.source && <Badge variant="outline" className="ml-1 text-[10px]">via {livePeers.source}</Badge>}</p>
+              <Button size="sm" variant="outline" onClick={syncFromServer} disabled={syncing}>{syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync to NexusOps</Button>
+            </div>
+            <Card className="border-border/40">
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>RustDesk ID</TableHead><TableHead>Hostname</TableHead><TableHead>OS</TableHead>
+                    <TableHead>Status</TableHead><TableHead>Version</TableHead><TableHead>Alias</TableHead><TableHead>Linked</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {livePeers.peers.length === 0 ? (
+                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No peers found on RustDesk server. Check API key permissions.</TableCell></TableRow>
+                    ) : livePeers.peers.map(p => {
+                      const matchedDevice = devices.find(d => d.rd_id === String(p.id));
+                      return (
+                        <TableRow key={p.id} data-testid={`live-peer-${p.id}`}>
+                          <TableCell><code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{p.id}</code></TableCell>
+                          <TableCell className="text-sm">{p.hostname || "—"}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{p.os || "—"}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              {p.online ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3 text-red-400" />}
+                              <span className={`text-xs ${p.online ? "text-emerald-400 font-medium" : "text-muted-foreground"}`}>{p.online ? "Online" : "Offline"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{p.version || "—"}</TableCell>
+                          <TableCell className="text-xs">{p.alias || "—"}</TableCell>
+                          <TableCell>
+                            {matchedDevice ? (
+                              <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]"><Link2 className="w-2.5 h-2.5 mr-0.5" />{matchedDevice.name || matchedDevice.hostname}</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">Not linked</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
         <TabsContent value="deployments" className="mt-4 space-y-4" data-testid="deployments-tab">
           {/* Deployment Stats */}
           <div className="grid grid-cols-4 gap-3">
@@ -612,7 +739,14 @@ export default function RemoteAccessPage() {
             <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="rustdesk.yourdomain.com" required data-testid="settings-server" /></div>
             <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /></div>
             <div className="space-y-2"><Label>Relay Server</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /></div>
-            <DialogFooter><Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button></DialogFooter>
+            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
+              <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro API</p>
+              <p>For live peer data, enter the API URL (usually <code>https://your-server:21114</code>) and generate a read/write API token from the RustDesk web console under Settings &gt; API.</p>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button type="button" variant="outline" onClick={testConnection} disabled={testingConnection || !settingsForm.server_url} data-testid="test-settings-btn">{testingConnection ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Wifi className="w-4 h-4 mr-1" />}Test Connection</Button>
+              <Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
