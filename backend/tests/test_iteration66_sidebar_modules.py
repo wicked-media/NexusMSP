@@ -22,7 +22,7 @@ class TestSidebarModuleVisibility:
         # Login as admin
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         data = login_resp.json()
@@ -36,7 +36,7 @@ class TestSidebarModuleVisibility:
         # Re-login to check response structure
         resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -186,7 +186,7 @@ class TestNavigationRoutes:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_resp.status_code == 200
         data = login_resp.json()

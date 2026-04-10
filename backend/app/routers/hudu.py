@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import httpx
@@ -16,7 +17,7 @@ async def hudu_get(config, path, params=None):
     url = config["url"].rstrip("/")
     api_url = f"{url}/api/v1/{path}"
     headers = {"x-api-key": config["api_key_full"], "Content-Type": "application/json", "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=30, verify=False) as client:
+    async with httpx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
         resp = await client.get(api_url, headers=headers, params=params)
         if resp.status_code == 200:
             return resp.json()

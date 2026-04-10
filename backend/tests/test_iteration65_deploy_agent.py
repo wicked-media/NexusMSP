@@ -25,7 +25,7 @@ class TestDeployAgentEndpoints:
         # Login
         response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["token"]
@@ -222,7 +222,7 @@ class TestDeploymentDataIntegrity:
         
         response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]

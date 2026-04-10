@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import DOMPurify from "dompurify";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -409,7 +410,7 @@ export default function EmailPage() {
                   </Badge>
                 </div>
                 <div className="border rounded-lg p-4 bg-muted/30 min-h-[200px]">
-                  <div dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
+                  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selectedEmail.body) }} />
                 </div>
                 {selectedEmail.status === 'draft' && (
                   <DialogFooter>

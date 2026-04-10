@@ -9,7 +9,7 @@ export default function ZeroTrustPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/zero-trust/overview`, { headers }).then(r => setData(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/zero-trust/overview`, { headers }).then(r => setData(r.data)); }, [token]);
 
   if (!data) return <div className="p-6 text-muted-foreground">Loading...</div>;
   const s = data.summary;

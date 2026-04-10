@@ -212,24 +212,30 @@ export default function ProductsPage() {
 
   const handlePrint = () => {
     const printWindow = window.open("", "_blank", "width=400,height=600");
-    const barcodeVal = selectedLabel?.barcode || selectedLabel?.sku || "N/A";
-    printWindow.document.write(`
-      <!DOCTYPE html><html><head><title>Label</title>
+    if (!printWindow) return;
+    const barcodeVal = String(selectedLabel?.barcode || selectedLabel?.sku || "N/A").replace(/[<>"'&]/g, "");
+    const productName = String(selectedLabel?.product_name || selectedLabel?.name || "").replace(/[<>"'&]/g, "");
+    const sku = String(selectedLabel?.sku || "").replace(/[<>"'&]/g, "");
+    const category = String(selectedLabel?.category || "").replace(/[<>"'&]/g, "");
+    const vendor = String(selectedLabel?.vendor || "").replace(/[<>"'&]/g, "");
+    const price = selectedLabel?.retail_price ? `<div class="price">$${Number(selectedLabel.retail_price).toFixed(2)}</div>` : "";
+    const doc = printWindow.document;
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head><title>Label</title>
       <style>@page{size:4in 6in;margin:0}body{margin:0;padding:12px;font-family:Arial,sans-serif;width:4in}
       .name{font-size:16px;font-weight:bold;margin-bottom:4px}.sku{font-size:11px;color:#555;margin-bottom:12px}
       .bc{text-align:center;margin:16px 0}.price{font-size:20px;font-weight:bold;text-align:center;margin-top:8px}
       .cat{font-size:10px;color:#777;margin-top:4px}</style></head>
-      <body><div class="name">${selectedLabel?.product_name || selectedLabel?.name || ""}</div>
-      <div class="sku">SKU: ${selectedLabel?.sku || ""}</div>
+      <body><div class="name">${productName}</div>
+      <div class="sku">SKU: ${sku}</div>
       <div class="bc"><svg id="bc"></svg></div>
       <div style="text-align:center;font-family:monospace;font-size:11px;letter-spacing:2px">${barcodeVal}</div>
-      ${selectedLabel?.retail_price ? `<div class="price">$${Number(selectedLabel.retail_price).toFixed(2)}</div>` : ""}
-      <div class="cat">${selectedLabel?.category || ""} ${selectedLabel?.vendor ? "| " + selectedLabel.vendor : ""}</div>
+      ${price}
+      <div class="cat">${category}${vendor ? " | " + vendor : ""}</div>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
       <script>JsBarcode("#bc","${barcodeVal}",{format:"CODE128",width:2,height:80,displayValue:false});window.print();window.close();<\/script>
-      </body></html>
-    `);
-    printWindow.document.close();
+      </body></html>`);
+    doc.close();
   };
 
   const filtered = products

@@ -27,7 +27,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "admin@nexusops.io",
-        "password": "admin123"
+        "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     return response.json().get("token")
@@ -185,7 +185,7 @@ class Test2FA:
         
         # Disable for cleanup
         requests.post(f"{BASE_URL}/api/user-settings/2fa/disable", 
-                     json={"password": "admin123"}, headers=headers)
+                     json={"password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")}, headers=headers)
 
 
 # ============== SECURITY KEYS TESTS ==============

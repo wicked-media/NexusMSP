@@ -20,7 +20,7 @@ class TestDmarcComplianceDashboard:
         """Setup - Get auth token for all tests"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json()["token"]
@@ -164,7 +164,7 @@ class TestSupedServices:
         """Setup - Get auth token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         self.token = login_resp.json()["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}

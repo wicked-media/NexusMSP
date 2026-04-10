@@ -23,7 +23,7 @@ class TestAuth:
         """Login with admin credentials"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -39,7 +39,7 @@ def auth_headers():
     if not TestAuth.token:
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         TestAuth.token = response.json()["token"]
     return {"Authorization": f"Bearer {TestAuth.token}"}

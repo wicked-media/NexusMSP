@@ -23,7 +23,7 @@ class TestBillingDashboard:
         # Login to get auth token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         
         if login_response.status_code == 200:

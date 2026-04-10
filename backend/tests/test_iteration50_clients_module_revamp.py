@@ -20,7 +20,7 @@ class TestClientsModuleRevamp:
         self.session.headers.update({"Content-Type": "application/json"})
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         self.token = login_response.json().get("token")
@@ -321,7 +321,7 @@ class TestHealthScoresForUIColoring:
         self.session.headers.update({"Content-Type": "application/json"})
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         self.token = login_response.json().get("token")
         self.session.headers.update({"Authorization": f"Bearer {self.token}"})
@@ -358,7 +358,7 @@ class TestSubscriptionsForClientCards:
         self.session.headers.update({"Content-Type": "application/json"})
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         self.token = login_response.json().get("token")
         self.session.headers.update({"Authorization": f"Bearer {self.token}"})

@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -438,7 +439,7 @@ async def test_site_connection(site_id: str, current_user: dict = Depends(get_cu
     if not controller_url:
         return {"success": False, "message": "No controller URL configured"}
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true', timeout=10) as client:
             resp = await client.get(f"{controller_url}/api/s/default/stat/health")
             if resp.status_code in (200, 401, 403):
                 await db.network_sites.update_one({"id": site_id}, {"$set": {"last_connection_test": datetime.now(timezone.utc).isoformat(), "connection_status": "reachable"}})

@@ -24,7 +24,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "admin@nexusops.io",
-        "password": "admin123"
+        "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -446,7 +446,7 @@ class TestStatusBoard:
         # First get a client with auth
         auth_res = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         token = auth_res.json().get("token")
         clients_res = requests.get(f"{BASE_URL}/api/clients", headers={"Authorization": f"Bearer {token}"})

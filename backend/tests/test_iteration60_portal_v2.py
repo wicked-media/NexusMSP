@@ -14,11 +14,11 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Portal user credentials
 PORTAL_EMAIL = "john@acmecorp.com"
-PORTAL_PASSWORD = "portal123"
+PORTAL_PASSWORD = os.environ.get("TEST_PORTAL_PASSWORD", "portal123")
 
 # MSP Admin credentials
 MSP_EMAIL = "admin@nexusops.io"
-MSP_PASSWORD = "admin123"
+MSP_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 
 
 class TestPortalV2Auth:

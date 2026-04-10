@@ -15,7 +15,7 @@ if not BASE_URL:
 
 # Test credentials
 TEST_EMAIL = "admin@nexusops.io"
-TEST_PASSWORD = "admin123"
+TEST_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 
 
 @pytest.fixture(scope="module")

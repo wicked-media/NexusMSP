@@ -24,7 +24,7 @@ class TestAuthentication:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -35,7 +35,7 @@ class TestAuthentication:
         """Verify login returns admin user with is_admin=True"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200
         data = response.json()
@@ -51,7 +51,7 @@ class TestTechniciansOverview:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -123,7 +123,7 @@ class TestTechnicianDashboard:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -179,7 +179,7 @@ class TestPermissionPresets:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -259,7 +259,7 @@ class TestTechnicianPermissionsUpdate:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -303,7 +303,7 @@ class TestLeaderboard:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -368,7 +368,7 @@ class TestTechnicianHistory:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -422,7 +422,7 @@ class TestEmailSignature:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -495,7 +495,7 @@ class TestEmailSignatureTemplates:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -524,7 +524,7 @@ class TestTechnicianCRUD:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     

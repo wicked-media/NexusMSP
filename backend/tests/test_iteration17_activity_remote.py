@@ -24,7 +24,7 @@ def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": "admin@nexusops.io", "password": "admin123"}
+        json={"email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")}
     )
     if response.status_code != 200:
         pytest.skip(f"Authentication failed: {response.text}")

@@ -30,7 +30,7 @@ import io
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 TEST_EMAIL = "admin@nexusops.io"
-TEST_PASSWORD = "admin123"
+TEST_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 TEST_PREFIX = "TEST_ITER18_"
 
 class TestAuthSetup:

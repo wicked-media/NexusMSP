@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import DOMPurify from "dompurify";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1276,7 +1277,7 @@ function SignatureDialog({ sigConfig, setSigConfig, handleSaveSignature, setSigD
           </div>
           <div>
             <Label className="mb-2 block">Preview</Label>
-            <div className="p-4 rounded-lg border bg-white min-h-[200px]"><div dangerouslySetInnerHTML={{ __html: generateSignatureHtml(c) }} /></div>
+            <div className="p-4 rounded-lg border bg-white min-h-[200px]"><div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(generateSignatureHtml(c)) }} /></div>
             <p className="text-xs text-muted-foreground mt-2">This signature will be used in outgoing emails from the ticket system.</p>
           </div>
         </div>

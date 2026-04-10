@@ -22,7 +22,7 @@ class TestInvoicePDF:
         """Get auth token and invoice ID"""
         resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert resp.status_code == 200, f"Login failed: {resp.text}"
         self.token = resp.json()["token"]
@@ -105,7 +105,7 @@ class TestDeviceRemoteViewers:
         """Get auth token and device ID"""
         resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert resp.status_code == 200, f"Login failed: {resp.text}"
         self.token = resp.json()["token"]
@@ -237,7 +237,7 @@ class TestDeviceViewerWithSpecificDevice:
         """Get auth token"""
         resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert resp.status_code == 200
         self.token = resp.json()["token"]

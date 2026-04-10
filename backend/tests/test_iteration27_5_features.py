@@ -16,7 +16,7 @@ class TestAuth:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -36,7 +36,7 @@ class TestSyncroRMM:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -86,7 +86,7 @@ class TestLeadsCRM:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -192,7 +192,7 @@ class TestTicketEmail:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -255,7 +255,7 @@ class TestScripting:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -327,7 +327,7 @@ class TestPatchManagement:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -361,7 +361,7 @@ class TestAICopilot:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     
@@ -394,7 +394,7 @@ class TestCleanup:
     @pytest.fixture(scope="class")
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "admin@nexusops.io", "password": "admin123"
+            "email": "admin@nexusops.io", "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json().get("token")
     

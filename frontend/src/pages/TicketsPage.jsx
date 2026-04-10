@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import DOMPurify from "dompurify";
 import CoPilotPanel from "@/components/CoPilotPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1585,7 +1586,7 @@ export default function TicketsPage() {
                       <Label className="text-xs">Body</Label>
                       <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="120px" />
                     </div>
-                    {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: emailSignature }} /></div>}
+                    {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
                     <div className="flex justify-end">
                       <Button size="sm" onClick={handleSendEmail} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
                     </div>
@@ -1619,7 +1620,7 @@ export default function TicketsPage() {
                               <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                             </div>
                             {item.content && /<[a-z][\s\S]*>/i.test(item.content) ? (
-                              <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: item.content }} />
+                              <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.content) }} />
                             ) : (
                               <p className="text-sm whitespace-pre-wrap">{item.content}</p>
                             )}
@@ -1638,7 +1639,7 @@ export default function TicketsPage() {
                             </div>
                             <p className="text-xs text-muted-foreground">To: {item.to_addresses?.join(", ")}</p>
                             {item.body && /<[a-z][\s\S]*>/i.test(item.body) ? (
-                              <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: item.body }} />
+                              <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.body) }} />
                             ) : (
                               <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
                             )}
@@ -2067,7 +2068,7 @@ export default function TicketsPage() {
                   )}
                 </div>
               </div>
-              {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: emailSignature }} /></div>}
+              {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
             </div>
             <DialogFooter><Button onClick={handleSendEmail} data-testid="send-email-submit"><Send className="w-4 h-4 mr-1" />Send</Button></DialogFooter>
           </DialogContent>

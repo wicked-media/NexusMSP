@@ -21,7 +21,7 @@ class TestPortalUserManagementAPIs:
         # Login as MSP admin
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_resp.status_code == 200, f"Admin login failed: {login_resp.text}"
         self.token = login_resp.json()["token"]
@@ -336,7 +336,7 @@ class TestPortalUserDataIntegrity:
         
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         self.token = login_resp.json()["token"]
         self.session.headers.update({"Authorization": f"Bearer {self.token}"})

@@ -25,7 +25,7 @@ class TestTechniciansImprovements:
         # Login as admin
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         token = login_response.json().get("token")
@@ -313,7 +313,7 @@ class TestTechnicianCategories:
         
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")
@@ -367,7 +367,7 @@ class TestQuickStats:
         
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")

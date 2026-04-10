@@ -28,7 +28,7 @@ def api_client():
     # Login to get token
     response = session.post(f"{BASE_URL}/api/auth/login", json={
         "email": "admin@nexusops.io",
-        "password": "admin123"
+        "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     auth_token = response.json().get("token")

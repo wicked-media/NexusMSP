@@ -20,7 +20,7 @@ class TestAuth:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -31,7 +31,7 @@ class TestAuth:
         """Test successful login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200
         data = response.json()
@@ -48,7 +48,7 @@ class TestDashboardStats:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -116,7 +116,7 @@ class TestPatchHubDashboard:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -143,7 +143,7 @@ class TestPatchHubAgentDownloadScript:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -242,7 +242,7 @@ class TestPatchHubAgentReports:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -290,7 +290,7 @@ class TestPatchHubAgentSettings:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -322,7 +322,7 @@ class TestDevicesEndpoint:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -355,7 +355,7 @@ class TestAlertsEndpoint:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     
@@ -378,7 +378,7 @@ class TestTicketsEndpoint:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         return response.json()["token"]
     

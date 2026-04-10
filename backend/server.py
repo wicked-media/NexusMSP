@@ -138,7 +138,7 @@ async def _rustdesk_auto_sync_loop():
                 api_key = val.get("api_key", "")
                 headers_dict = {"Authorization": f"Bearer {api_key}"} if api_key else {}
                 peers = []
-                async with httpx.AsyncClient(timeout=15.0, verify=False) as cl:
+                async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as cl:
                     for path in ["/peers", "/v1/peers", "/ab/peers"]:
                         try:
                             resp = await cl.get(f"{server_url}/api{path}", headers=headers_dict)

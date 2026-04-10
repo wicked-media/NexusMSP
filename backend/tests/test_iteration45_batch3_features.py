@@ -16,7 +16,7 @@ def auth_token():
     """Get authentication token for all tests"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "admin@nexusops.io",
-        "password": "admin123"
+        "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
     })
     if response.status_code == 200:
         return response.json().get("token")  # Note: API returns 'token' not 'access_token'

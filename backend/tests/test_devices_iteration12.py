@@ -17,7 +17,7 @@ class TestDevicesAPI:
         # Login to get token
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["token"]
@@ -244,7 +244,7 @@ class TestDeviceFilters:
     def setup(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "admin@nexusops.io",
-            "password": "admin123"
+            "password": os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         })
         self.token = response.json()["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
