@@ -10,7 +10,7 @@ export default function GitScriptsPage() {
   const [scripts, setScripts] = useState([]);
   const [selected, setSelected] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/git-scripts/list`, { headers }).then(r => setScripts(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/git-scripts/list`, { headers }).then(r => setScripts(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6" data-testid="git-scripts-page">

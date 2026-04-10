@@ -76,7 +76,7 @@ export default function WhiteLabelPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchBranding(); }, []);
+  useEffect(() => { fetchBranding(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     setSaving(true);

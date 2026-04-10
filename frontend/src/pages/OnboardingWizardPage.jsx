@@ -313,7 +313,7 @@ function CompanyProfileForm({ data, onChange }) {
           <Label>Industry</Label>
           <Select value={data.industry || "__none"} onValueChange={v => u("industry", v === "__none" ? "" : v)}>
             <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-            <SelectContent>{INDUSTRIES.map(i => <SelectItem key={i} value={i.toLowerCase()}>{i}</SelectItem>)}</SelectContent>
+            <SelectContent>{INDUSTRIES.map(i => <SelectItem key={`k-${i}`} value={i.toLowerCase()}>{i}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>
@@ -362,7 +362,7 @@ function ContactsAccessForm({ data, onChange }) {
     <div className="space-y-4" data-testid="step-contacts-access">
       <p className="text-sm text-muted-foreground">Add key contacts for this client. At minimum, add a primary contact.</p>
       {contacts.map((c, i) => (
-        <Card key={i} className="border-border/40">
+        <Card key={`k-${i}`} className="border-border/40">
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact {i + 1}</span>
@@ -425,7 +425,7 @@ function AssetDiscoveryForm({ data, onChange }) {
         </div>
       </div>
       {devices.map((d, i) => (
-        <Card key={i} className="border-border/40">
+        <Card key={`k-${i}`} className="border-border/40">
           <CardContent className="pt-3 pb-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -1170,7 +1170,7 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
           </DialogHeader>
           <div className="max-h-80 overflow-auto space-y-2">
             {(session?.audit_log || []).slice().reverse().map((entry, i) => (
-              <div key={i} className="flex items-start gap-3 p-2 rounded-lg bg-muted/30 text-sm">
+              <div key={`k-${i}`} className="flex items-start gap-3 p-2 rounded-lg bg-muted/30 text-sm">
                 <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
                 <div>
                   <p className="font-medium">{entry.action?.replace(/_/g, " ")}</p>

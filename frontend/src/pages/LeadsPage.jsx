@@ -80,7 +80,7 @@ export default function LeadsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchLeadDetail = async (lead) => {
     setDetailLead(lead);

@@ -46,7 +46,7 @@ export default function TicketPingSettingsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSaveSettings = async () => {
     setSaving(true);

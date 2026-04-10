@@ -84,7 +84,7 @@ export default function UpsellPage() {
                   const cfg = typeConfig[o.type] || { icon: ChevronRight, color: "text-zinc-400", bg: "bg-zinc-500/10" };
                   const Icon = cfg.icon;
                   return (
-                    <div key={i} className={`flex items-center gap-3 p-2.5 rounded-lg ${cfg.bg} border border-border/30`}>
+                    <div key={`k-${i}`} className={`flex items-center gap-3 p-2.5 rounded-lg ${cfg.bg} border border-border/30`}>
                       <Icon className={`w-4 h-4 ${cfg.color} flex-shrink-0`} />
                       <div className="flex-1">
                         <p className="text-sm font-medium">{o.title}</p>

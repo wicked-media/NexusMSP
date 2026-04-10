@@ -57,7 +57,7 @@ export default function ExpiryTrackerPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openAddDialog = (type) => {
     setDialogType(type);

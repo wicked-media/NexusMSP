@@ -76,7 +76,7 @@ async def submit_survey(data: dict):
 @router.post("/csat/seed-demo")
 async def seed_demo_data(current_user: dict = Depends(get_current_user)):
     """Seed demo CSAT data for testing."""
-    import random
+    import random; random = random.SystemRandom()
     techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
     clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
     count = 0

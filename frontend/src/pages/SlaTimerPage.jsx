@@ -75,7 +75,7 @@ export default function SlaTimerPage() {
         ].map((s, i) => {
           const Icon = s.icon;
           return (
-            <Card key={i}>
+            <Card key={`k-${i}`}>
               <CardContent className="pt-4 flex items-center gap-4">
                 <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center`}><Icon className={`w-5 h-5 ${s.color}`} /></div>
                 <div>

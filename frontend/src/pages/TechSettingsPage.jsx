@@ -83,7 +83,7 @@ export default function TechSettingsPage() {
   // Gamification
   const [gamProfile, setGamProfile] = useState(null);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
     setLoading(true);
@@ -394,7 +394,7 @@ export default function TechSettingsPage() {
                         <p className="text-sm font-medium mb-2">Backup Codes (save these securely):</p>
                         <div className="grid grid-cols-4 gap-2">
                           {setupData.backup_codes?.map((code, i) => (
-                            <code key={i} className="text-xs bg-muted px-2 py-1 rounded text-center font-mono">{code}</code>
+                            <code key={`k-${i}`} className="text-xs bg-muted px-2 py-1 rounded text-center font-mono">{code}</code>
                           ))}
                         </div>
                       </div>
@@ -821,7 +821,7 @@ export default function TechSettingsPage() {
                   <CardContent>
                     <div className="space-y-2">
                       {(gamProfile.recent_xp || []).slice(0, 10).map((entry, i) => (
-                        <div key={i} className="flex items-center justify-between p-2 rounded-lg border">
+                        <div key={`k-${i}`} className="flex items-center justify-between p-2 rounded-lg border">
                           <div className="flex items-center gap-2">
                             <Zap className="w-3 h-3 text-yellow-500" />
                             <span className="text-sm">{entry.reason}</span>

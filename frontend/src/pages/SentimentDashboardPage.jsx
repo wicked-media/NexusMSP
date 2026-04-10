@@ -164,14 +164,14 @@ export default function SentimentDashboardPage() {
             <CardContent>
               <div className="space-y-2">
                 {(c.insights || []).map((ins, i) => (
-                  <div key={i} className="text-xs p-2 rounded bg-muted/20 border border-border/30">{ins}</div>
+                  <div key={`k-${i}`} className="text-xs p-2 rounded bg-muted/20 border border-border/30">{ins}</div>
                 ))}
               </div>
               <Separator className="my-3" />
               <p className="text-xs font-semibold mb-2">Recommendations</p>
               <div className="space-y-2">
                 {(c.recommendations || []).map((rec, i) => (
-                  <div key={i} className="text-xs p-2 rounded bg-primary/5 border border-primary/20 flex items-start gap-2">
+                  <div key={`k-${i}`} className="text-xs p-2 rounded bg-primary/5 border border-primary/20 flex items-start gap-2">
                     <ChevronRight className="w-3 h-3 mt-0.5 text-primary flex-shrink-0" />{rec}
                   </div>
                 ))}
@@ -191,7 +191,7 @@ export default function SentimentDashboardPage() {
                 {clientDetail.history.slice(0, 30).reverse().map((h, i) => {
                   const color = h.score >= 70 ? "bg-emerald-500" : h.score >= 50 ? "bg-blue-500" : h.score >= 30 ? "bg-amber-500" : "bg-red-500";
                   return (
-                    <div key={i} className={`flex-1 ${color} rounded-t opacity-70 hover:opacity-100 transition-opacity`}
+                    <div key={`k-${i}`} className={`flex-1 ${color} rounded-t opacity-70 hover:opacity-100 transition-opacity`}
                       style={{ height: `${h.score}%` }} title={`${h.analyzed_at?.slice(0, 10)}: ${h.score}`} />
                   );
                 })}

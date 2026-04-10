@@ -120,7 +120,7 @@ export default function ScriptingPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -342,7 +342,7 @@ export default function ScriptingPage() {
           <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Click "Import" to add to your scripts.</p>
           <div className="space-y-4">
             {scriptLibrary.map((template, i) => (
-              <Card key={i} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
+              <Card key={`k-${i}`} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">

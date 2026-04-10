@@ -10,7 +10,7 @@ export default function WebhookBuilderPage() {
   const { token } = useAuth();
   const [hooks, setHooks] = useState([]);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/webhook-builder/list`, { headers }).then(r => setHooks(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/webhook-builder/list`, { headers }).then(r => setHooks(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6" data-testid="webhook-builder-page">

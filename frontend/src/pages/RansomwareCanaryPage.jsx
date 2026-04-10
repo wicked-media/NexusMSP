@@ -59,7 +59,7 @@ export default function RansomwareCanaryPage() {
           <TableHeader><TableRow><TableHead>Canary File</TableHead><TableHead>Host</TableHead><TableHead>Status</TableHead><TableHead>Last Checked</TableHead></TableRow></TableHeader>
           <TableBody>
             {canaries.map((c, i) => (
-              <TableRow key={i} className={c.status === "triggered" ? "bg-red-500/5" : ""} data-testid={`canary-${i}`}>
+              <TableRow key={`k-${i}`} className={c.status === "triggered" ? "bg-red-500/5" : ""} data-testid={`canary-${i}`}>
                 <TableCell className="font-mono text-xs">{c.path}</TableCell>
                 <TableCell className="text-sm font-mono">{c.host}</TableCell>
                 <TableCell>

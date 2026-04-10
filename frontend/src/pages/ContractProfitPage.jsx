@@ -73,7 +73,7 @@ export default function ContractProfitPage() {
             </TableRow></TableHeader>
             <TableBody>
               {contracts.map((c, i) => (
-                <TableRow key={i} data-testid={`contract-row-${i}`}>
+                <TableRow key={`k-${i}`} data-testid={`contract-row-${i}`}>
                   <TableCell className="font-medium">{c.client_name}</TableCell>
                   <TableCell className="text-sm">{c.contract_name}</TableCell>
                   <TableCell className="text-right font-mono">${c.monthly_value.toLocaleString()}</TableCell>

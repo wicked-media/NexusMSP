@@ -116,7 +116,7 @@ export default function LoginPage() {
                 { value: "< 2s", label: "Avg Response", color: "cyan" },
                 { value: "256-bit", label: "AES Encryption", color: "blue" },
               ].map((stat, i) => (
-                <div key={i} className="space-y-1">
+                <div key={`k-${i}`} className="space-y-1">
                   <p className={`text-2xl font-bold font-mono text-${stat.color}-400`}>{stat.value}</p>
                   <p className="text-xs text-zinc-500">{stat.label}</p>
                 </div>
@@ -137,7 +137,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-4 border-t border-zinc-800/50 pt-6">
             <div className="flex -space-x-2">
               {["AT", "SC", "MR"].map((init, i) => (
-                <div key={i} className="w-8 h-8 rounded-full border-2 border-[#0a0a0f] bg-zinc-800 flex items-center justify-center text-[10px] font-medium text-zinc-400">
+                <div key={`k-${i}`} className="w-8 h-8 rounded-full border-2 border-[#0a0a0f] bg-zinc-800 flex items-center justify-center text-[10px] font-medium text-zinc-400">
                   {init}
                 </div>
               ))}

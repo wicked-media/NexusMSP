@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
-import random, uuid, asyncio, json
+import random; random = random.SystemRandom()
+import uuid, asyncio, json
 
 router = APIRouter()
 

@@ -52,7 +52,7 @@ export default function ChannelModePage() {
           { label: "Total MRR", value: `$${summary.total_mrr?.toLocaleString()}`, icon: DollarSign, color: "#f97316" },
           { label: "Avg Margin", value: `${summary.avg_margin}%`, icon: TrendingUp, color: "#10b981" },
         ].map((s, i) => (
-          <div key={i} className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+          <div key={`k-${i}`} className="rounded-xl p-4 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
             <div className="flex items-center gap-2 mb-2"><s.icon size={14} style={{ color: s.color }} /><span className="text-xs text-[var(--muted)]">{s.label}</span></div>
             <div className="text-xl font-bold">{s.value}</div>
           </div>
@@ -108,7 +108,7 @@ export default function ChannelModePage() {
             <h3 className="text-sm font-medium mb-3">Monthly Revenue vs Cost</h3>
             <div className="flex items-end gap-2 h-40">
               {(revenue.monthly_trend || []).map((m, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div key={`k-${i}`} className="flex-1 flex flex-col items-center gap-1">
                   <div className="w-full flex flex-col items-center gap-0.5">
                     <div className="w-full rounded-t bg-emerald-500" style={{ height: `${(m.revenue / 80000) * 100}px` }} />
                     <div className="w-full rounded-t bg-red-400/50" style={{ height: `${(m.cost / 80000) * 100}px` }} />

@@ -66,7 +66,7 @@ export default function WallboardPage() {
           { label: "Devices Online", value: `${devices.online || 0}/${devices.total || 0}`, color: "text-cyan-400", bg: "bg-cyan-500/10" },
           { label: "Uptime", value: `${devices.uptime_pct || 0}%`, color: "text-emerald-400", bg: "bg-emerald-500/10" },
         ].map((s, i) => (
-          <div key={i} className={`${s.bg} rounded-xl p-4 border border-zinc-800/50`}>
+          <div key={`k-${i}`} className={`${s.bg} rounded-xl p-4 border border-zinc-800/50`}>
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{s.label}</p>
             <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
           </div>

@@ -128,7 +128,7 @@ Warranty: 2024-01-01 to 2027-01-01
           <CardHeader className="pb-2"><CardTitle className="text-sm">Recent Scans</CardTitle></CardHeader>
           <CardContent className="space-y-1">
             {history.slice(0, 10).map((h, i) => (
-              <div key={i} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
+              <div key={`k-${i}`} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-3 h-3 text-emerald-400" />
                   <span>{h.result?.hostname || h.result?.model || "Scan"}</span>

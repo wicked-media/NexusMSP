@@ -78,7 +78,7 @@ export default function ReportsPage() {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Computed SLA stats
   const slaStats = {
@@ -157,7 +157,7 @@ export default function ReportsPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={ticketData?.by_status || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="status">
-                        {(ticketData?.by_status || []).map((e, i) => <Cell key={i} fill={statusColorMap[e.status] || COLORS[i]} />)}
+                        {(ticketData?.by_status || []).map((e, i) => <Cell key={`k-${i}`} fill={statusColorMap[e.status] || COLORS[i]} />)}
                       </Pie>
                       <Tooltip contentStyle={chartTooltipStyle} />
                       <Legend />
@@ -239,7 +239,7 @@ export default function ReportsPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={ticketData?.by_priority || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="priority">
-                        {(ticketData?.by_priority || []).map((e, i) => <Cell key={i} fill={priorityColorMap[e.priority] || COLORS[i]} />)}
+                        {(ticketData?.by_priority || []).map((e, i) => <Cell key={`k-${i}`} fill={priorityColorMap[e.priority] || COLORS[i]} />)}
                       </Pie>
                       <Tooltip contentStyle={chartTooltipStyle} /><Legend />
                     </PieChart>
@@ -306,7 +306,7 @@ export default function ReportsPage() {
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} domain={[0, 100]} />
                     <Tooltip contentStyle={chartTooltipStyle} />
                     <Bar dataKey="slaRate" name="SLA Rate %" radius={[4, 4, 0, 0]}>
-                      {slaStats.byPriority.map((e, i) => <Cell key={i} fill={e.slaRate >= 90 ? "#22C55E" : e.slaRate >= 70 ? "#EAB308" : "#EF4444"} />)}
+                      {slaStats.byPriority.map((e, i) => <Cell key={`k-${i}`} fill={e.slaRate >= 90 ? "#22C55E" : e.slaRate >= 70 ? "#EAB308" : "#EF4444"} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -406,7 +406,7 @@ export default function ReportsPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={deviceData?.by_type || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="type">
-                        {(deviceData?.by_type || []).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        {(deviceData?.by_type || []).map((_, i) => <Cell key={`k-${i}`} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip contentStyle={chartTooltipStyle} /><Legend />
                     </PieChart>

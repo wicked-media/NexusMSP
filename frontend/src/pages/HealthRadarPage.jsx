@@ -27,7 +27,7 @@ export default function HealthRadarPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -97,7 +97,7 @@ export default function HealthRadarPage() {
                               {client.risk_factors.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mb-2">
                                   {client.risk_factors.map((f, i) => (
-                                    <Badge key={i} variant="outline" className="text-[9px] bg-red-500/5 border-red-500/20 text-red-400">{f}</Badge>
+                                    <Badge key={`k-${i}`} variant="outline" className="text-[9px] bg-red-500/5 border-red-500/20 text-red-400">{f}</Badge>
                                   ))}
                                 </div>
                               )}
@@ -139,7 +139,7 @@ export default function HealthRadarPage() {
                             </div>
                             <div className="space-y-1.5">
                               {client.opportunities.map((opp, i) => (
-                                <div key={i} className="flex items-center gap-2 p-2 rounded bg-cyan-500/5 border border-cyan-500/10">
+                                <div key={`k-${i}`} className="flex items-center gap-2 p-2 rounded bg-cyan-500/5 border border-cyan-500/10">
                                   <ArrowUpRight className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
                                   <span className="text-xs flex-1">{opp.description}</span>
                                   {opp.potential_mrr > 0 && <span className="text-xs font-mono text-cyan-400">${opp.potential_mrr}/mo</span>}

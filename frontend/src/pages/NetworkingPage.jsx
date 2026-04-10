@@ -136,7 +136,7 @@ function DpiTab({ siteId, headers }) {
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
                 <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value">
-                  {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                  {pieData.map((e, i) => <Cell key={`k-${i}`} fill={e.color} />)}
                 </Pie>
                 <Tooltip formatter={(v) => [`${(v / 1_000_000_000).toFixed(1)} GB`]} />
                 <Legend formatter={(v) => <span className="text-xs">{v}</span>} />
@@ -160,7 +160,7 @@ function DpiTab({ siteId, headers }) {
                 const total = c.rx_bytes + c.tx_bytes;
                 const pct = totalBytes > 0 ? ((total / totalBytes) * 100).toFixed(1) : 0;
                 return (
-                  <TableRow key={i}>
+                  <TableRow key={`k-${i}`}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: DPI_COLORS[i % DPI_COLORS.length] }} />
@@ -242,7 +242,7 @@ export default function NetworkingPage() {
     } catch { toast.error("Failed to load site data"); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [selectedSite]);
 
   const openAddSite = () => { setEditingSite(null); setSiteForm({ ...emptySiteForm }); setSiteDialog(true); };
@@ -706,7 +706,7 @@ export default function NetworkingPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {dashboard.alerts.slice(0, 5).map((alert, i) => (
-              <div key={i} className={`flex items-center gap-3 text-sm p-2 rounded-lg ${alert.severity === "critical" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"}`}>
+              <div key={`k-${i}`} className={`flex items-center gap-3 text-sm p-2 rounded-lg ${alert.severity === "critical" ? "bg-red-500/10 text-red-400" : "bg-amber-500/10 text-amber-400"}`}>
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                 <span>{alert.message}</span>
                 <Badge variant="outline" className="ml-auto text-[10px] capitalize">{alert.severity}</Badge>
@@ -758,7 +758,7 @@ export default function NetworkingPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {dashboard.offline_devices.map((d, i) => (
-              <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-red-500/5 text-sm">
+              <div key={`k-${i}`} className="flex items-center justify-between p-2 rounded-lg bg-red-500/5 text-sm">
                 <div className="flex items-center gap-3">
                   <StatusDot status="offline" />
                   <span className="font-medium">{d.name}</span>

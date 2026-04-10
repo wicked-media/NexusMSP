@@ -45,7 +45,7 @@ export default function RevenueForecastPage() {
             <TableHeader><TableRow><TableHead>Month</TableHead><TableHead className="text-right">MRR</TableHead><TableHead className="text-right">ARR</TableHead><TableHead className="text-right">Growth</TableHead></TableRow></TableHeader>
             <TableBody>
               {forecast.map((f, i) => (
-                <TableRow key={i} data-testid={`forecast-row-${i}`}>
+                <TableRow key={`k-${i}`} data-testid={`forecast-row-${i}`}>
                   <TableCell className="font-medium">{f.month}</TableCell>
                   <TableCell className="text-right font-mono">${f.mrr.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono">${f.arr.toLocaleString()}</TableCell>

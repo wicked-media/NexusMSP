@@ -92,7 +92,7 @@ export default function TopologyPage() {
                     const src = topology.nodes.find(n => n.id === e.source);
                     const tgt = topology.nodes.find(n => n.id === e.target);
                     if (!src || !tgt) return null;
-                    return <line key={i} x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y}
+                    return <line key={`k-${i}`} x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y}
                       stroke="#374151" strokeWidth="1.5" strokeDasharray={e.type === "uplink" ? "none" : "4 2"} />;
                   })}
                   {/* Nodes */}

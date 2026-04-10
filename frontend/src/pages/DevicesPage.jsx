@@ -497,7 +497,7 @@ export default function DevicesPage() {
                   </div>
                   {(d.tags || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-3">
-                      {d.tags.slice(0, 3).map((t, i) => <Badge key={i} variant="secondary" className="text-[9px] px-1.5 py-0">{t}</Badge>)}
+                      {d.tags.slice(0, 3).map((t, i) => <Badge key={`k-${i}`} variant="secondary" className="text-[9px] px-1.5 py-0">{t}</Badge>)}
                       {d.tags.length > 3 && <Badge variant="secondary" className="text-[9px] px-1.5 py-0">+{d.tags.length - 3}</Badge>}
                     </div>
                   )}

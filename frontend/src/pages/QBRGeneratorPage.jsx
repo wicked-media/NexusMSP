@@ -169,7 +169,7 @@ export default function QBRGeneratorPage() {
                         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-2"><Zap className="w-3 h-3 text-amber-400" />AI Recommendations & Upsell Opportunities</h4>
                         <div className="space-y-1.5">
                           {(sec.recommendations || []).map((r, i) => (
-                            <div key={i} className="flex items-start gap-2 p-2.5 rounded-lg border border-border/20 bg-amber-500/5">
+                            <div key={`k-${i}`} className="flex items-start gap-2 p-2.5 rounded-lg border border-border/20 bg-amber-500/5">
                               <Star className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
                               <p className="text-sm">{r}</p>
                             </div>

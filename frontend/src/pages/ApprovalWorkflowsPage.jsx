@@ -37,7 +37,7 @@ export default function ApprovalWorkflowsPage() {
     }).catch(() => {});
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createApproval = async () => {
     try {

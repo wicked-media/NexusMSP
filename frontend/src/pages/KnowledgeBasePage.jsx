@@ -63,7 +63,7 @@ export default function KnowledgeBasePage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchArticles(); }, []);
+  useEffect(() => { fetchArticles(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchHuduArticles = async () => {
     try {
@@ -201,7 +201,7 @@ export default function KnowledgeBasePage() {
             {viewArticle.tags?.length > 0 && (
               <div className="flex items-center gap-2 mt-4">
                 <Tag className="w-4 h-4 text-muted-foreground" />
-                {viewArticle.tags.map((tag, i) => (<Badge key={i} variant="outline" className="text-xs">{tag}</Badge>))}
+                {viewArticle.tags.map((tag, i) => (<Badge key={`k-${i}`} variant="outline" className="text-xs">{tag}</Badge>))}
               </div>
             )}
             <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
@@ -307,7 +307,7 @@ export default function KnowledgeBasePage() {
                     <p className="text-xs text-muted-foreground line-clamp-3 mb-3">{article.content?.substring(0, 150)}...</p>
                     <div className="flex items-center gap-2 mb-2">
                       <Badge className={`text-[9px] ${getCategoryStyle(article.category)}`}>{categories.find(c => c.value === article.category)?.label || article.category}</Badge>
-                      {article.tags?.slice(0, 2).map((tag, i) => (<Badge key={i} variant="outline" className="text-[9px]">{tag}</Badge>))}
+                      {article.tags?.slice(0, 2).map((tag, i) => (<Badge key={`k-${i}`} variant="outline" className="text-[9px]">{tag}</Badge>))}
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                       <div className="flex items-center gap-3">

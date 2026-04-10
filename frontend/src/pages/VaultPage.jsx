@@ -147,7 +147,7 @@ export default function VaultPage() {
               <TableHeader><TableRow><TableHead>Credential</TableHead><TableHead>Action</TableHead><TableHead>By</TableHead><TableHead>When</TableHead></TableRow></TableHeader>
               <TableBody>
                 {audit.map((a, i) => (
-                  <TableRow key={i}>
+                  <TableRow key={`k-${i}`}>
                     <TableCell className="font-medium">{a.entry_name}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[10px]">{a.action}</Badge></TableCell>
                     <TableCell className="text-sm">{a.accessed_by}</TableCell>

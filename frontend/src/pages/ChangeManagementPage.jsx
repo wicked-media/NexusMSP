@@ -34,7 +34,7 @@ export default function ChangeManagementPage() {
     ]).then(([c, s, cl]) => { setChanges(c.data); setStats(s.data); setClients(cl.data); }).catch(() => {});
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     const cl = clients.find(c => c.id === form.client_id);

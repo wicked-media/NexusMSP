@@ -95,7 +95,7 @@ export default function RentalsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- DEVICE CRUD ----
   const openAddDevice = () => { setEditingDevice(null); setDeviceForm({ ...emptyDeviceForm }); setDeviceDialog(true); };

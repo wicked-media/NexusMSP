@@ -381,7 +381,7 @@ export default function DomotzPage() {
               <CardContent>
                 <div className="space-y-2">
                   {alerts.slice(0, 5).map((alert, idx) => (
-                    <div key={idx} className="flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                    <div key={`k-${idx}`} className="flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
                       <AlertTriangle className="w-4 h-4 text-yellow-500" />
                       <div className="flex-1">
                         <p className="text-sm font-medium">{alert.message || alert.name}</p>

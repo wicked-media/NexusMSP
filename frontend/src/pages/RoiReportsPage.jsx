@@ -93,7 +93,7 @@ export default function RoiReportsPage() {
                 { label: "Avg Resolution", value: `${r.ticket_metrics?.avg_resolution_hours}h` },
                 { label: "Resolution Rate", value: `${r.ticket_metrics?.resolution_rate}%` },
               ].map((m, i) => (
-                <div key={i} className="flex justify-between text-sm">
+                <div key={`k-${i}`} className="flex justify-between text-sm">
                   <span className="text-muted-foreground">{m.label}</span>
                   <span className="font-bold">{m.value}</span>
                 </div>
@@ -130,7 +130,7 @@ export default function RoiReportsPage() {
           <CardContent>
             <ul className="space-y-2">
               {(r.highlights || []).map((h, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm"><ChevronRight className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />{h}</li>
+                <li key={`k-${i}`} className="flex items-start gap-2 text-sm"><ChevronRight className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />{h}</li>
               ))}
             </ul>
           </CardContent>

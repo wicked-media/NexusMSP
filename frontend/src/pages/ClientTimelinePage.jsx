@@ -89,7 +89,7 @@ export default function ClientTimelinePage() {
                   {timeline.events.map((event, i) => {
                     const Icon = iconMap[event.icon] || Clock;
                     return (
-                      <div key={i} className="relative flex items-start gap-4 py-3 px-3 rounded-lg hover:bg-muted/50 transition-colors" data-testid={`timeline-event-${i}`}>
+                      <div key={`k-${i}`} className="relative flex items-start gap-4 py-3 px-3 rounded-lg hover:bg-muted/50 transition-colors" data-testid={`timeline-event-${i}`}>
                         <div className={`absolute -left-5 w-6 h-6 rounded-full ${colorMap[event.color] || "bg-slate-500"} flex items-center justify-center ring-4 ring-background`}>
                           <Icon className="w-3 h-3 text-white" />
                         </div>

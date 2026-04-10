@@ -108,7 +108,7 @@ export default function CommsTimelinePage() {
                     <div className="flex gap-1 ml-auto">
                       {(c.recent || []).slice(0, 3).map((r, i) => {
                         const Icon = ICON_MAP[r.type] || Mail;
-                        return <Icon key={i} className={`w-3 h-3 ${TYPE_COLORS[r.type]?.split(" ")[0] || "text-muted-foreground"}`} />;
+                        return <Icon key={`k-${i}`} className={`w-3 h-3 ${TYPE_COLORS[r.type]?.split(" ")[0] || "text-muted-foreground"}`} />;
                       })}
                     </div>
                   </div>

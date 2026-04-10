@@ -73,7 +73,7 @@ export default function FinancialReportsPage() {
             { label: "Collected", value: `$${revenue.total_collected?.toLocaleString()}`, icon: Wallet, color: "text-amber-500" },
             { label: "Outstanding", value: `$${revenue.total_outstanding?.toLocaleString()}`, icon: FileText, color: "text-red-500" },
           ].map((k, i) => (
-            <Card key={i}><CardContent className="pt-4"><div className="flex items-center gap-3"><k.icon className={`w-7 h-7 ${k.color}`} /><div><p className="text-[10px] text-muted-foreground uppercase tracking-wide">{k.label}</p><p className="text-lg font-bold">{k.value}</p></div></div></CardContent></Card>
+            <Card key={`k-${i}`}><CardContent className="pt-4"><div className="flex items-center gap-3"><k.icon className={`w-7 h-7 ${k.color}`} /><div><p className="text-[10px] text-muted-foreground uppercase tracking-wide">{k.label}</p><p className="text-lg font-bold">{k.value}</p></div></div></CardContent></Card>
           ))}
         </div>
       )}
@@ -154,7 +154,7 @@ export default function FinancialReportsPage() {
             </div>
             <div className="grid grid-cols-5 gap-3 mt-4">
               {agingData.map((b, i) => (
-                <Card key={i} className={i >= 3 ? "border-red-500/20" : i >= 2 ? "border-amber-500/20" : ""}>
+                <Card key={`k-${i}`} className={i >= 3 ? "border-red-500/20" : i >= 2 ? "border-amber-500/20" : ""}>
                   <CardContent className="pt-3 text-center"><p className="text-lg font-bold">${b.value.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">{b.name} ({b.count})</p></CardContent>
                 </Card>
               ))}
@@ -183,14 +183,14 @@ export default function FinancialReportsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div style={{ width: "100%", height: 300 }}>
                 <ResponsiveContainer>
-                  <PieChart><Pie data={(serviceRev?.services || []).slice(0, 8)} dataKey="total_revenue" nameKey="service_name" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }) => `${name.substring(0, 15)} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>{(serviceRev?.services || []).slice(0, 8).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /></PieChart>
+                  <PieChart><Pie data={(serviceRev?.services || []).slice(0, 8)} dataKey="total_revenue" nameKey="service_name" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }) => `${name.substring(0, 15)} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>{(serviceRev?.services || []).slice(0, 8).map((_, i) => <Cell key={`k-${i}`} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /></PieChart>
                 </ResponsiveContainer>
               </div>
               <Table>
                 <TableHeader><TableRow><TableHead>Service</TableHead><TableHead>Revenue</TableHead><TableHead>Qty</TableHead><TableHead>Avg Price</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {(serviceRev?.services || []).map((s, i) => (
-                    <TableRow key={i}><TableCell className="font-medium text-sm">{s.service_name}</TableCell><TableCell>${s.total_revenue.toLocaleString()}</TableCell><TableCell>{s.total_quantity}</TableCell><TableCell>${s.avg_unit_price}</TableCell></TableRow>
+                    <TableRow key={`k-${i}`}><TableCell className="font-medium text-sm">{s.service_name}</TableCell><TableCell>${s.total_revenue.toLocaleString()}</TableCell><TableCell>{s.total_quantity}</TableCell><TableCell>${s.avg_unit_price}</TableCell></TableRow>
                   ))}
                 </TableBody>
               </Table>
@@ -204,7 +204,7 @@ export default function FinancialReportsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div><h3 className="text-sm font-semibold mb-3">By Payment Method</h3>
                 {(collections?.by_method || []).map((m, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-border/50"><div className="flex items-center gap-2"><CreditCard className="w-4 h-4 text-blue-500" /><span className="text-sm capitalize">{m.method?.replace("_", " ")}</span></div><div className="text-right"><p className="font-medium">${m.total?.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">{m.count} transactions</p></div></div>
+                  <div key={`k-${i}`} className="flex items-center justify-between py-2 border-b border-border/50"><div className="flex items-center gap-2"><CreditCard className="w-4 h-4 text-blue-500" /><span className="text-sm capitalize">{m.method?.replace("_", " ")}</span></div><div className="text-right"><p className="font-medium">${m.total?.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">{m.count} transactions</p></div></div>
                 ))}
               </div>
               <div style={{ width: "100%", height: 250 }}>
@@ -245,7 +245,7 @@ export default function FinancialReportsPage() {
               <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Client</TableHead><TableHead>Description</TableHead><TableHead>Category</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader>
               <TableBody>
                 {(allocations?.allocations || []).slice(0, 30).map((a, i) => (
-                  <TableRow key={i}><TableCell><Badge variant="outline" className="text-[9px] capitalize">{a.type?.replace("_", " ")}</Badge></TableCell><TableCell className="text-sm">{a.client_name}</TableCell><TableCell className="text-sm">{a.description}</TableCell><TableCell><Badge variant="outline" className="text-[9px]">{a.category}</Badge></TableCell><TableCell className="font-medium">${a.amount?.toLocaleString()}</TableCell></TableRow>
+                  <TableRow key={`k-${i}`}><TableCell><Badge variant="outline" className="text-[9px] capitalize">{a.type?.replace("_", " ")}</Badge></TableCell><TableCell className="text-sm">{a.client_name}</TableCell><TableCell className="text-sm">{a.description}</TableCell><TableCell><Badge variant="outline" className="text-[9px]">{a.category}</Badge></TableCell><TableCell className="font-medium">${a.amount?.toLocaleString()}</TableCell></TableRow>
                 ))}
               </TableBody>
             </Table>

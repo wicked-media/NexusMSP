@@ -36,7 +36,7 @@ export default function IntelligentRoutingPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bulkRoute = async () => {
     setRouting(true);

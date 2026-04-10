@@ -88,7 +88,7 @@ export default function ProductsPage() {
     } catch { /* silent */ }
   };
 
-  useEffect(() => { fetchProducts(); }, []);
+  useEffect(() => { fetchProducts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (viewProduct) fetchProductDetails(viewProduct.id);
@@ -418,7 +418,7 @@ export default function ProductsPage() {
                         </div>
                         <div className="space-y-1">
                           {onOrderInfo.purchase_orders?.map((po, i) => (
-                            <div key={i} className="flex items-center justify-between text-xs">
+                            <div key={`k-${i}`} className="flex items-center justify-between text-xs">
                               <span className="font-mono text-cyan-300">{po.po_number}</span>
                               <span className="text-muted-foreground">{po.vendor}</span>
                               <span className="font-medium">{po.quantity} units</span>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
-import uuid, hashlib
+import uuid, secrets
 from app.database import db
 from app.auth import get_current_user
 
@@ -8,9 +8,8 @@ router = APIRouter()
 
 
 def generate_magic_token(client_id: str) -> str:
-    """Generate a deterministic but hard-to-guess magic link token."""
-    secret = f"nexusops-magic-{client_id}-{uuid.uuid4().hex[:8]}"
-    return hashlib.sha256(secret.encode()).hexdigest()[:24]
+    """Generate a cryptographically secure magic link token."""
+    return secrets.token_urlsafe(24)
 
 
 @router.post("/magic-portal/generate/{client_id}")

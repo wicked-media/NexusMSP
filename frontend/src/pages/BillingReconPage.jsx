@@ -65,7 +65,7 @@ export default function BillingReconPage() {
         ].map((s, i) => {
           const Icon = s.icon;
           return (
-            <Card key={i}>
+            <Card key={`k-${i}`}>
               <CardContent className="pt-4">
                 <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center mb-2`}><Icon className={`w-4 h-4 ${s.color}`} /></div>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -83,7 +83,7 @@ export default function BillingReconPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm text-amber-400 flex items-center gap-2"><Clock className="w-4 h-4" />Unbilled Time Entries ({unbilledTime.total_entries})</CardTitle></CardHeader>
           <CardContent className="space-y-1">
             {(unbilledTime.entries || []).map((e, i) => (
-              <div key={i} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
+              <div key={`k-${i}`} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
                 <div>
                   <p className="font-medium">{e.description || "Time entry"}</p>
                   <p className="text-xs text-muted-foreground">{e.user_name} &middot; {e.client_name} &middot; {e.date}</p>
@@ -101,7 +101,7 @@ export default function BillingReconPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm text-violet-400 flex items-center gap-2"><TrendingUp className="w-4 h-4" />Contract Hour Overages</CardTitle></CardHeader>
           <CardContent className="space-y-1">
             {overages.map((o, i) => (
-              <div key={i} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
+              <div key={`k-${i}`} className="flex items-center justify-between p-2 bg-muted/20 rounded text-sm">
                 <div>
                   <p className="font-medium">{o.contract_name}</p>
                   <p className="text-xs text-muted-foreground">Used {o.hours_used}h of {o.included_hours}h included</p>
@@ -122,7 +122,7 @@ export default function BillingReconPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm text-red-400 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />Overdue Invoices</CardTitle></CardHeader>
           <CardContent className="space-y-1">
             {(overdue.invoices || []).map((inv, i) => (
-              <div key={i} className="flex items-center justify-between p-2 bg-red-500/5 rounded text-sm">
+              <div key={`k-${i}`} className="flex items-center justify-between p-2 bg-red-500/5 rounded text-sm">
                 <div>
                   <p className="font-medium">{inv.invoice_number}</p>
                   <p className="text-xs text-muted-foreground">{inv.client_name} &middot; Due: {inv.due_date}</p>

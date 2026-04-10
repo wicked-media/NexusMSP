@@ -49,7 +49,7 @@ export default function MobileTechPage() {
           { label: "Avg Response", value: `${dayData.stats.avg_response_min}m`, color: "#f97316" },
           { label: "CSAT", value: dayData.stats.satisfaction, icon: Star, color: "#eab308" },
         ].map((s, i) => (
-          <div key={i} className="rounded-xl p-3 text-center border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+          <div key={`k-${i}`} className="rounded-xl p-3 text-center border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
             <div className="text-lg font-bold" style={{ color: s.color }}>{s.value}</div>
             <div className="text-[10px] text-[var(--muted)]">{s.label}</div>
           </div>
@@ -73,14 +73,14 @@ export default function MobileTechPage() {
         <>
           <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
             {(dayData.quick_actions || []).map((a, i) => (
-              <button key={i} data-testid={`quick-action-${i}`} className="px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap" style={{ background: "var(--accent)", color: "white" }}>{a}</button>
+              <button key={`k-${i}`} data-testid={`quick-action-${i}`} className="px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap" style={{ background: "var(--accent)", color: "white" }}>{a}</button>
             ))}
           </div>
 
           <h3 className="text-sm font-medium mb-2 text-[var(--muted)]">Assigned Tickets</h3>
           <div className="space-y-2">
             {(dayData.assigned_tickets || []).map((t, i) => (
-              <div key={i} data-testid={`ticket-${i}`} className="rounded-xl p-3 border flex items-center gap-3 transition-colors hover:border-[var(--accent)]" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+              <div key={`k-${i}`} data-testid={`ticket-${i}`} className="rounded-xl p-3 border flex items-center gap-3 transition-colors hover:border-[var(--accent)]" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
                 <div className="w-2 h-8 rounded-full" style={{ background: PRIORITY_COLORS[t.priority] || "#6b7280" }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{t.title}</div>
@@ -104,7 +104,7 @@ export default function MobileTechPage() {
         <div className="space-y-2">
           <h3 className="text-sm font-medium mb-2 text-[var(--muted)]">Today's Schedule</h3>
           {(dayData.schedule || []).map((s, i) => (
-            <div key={i} data-testid={`schedule-${i}`} className="rounded-xl p-3 border flex items-center gap-3" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+            <div key={`k-${i}`} data-testid={`schedule-${i}`} className="rounded-xl p-3 border flex items-center gap-3" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="text-sm font-mono font-medium w-14 text-center" style={{ color: "var(--accent)" }}>{s.time}</div>
               <div className="w-px h-10 bg-[var(--border)]" />
               <div className="flex-1">
@@ -120,7 +120,7 @@ export default function MobileTechPage() {
       {tab === "queue" && queue && (
         <div className="space-y-2">
           {(queue.queue || []).map((t, i) => (
-            <div key={i} className="rounded-xl p-3 border flex items-center gap-3" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+            <div key={`k-${i}`} className="rounded-xl p-3 border flex items-center gap-3" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="w-2 h-8 rounded-full" style={{ background: PRIORITY_COLORS[t.priority] }} />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">{t.title}</div>

@@ -55,7 +55,7 @@ export default function RemediationPlaybooksPage() {
             </div>
             <div className="mt-3 space-y-1">
               {(pb.steps || []).map((step, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm"><span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">{step.order}</span><span>{step.description}</span></div>
+                <div key={`k-${i}`} className="flex items-center gap-2 text-sm"><span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">{step.order}</span><span>{step.description}</span></div>
               ))}
             </div>
           </CardContent>

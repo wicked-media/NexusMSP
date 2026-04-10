@@ -71,7 +71,7 @@ export default function TicketSettingsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchCategories(); }, []);
+  useEffect(() => { fetchCategories(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openAddCategory = () => {
     setEditingCat(null);
@@ -369,7 +369,7 @@ export default function TicketSettingsPage() {
               <div><Label>Icon</Label>
                 <Select value={catForm.icon} onValueChange={v => setCatForm({ ...catForm, icon: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{ICONS.map(i => <SelectItem key={i} value={i}>{i}</SelectItem>)}</SelectContent>
+                  <SelectContent>{ICONS.map(i => <SelectItem key={`k-${i}`} value={i}>{i}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div><Label>Color</Label><Input type="color" value={catForm.color} onChange={e => setCatForm({ ...catForm, color: e.target.value })} className="h-10 cursor-pointer" data-testid="cat-color-input" /></div>

@@ -1312,7 +1312,7 @@ export default function TicketsPage() {
                       <p className="text-xs font-semibold text-muted-foreground mb-1">Potential Causes</p>
                       <div className="flex flex-wrap gap-1.5">
                         {aiAnalysis.potential_causes.map((cause, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] bg-orange-500/5 border-orange-500/20">{cause}</Badge>
+                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] bg-orange-500/5 border-orange-500/20">{cause}</Badge>
                         ))}
                       </div>
                     </div>
@@ -1322,7 +1322,7 @@ export default function TicketsPage() {
                       <p className="text-xs font-semibold text-muted-foreground mb-1">Recommended Fix Steps</p>
                       <div className="space-y-1.5">
                         {aiAnalysis.steps.map((step, i) => (
-                          <div key={i} className="flex items-start gap-2 py-1 px-2 rounded bg-muted/30">
+                          <div key={`k-${i}`} className="flex items-start gap-2 py-1 px-2 rounded bg-muted/30">
                             <span className="text-xs font-bold text-purple-400 mt-0.5">{i + 1}.</span>
                             <span className="text-xs">{step}</span>
                           </div>
@@ -1334,7 +1334,7 @@ export default function TicketsPage() {
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground mb-1">Scripts / Commands</p>
                       {aiAnalysis.recommended_scripts.map((script, i) => (
-                        <code key={i} className="block text-[11px] bg-muted/50 px-2 py-1 rounded font-mono mb-1">{script}</code>
+                        <code key={`k-${i}`} className="block text-[11px] bg-muted/50 px-2 py-1 rounded font-mono mb-1">{script}</code>
                       ))}
                     </div>
                   )}
@@ -1343,7 +1343,7 @@ export default function TicketsPage() {
                       <p className="text-xs font-semibold text-muted-foreground mb-1">Related KB Articles</p>
                       <div className="flex flex-wrap gap-1.5">
                         {aiAnalysis.kb_references.map((ref, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] text-blue-400 border-blue-500/20"><BookOpen className="w-2.5 h-2.5 mr-0.5" />{ref}</Badge>
+                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] text-blue-400 border-blue-500/20"><BookOpen className="w-2.5 h-2.5 mr-0.5" />{ref}</Badge>
                         ))}
                       </div>
                     </div>
@@ -1980,7 +1980,7 @@ export default function TicketsPage() {
                       {enrichment.blast_radius.affected_services?.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {enrichment.blast_radius.affected_services.map((s, i) => (
-                            <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20">{s}</span>
+                            <span key={`k-${i}`} className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20">{s}</span>
                           ))}
                         </div>
                       )}
@@ -2319,7 +2319,7 @@ export default function TicketsPage() {
                   <Separator />
                   <div className="grid grid-cols-2 gap-3">
                     {viewWsJob.condition_on_arrival && <div><span className="text-muted-foreground block text-xs">Condition on Arrival</span><span className="text-xs">{viewWsJob.condition_on_arrival}</span></div>}
-                    {viewWsJob.accessories_received?.length > 0 && <div><span className="text-muted-foreground block text-xs">Accessories</span><div className="flex flex-wrap gap-1">{viewWsJob.accessories_received.map((a, i) => <Badge key={i} variant="secondary" className="text-[9px]">{a}</Badge>)}</div></div>}
+                    {viewWsJob.accessories_received?.length > 0 && <div><span className="text-muted-foreground block text-xs">Accessories</span><div className="flex flex-wrap gap-1">{viewWsJob.accessories_received.map((a, i) => <Badge key={`k-${i}`} variant="secondary" className="text-[9px]">{a}</Badge>)}</div></div>}
                   </div>
                 </>}
                 <Separator />
@@ -2456,7 +2456,7 @@ export default function TicketsPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {wsQuote.line_items?.map((li, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm">
+                        <div key={`k-${i}`} className="flex items-center justify-between text-sm">
                           <span>{li.description}</span>
                           <span className="font-mono">{li.quantity} x ${li.unit_price?.toFixed(2)} = ${li.total?.toFixed(2)}</span>
                         </div>
@@ -2612,7 +2612,7 @@ export default function TicketsPage() {
             <DialogHeader><DialogTitle>Repair Quote Builder</DialogTitle></DialogHeader>
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {wsQuoteItems.map((item, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...wsQuoteItems]; n[i].description = e.target.value; setWsQuoteItems(n); }} placeholder="Labour / Part / Service" /></div>
                   <div className="col-span-2"><Label className="text-xs">Qty</Label><Input type="number" min="1" value={item.qty} onChange={e => { const n = [...wsQuoteItems]; n[i].qty = parseInt(e.target.value) || 1; setWsQuoteItems(n); }} /></div>
                   <div className="col-span-3"><Label className="text-xs">Price</Label><Input type="number" step="0.01" value={item.price} onChange={e => { const n = [...wsQuoteItems]; n[i].price = parseFloat(e.target.value) || 0; setWsQuoteItems(n); }} /></div>
@@ -2979,7 +2979,7 @@ export default function TicketsPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {fjQuote.line_items?.map((li, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm">
+                        <div key={`k-${i}`} className="flex items-center justify-between text-sm">
                           <span>{li.description}</span>
                           <span className="font-mono">{li.quantity} x ${li.unit_price?.toFixed(2)} = ${li.total?.toFixed(2)}</span>
                         </div>
@@ -3115,7 +3115,7 @@ export default function TicketsPage() {
             <DialogHeader><DialogTitle>Service Quote Builder</DialogTitle></DialogHeader>
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {fjQuoteItems.map((item, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...fjQuoteItems]; n[i].description = e.target.value; setFjQuoteItems(n); }} placeholder="Installation / Cable / Labour" /></div>
                   <div className="col-span-2"><Label className="text-xs">Qty</Label><Input type="number" min="1" value={item.qty} onChange={e => { const n = [...fjQuoteItems]; n[i].qty = parseInt(e.target.value) || 1; setFjQuoteItems(n); }} /></div>
                   <div className="col-span-3"><Label className="text-xs">Price</Label><Input type="number" step="0.01" value={item.price} onChange={e => { const n = [...fjQuoteItems]; n[i].price = parseFloat(e.target.value) || 0; setFjQuoteItems(n); }} /></div>

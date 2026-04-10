@@ -144,14 +144,14 @@ export default function RunbooksPage() {
       {tab === "templates" && (
         <div className="grid grid-cols-2 gap-3">
           {templates.map((t, i) => (
-            <Card key={i} className="hover:border-violet-500/20 transition-all">
+            <Card key={`k-${i}`} className="hover:border-violet-500/20 transition-all">
               <CardContent className="pt-4">
                 <p className="font-bold">{t.name}</p>
                 <p className="text-xs text-muted-foreground mb-3">{t.description}</p>
                 <div className="space-y-1 mb-3">
                   <p className="text-[10px] text-muted-foreground">Trigger: {t.trigger?.type}</p>
                   {(t.actions || []).map((a, j) => (
-                    <div key={j} className="text-[10px] flex items-center gap-1"><ChevronRight className="w-3 h-3 text-violet-400" />{a.type}</div>
+                    <div key={`k-${j}`} className="text-[10px] flex items-center gap-1"><ChevronRight className="w-3 h-3 text-violet-400" />{a.type}</div>
                   ))}
                 </div>
                 <Button size="sm" onClick={() => applyTemplate(t)} data-testid={`use-template-${i}`}><Copy className="w-3 h-3 mr-1" />Use Template</Button>

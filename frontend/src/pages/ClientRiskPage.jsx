@@ -53,7 +53,7 @@ export default function ClientRiskPage() {
                     <div className="flex items-center gap-2"><Progress value={c.risk_score} className="h-2 w-16" /><span className="text-xs font-bold">{c.risk_score}</span></div>
                   </TableCell>
                   <TableCell><Badge variant={riskColors[c.risk_level]} className="capitalize text-xs">{c.risk_level}</Badge></TableCell>
-                  <TableCell><div className="space-y-0.5">{c.risk_factors.map((f, i) => <p key={i} className="text-[10px] text-muted-foreground">{f}</p>)}</div></TableCell>
+                  <TableCell><div className="space-y-0.5">{c.risk_factors.map((f, i) => <p key={`k-${i}`} className="text-[10px] text-muted-foreground">{f}</p>)}</div></TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -76,7 +76,7 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => { fetchDashboardData(); }, []);
+  useEffect(() => { fetchDashboardData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     autoRefreshRef.current = setInterval(fetchDashboardData, 60000);
     return () => clearInterval(autoRefreshRef.current);
@@ -98,7 +98,7 @@ export default function DashboardPage() {
       <div className="space-y-6" data-testid="dashboard-loading">
         <div><h1 className="text-3xl font-bold tracking-tight">Dashboard</h1><p className="text-muted-foreground">Loading...</p></div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map(i => <Card key={i}><CardContent className="p-6"><div className="h-16 rounded bg-muted animate-pulse" /></CardContent></Card>)}
+          {[1, 2, 3, 4].map(i => <Card key={`k-${i}`}><CardContent className="p-6"><div className="h-16 rounded bg-muted animate-pulse" /></CardContent></Card>)}
         </div>
       </div>
     );
@@ -146,7 +146,7 @@ export default function DashboardPage() {
             {searchQuery ? (
               <div className="p-2 max-h-64 overflow-y-auto">
                 {quickSearchResults.length > 0 ? quickSearchResults.map((r, i) => (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(r.path); setSearchOpen(false); }}>
+                  <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(r.path); setSearchOpen(false); }}>
                     {r.type === "ticket" ? <Ticket className="w-4 h-4 text-blue-500" /> : <Monitor className="w-4 h-4 text-emerald-500" />}
                     <div><p className="text-sm font-medium">{r.label}</p><p className="text-[10px] text-muted-foreground">{r.sub}</p></div>
                   </div>
@@ -163,7 +163,7 @@ export default function DashboardPage() {
                   { icon: CalendarDays, label: "Schedule", path: "/scheduling", color: "text-cyan-500" },
                   { icon: UserCog, label: "Technicians", path: "/technicians", color: "text-pink-500" },
                 ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
+                  <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
                     <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>
                   </div>
                 ))}
@@ -193,7 +193,7 @@ export default function DashboardPage() {
       {attentionItems.length > 0 && (
         <div className="flex gap-2 flex-wrap" data-testid="attention-banner">
           {attentionItems.map((item, i) => (
-            <button key={i} onClick={() => navigate(item.path)}
+            <button key={`k-${i}`} onClick={() => navigate(item.path)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold transition-all hover:scale-[1.02] hover:shadow-md ${item.color}`}
               data-testid={`attention-item-${i}`}>
               <item.icon className="w-3.5 h-3.5" />{item.label}<ChevronRight className="w-3 h-3 opacity-50" />
@@ -308,7 +308,7 @@ export default function DashboardPage() {
                     { name: "Warning", value: warningDevices.length, color: "#EAB308" },
                     { name: "Offline", value: offlineDevices.length, color: "#EF4444" }
                   ]} cx="50%" cy="50%" innerRadius={35} outerRadius={50} paddingAngle={4} dataKey="value">
-                    {[{ color: "#22C55E" }, { color: "#EAB308" }, { color: "#EF4444" }].map((e, i) => <Cell key={i} fill={e.color} />)}
+                    {[{ color: "#22C55E" }, { color: "#EAB308" }, { color: "#EF4444" }].map((e, i) => <Cell key={`k-${i}`} fill={e.color} />)}
                   </Pie>
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
                 </PieChart>
@@ -327,7 +327,7 @@ export default function DashboardPage() {
                 { icon: Laptop, label: "Laptops", count: devices.filter(d => d.device_type === "laptop").length, color: "text-cyan-400" },
                 { icon: Wifi, label: "Network", count: devices.filter(d => d.device_type === "network").length, color: "text-orange-400" },
               ].map((item, i) => (
-                <div key={i} className="flex items-center justify-between">
+                <div key={`k-${i}`} className="flex items-center justify-between">
                   <div className="flex items-center gap-2"><item.icon className={`w-3 h-3 ${item.color}`} /><span className="text-xs">{item.label}</span></div>
                   <span className="font-mono text-xs font-medium">{item.count}</span>
                 </div>

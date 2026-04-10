@@ -208,7 +208,7 @@ export default function EstimatesPage() {
                 </TableHeader>
                 <TableBody>
                   {(viewing.line_items || []).map((li, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`k-${i}`}>
                       <TableCell>{li.description}</TableCell>
                       <TableCell className="text-right font-mono">{li.quantity}</TableCell>
                       <TableCell className="text-right font-mono">${parseFloat(li.unit_price || 0).toFixed(2)}</TableCell>
@@ -385,7 +385,7 @@ export default function EstimatesPage() {
               </div>
               <div className="space-y-2">
                 {form.line_items.map((li, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_80px_100px_32px] gap-2 items-end">
+                  <div key={`k-${i}`} className="grid grid-cols-[1fr_80px_100px_32px] gap-2 items-end">
                     <Input placeholder="Description" value={li.description} onChange={e => updateLineItem(i, "description", e.target.value)} data-testid={`li-desc-${i}`} />
                     <Input type="number" placeholder="Qty" value={li.quantity} onChange={e => updateLineItem(i, "quantity", parseFloat(e.target.value) || 0)} />
                     <Input type="number" placeholder="Price" value={li.unit_price} onChange={e => updateLineItem(i, "unit_price", parseFloat(e.target.value) || 0)} />

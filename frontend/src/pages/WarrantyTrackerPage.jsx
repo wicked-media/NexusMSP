@@ -29,7 +29,7 @@ export default function WarrantyTrackerPage() {
     axios.get(`${API}/warranty/overview`, { headers }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateWarranty = async () => {
     if (!editDevice) return;

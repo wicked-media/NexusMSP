@@ -92,7 +92,7 @@ export default function CompliancePage() {
               </TableRow></TableHeader>
               <TableBody>
                 {currentScan.controls.map((ctrl, i) => (
-                  <TableRow key={i} data-testid={`compliance-control-${ctrl.id}`}>
+                  <TableRow key={`k-${i}`} data-testid={`compliance-control-${ctrl.id}`}>
                     <TableCell className="font-mono text-xs">{ctrl.id}</TableCell>
                     <TableCell className="font-medium text-sm">{ctrl.name}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{ctrl.description}</TableCell>

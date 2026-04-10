@@ -10,7 +10,7 @@ export default function ExecutiveReportsPage() {
   const { token } = useAuth();
   const [reports, setReports] = useState([]);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/executive-reports/list`, { headers }).then(r => setReports(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/executive-reports/list`, { headers }).then(r => setReports(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6" data-testid="executive-reports-page">

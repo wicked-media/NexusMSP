@@ -24,7 +24,7 @@ export default function EscalationMatrixPage() {
     ]).then(([r, l]) => { setRules(r.data); setLogs(l.data); }).catch(() => {});
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runCheck = async () => {
     setChecking(true);

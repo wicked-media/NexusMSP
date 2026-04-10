@@ -331,7 +331,7 @@ export default function BillingDashboardPage() {
                 const invPct = (month.invoiced / maxVal) * 100;
                 const colPct = (month.collected / maxVal) * 100;
                 return (
-                  <div key={i} className="space-y-0.5">
+                  <div key={`k-${i}`} className="space-y-0.5">
                     <div className="flex items-center justify-between text-[10px]">
                       <span className="text-muted-foreground w-14">{month.month}</span>
                       <span className="text-muted-foreground">
@@ -372,7 +372,7 @@ export default function BillingDashboardPage() {
                   const maxDebt = m.top_debtors[0]?.balance || 1;
                   const pct = (d.balance / maxDebt) * 100;
                   return (
-                    <div key={i} className="flex items-center gap-3" data-testid={`debtor-${i}`}>
+                    <div key={`k-${i}`} className="flex items-center gap-3" data-testid={`debtor-${i}`}>
                       <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
                         i === 0 ? "bg-red-500/20 text-red-400" : i < 3 ? "bg-orange-500/20 text-orange-400" : "bg-muted/30 text-muted-foreground"
                       }`}>{i + 1}</span>
@@ -409,7 +409,7 @@ export default function BillingDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {m.recent_payments.slice(0, 8).map((p, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`k-${i}`}>
                       <TableCell className="font-mono text-sm">{p.invoice_number}</TableCell>
                       <TableCell className="text-sm">{p.client_name}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px] capitalize">{(p.method || "").replace(/_/g, " ")}</Badge></TableCell>

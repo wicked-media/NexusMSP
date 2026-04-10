@@ -26,7 +26,7 @@ function ChartWidget({ widget }) {
         {data.map((d, i) => {
           const val = Object.values(d).find(v => typeof v === "number") || 0;
           return (
-            <div key={i} className="flex flex-col items-center flex-1">
+            <div key={`k-${i}`} className="flex flex-col items-center flex-1">
               <div className="w-full rounded-t" style={{ height: `${(val / maxVal) * 100}%`, minHeight: 4, background: "var(--accent)" }} />
               <span className="text-[9px] text-[var(--muted)] mt-1 truncate w-full text-center">{Object.values(d).find(v => typeof v === "string")}</span>
             </div>
@@ -49,14 +49,14 @@ function PieWidget({ widget }) {
             {data.reduce((acc, d, i) => {
               const pct = (d.value / total) * 100;
               const offset = acc.offset;
-              acc.elements.push(<circle key={i} cx="18" cy="18" r="15.9" fill="none" stroke={d.color} strokeWidth="3" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={-offset} />);
+              acc.elements.push(<circle key={`k-${i}`} cx="18" cy="18" r="15.9" fill="none" stroke={d.color} strokeWidth="3" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={-offset} />);
               acc.offset += pct;
               return acc;
             }, { elements: [], offset: 0 }).elements}
           </svg>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2 mt-1">{data.map((d, i) => <span key={i} className="text-[10px] flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: d.color }} />{d.name}</span>)}</div>
+      <div className="flex flex-wrap gap-2 mt-1">{data.map((d, i) => <span key={`k-${i}`} className="text-[10px] flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: d.color }} />{d.name}</span>)}</div>
     </div>
   );
 }

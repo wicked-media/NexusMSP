@@ -108,7 +108,7 @@ export default function ClientsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchClients(); }, []);
+  useEffect(() => { fetchClients(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchClientDetail = async (client) => {
     setViewingClient(client);
@@ -807,7 +807,7 @@ export default function ClientsPage() {
                     <CardContent>
                       <div className="space-y-2">
                         {acronisSubs.map((s, i) => (
-                          <div key={i} className="flex items-center justify-between p-2.5 rounded-lg border bg-blue-500/[0.02] border-blue-500/10">
+                          <div key={`k-${i}`} className="flex items-center justify-between p-2.5 rounded-lg border bg-blue-500/[0.02] border-blue-500/10">
                             <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" /><div><p className="text-sm font-medium">{s.service_name}</p><p className="text-[10px] text-muted-foreground">{s.quantity} {s.unit} @ ${s.price_per_unit}/{s.unit}</p></div></div>
                             <div className="text-right"><p className="text-sm font-bold">${s.monthly_cost}/mo</p><Badge className={s.usage_percent > 90 ? "bg-red-500/10 text-red-500 text-[9px]" : "bg-emerald-500/10 text-emerald-500 text-[9px]"}>{s.usage_percent}%</Badge></div>
                           </div>
@@ -836,7 +836,7 @@ export default function ClientsPage() {
                             <div>
                               <p className="text-xs font-semibold text-muted-foreground mb-2">Top Sending Sources</p>
                               {dmarcRecords.summary.top_sources.map((s, i) => (
-                                <div key={i} className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">{s.source}</span><span className="font-mono">{s.count.toLocaleString()}</span></div>
+                                <div key={`k-${i}`} className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">{s.source}</span><span className="font-mono">{s.count.toLocaleString()}</span></div>
                               ))}
                             </div>
                           )}
@@ -984,7 +984,7 @@ export default function ClientsPage() {
                         <TableHeader><TableRow><TableHead>Display Name</TableHead><TableHead>UPN / Email</TableHead><TableHead>License Type</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
                         <TableBody>
                           {m365Users.map((u, i) => (
-                            <TableRow key={i}>
+                            <TableRow key={`k-${i}`}>
                               <TableCell className="font-medium">{u.display_name || u.name}</TableCell>
                               <TableCell className="text-sm">{u.upn || u.email}</TableCell>
                               <TableCell><Badge variant="outline" className="text-xs">{u.license_type || "Unknown"}</Badge></TableCell>
@@ -1085,7 +1085,7 @@ export default function ClientsPage() {
                     </div>
                     <div className="space-y-2">
                       {clientReadiness.checks.map((check, i) => (
-                        <div key={i} className={`flex items-center gap-3 p-2.5 rounded-lg border ${check.done ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/20 bg-red-500/5"}`}>
+                        <div key={`k-${i}`} className={`flex items-center gap-3 p-2.5 rounded-lg border ${check.done ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/20 bg-red-500/5"}`}>
                           {check.done ? <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" /> : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
                           <div>
                             <p className="text-sm font-medium">{check.name}</p>

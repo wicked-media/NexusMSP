@@ -362,7 +362,7 @@ export default function InvoicesPage() {
               ) : (
                 <div className="space-y-2">
                   {form.line_items.map((li, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
+                    <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
                       <div className="col-span-4">
                         {idx === 0 && <Label className="text-xs">Product / Item</Label>}
                         <Select value={li.product_id || ""} onValueChange={v => updateLineItem(idx, "product_id", v)}>
@@ -574,7 +574,7 @@ export default function InvoicesPage() {
                       <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {(inv.line_items || []).map((li, i) => (
-                          <TableRow key={i}>
+                          <TableRow key={`k-${i}`}>
                             <TableCell className="font-medium">{li.name}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{li.description || "-"}</TableCell>
                             <TableCell className="text-right">{li.quantity}</TableCell>
@@ -608,7 +608,7 @@ export default function InvoicesPage() {
                         <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Recorded By</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
                         <TableBody>
                           {(inv.payments || []).map((p, i) => (
-                            <TableRow key={i}>
+                            <TableRow key={`k-${i}`}>
                               <TableCell className="text-sm">{p.date ? format(new Date(p.date), "MMM d, yyyy h:mm a") : "-"}</TableCell>
                               <TableCell><Badge variant="outline" className="capitalize text-xs">{(p.method || "").replace(/_/g, " ")}</Badge></TableCell>
                               <TableCell className="text-sm font-mono">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
@@ -858,7 +858,7 @@ export default function InvoicesPage() {
                         const pct = maxRev > 0 ? (m.revenue / maxRev * 100) : 0;
                         const colPct = maxRev > 0 ? (m.collected / maxRev * 100) : 0;
                         return (
-                          <div key={i} className="flex items-center gap-2">
+                          <div key={`k-${i}`} className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground w-16">{m.month}</span>
                             <div className="flex-1 h-5 bg-muted/20 rounded overflow-hidden relative">
                               <div className="h-full bg-blue-500/30 rounded absolute" style={{ width: `${pct}%` }} />
@@ -878,7 +878,7 @@ export default function InvoicesPage() {
                   {(revenueAnalytics.top_clients || []).length === 0 ? <p className="text-sm text-muted-foreground">No data</p> : (
                     <div className="space-y-2">
                       {revenueAnalytics.top_clients.map((c, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={`k-${i}`} className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
                             <span className="text-sm font-medium">{c.client}</span>

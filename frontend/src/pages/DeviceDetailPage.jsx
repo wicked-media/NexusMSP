@@ -226,7 +226,7 @@ export default function DeviceDetailPage() {
                     {(data.events || []).slice(0, 5).map((evt, i) => {
                       const EvtIcon = EVENT_ICONS[evt.event_type] || Info;
                       return (
-                        <div key={i} className="flex items-center gap-3 py-1.5 text-sm">
+                        <div key={`k-${i}`} className="flex items-center gap-3 py-1.5 text-sm">
                           <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${SEVERITY_COLORS[evt.severity] || "bg-muted"}`}>
                             <EvtIcon className="w-3.5 h-3.5" />
                           </div>
@@ -264,7 +264,7 @@ export default function DeviceDetailPage() {
                   <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Tag className="w-4 h-4" />Tags</CardTitle></CardHeader>
                   <CardContent>
                     <div className="flex flex-wrap gap-1.5">
-                      {dev.tags.map((tag, i) => <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>)}
+                      {dev.tags.map((tag, i) => <Badge key={`k-${i}`} variant="secondary" className="text-xs">{tag}</Badge>)}
                     </div>
                   </CardContent>
                 </Card>
@@ -306,7 +306,7 @@ export default function DeviceDetailPage() {
                   <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2 text-red-500"><AlertTriangle className="w-4 h-4" />Active Alerts ({data.alerts.length})</CardTitle></CardHeader>
                   <CardContent className="space-y-2">
                     {data.alerts.map((a, i) => (
-                      <div key={i} className="p-2 rounded-lg bg-red-500/5 border border-red-500/10 text-sm">
+                      <div key={`k-${i}`} className="p-2 rounded-lg bg-red-500/5 border border-red-500/10 text-sm">
                         <div className="flex items-center gap-2">
                           <Badge className={SEVERITY_COLORS[a.severity] + " text-[10px]"}>{a.severity}</Badge>
                           <span className="text-xs text-muted-foreground">{a.alert_type}</span>
@@ -345,7 +345,7 @@ export default function DeviceDetailPage() {
                     const priorityColor = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
                     const statusColor = { open: "border-blue-500/30 text-blue-500", in_progress: "border-amber-500/30 text-amber-500", resolved: "border-emerald-500/30 text-emerald-500", closed: "border-gray-500/30 text-gray-400", on_hold: "border-orange-500/30 text-orange-500" };
                     return (
-                      <TableRow key={i} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/tickets`)} data-testid={`device-ticket-${t.id || i}`}>
+                      <TableRow key={`k-${i}`} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/tickets`)} data-testid={`device-ticket-${t.id || i}`}>
                         <TableCell className="font-mono text-xs font-medium">{t.ticket_number || `TKT-${String(i+1).padStart(3,"0")}`}</TableCell>
                         <TableCell className="max-w-xs truncate font-medium">{t.title}</TableCell>
                         <TableCell><Badge className={`${priorityColor[t.priority] || ""} text-[10px] capitalize`}>{t.priority}</Badge></TableCell>
@@ -460,7 +460,7 @@ export default function DeviceDetailPage() {
                   {(data.software || []).length === 0 ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No software inventory data</TableCell></TableRow>
                   ) : (data.software || []).map((sw, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`k-${i}`}>
                       <TableCell className="font-medium">{sw.name}</TableCell>
                       <TableCell className="font-mono text-xs">{sw.version}</TableCell>
                       <TableCell className="text-muted-foreground">{sw.publisher}</TableCell>
@@ -490,7 +490,7 @@ export default function DeviceDetailPage() {
                   {(data.patches || []).length === 0 ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No patch data</TableCell></TableRow>
                   ) : (data.patches || []).map((p, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`k-${i}`}>
                       <TableCell className="font-mono text-xs font-medium">{p.kb_id}</TableCell>
                       <TableCell className="max-w-xs truncate">{p.title}</TableCell>
                       <TableCell><Badge className={SEVERITY_COLORS[p.severity] + " text-[10px] capitalize"}>{p.severity}</Badge></TableCell>
@@ -529,7 +529,7 @@ export default function DeviceDetailPage() {
                       { label: "Firewall", value: dev.firewall_enabled ? "Enabled" : "Disabled", status: dev.firewall_enabled ? "active" : "inactive", icon: Lock },
                       { label: "Disk Encryption", value: dev.encryption_status || "Unknown", status: (dev.encryption_status || "").includes("Encrypted") ? "active" : "inactive", icon: Lock },
                     ].map((item, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 rounded-lg border">
+                      <div key={`k-${i}`} className="flex items-center gap-3 p-3 rounded-lg border">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.status === "active" ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
                           <item.icon className={`w-5 h-5 ${item.status === "active" ? "text-emerald-500" : "text-red-500"}`} />
                         </div>
@@ -595,7 +595,7 @@ export default function DeviceDetailPage() {
                   {(data.network_adapters || []).length === 0 ? (
                     <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No network adapter data</TableCell></TableRow>
                   ) : (data.network_adapters || []).map((n, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`k-${i}`}>
                       <TableCell className="font-medium">{n.adapter_name}{n.ssid ? <span className="text-xs text-muted-foreground ml-1">({n.ssid})</span> : ""}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px] capitalize">{n.type}</Badge></TableCell>
                       <TableCell className="font-mono text-xs">{n.ip_address}</TableCell>
@@ -629,7 +629,7 @@ export default function DeviceDetailPage() {
                   ) : (data.events || []).map((evt, i) => {
                     const EvtIcon = EVENT_ICONS[evt.event_type] || Info;
                     return (
-                      <TableRow key={i}>
+                      <TableRow key={`k-${i}`}>
                         <TableCell><div className={`w-7 h-7 rounded-md flex items-center justify-center ${SEVERITY_COLORS[evt.severity] || "bg-muted"}`}><EvtIcon className="w-3.5 h-3.5" /></div></TableCell>
                         <TableCell className="font-medium capitalize text-sm">{(evt.event_type || "").replace(/_/g, " ")}</TableCell>
                         <TableCell className="text-sm">{evt.message}</TableCell>

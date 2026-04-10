@@ -25,7 +25,7 @@ const ExecutionLog = ({ logs, isLive }) => {
       </div>
       <div className="p-3 font-mono text-xs space-y-1.5 max-h-48 overflow-y-auto">
         {logs.map((log, i) => (
-          <div key={i} className={`flex gap-2 ${log.status === "completed" ? "text-green-400" : log.status === "running" ? "text-yellow-300" : "text-red-400"}`}>
+          <div key={`k-${i}`} className={`flex gap-2 ${log.status === "completed" ? "text-green-400" : log.status === "running" ? "text-yellow-300" : "text-red-400"}`}>
             <span className="text-[#8b949e] w-16 flex-shrink-0">[Step {log.step}]</span>
             <span className="text-[#58a6ff] flex-shrink-0">{log.duration_ms}ms</span>
             <span className="flex-1 break-all">{log.action}</span>
@@ -204,7 +204,7 @@ export default function SelfHealingPage() {
               </div>
               <div className="space-y-1">
                 {rb.steps.map((step, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30">
+                  <div key={`k-${i}`} className="flex items-start gap-2 p-2 rounded bg-muted/30">
                     <div className="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">{i + 1}</div>
                     <div className="flex-1">
                       <code className="text-xs font-mono break-all">{step.action}</code>

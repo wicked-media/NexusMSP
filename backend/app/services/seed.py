@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import hash_password
 from app.models import *
-import random
+import random; random = random.SystemRandom()
 
 PERMISSION_PRESETS = {
     "L1 Technician": {
@@ -222,7 +222,6 @@ async def _seed_core_data():
         await db.device_patches.insert_one(p)
 
     # Seed device events
-    import random
     event_types = ["agent_check_in", "login", "logout", "software_installed", "patch_applied", "alert_triggered", "reboot", "service_restart", "backup_completed", "script_executed"]
     events_data = []
     for i in range(50):

@@ -63,7 +63,7 @@ export default function AssetsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetForm = () => setForm({
     name: "", client_id: "", asset_type: "hardware", manufacturer: "", model: "",

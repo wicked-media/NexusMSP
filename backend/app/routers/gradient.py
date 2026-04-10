@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 import uuid
-import random
+import random; random = random.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
 

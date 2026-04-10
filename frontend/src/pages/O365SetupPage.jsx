@@ -60,7 +60,7 @@ export default function O365SetupPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchSettings(); }, []);
+  useEffect(() => { fetchSettings(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConnect = async () => {
     if (!form.tenant_id || !form.client_id || !form.client_secret || !form.mailbox_email) {

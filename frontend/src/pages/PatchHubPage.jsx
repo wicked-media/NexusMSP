@@ -488,7 +488,7 @@ export default function PatchHubPage() {
                     <Label className="text-xs text-muted-foreground mb-1 block">Deployment Steps</Label>
                     <div className="space-y-1.5">
                       {agentScript.instructions.map((step, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm">
+                        <div key={`k-${i}`} className="flex items-start gap-2 text-sm">
                           <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5">{i + 1}</div>
                           <span>{step}</span>
                         </div>

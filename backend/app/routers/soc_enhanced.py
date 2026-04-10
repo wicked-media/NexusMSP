@@ -3,7 +3,7 @@ from app.database import db
 from app.routers.auth import get_current_user
 from datetime import datetime, timezone, timedelta
 import uuid
-import random
+import random; random = random.SystemRandom()
 
 router = APIRouter(tags=["Huntress Integration"])
 

@@ -64,7 +64,7 @@ export default function MagicPortalPage() {
           ].map((s, i) => {
             const Icon = s.icon;
             return (
-              <Card key={i}>
+              <Card key={`k-${i}`}>
                 <CardContent className="pt-4 flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-xl ${s.bg} flex items-center justify-center`}><Icon className={`w-6 h-6 ${s.color}`} /></div>
                   <div>
@@ -152,7 +152,7 @@ export default function MagicPortalPage() {
             <CardHeader className="pb-2"><CardTitle className="text-sm">Active Contracts</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {contracts.map((c, i) => (
-                <div key={i} className="flex items-center justify-between p-2 bg-muted/10 rounded">
+                <div key={`k-${i}`} className="flex items-center justify-between p-2 bg-muted/10 rounded">
                   <span className="text-sm">{c.name} ({c.type})</span>
                   <span className="text-sm font-bold">${c.value}/{c.billing_cycle}</span>
                 </div>

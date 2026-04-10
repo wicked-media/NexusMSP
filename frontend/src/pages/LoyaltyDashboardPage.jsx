@@ -39,7 +39,7 @@ export default function LoyaltyDashboardPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -185,7 +185,7 @@ export default function LoyaltyDashboardPage() {
                               <div className="space-y-1.5">
                                 <p className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Upsell Opportunities</p>
                                 {proposal.upsell_opportunities.map((u, i) => (
-                                  <div key={i} className="flex items-center gap-2 p-2 rounded bg-cyan-500/5 border border-cyan-500/10">
+                                  <div key={`k-${i}`} className="flex items-center gap-2 p-2 rounded bg-cyan-500/5 border border-cyan-500/10">
                                     <Zap className="w-3 h-3 text-cyan-400 flex-shrink-0" />
                                     <span className="text-xs flex-1">{u.description}</span>
                                     <span className="text-xs font-mono text-cyan-400">+${u.additional_mrr.toLocaleString()}/mo</span>

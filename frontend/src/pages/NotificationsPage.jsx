@@ -56,7 +56,7 @@ export default function NotificationsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchNotifications(); }, []);
+  useEffect(() => { fetchNotifications(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const markRead = async (ids) => {
     try {

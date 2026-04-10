@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -123,7 +123,7 @@ def generate_barcode_svg_data(code: str, barcode_type: str = "code128") -> str:
         return ""
 
 @router.post("/products/{product_id}/generate-barcode")
-async def generate_product_barcode(product_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+async def generate_product_barcode(product_id: str, data: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")

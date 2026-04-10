@@ -19,6 +19,7 @@ import {
   Clock, AlertTriangle, Wifi, WifiOff, DollarSign, Eye,
   Settings, Smartphone, ChevronRight, Building2, Cpu, MemoryStick
 } from "lucide-react";
+import { secureStorage } from "@/lib/secureStorage";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api/portal/v2";
 
@@ -27,12 +28,12 @@ const PortalAuthCtx = createContext(null);
 const usePortalAuth = () => useContext(PortalAuthCtx);
 
 function PortalAuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem("portal_token"));
-  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem("portal_user")); } catch { return null; } });
+  const [token, setToken] = useState(() => secureStorage.getItem("portal_token"));
+  const [user, setUser] = useState(() => { try { return JSON.parse(secureStorage.getItem("portal_user")); } catch { return null; } });
   const [profile, setProfile] = useState(null);
 
-  const login = (t, u) => { localStorage.setItem("portal_token", t); localStorage.setItem("portal_user", JSON.stringify(u)); setToken(t); setUser(u); };
-  const logout = () => { localStorage.removeItem("portal_token"); localStorage.removeItem("portal_user"); setToken(null); setUser(null); setProfile(null); };
+  const login = (t, u) => { secureStorage.setItem("portal_token", t); secureStorage.setItem("portal_user", JSON.stringify(u)); setToken(t); setUser(u); };
+  const logout = () => { secureStorage.removeItem("portal_token"); secureStorage.removeItem("portal_user"); setToken(null); setUser(null); setProfile(null); };
 
   useEffect(() => {
     if (token) {
@@ -298,7 +299,7 @@ function PortalDevices() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/devices`, { headers }).then(r => setDevices(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { axios.get(`${API}/devices`, { headers }).then(r => setDevices(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   const usageColor = v => !v ? "text-zinc-500" : v >= 90 ? "text-red-400 font-bold" : v >= 70 ? "text-amber-400" : "text-emerald-400";
   return (
@@ -334,7 +335,7 @@ function PortalInvoices() {
   const { token } = usePortalAuth();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { axios.get(`${API}/invoices`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setInvoices(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { axios.get(`${API}/invoices`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setInvoices(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   const statusColor = (s) => s === "paid" ? "bg-emerald-500/20 text-emerald-400" : s === "overdue" ? "bg-red-500/20 text-red-400" : s === "sent" ? "bg-blue-500/20 text-blue-400" : "bg-zinc-500/20 text-zinc-400";
   return (
@@ -357,7 +358,7 @@ function PortalBackups() {
   const { token } = usePortalAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { axios.get(`${API}/backups`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { axios.get(`${API}/backups`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   if (!data) return <div className="text-center py-12 text-zinc-500">No backup data available</div>;
   const s = data.summary;
@@ -387,7 +388,7 @@ function PortalCompliance() {
   const { token } = usePortalAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { axios.get(`${API}/compliance`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { axios.get(`${API}/compliance`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   return (
     <div className="space-y-4" data-testid="portal-compliance">
@@ -419,7 +420,7 @@ function PortalQBR() {
   const { token } = usePortalAuth();
   const [qbrs, setQbrs] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { axios.get(`${API}/qbr`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setQbrs(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { axios.get(`${API}/qbr`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setQbrs(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   return (
     <div className="space-y-4" data-testid="portal-qbr">

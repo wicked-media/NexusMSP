@@ -51,7 +51,7 @@ export default function AcronisPage() {
 
       {summary && <div className="grid grid-cols-4 gap-4">
         {[{ label: "Customers", value: summary.total_customers, icon: Users, color: "text-blue-500" }, { label: "Protected", value: `${summary.protected_devices}/${summary.total_devices}`, icon: Shield, color: "text-emerald-500" }, { label: "Storage", value: `${summary.total_storage_used_gb} GB`, icon: Database, color: "text-violet-500" }, { label: "MRR", value: `$${summary.total_monthly_revenue?.toLocaleString()}`, icon: DollarSign, color: "text-amber-500" }].map((s, i) => (
-          <Card key={i}><CardContent className="pt-4"><div className="flex items-center gap-3"><s.icon className={`w-8 h-8 ${s.color}`} /><div><p className="text-xs text-muted-foreground">{s.label}</p><p className="text-xl font-bold">{s.value}</p></div></div></CardContent></Card>
+          <Card key={`k-${i}`}><CardContent className="pt-4"><div className="flex items-center gap-3"><s.icon className={`w-8 h-8 ${s.color}`} /><div><p className="text-xs text-muted-foreground">{s.label}</p><p className="text-xl font-bold">{s.value}</p></div></div></CardContent></Card>
         ))}
       </div>}
 
@@ -74,7 +74,7 @@ export default function AcronisPage() {
         <TabsContent value="subscriptions">
           <Table><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Qty</TableHead><TableHead>Unit</TableHead><TableHead>$/Unit</TableHead><TableHead>Monthly</TableHead><TableHead>Usage</TableHead></TableRow></TableHeader>
             <TableBody>{subscriptions.map((s, i) => (
-              <TableRow key={i}><TableCell className="text-sm">{s.customer_name}</TableCell><TableCell className="font-medium text-sm">{s.service_name}</TableCell><TableCell>{s.quantity}</TableCell><TableCell className="text-xs">{s.unit}</TableCell><TableCell>${s.price_per_unit}</TableCell><TableCell className="font-medium">${s.monthly_cost}</TableCell><TableCell><Badge className={s.usage_percent > 90 ? "bg-red-500/10 text-red-500" : s.usage_percent > 70 ? "bg-yellow-500/10 text-yellow-500" : "bg-emerald-500/10 text-emerald-500"}>{s.usage_percent}%</Badge></TableCell></TableRow>
+              <TableRow key={`k-${i}`}><TableCell className="text-sm">{s.customer_name}</TableCell><TableCell className="font-medium text-sm">{s.service_name}</TableCell><TableCell>{s.quantity}</TableCell><TableCell className="text-xs">{s.unit}</TableCell><TableCell>${s.price_per_unit}</TableCell><TableCell className="font-medium">${s.monthly_cost}</TableCell><TableCell><Badge className={s.usage_percent > 90 ? "bg-red-500/10 text-red-500" : s.usage_percent > 70 ? "bg-yellow-500/10 text-yellow-500" : "bg-emerald-500/10 text-emerald-500"}>{s.usage_percent}%</Badge></TableCell></TableRow>
             ))}</TableBody>
           </Table>
         </TabsContent>

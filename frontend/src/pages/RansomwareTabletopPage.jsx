@@ -11,7 +11,7 @@ export default function RansomwareTabletopPage() {
   const [scenarios, setScenarios] = useState([]);
   const [activeDrill, setActiveDrill] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/ransomware-tabletop/scenarios`, { headers }).then(r => setScenarios(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/ransomware-tabletop/scenarios`, { headers }).then(r => setScenarios(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startDrill = async (id) => {
     const res = await axios.post(`${API}/ransomware-tabletop/start/${id}`, {}, { headers });
@@ -25,11 +25,11 @@ export default function RansomwareTabletopPage() {
         <Card className="border-red-500/30"><CardContent className="pt-4">
           <div className="flex items-center gap-2 mb-4"><AlertTriangle className="w-5 h-5 text-red-500" /><h2 className="text-lg font-bold">DRILL IN PROGRESS: {activeDrill.scenario_name}</h2><Badge variant="destructive">Phase {activeDrill.current_phase}</Badge></div>
           {activeDrill.phases?.map((phase, i) => (
-            <div key={i} className={`p-4 rounded-lg border mb-3 ${i + 1 === activeDrill.current_phase ? "border-red-500/50 bg-red-500/5" : ""}`}>
+            <div key={`k-${i}`} className={`p-4 rounded-lg border mb-3 ${i + 1 === activeDrill.current_phase ? "border-red-500/50 bg-red-500/5" : ""}`}>
               <h3 className="font-semibold">Phase {phase.phase}: {phase.title}</h3>
               <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
               {i + 1 === activeDrill.current_phase && (
-                <div className="mt-3 space-y-2">{phase.decisions.map((d, j) => <Button key={j} variant="outline" className="mr-2 text-sm">{d}</Button>)}</div>
+                <div className="mt-3 space-y-2">{phase.decisions.map((d, j) => <Button key={`k-${j}`} variant="outline" className="mr-2 text-sm">{d}</Button>)}</div>
               )}
             </div>
           ))}

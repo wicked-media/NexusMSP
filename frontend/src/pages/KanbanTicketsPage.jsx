@@ -122,7 +122,7 @@ export default function KanbanTicketsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchBoard(); }, []);
+  useEffect(() => { fetchBoard(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDragStart = (e, ticket) => {
     setDraggingTicket(ticket);

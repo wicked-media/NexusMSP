@@ -8,6 +8,7 @@ import LoginPage from "@/pages/LoginPage";
 import { Sidebar } from "@/components/Sidebar";
 import { AICopilotPanel } from "@/components/AICopilotPanel";
 import { routeConfig } from "@/config/routes";
+import { secureStorage } from "@/lib/secureStorage";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -40,7 +41,7 @@ export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem("nexusops_token"));
+  const [token, setToken] = useState(secureStorage.getItem("nexusops_token"));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,7 +53,7 @@ export const AuthProvider = ({ children }) => {
           });
           setUser(response.data);
         } catch (error) {
-          localStorage.removeItem("nexusops_token");
+          secureStorage.removeItem("nexusops_token");
           setToken(null);
         }
       }
@@ -65,7 +66,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await axios.post(`${API}/auth/login`, { email, password });
       const { token: newToken, user: userData } = response.data;
-      localStorage.setItem("nexusops_token", newToken);
+      secureStorage.setItem("nexusops_token", newToken);
       setToken(newToken);
       setUser(userData);
       toast.success("Welcome back!");
@@ -80,7 +81,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await axios.post(`${API}/auth/register`, { name, email, password });
       const { token: newToken, user: userData } = response.data;
-      localStorage.setItem("nexusops_token", newToken);
+      secureStorage.setItem("nexusops_token", newToken);
       setToken(newToken);
       setUser(userData);
       toast.success("Account created successfully!");
@@ -92,7 +93,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const loginWithToken = async (newToken) => {
-    localStorage.setItem("nexusops_token", newToken);
+    secureStorage.setItem("nexusops_token", newToken);
     setToken(newToken);
     try {
       const response = await axios.get(`${API}/auth/me`, {
@@ -101,14 +102,14 @@ export const AuthProvider = ({ children }) => {
       setUser(response.data);
       return true;
     } catch {
-      localStorage.removeItem("nexusops_token");
+      secureStorage.removeItem("nexusops_token");
       setToken(null);
       throw new Error("Invalid token");
     }
   };
 
   const logout = () => {
-    localStorage.removeItem("nexusops_token");
+    secureStorage.removeItem("nexusops_token");
     setToken(null);
     setUser(null);
     toast.success("Logged out successfully");

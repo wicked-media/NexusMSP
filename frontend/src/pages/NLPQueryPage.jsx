@@ -124,7 +124,7 @@ export default function NLPQueryPage() {
                   const Icon = TYPE_ICONS[r.type] || Database;
                   const tc = TYPE_COLORS[r.type] || TYPE_COLORS.device;
                   return (
-                    <div key={i} className="flex items-center gap-4 p-3 rounded-lg border border-border/30 hover:bg-muted/30 transition-colors" data-testid={`result-${i}`}>
+                    <div key={`k-${i}`} className="flex items-center gap-4 p-3 rounded-lg border border-border/30 hover:bg-muted/30 transition-colors" data-testid={`result-${i}`}>
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${tc.split(" ").slice(1).join(" ")}`}>
                         <Icon className={`w-4 h-4 ${tc.split(" ")[0]}`} />
                       </div>
@@ -163,7 +163,7 @@ export default function NLPQueryPage() {
           <CardContent>
             <div className="space-y-1">
               {queryHistory.slice(0, 8).map((h, i) => (
-                <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => { setQuery(h.query); doSearch(h.query); }} data-testid={`history-${i}`}>
+                <div key={`k-${i}`} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => { setQuery(h.query); doSearch(h.query); }} data-testid={`history-${i}`}>
                   <Clock className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                   <span className="text-sm flex-1 truncate">{h.query}</span>
                   <span className="text-[10px] text-muted-foreground">{h.resultCount} results</span>

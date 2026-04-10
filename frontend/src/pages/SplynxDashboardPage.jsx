@@ -94,7 +94,7 @@ export default function SplynxDashboardPage() {
     } catch { toast.error("Failed"); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -249,7 +249,7 @@ export default function SplynxDashboardPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                    {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    {pieData.map((entry, i) => <Cell key={`k-${i}`} fill={entry.color} />)}
                   </Pie>
                   <Tooltip formatter={(value) => [value, "Services"]} />
                   <Legend />
@@ -314,7 +314,7 @@ export default function SplynxDashboardPage() {
                     </div>
                     <div className="flex gap-1">
                       {(client.services || []).map((s, i) => (
-                        <div key={i} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[s.status] || "#6b7280" }}
+                        <div key={`k-${i}`} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[s.status] || "#6b7280" }}
                           title={`${s.description}: ${s.status}`} />
                       ))}
                     </div>

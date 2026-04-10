@@ -9,7 +9,7 @@ export default function GeoMapPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/geo-map/data`, { headers }).then(r => setData(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/geo-map/data`, { headers }).then(r => setData(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <div className="p-6 text-muted-foreground">Loading...</div>;
   const s = data.summary;

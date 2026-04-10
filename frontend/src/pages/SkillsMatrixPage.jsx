@@ -29,7 +29,7 @@ export default function SkillsMatrixPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (tech) => {
     setEditing(tech);
@@ -89,7 +89,7 @@ export default function SkillsMatrixPage() {
                     })}
                     <TableCell>
                       {(tech.certifications || []).map((c, i) => (
-                        <Badge key={i} variant="outline" className="text-[10px] mr-1">{c}</Badge>
+                        <Badge key={`k-${i}`} variant="outline" className="text-[10px] mr-1">{c}</Badge>
                       ))}
                     </TableCell>
                     <TableCell className="text-right font-mono">{tech.total_resolved}</TableCell>

@@ -44,7 +44,7 @@ export default function ProcurementPlannerPage() {
               </TableRow></TableHeader>
               <TableBody>
                 {data.recommendations.map((r, i) => (
-                  <TableRow key={i} data-testid={`proc-rec-${i}`}>
+                  <TableRow key={`k-${i}`} data-testid={`proc-rec-${i}`}>
                     <TableCell className="font-medium">{r.device_name}</TableCell>
                     <TableCell className="text-sm">{r.client_name}</TableCell>
                     <TableCell><Badge variant="outline" className="capitalize text-xs">{r.reason?.replace("_", " ")}</Badge></TableCell>

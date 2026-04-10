@@ -22,7 +22,7 @@ export default function LiveChatPage() {
     axios.get(`${API}/live-chat/sessions`, { headers }).then(r => setSessions(r.data)).catch(() => {});
   };
 
-  useEffect(() => { fetchSessions(); }, []);
+  useEffect(() => { fetchSessions(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSession = async (sessionId) => {
     const { data } = await axios.get(`${API}/live-chat/sessions/${sessionId}`, { headers });

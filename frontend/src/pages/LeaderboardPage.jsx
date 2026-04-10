@@ -151,7 +151,7 @@ export default function LeaderboardPage() {
                 <p className="text-xs font-semibold">Recent XP</p>
                 <ScrollArea className="h-32">
                   {(profile.xp_history || []).slice(-10).reverse().map((h, i) => (
-                    <div key={i} className="flex items-center justify-between py-1 text-xs border-b border-border/20">
+                    <div key={`k-${i}`} className="flex items-center justify-between py-1 text-xs border-b border-border/20">
                       <span className="text-muted-foreground">{h.reason}</span>
                       <Badge className="bg-amber-500/20 text-amber-400 text-[10px]">+{h.xp} XP</Badge>
                     </div>
@@ -181,13 +181,13 @@ export default function LeaderboardPage() {
         <div className="grid grid-cols-3 gap-4">
           {[1, 0, 2].map((idx) => {
             const t = leaderboard[idx];
-            if (!t) return <div key={idx} />;
+            if (!t) return <div key={`k-${idx}`} />;
             const pos = idx + 1;
             const colors = ["border-amber-500/40 bg-amber-500/5", "border-zinc-400/40 bg-zinc-400/5", "border-orange-500/40 bg-orange-500/5"];
             const crowns = [<Crown key="g" className="w-6 h-6 text-amber-400" />, <Crown key="s" className="w-5 h-5 text-zinc-400" />, <Crown key="b" className="w-5 h-5 text-orange-400" />];
             const lvl = t.level_info || {};
             return (
-              <Card key={idx} className={`${colors[idx]} cursor-pointer hover:scale-[1.02] transition-transform`}
+              <Card key={`k-${idx}`} className={`${colors[idx]} cursor-pointer hover:scale-[1.02] transition-transform`}
                 onClick={() => viewProfile(t.user_id)} data-testid={`podium-${pos}`}>
                 <CardContent className="pt-5 text-center">
                   <div className="flex justify-center mb-2">{crowns[idx]}</div>

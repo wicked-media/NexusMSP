@@ -205,7 +205,7 @@ export default function SocFeedPage() {
                 {alert.remediation_steps && alert.status !== "closed" && (
                   <div className="mt-2 ml-5 p-2 rounded bg-muted/20 border border-dashed">
                     <p className="text-[10px] font-semibold text-muted-foreground mb-1">Recommended Actions:</p>
-                    <ul className="text-[11px] space-y-0.5 text-muted-foreground">{(alert.remediation_steps || []).map((s, i) => <li key={i} className="flex items-start gap-1"><Zap className="w-3 h-3 mt-0.5 text-amber-400 flex-shrink-0" />{s}</li>)}</ul>
+                    <ul className="text-[11px] space-y-0.5 text-muted-foreground">{(alert.remediation_steps || []).map((s, i) => <li key={`k-${i}`} className="flex items-start gap-1"><Zap className="w-3 h-3 mt-0.5 text-amber-400 flex-shrink-0" />{s}</li>)}</ul>
                   </div>
                 )}
               </CardContent>

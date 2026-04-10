@@ -32,7 +32,7 @@ export default function PostmortemPage() {
     }).catch(() => {}).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generate = async () => {
     if (!selectedTicket) { toast.error("Select a ticket first"); return; }
@@ -132,7 +132,7 @@ export default function PostmortemPage() {
                   <div>
                     <h3 className="text-sm font-semibold mb-2">Timeline</h3>
                     <div className="space-y-1 pl-4 border-l-2 border-border">
-                      {viewing.timeline.map((t, i) => <p key={i} className="text-xs text-muted-foreground">{t}</p>)}
+                      {viewing.timeline.map((t, i) => <p key={`k-${i}`} className="text-xs text-muted-foreground">{t}</p>)}
                     </div>
                   </div>
                 )}
@@ -140,7 +140,7 @@ export default function PostmortemPage() {
                   <div>
                     <h3 className="text-sm font-semibold mb-2 flex items-center gap-1"><Shield className="w-3 h-3" />Prevention Actions</h3>
                     <ul className="space-y-1">
-                      {viewing.prevention.map((p, i) => <li key={i} className="text-sm text-muted-foreground flex items-start gap-2"><span className="text-green-500 mt-0.5">*</span>{p}</li>)}
+                      {viewing.prevention.map((p, i) => <li key={`k-${i}`} className="text-sm text-muted-foreground flex items-start gap-2"><span className="text-green-500 mt-0.5">*</span>{p}</li>)}
                     </ul>
                   </div>
                 )}

@@ -392,7 +392,7 @@ export default function PurchaseOrdersPage() {
             ) : (
               <div className="space-y-2">
                 {form.line_items.map((li, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
+                  <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
                     <div className="col-span-5">
                       {idx === 0 && <Label className="text-xs">Product</Label>}
                       <Select value={li.product_id || "__none"} onValueChange={v => updateLineItem(idx, "product_id", v === "__none" ? "" : v)}>
@@ -449,7 +449,7 @@ export default function PurchaseOrdersPage() {
               {receiveItems.map((ri, idx) => {
                 const remaining = ri.quantity - (ri.received_qty || 0);
                 return (
-                  <TableRow key={idx}>
+                  <TableRow key={`k-${idx}`}>
                     <TableCell className="font-medium">{ri.product_name || "Item"}</TableCell>
                     <TableCell className="text-right font-mono">{ri.quantity}</TableCell>
                     <TableCell className="text-right font-mono">{ri.received_qty || 0}</TableCell>
@@ -615,7 +615,7 @@ export default function PurchaseOrdersPage() {
                           const itemStatus = li.status || (li.received_qty >= li.quantity ? "received" : li.received_qty > 0 ? "partial" : "pending");
                           const ItemIcon = ITEM_STATUS_CONFIG[itemStatus]?.icon || Clock;
                           return (
-                            <TableRow key={i} data-testid={`po-line-item-${i}`}>
+                            <TableRow key={`k-${i}`} data-testid={`po-line-item-${i}`}>
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   {itemStatus === "pending" && <Box className="w-4 h-4 text-blue-400" />}
@@ -841,7 +841,7 @@ export default function PurchaseOrdersPage() {
                   {(spendAnalytics.top_vendors || []).length === 0 ? <p className="text-sm text-muted-foreground">No data</p> : (
                     <div className="space-y-2">
                       {spendAnalytics.top_vendors.map((v, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={`k-${i}`} className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
                             <span className="text-sm font-medium">{v.vendor}</span>
@@ -862,7 +862,7 @@ export default function PurchaseOrdersPage() {
                         const maxSpend = Math.max(...spendAnalytics.monthly_spend.map(x => x.spend));
                         const pct = maxSpend > 0 ? (m.spend / maxSpend * 100) : 0;
                         return (
-                          <div key={i} className="flex items-center gap-2">
+                          <div key={`k-${i}`} className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground w-16">{m.month}</span>
                             <div className="flex-1 h-5 bg-muted/20 rounded overflow-hidden">
                               <div className="h-full bg-blue-500/40 rounded transition-all" style={{ width: `${pct}%` }} />

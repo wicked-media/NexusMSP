@@ -115,7 +115,7 @@ export default function PredictiveMaintenancePage() {
             <CardHeader className="pb-2"><CardTitle className="text-sm text-amber-400 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />Predicted Issues ({deviceData.predictions.length})</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {deviceData.predictions.map((p, i) => (
-                <div key={i} className={`p-3 rounded-lg border ${p.severity === "critical" ? "bg-red-500/5 border-red-500/20" : p.severity === "high" ? "bg-amber-500/5 border-amber-500/20" : "bg-muted/20 border-border/30"}`}>
+                <div key={`k-${i}`} className={`p-3 rounded-lg border ${p.severity === "critical" ? "bg-red-500/5 border-red-500/20" : p.severity === "high" ? "bg-amber-500/5 border-amber-500/20" : "bg-muted/20 border-border/30"}`}>
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-medium text-sm">{p.component}</p>

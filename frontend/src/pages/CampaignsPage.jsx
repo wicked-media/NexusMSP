@@ -80,7 +80,7 @@ export default function CampaignsPage() {
         <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Quick Templates</p>
         <div className="flex gap-2 overflow-x-auto">
           {templates.map((t, i) => (
-            <Button key={i} variant="outline" size="sm" onClick={() => applyTemplate(t)} className="whitespace-nowrap" data-testid={`campaign-template-${i}`}>
+            <Button key={`k-${i}`} variant="outline" size="sm" onClick={() => applyTemplate(t)} className="whitespace-nowrap" data-testid={`campaign-template-${i}`}>
               <Copy className="w-3 h-3 mr-1" />{t.name}
             </Button>
           ))}

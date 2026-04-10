@@ -30,7 +30,7 @@ export default function CsatSurveysPage() {
     }).catch(() => {}).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seedDemo = async () => {
     try {
@@ -122,7 +122,7 @@ export default function CsatSurveysPage() {
                       <TableCell className="text-right">{t.count}</TableCell>
                       <TableCell>
                         <div className="flex gap-0.5">{Array.from({ length: 5 }, (_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < Math.round(t.avg) ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
+                          <Star key={`k-${i}`} className={`w-3 h-3 ${i < Math.round(t.avg) ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
                         ))}</div>
                       </TableCell>
                     </TableRow>
@@ -144,7 +144,7 @@ export default function CsatSurveysPage() {
                       <TableCell className="text-right">{c.count}</TableCell>
                       <TableCell>
                         <div className="flex gap-0.5">{Array.from({ length: 5 }, (_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < Math.round(c.avg) ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
+                          <Star key={`k-${i}`} className={`w-3 h-3 ${i < Math.round(c.avg) ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
                         ))}</div>
                       </TableCell>
                     </TableRow>
@@ -165,7 +165,7 @@ export default function CsatSurveysPage() {
                       <TableCell className="text-sm">{s.tech_name}</TableCell>
                       <TableCell>
                         <div className="flex gap-0.5">{Array.from({ length: 5 }, (_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < s.score ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
+                          <Star key={`k-${i}`} className={`w-3 h-3 ${i < s.score ? "text-amber-500 fill-amber-500" : "text-slate-600"}`} />
                         ))}</div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{s.comment || "-"}</TableCell>

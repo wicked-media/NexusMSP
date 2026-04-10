@@ -13,7 +13,7 @@ export default function PricingCalcPage() {
   const [form, setForm] = useState({ devices: 20, users: 40, labor_hours_month: 10, labor_rate: 125, target_margin_pct: 45 });
   const [result, setResult] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/pricing-calc/overview`, { headers }).then(r => setData(r.data)); }, []);
+  useEffect(() => { axios.get(`${API}/pricing-calc/overview`, { headers }).then(r => setData(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const calculate = async () => {
     const res = await axios.post(`${API}/pricing-calc/calculate`, form, { headers });

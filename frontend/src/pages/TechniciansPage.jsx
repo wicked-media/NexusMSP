@@ -178,7 +178,7 @@ export default function TechniciansPage() {
     try { const r = await axios.get(`${API}/achievements`, { headers }); setAllAchievements(r.data); } catch {}
   };
 
-  useEffect(() => { fetchTechs(); fetchLeaderboard(); fetchAllAchievements(); }, []);
+  useEffect(() => { fetchTechs(); fetchLeaderboard(); fetchAllAchievements(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchTechDashboard = async (tech) => {
     setViewingTech(tech);
@@ -542,7 +542,7 @@ export default function TechniciansPage() {
                       {techHistory.monthly.map((m, i) => {
                         const maxVal = Math.max(...techHistory.monthly.map(x => Math.max(x.opened, x.closed)), 1);
                         return (
-                          <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                          <div key={`k-${i}`} className="flex-1 flex flex-col items-center gap-1">
                             <div className="flex items-end gap-1 h-28 w-full">
                               <div className="flex-1 bg-blue-500/30 rounded-t" style={{ height: `${(m.opened / maxVal) * 100}%`, minHeight: m.opened > 0 ? "4px" : "0" }} title={`Opened: ${m.opened}`} />
                               <div className="flex-1 bg-emerald-500/50 rounded-t" style={{ height: `${(m.closed / maxVal) * 100}%`, minHeight: m.closed > 0 ? "4px" : "0" }} title={`Closed: ${m.closed}`} />
@@ -619,7 +619,7 @@ export default function TechniciansPage() {
         {(technician.specialties || []).length > 0 && (
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Specialties</CardTitle></CardHeader>
             <CardContent className="flex gap-2 flex-wrap">
-              {technician.specialties.map((s, i) => <Badge key={i} variant="secondary"><Wrench className="w-3 h-3 mr-1" />{s}</Badge>)}
+              {technician.specialties.map((s, i) => <Badge key={`k-${i}`} variant="secondary"><Wrench className="w-3 h-3 mr-1" />{s}</Badge>)}
             </CardContent>
           </Card>
         )}
@@ -725,7 +725,7 @@ export default function TechniciansPage() {
               </div>
               <div>
                 <Label>Specialties</Label>
-                <div className="flex gap-2 flex-wrap mb-2">{formData.specialties.map((s, i) => (<Badge key={i} variant="secondary" className="cursor-pointer" onClick={() => setFormData(p => ({ ...p, specialties: p.specialties.filter((_, j) => j !== i) }))}>{s} <XCircle className="w-3 h-3 ml-1" /></Badge>))}</div>
+                <div className="flex gap-2 flex-wrap mb-2">{formData.specialties.map((s, i) => (<Badge key={`k-${i}`} variant="secondary" className="cursor-pointer" onClick={() => setFormData(p => ({ ...p, specialties: p.specialties.filter((_, j) => j !== i) }))}>{s} <XCircle className="w-3 h-3 ml-1" /></Badge>))}</div>
                 <div className="flex gap-2"><Input className="flex-1" placeholder="e.g. Networking, Azure" value={specialtyInput} onChange={e => setSpecialtyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addSpecialty())} /><Button type="button" variant="outline" size="sm" onClick={addSpecialty}>Add</Button></div>
               </div>
             </div>

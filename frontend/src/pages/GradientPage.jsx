@@ -49,7 +49,7 @@ export default function GradientPage() {
           { label: "Missed Revenue", value: `$${s.missed_revenue?.toLocaleString() || 0}`, icon: AlertTriangle, color: "text-amber-500" },
           { label: "Revenue Opportunities", value: `$${opportunities?.total_potential_mrr?.toLocaleString() || 0}`, icon: TrendingUp, color: "text-emerald-500" },
         ].map((c, i) => (
-          <Card key={i}><CardContent className="pt-4"><div className="flex items-center gap-3"><c.icon className={`w-8 h-8 ${c.color}`} /><div><p className="text-xs text-muted-foreground">{c.label}</p><p className="text-xl font-bold">{c.value}</p></div></div></CardContent></Card>
+          <Card key={`k-${i}`}><CardContent className="pt-4"><div className="flex items-center gap-3"><c.icon className={`w-8 h-8 ${c.color}`} /><div><p className="text-xs text-muted-foreground">{c.label}</p><p className="text-xl font-bold">{c.value}</p></div></div></CardContent></Card>
         ))}
       </div>
 

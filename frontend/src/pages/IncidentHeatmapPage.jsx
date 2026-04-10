@@ -125,7 +125,7 @@ export default function IncidentHeatmapPage() {
                 <div className="min-w-[700px]">
                   <div className="flex gap-[3px] mb-1 ml-14">
                     {Array.from({ length: 24 }, (_, i) => (
-                      <div key={i} className="w-7 text-center text-[9px] text-muted-foreground font-mono">{i}</div>
+                      <div key={`k-${i}`} className="w-7 text-center text-[9px] text-muted-foreground font-mono">{i}</div>
                     ))}
                   </div>
                   {DAYS.map((day, dayIdx) => (
@@ -154,7 +154,7 @@ export default function IncidentHeatmapPage() {
                   )}
                   <div className="flex items-center gap-2 mt-4 justify-center">
                     <span className="text-xs text-muted-foreground">Less</span>
-                    {["bg-muted/30", "bg-emerald-400/60", "bg-amber-400", "bg-orange-500", "bg-red-500"].map((c, i) => <div key={i} className={`w-5 h-5 rounded-sm ${c}`} />)}
+                    {["bg-muted/30", "bg-emerald-400/60", "bg-amber-400", "bg-orange-500", "bg-red-500"].map((c, i) => <div key={`k-${i}`} className={`w-5 h-5 rounded-sm ${c}`} />)}
                     <span className="text-xs text-muted-foreground">More</span>
                   </div>
                 </div>

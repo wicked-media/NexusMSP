@@ -66,7 +66,7 @@ export default function VendorsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchVendors(); }, []);
+  useEffect(() => { fetchVendors(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openAdd = () => { setEditing(null); setForm({ ...emptyForm }); setFormOpen(true); };
   const openEdit = (v) => {

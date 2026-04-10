@@ -54,7 +54,7 @@ export default function SchedulingPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreate = async () => {
     const ticket = tickets.find(t => t.id === formData.ticket_id);

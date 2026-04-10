@@ -145,7 +145,7 @@ export default function SocRealtimePage() {
                 <TableBody>
                   {(recon?.reconciliation || []).length === 0 ? <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground text-sm">No reconciliation data</TableCell></TableRow> :
                   (recon?.reconciliation || []).map((r, i) => (
-                    <TableRow key={i} className={r.status === "over" ? "bg-amber-500/5" : r.status === "under" ? "bg-red-500/5" : ""} data-testid={`recon-${i}`}>
+                    <TableRow key={`k-${i}`} className={r.status === "over" ? "bg-amber-500/5" : r.status === "under" ? "bg-red-500/5" : ""} data-testid={`recon-${i}`}>
                       <TableCell className="font-medium text-sm">{r.client_name}</TableCell>
                       <TableCell className="text-right font-mono">{r.contracted_seats}</TableCell>
                       <TableCell className="text-right font-mono">{r.actual_agents}</TableCell>
