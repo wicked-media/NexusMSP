@@ -77,7 +77,7 @@ async def _yeastar_get_token(settings: dict) -> str | None:
         
         url = f"{pbx_url}/openapi/v1.0/get_token"
         try:
-            async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true', timeout=15) as http:
+            async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true', timeout=15) as http:
                 resp = await http.post(url, json={"username": client_id, "password": client_secret}, headers={"User-Agent": "OpenAPI", "Content-Type": "application/json"})
                 data = resp.json()
                 if data.get("errcode") == 0:
@@ -109,7 +109,7 @@ async def _yeastar_api_get(path: str, params: dict = None) -> dict | list | None
     if params:
         query.update(params)
     try:
-        async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true', timeout=15) as http:
+        async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true', timeout=15) as http:
             resp = await http.get(url, params=query, headers={"User-Agent": "OpenAPI"})
             if resp.status_code == 200 and resp.text:
                 return resp.json()

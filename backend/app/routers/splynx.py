@@ -34,7 +34,7 @@ async def splynx_get(config, path, params=None):
     url = config["url"].rstrip("/")
     api_url = f"{url}/api/2.0/{path}"
     headers = build_auth_header(config)
-    async with httpx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+    async with httpx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
         resp = await client.get(api_url, headers=headers, params=params)
         if resp.status_code == 200:
             return resp.json()
@@ -343,7 +343,7 @@ async def suspend_client(client_id: str, data: dict = {}, current_user: dict = D
             url = config["url"].rstrip("/")
             headers = build_auth_header(config)
             import httpx as hx
-            async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as cl:
+            async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as cl:
                 resp = await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
                     headers=headers, json={"status": "disabled"})
                 suspended_in_splynx = resp.status_code == 200
@@ -382,7 +382,7 @@ async def unsuspend_client(client_id: str, current_user: dict = Depends(get_curr
             url = config["url"].rstrip("/")
             headers = build_auth_header(config)
             import httpx as hx
-            async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as cl:
+            async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as cl:
                 resp = await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
                     headers=headers, json={"status": "active"})
                 unsuspended_in_splynx = resp.status_code == 200
@@ -463,7 +463,7 @@ async def auto_suspend_check(current_user: dict = Depends(get_current_user)):
                     url = config["url"].rstrip("/")
                     headers = build_auth_header(config)
                     import httpx as hx
-                    async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as cl:
+                    async with hx.AsyncClient(timeout=30, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as cl:
                         await cl.put(f"{url}/api/2.0/admin/customers/customer/{sid}",
                             headers=headers, json={"status": "disabled"})
                 except Exception:

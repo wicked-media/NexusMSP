@@ -196,12 +196,15 @@ export default function RemoteAccessPage() {
     finally { setSyncing(false); }
   };
 
-  // Test RustDesk server connection
+  // Test RustDesk server connection (tests what's in the form, not saved config)
   const testConnection = async () => {
     setTestingConnection(true);
     setConnectionResult(null);
     try {
-      const res = await axios.get(`${API}/rustdesk/live/test-connection`, { headers });
+      const params = new URLSearchParams();
+      if (settingsForm.server_url) params.set("server_url", settingsForm.server_url);
+      if (settingsForm.api_key) params.set("api_key", settingsForm.api_key);
+      const res = await axios.get(`${API}/rustdesk/live/test-connection?${params.toString()}`, { headers });
       setConnectionResult(res.data);
       if (res.data.connected) {
         toast.success(res.data.message);
@@ -739,17 +742,29 @@ export default function RemoteAccessPage() {
             <DialogDescription id="settings-desc">Configure your RustDesk server connection</DialogDescription>
           </DialogHeader>
           <form onSubmit={saveSettings} className="space-y-4">
-            <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="rustdesk.yourdomain.com" required data-testid="settings-server" /></div>
-            <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /></div>
-            <div className="space-y-2"><Label>Relay Server</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /></div>
+            <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="https://your-server:21114" required data-testid="settings-server" /><p className="text-[10px] text-muted-foreground">The full URL of your RustDesk API server, including port (default RustDesk Pro API port is 21114)</p></div>
+            <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /><p className="text-[10px] text-muted-foreground">Generate from RustDesk Web Console → Settings → API Tokens (required for peer list &amp; sync)</p></div>
+            <div className="space-y-2"><Label>Relay Server (optional)</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /><p className="text-[10px] text-muted-foreground">Only needed if your relay runs on a separate host from the ID server</p></div>
             <div className="flex items-center justify-between py-2">
               <div><Label>Auto-Sync (every 5 min)</Label><p className="text-xs text-muted-foreground">Automatically pull live peer status from server</p></div>
               <Switch checked={settingsForm.auto_sync !== false} onCheckedChange={v => setSettingsForm({ ...settingsForm, auto_sync: v })} data-testid="settings-auto-sync" />
             </div>
             <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
-              <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro API</p>
-              <p>For live peer data, enter the API URL (usually <code>https://your-server:21114</code>) and generate a read/write API token from the RustDesk web console under Settings &gt; API.</p>
+              <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro Required</p>
+              <p>NexusOps requires <strong>RustDesk Server Pro</strong> for the live API. The OSS server does not expose a REST API. Enter the Web Console API URL (default port <code>21114</code>) and generate a token from Settings → API.</p>
             </div>
+            {connectionResult && (
+              <div className={`p-3 rounded-lg text-xs border ${connectionResult.connected ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+                <p className={`font-medium mb-1 ${connectionResult.connected ? "text-emerald-400" : "text-red-400"}`}>
+                  {connectionResult.connected ? "Connected Successfully" : "Connection Failed"}
+                </p>
+                <p className="text-muted-foreground">{connectionResult.message}</p>
+                {connectionResult.peer_count != null && <p className="mt-1 text-muted-foreground">Peers found: <strong className="text-white">{connectionResult.peer_count}</strong></p>}
+                {connectionResult.endpoints_available?.length > 0 && (
+                  <p className="mt-1 text-muted-foreground">API endpoints: {connectionResult.endpoints_available.map(e => e.path).join(", ")}</p>
+                )}
+              </div>
+            )}
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={testConnection} disabled={testingConnection || !settingsForm.server_url} data-testid="test-settings-btn">{testingConnection ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Wifi className="w-4 h-4 mr-1" />}Test Connection</Button>
               <Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button>

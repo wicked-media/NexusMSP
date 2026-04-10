@@ -14,7 +14,13 @@ router = APIRouter()
 async def _get_rustdesk_config():
     """Get RustDesk server config from DB."""
     config = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
-    return config.get("value", {}) if config else {}
+    value = config.get("value", {}) if config else {}
+    # Normalize server_url — ensure it has a protocol
+    url = value.get("server_url", "").strip().rstrip("/")
+    if url and not url.startswith("http"):
+        url = f"https://{url}"
+    value["server_url"] = url
+    return value
 
 async def _rustdesk_api_request(method: str, path: str, data: dict = None):
     """Make an authenticated request to the RustDesk server API."""
@@ -30,7 +36,7 @@ async def _rustdesk_api_request(method: str, path: str, data: dict = None):
         headers_dict["Authorization"] = f"Bearer {api_key}"
     
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
             if method == "GET":
                 resp = await client.get(url, headers=headers_dict)
             elif method == "POST":
@@ -380,11 +386,22 @@ async def get_agent_deployments(current_user: dict = Depends(get_current_user)):
 # ─── Live RustDesk Server API Integration ───
 
 @router.get("/rustdesk/live/test-connection")
-async def test_rustdesk_connection(current_user: dict = Depends(get_current_user)):
-    """Test connectivity to the configured RustDesk server."""
-    config = await _get_rustdesk_config()
-    server_url = config.get("server_url", "").rstrip("/")
-    api_key = config.get("api_key", "")
+async def test_rustdesk_connection(
+    server_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """Test connectivity to a RustDesk server. Uses query params if provided, otherwise falls back to saved config."""
+    if server_url:
+        # Normalize URL from query param
+        server_url = server_url.strip().rstrip("/")
+        if not server_url.startswith("http"):
+            server_url = f"https://{server_url}"
+        api_key = api_key or ""
+    else:
+        config = await _get_rustdesk_config()
+        server_url = config.get("server_url", "").rstrip("/")
+        api_key = config.get("api_key", "")
     
     if not server_url:
         return {"connected": False, "message": "No server URL configured"}
@@ -400,7 +417,7 @@ async def test_rustdesk_connection(current_user: dict = Depends(get_current_user
     ]
     
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
             headers_dict = {}
             if api_key:
                 headers_dict["Authorization"] = f"Bearer {api_key}"
@@ -436,7 +453,7 @@ async def test_rustdesk_connection(current_user: dict = Depends(get_current_user
         if not results["connected"]:
             # Try raw TCP to see if server is reachable
             try:
-                resp = await httpx.AsyncClient(timeout=5.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true').get(server_url)
+                resp = await httpx.AsyncClient(timeout=5.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true').get(server_url)
                 results["connected"] = True
                 results["message"] = f"Server reachable (HTTP {resp.status_code}) but API endpoints not accessible. Check API key permissions."
             except Exception:
@@ -468,7 +485,7 @@ async def get_live_peers(current_user: dict = Depends(get_current_user)):
         headers_dict["Authorization"] = f"Bearer {api_key}"
     
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
             # Try different peer list endpoints
             for path in ["/peers", "/v1/peers", "/ab/peers", "/ab"]:
                 try:
@@ -533,7 +550,7 @@ async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
     
     peers = []
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
             for path in ["/peers", "/v1/peers", "/ab/peers", "/ab"]:
                 try:
                     resp = await client.get(f"{server_url}/api{path}", headers=headers_dict)
@@ -649,7 +666,7 @@ async def get_live_audit_logs(current_user: dict = Depends(get_current_user)):
     logs = []
     source = None
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
             for path in ["/audit", "/v1/audit", "/sessions", "/conn-log"]:
                 try:
                     resp = await client.get(f"{server_url}/api{path}", headers=headers_dict)
