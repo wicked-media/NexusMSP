@@ -142,8 +142,9 @@ export default function TechniciansPage() {
   const [bulkCategories, setBulkCategories] = useState([]);
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const DEFAULT_PASSWORD = "nexusops123";
   const [formData, setFormData] = useState({
-    name: "", email: "", password: "nexusops123", role: "technician", job_title: "",
+    name: "", email: "", password: DEFAULT_PASSWORD, role: "technician", job_title: "",
     hourly_rate: "75", phone: "", specialties: [], categories: [], is_admin: false
   });
 
@@ -310,7 +311,7 @@ export default function TechniciansPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
   };
 
-  const resetForm = () => setFormData({ name: "", email: "", password: "nexusops123", role: "technician", job_title: "", hourly_rate: "75", phone: "", specialties: [], categories: [], is_admin: false });
+  const resetForm = () => setFormData({ name: "", email: "", password: DEFAULT_PASSWORD, role: "technician", job_title: "", hourly_rate: "75", phone: "", specialties: [], categories: [], is_admin: false });
 
   const openEdit = (tech) => {
     setEditingTech(tech);
