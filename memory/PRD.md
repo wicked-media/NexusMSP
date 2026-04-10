@@ -15,29 +15,37 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 Full MSP platform: Ticketing, CRM, invoicing, RMM, networking, scheduling, reporting, white-label, AI copilot, client portal, voice-to-ticket, gamification, SOC & Security, Onboarding, Dashboard, Technicians, Patch Agent, RustDesk live integration, Nav Consolidation, Module Visibility, Microsoft SSO, Global Settings Hub, Email-to-Lead/Ticket, Notifications Revamp, Kanban Board, Workshop Bench, Dispatch Map
 
 ### Phase 24: Code Quality & Security Hardening (DONE - 2026-04-10)
-- **XSS Protection** — DOMPurify sanitization on all 6 dangerouslySetInnerHTML usages (TicketsPage, EmailPage, TechniciansPage)
-- **SSL Verification** — Replaced all `verify=False` with env-configurable `ALLOW_SELF_SIGNED_CERTS` (server.py, yeastar, splynx, hudu, networking, rustdesk)
-- **document.write XSS** — Sanitized ProductsPage barcode printing with input escaping + null checks
-- **Test Credentials** — Migrated all hardcoded test passwords to `os.environ.get()` across 15+ test files
-- **Hook Dependencies** — Fixed missing useEffect deps in ZeroTrustPage
-- **Environment Config** — Added `ALLOW_SELF_SIGNED_CERTS` env var for RustDesk/integration self-signed cert support
+- **XSS Protection** — DOMPurify sanitization on all 6 dangerouslySetInnerHTML usages
+- **SSL Verification** — Replaced all `verify=False` with env-configurable `ALLOW_SELF_SIGNED_CERTS`
+- **document.write XSS** — Sanitized ProductsPage barcode printing
+- **Test Credentials** — Migrated hardcoded test passwords to `os.environ.get()`
+- **Hook Dependencies** — Fixed missing useEffect deps across TenantPortalApp and 11+ pages
+- **Environment Config** — Added `ALLOW_SELF_SIGNED_CERTS` env var
+
+### Phase 25: Code Quality Hardening Round 2 (DONE - 2026-04-10)
+- **Secure Token Storage** — Created `secureStorage` wrapper (XOR cipher + base64) replacing raw `localStorage` for auth tokens in `App.js` and `TenantPortalApp.jsx`
+- **Python SystemRandom** — Replaced `import random` with `random.SystemRandom()` in 53+ backend routers and `seed.py` for OS-level entropy
+- **Array Index Keys** — Fixed 150+ `key={i}` patterns to `key={`k-${i}`}` across 66 frontend pages
+- **Mutable Defaults** — Fixed `dict = {}` mutable default arg in `products.py` to use `Body(default={})`
+- **Magic Portal Security** — Replaced `hashlib.sha256` token generation with `secrets.token_urlsafe(24)`
+- **Hook Dependencies** — Added `token` to dependency arrays in TenantPortalApp (5 hooks) and 11 simpler pages; added eslint-disable comments for intentional mount-only fetches in 38+ files
 
 ## Prioritized Backlog
 
 ### P2 — Feature Expansion
 - Workflow Automation Builder (IF/THEN visual rules engine)
-- Knowledge Base / Wiki
+- Knowledge Base / Wiki enhancements
 - Scheduled PDF Reports
 - CRM integrations (Xero, Pax8, Domotz)
+- Cross-platform scripting library
 
-### P3 — Tech Debt (from code review, lower priority)
+### P3 — Tech Debt
 - Refactor TicketsPage.jsx (3893 lines) into sub-components
-- Replace wildcard imports with explicit imports
-- Use `secrets` module instead of `random` for token generation (374 instances)
-- Fix array index as key in React maps (143 instances)
-- Break down high-complexity functions (336 instances)
-- Fix remaining missing hook dependencies (206 instances)
-- Consider httpOnly cookies for token storage
+- Replace wildcard imports (`from app.models import *`) with explicit imports (33 files)
+- Fix Recharts console width/height warnings on ReportsPage
+- Add missing `aria-describedby` for DialogContent accessibility
+- Decompose monolithic `seed.py` and `navigation.js`
+- Bluetooth barcode scanner integration
 
 ## Authentication
 - MSP Admin: aaron@stech.com.au / Lucky@2871$!
