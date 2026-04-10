@@ -20,6 +20,7 @@ import {
   Terminal, Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
