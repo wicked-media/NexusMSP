@@ -1,13 +1,30 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import Response
 from datetime import datetime, timezone
 import os
-from app.database import db
+import jwt
+from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 
 router = APIRouter()
 
 UPLOAD_DIR = "/app/backend/uploads/branding"
+
+
+async def _get_user_from_token(token: str = Query(None)):
+    """Authenticate via query param token (for PDF downloads opened in new tabs)"""
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 async def _get_branding():
     """Get branding config from correct collection key"""
@@ -306,9 +323,11 @@ def generate_invoice_pdf(invoice, branding=None):
 
 
 @router.get("/invoices/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: str, current_user: dict = Depends(get_current_user)):
+async def get_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_from_token)):
     """Generate and return invoice as PDF for preview"""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
@@ -324,9 +343,11 @@ async def get_invoice_pdf(invoice_id: str, current_user: dict = Depends(get_curr
 
 
 @router.get("/invoices/{invoice_id}/pdf/download")
-async def download_invoice_pdf(invoice_id: str, current_user: dict = Depends(get_current_user)):
+async def download_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_from_token)):
     """Download invoice as PDF attachment"""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 

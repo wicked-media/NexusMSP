@@ -2,9 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 import uuid
 import random as _random_mod
+import base64
+import logging
 _srand = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -394,7 +398,78 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
     message = data.get("message", "")
     if not to_email:
         raise HTTPException(status_code=400, detail="Recipient email required")
-    # Log the email send (mocked for now - will use Resend when credentials are provided)
+
+    # Generate PDF
+    pdf_bytes = None
+    pdf_filename = f"{invoice.get('invoice_number', 'invoice')}.pdf"
+    try:
+        from app.routers.invoice_pdf import generate_invoice_pdf, _get_branding
+        branding = await _get_branding()
+        pdf_bytes = bytes(generate_invoice_pdf(invoice, branding))
+    except Exception as e:
+        logger.warning(f"PDF generation failed for email: {e}")
+
+    # Send via email_utils (Resend)
+    email_status = "sent"
+    email_message = f"Invoice emailed to {to_email}"
+    try:
+        from app.routers.email_utils import send_email, is_resend_configured
+        # Build HTML email body
+        inv_num = invoice.get("invoice_number", "N/A")
+        total = invoice.get("total", 0)
+        due_date = invoice.get("due_date", "N/A")
+        client_name = invoice.get("client_name", "")
+        html_body = f"""
+        <div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto">
+          <div style="background:#1a56db;padding:20px 28px;color:#fff;border-radius:8px 8px 0 0">
+            <h2 style="margin:0">Invoice {inv_num}</h2>
+          </div>
+          <div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
+            <p>Hi{' ' + client_name if client_name else ''},</p>
+            <p>{message.replace(chr(10), '<br>')}</p>
+            <table style="width:100%;margin:20px 0;border-collapse:collapse">
+              <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#666">Invoice #</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:bold;text-align:right">{inv_num}</td></tr>
+              <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#666">Amount</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:bold;text-align:right">${total:,.2f}</td></tr>
+              <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#666">Due Date</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right">{due_date}</td></tr>
+            </table>
+            {('<p style="font-size:13px;color:#666">The invoice PDF is attached to this email.</p>' if pdf_bytes else '')}
+            <p style="font-size:12px;color:#999;margin-top:24px;border-top:1px solid #eee;padding-top:12px">Sent via NexusOps</p>
+          </div>
+        </div>
+        """
+
+        if is_resend_configured() and pdf_bytes:
+            # Send with PDF attachment via Resend
+            import resend
+            import os
+            resend.api_key = os.environ.get("RESEND_API_KEY", "")
+            sender = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+            import asyncio
+            result = await asyncio.to_thread(resend.Emails.send, {
+                "from": sender,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+                "attachments": [{"filename": pdf_filename, "content": list(pdf_bytes)}],
+            })
+            email_status = "sent"
+            email_message = f"Invoice emailed to {to_email} with PDF attached"
+            logger.info(f"[EMAIL SENT] Invoice {inv_num} to {to_email} | ID: {result.get('id')}")
+        elif is_resend_configured():
+            # Send without attachment
+            result = await send_email(to_email, subject, html_body)
+            email_status = result.get("status", "sent")
+            email_message = result.get("message", email_message)
+        else:
+            # Mocked
+            logger.info(f"[EMAIL MOCK] Invoice {inv_num} to {to_email}")
+            email_status = "mocked"
+            email_message = f"Invoice email logged (Resend not configured). To: {to_email}"
+    except Exception as e:
+        logger.error(f"Email send failed: {e}")
+        email_status = "failed"
+        email_message = f"Email failed: {str(e)}"
+
     email_record = {
         "id": str(uuid.uuid4()),
         "invoice_id": invoice_id,
@@ -402,16 +477,16 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
         "to_email": to_email,
         "subject": subject,
         "message": message,
-        "status": "sent",
+        "status": email_status,
+        "has_pdf": pdf_bytes is not None,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.xero_invoice_emails.insert_one(email_record)
-    # Update invoice status to AUTHORISED if it was DRAFT
     if invoice.get("status") == "DRAFT":
         await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {"status": "AUTHORISED", "sent_at": datetime.now(timezone.utc).isoformat()}})
     await _log_sync_event("invoice_emailed", f"Invoice {invoice.get('invoice_number', '')} emailed to {to_email}")
     email_record.pop("_id", None)
-    return {"message": f"Invoice emailed to {to_email}", "email": email_record}
+    return {"message": email_message, "email": email_record}
 
 @router.get("/xero/invoices/{invoice_id}/emails")
 async def get_invoice_emails(invoice_id: str, current_user: dict = Depends(get_current_user)):

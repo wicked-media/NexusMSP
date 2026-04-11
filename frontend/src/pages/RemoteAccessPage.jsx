@@ -17,7 +17,8 @@ import {
   Laptop, Monitor, Server, Wifi, WifiOff, Settings, Plus, RefreshCw, Loader2,
   ExternalLink, Copy, Search, Play, Clock, Shield, Download, ChevronRight,
   Link2, Unlink, Eye, EyeOff, Pencil, Check, X, History, Zap, Globe,
-  Terminal, Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle
+  Terminal, Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle,
+  Plug, Power, TestTube, Save, BookOpen
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -52,22 +53,29 @@ export default function RemoteAccessPage() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState(null);
   const [livePeers, setLivePeers] = useState(null);
+  // Providers / Integrations
+  const [providers, setProviders] = useState([]);
+  const [providerConfig, setProviderConfig] = useState(null);
+  const [providerForm, setProviderForm] = useState({});
+  const [savingProvider, setSavingProvider] = useState(false);
+  const [testingProvider, setTestingProvider] = useState(null);
+  const [providerTestResult, setProviderTestResult] = useState({});
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [dRes, sRes, cRes] = await Promise.all([
+      const [dRes, sRes, cRes, pRes] = await Promise.all([
         axios.get(`${API}/rustdesk/all-devices`, { headers }),
         axios.get(`${API}/rustdesk/sessions`, { headers }),
         axios.get(`${API}/rustdesk/config`, { headers }),
+        axios.get(`${API}/remote-providers`, { headers }).catch(() => ({ data: [] })),
       ]);
       setDevices(dRes.data);
       setSessions(sRes.data);
       setConfig(cRes.data?.value || cRes.data);
-      // Fetch deployments
+      setProviders(pRes.data || []);
       axios.get(`${API}/rustdesk/agent-deployments`, { headers }).then(r => setDeployments(r.data)).catch(() => {});
-      // Fetch live peers if server configured
       const cfg = cRes.data?.value || cRes.data;
       if (cfg?.enabled && cfg?.server_url) {
         axios.get(`${API}/rustdesk/live/peers`, { headers }).then(r => setLivePeers(r.data)).catch(() => setLivePeers(null));
@@ -77,6 +85,49 @@ export default function RemoteAccessPage() {
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Provider functions
+  const openProviderConfig = async (provider) => {
+    setProviderConfig(provider);
+    setProviderTestResult({});
+    try {
+      const res = await axios.get(`${API}/remote-providers/${provider.id}/settings`, { headers });
+      const form = {};
+      provider.config_fields.forEach(f => { form[f.key] = res.data[f.key] || ""; });
+      form.active = res.data.active || false;
+      setProviderForm(form);
+    } catch { setProviderForm({ active: false }); }
+  };
+
+  const saveProviderSettings = async () => {
+    if (!providerConfig) return;
+    setSavingProvider(true);
+    try {
+      await axios.put(`${API}/remote-providers/${providerConfig.id}/settings`, providerForm, { headers });
+      toast.success(`${providerConfig.name} settings saved`);
+      fetchData();
+    } catch { toast.error("Failed to save settings"); }
+    finally { setSavingProvider(false); }
+  };
+
+  const toggleProvider = async (provider) => {
+    try {
+      const res = await axios.put(`${API}/remote-providers/${provider.id}/toggle`, {}, { headers });
+      toast.success(res.data.message);
+      fetchData();
+    } catch { toast.error("Failed to toggle provider"); }
+  };
+
+  const testProviderConnection = async (provider) => {
+    setTestingProvider(provider.id);
+    try {
+      const res = await axios.post(`${API}/remote-providers/${provider.id}/test`, {}, { headers });
+      setProviderTestResult(prev => ({ ...prev, [provider.id]: res.data }));
+      if (res.data.success) toast.success(res.data.message);
+      else toast.error(res.data.message);
+    } catch { toast.error("Connection test failed"); }
+    finally { setTestingProvider(null); }
+  };
 
   // Quick connect
   const quickConnect = async () => {
@@ -251,9 +302,9 @@ export default function RemoteAccessPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center"><Laptop className="w-5 h-5 text-white" /></div>
-            Remote Devices
+            Remote Access Hub
           </h1>
-          <p className="text-muted-foreground mt-1">Manage RustDesk remote access for all client devices</p>
+          <p className="text-muted-foreground mt-1">Manage remote access providers and device connections</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Server Settings</Button>
@@ -340,9 +391,10 @@ export default function RemoteAccessPage() {
         <TabsList>
           <TabsTrigger value="devices">All Devices ({devices.length})</TabsTrigger>
           <TabsTrigger value="registered">Registered ({registered.length})</TabsTrigger>
+          <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Integrations ({providers.length})</TabsTrigger>
           {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Peers ({livePeers.count})</TabsTrigger>}
-          <TabsTrigger value="deployments" data-testid="tab-deployments"><Rocket className="w-3 h-3 mr-1" />Agent Deployments ({deployments?.total || 0})</TabsTrigger>
-          <TabsTrigger value="sessions">Session History ({sessions.length})</TabsTrigger>
+          <TabsTrigger value="deployments" data-testid="tab-deployments"><Rocket className="w-3 h-3 mr-1" />Deployments ({deployments?.total || 0})</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions ({sessions.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="devices" className="mt-4 space-y-3">
@@ -527,8 +579,81 @@ export default function RemoteAccessPage() {
           )}
         </TabsContent>
 
+        {/* ============ INTEGRATIONS TAB ============ */}
+        <TabsContent value="integrations" className="mt-4 space-y-4" data-testid="integrations-tab">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Configure remote access providers. Enable the tools your team uses and enter API credentials.</p>
+            </div>
+            <Badge variant="outline" className="text-xs">{providers.filter(p => p.active).length} Active / {providers.length} Available</Badge>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {providers.map(p => {
+              const isActive = p.active;
+              const isConfigured = p.configured;
+              const testRes = providerTestResult[p.id];
+              return (
+                <Card key={p.id} className={`border transition-all hover:shadow-md ${isActive ? "border-emerald-500/30 bg-emerald-500/5" : "border-border/40"}`} data-testid={`provider-card-${p.id}`}>
+                  <CardContent className="pt-5 pb-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isActive ? "bg-emerald-500/15" : "bg-muted/50"}`}>
+                          {p.type === "self-hosted" ? <Server className={`w-5 h-5 ${isActive ? "text-emerald-400" : "text-muted-foreground"}`} /> : <Globe className={`w-5 h-5 ${isActive ? "text-emerald-400" : "text-muted-foreground"}`} />}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-sm">{p.name}</h3>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <Badge variant="outline" className="text-[10px]">{p.type === "self-hosted" ? "Self-Hosted" : "Cloud"}</Badge>
+                            <span className="text-[10px] text-muted-foreground">{p.license}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Switch checked={isActive} onCheckedChange={() => toggleProvider(p)} data-testid={`toggle-${p.id}`} />
+                    </div>
+
+                    <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{p.description}</p>
+
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {p.features.slice(0, 4).map(f => (
+                        <Badge key={f} variant="secondary" className="text-[9px] px-1.5 py-0 font-normal">{f}</Badge>
+                      ))}
+                      {p.features.length > 4 && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-normal">+{p.features.length - 4}</Badge>}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        {isConfigured ? (
+                          <span className="flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle className="w-3 h-3" />Configured</span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] text-amber-400"><AlertCircle className="w-3 h-3" />Not configured</span>
+                        )}
+                        {testRes && (
+                          <span className={`flex items-center gap-1 text-[10px] ml-2 ${testRes.success ? "text-emerald-400" : "text-red-400"}`}>
+                            {testRes.success ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                            {testRes.success ? "Connected" : "Failed"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        {p.docs_url && (
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => window.open(p.docs_url, "_blank")} data-testid={`docs-${p.id}`}>
+                            <BookOpen className="w-3 h-3 mr-1" />Docs
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openProviderConfig(p)} data-testid={`configure-${p.id}`}>
+                          <Settings className="w-3 h-3 mr-1" />Configure
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </TabsContent>
+
         {/* Agent Deployments Tab */}
-        {/* Live Peers Tab */}
         {livePeers && (
           <TabsContent value="live-peers" className="mt-4 space-y-3" data-testid="live-peers-tab">
             <div className="flex items-center justify-between mb-2">
@@ -794,6 +919,60 @@ export default function RemoteAccessPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeployDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Provider Configuration Dialog */}
+      <Dialog open={!!providerConfig} onOpenChange={v => { if (!v) setProviderConfig(null); }}>
+        <DialogContent className="max-w-md" aria-describedby="provider-config-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Settings className="w-5 h-5" />{providerConfig?.name} Configuration</DialogTitle>
+            <DialogDescription id="provider-config-desc">Configure connection settings for {providerConfig?.name}</DialogDescription>
+          </DialogHeader>
+          {providerConfig && (
+            <div className="space-y-4">
+              {providerConfig.config_fields.map(field => (
+                <div key={field.key} className="space-y-1.5">
+                  <Label className="text-xs">{field.label}</Label>
+                  <Input
+                    type={field.type === "password" ? "password" : "text"}
+                    value={providerForm[field.key] || ""}
+                    onChange={e => setProviderForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    placeholder={field.placeholder}
+                    data-testid={`provider-field-${field.key}`}
+                  />
+                </div>
+              ))}
+
+              <div className="flex items-center justify-between py-2 border-t">
+                <div>
+                  <Label className="text-sm">Enable Provider</Label>
+                  <p className="text-[10px] text-muted-foreground">Show in remote access options</p>
+                </div>
+                <Switch
+                  checked={providerForm.active || false}
+                  onCheckedChange={v => setProviderForm(prev => ({ ...prev, active: v }))}
+                  data-testid="provider-active-toggle"
+                />
+              </div>
+
+              {providerTestResult[providerConfig.id] && (
+                <div className={`p-3 rounded-lg text-xs border ${providerTestResult[providerConfig.id].success ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+                  <p className={`font-medium ${providerTestResult[providerConfig.id].success ? "text-emerald-400" : "text-red-400"}`}>
+                    {providerTestResult[providerConfig.id].message}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => testProviderConnection(providerConfig)} disabled={testingProvider === providerConfig?.id} data-testid="test-provider-btn">
+              {testingProvider === providerConfig?.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <TestTube className="w-3 h-3 mr-1" />}Test Connection
+            </Button>
+            <Button onClick={saveProviderSettings} disabled={savingProvider} data-testid="save-provider-btn">
+              {savingProvider ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}Save Settings
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

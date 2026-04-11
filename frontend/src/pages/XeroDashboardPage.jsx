@@ -20,7 +20,7 @@ import {
   RefreshCw, Loader2, CreditCard, Receipt, Search, BarChart3, Clock, Plus,
   Send, Ban, History, Repeat, ArrowRight, Pause, Play, XCircle, Mail,
   Pencil, Trash2, Zap, CalendarDays, Percent, Shield, ChevronDown, ChevronUp,
-  Palette, Eye
+  Palette, Eye, Download
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
@@ -231,11 +231,20 @@ export default function XeroDashboardPage() {
     if (!emailForm.to_email) { toast.error("Recipient email required"); return; }
     setEmailSending(true);
     try {
-      await axios.post(`${API}/xero/invoices/${emailDialog.id}/email`, emailForm, { headers });
-      toast.success(`Invoice emailed to ${emailForm.to_email}`);
+      const res = await axios.post(`${API}/xero/invoices/${emailDialog.id}/email`, emailForm, { headers });
+      toast.success(res.data.message || `Invoice emailed to ${emailForm.to_email}`);
       setEmailDialog(null); fetchAll();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to send email"); }
     finally { setEmailSending(false); }
+  };
+
+  // PDF download
+  const downloadPdf = (inv) => {
+    window.open(`${API}/invoices/${inv.id}/pdf/download?token=${token}`, "_blank");
+    toast.success(`Downloading ${inv.invoice_number}.pdf`);
+  };
+  const previewPdf = (inv) => {
+    window.open(`${API}/invoices/${inv.id}/pdf?token=${token}`, "_blank");
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -407,6 +416,7 @@ export default function XeroDashboardPage() {
                         <TableCell className={`text-right font-mono ${inv.amount_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadPdf(inv)} title="Download PDF" data-testid={`pdf-${inv.id}`}><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEmailDialog(inv)} title="Email Invoice" data-testid={`email-${inv.id}`}><Mail className="w-3.5 h-3.5 text-cyan-400" /></Button>
                             {inv.status === "DRAFT" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleSendInvoice(inv)} title="Mark Sent"><Send className="w-3.5 h-3.5 text-blue-400" /></Button>}
                             {inv.amount_due > 0 && inv.status !== "DRAFT" && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }} title="Record Payment" data-testid={`pay-${inv.id}`}><CreditCard className="w-3.5 h-3.5 text-emerald-400" /></Button>}
