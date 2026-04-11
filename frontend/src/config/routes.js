@@ -43,8 +43,8 @@ export const routeConfig = [
   { path: "/client-reports", component: page("ClientReportsPage"), auth: true, layout: true },
 
   // Service Management
-  { path: "/sla-timer", component: page("SlaTimerPage"), auth: true, layout: true },
-  { path: "/sla-penalties", component: page("SlaPenaltiesPage"), auth: true, layout: true },
+  { path: "/sla-timer", component: page("SlaCenterPage"), auth: true, layout: true },
+  { path: "/sla-penalties", component: page("SlaCenterPage"), auth: true, layout: true },
   { path: "/dispatch-board", component: page("DispatchBoardPage"), auth: true, layout: true },
   { path: "/escalation-matrix", component: page("EscalationMatrixPage"), auth: true, layout: true },
   { path: "/change-management", component: page("ChangeManagementPage"), auth: true, layout: true },
@@ -61,9 +61,9 @@ export const routeConfig = [
   { path: "/asset-lifecycle", component: page("AssetLifecyclePage"), auth: true, layout: true },
   { path: "/asset-depreciation", component: page("AssetDepreciationPage"), auth: true, layout: true },
   { path: "/warranty-tracker", component: page("WarrantyTrackerPage"), auth: true, layout: true },
-  { path: "/backup-compliance", component: page("BackupCompliancePage"), auth: true, layout: true },
+  { path: "/backup-compliance", component: page("BackupCenterPage"), auth: true, layout: true },
   { path: "/procurement-planner", component: page("ProcurementPlannerPage"), auth: true, layout: true },
-  { path: "/predictive-maintenance", component: page("PredictiveMaintenancePage"), auth: true, layout: true },
+  { path: "/predictive-maintenance", component: page("PredictiveIntelPage"), auth: true, layout: true },
   { path: "/doc-scanner", component: page("DocScannerPage"), auth: true, layout: true },
   { path: "/vault", component: page("VaultPage"), auth: true, layout: true },
   { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
@@ -89,7 +89,7 @@ export const routeConfig = [
   { path: "/upsell", component: page("UpsellPage"), auth: true, layout: true },
   { path: "/contract-profit", component: page("ContractProfitPage"), auth: true, layout: true },
   { path: "/vendor-scorecard", component: page("VendorScorecardPage"), auth: true, layout: true },
-  { path: "/compliance", component: page("CompliancePage"), auth: true, layout: true },
+  { path: "/compliance", component: page("ComplianceCenterPage"), auth: true, layout: true },
 
   // Business Operations
   { path: "/leads", component: page("LeadsPage"), auth: true, layout: true },
@@ -113,13 +113,12 @@ export const routeConfig = [
   { path: "/ticket-settings", component: page("TicketSettingsPage"), auth: true, layout: true },
   { path: "/ticket-ping-settings", component: page("TicketPingSettingsPage"), auth: true, layout: true },
   { path: "/health-radar", component: page("HealthRadarPage"), auth: true, layout: true },
-  { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
 
   // Phase C new features
   { path: "/dns-monitor", component: page("DnsMonitorPage"), auth: true, layout: true },
   { path: "/patch-compliance", component: page("PatchCompliancePage"), auth: true, layout: true },
   { path: "/client-portal-admin", component: page("ClientPortalAdminPage"), auth: true, layout: true },
-  { path: "/backup-dashboard", component: page("BackupDashboardPage"), auth: true, layout: true },
+  { path: "/backup-dashboard", component: page("BackupCenterPage"), auth: true, layout: true },
   { path: "/mfa-management", component: page("MfaManagementPage"), auth: true, layout: true },
   { path: "/alert-suppression", component: page("AlertSuppressionPage"), auth: true, layout: true },
   { path: "/license-management", component: page("LicenseManagementPage"), auth: true, layout: true },
@@ -136,7 +135,7 @@ export const routeConfig = [
   { path: "/soc-feed", component: page("SocFeedPage"), auth: true, layout: true },
   { path: "/vulnerability-scanner", component: page("VulnerabilityScannerPage"), auth: true, layout: true },
   { path: "/third-party-patching", component: page("ThirdPartyPatchingPage"), auth: true, layout: true },
-  { path: "/compliance-report-gen", component: page("ComplianceReportGenPage"), auth: true, layout: true },
+  { path: "/compliance-report-gen", component: page("ComplianceCenterPage"), auth: true, layout: true },
   { path: "/audit-trail", component: page("AuditTrailPage"), auth: true, layout: true },
 
   // Phase D: Operations & Business
@@ -145,7 +144,7 @@ export const routeConfig = [
   { path: "/recurring-invoices", component: page("RecurringInvoicesPage"), auth: true, layout: true },
   { path: "/kanban-tickets", component: page("KanbanTicketsPage"), auth: true, layout: true },
   { path: "/password-rotation", component: page("PasswordRotationPage"), auth: true, layout: true },
-  { path: "/sla-report-gen", component: page("SlaReportGenPage"), auth: true, layout: true },
+  { path: "/sla-report-gen", component: page("SlaCenterPage"), auth: true, layout: true },
   { path: "/capacity-planner", component: page("CapacityPlannerPage"), auth: true, layout: true },
   { path: "/auto-documentation", component: page("AutoDocumentationPage"), auth: true, layout: true },
 
@@ -158,7 +157,7 @@ export const routeConfig = [
 
   // Phase F: AI Self-Healing + Advanced Ops
   { path: "/self-healing", component: page("SelfHealingPage"), auth: true, layout: true },
-  { path: "/predictive-failure", component: page("PredictiveFailurePage"), auth: true, layout: true },
+  { path: "/predictive-failure", component: page("PredictiveIntelPage"), auth: true, layout: true },
   { path: "/usage-billing", component: page("UsageBillingPage"), auth: true, layout: true },
   { path: "/pricing-calc", component: page("PricingCalcPage"), auth: true, layout: true },
   { path: "/comms-timeline", component: page("CommsTimelinePage"), auth: true, layout: true },
@@ -174,7 +173,7 @@ export const routeConfig = [
   { path: "/channel-mode", component: page("ChannelModePage"), auth: true, layout: true },
   { path: "/mobile-tech", component: page("MobileTechPage"), auth: true, layout: true },
   { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
-  { path: "/revenue-tracker", component: page("RevenueTrackerPage"), auth: true, layout: true },
+  { path: "/revenue-tracker", component: page("RevenueAnalyticsPage"), auth: true, layout: true },
 
   { path: "/billing-dashboard", component: page("BillingDashboardPage"), auth: true, layout: true },
 
@@ -186,8 +185,8 @@ export const routeConfig = [
   // Phase E: Security
   { path: "/dark-web-monitor", component: page("DarkWebMonitorPage"), auth: true, layout: true },
   { path: "/phishing-sim", component: page("PhishingSimPage"), auth: true, layout: true },
-  { path: "/backup-verify", component: page("BackupVerifyPage"), auth: true, layout: true },
-  { path: "/compliance-frameworks", component: page("ComplianceFrameworksPage"), auth: true, layout: true },
+  { path: "/backup-verify", component: page("BackupCenterPage"), auth: true, layout: true },
+  { path: "/compliance-frameworks", component: page("ComplianceCenterPage"), auth: true, layout: true },
 
   // Phase E: Operations
   { path: "/hardware-refresh", component: page("HardwareRefreshPage"), auth: true, layout: true },
@@ -202,7 +201,7 @@ export const routeConfig = [
   // P1 Features
   { path: "/intelligent-routing", component: page("IntelligentRoutingPage"), auth: true, layout: true },
   { path: "/client-portal", component: page("ClientPortalPage"), auth: true, layout: true },
-  { path: "/revenue-tracking", component: page("RevenueTrackingPage"), auth: true, layout: true },
+  { path: "/revenue-tracking", component: page("RevenueAnalyticsPage"), auth: true, layout: true },
   { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
 
   // Auth callback (no auth, no layout)

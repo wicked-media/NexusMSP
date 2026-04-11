@@ -35,8 +35,7 @@ export const navGroups = [
         children: [
           { path: "/tickets", label: "All Tickets" },
           { path: "/kanban-tickets", label: "Kanban Board" },
-          { path: "/sla-timer", label: "SLA Timer" },
-          { path: "/sla-penalties", label: "SLA Penalties" },
+          { path: "/sla-timer", label: "SLA Center" },
         ]
       },
       {
@@ -123,11 +122,9 @@ export const navGroups = [
         ]
       },
       {
-        path: "/backup-dashboard", icon: HardDrive, label: "Backups",
+        path: "/backup-dashboard", icon: HardDrive, label: "Backup Center",
         children: [
-          { path: "/backup-dashboard", label: "Dashboard" },
-          { path: "/backup-compliance", label: "Compliance" },
-          { path: "/backup-verify", label: "Verify" },
+          { path: "/backup-dashboard", label: "Backup Center" },
         ]
       },
       {
@@ -210,8 +207,7 @@ export const navGroups = [
           { path: "/profitability-heatmap", label: "Profitability Map" },
           { path: "/cost-per-ticket", label: "Cost/Ticket" },
           { path: "/roi-reports", label: "ROI Reports" },
-          { path: "/revenue-tracker", label: "Revenue Tracker" },
-          { path: "/revenue-tracking", label: "Revenue/Ticket" },
+          { path: "/revenue-tracker", label: "Revenue Analytics" },
         ]
       },
       {
@@ -245,7 +241,7 @@ export const navGroups = [
         children: [
           { path: "/security-dashboard", label: "Overview" },
           { path: "/soc-feed", label: "SOC Feed" },
-          { path: "/soc-realtime", label: "Live Feed" },
+          { path: "/soc-realtime", label: "Smart Automation" },
           { path: "/threat-timeline", label: "Threat Timeline" },
           { path: "/identity-threats", label: "Identity Threats" },
         ]
@@ -269,11 +265,9 @@ export const navGroups = [
         ]
       },
       {
-        path: "/compliance-frameworks", icon: ShieldAlert, label: "Compliance",
+        path: "/compliance", icon: ShieldAlert, label: "Compliance Center",
         children: [
-          { path: "/compliance-frameworks", label: "Frameworks" },
-          { path: "/compliance", label: "Reports" },
-          { path: "/compliance-report-gen", label: "Generator" },
+          { path: "/compliance", label: "Compliance Center" },
           { path: "/mfa-management", label: "MFA Management" },
           { path: "/password-rotation", label: "Password Rotation" },
           { path: "/audit-trail", label: "Audit Trail" },
@@ -291,8 +285,8 @@ export const navGroups = [
           { path: "/nlp-query", label: "NLP Search" },
           { path: "/ai-resolution", label: "Auto-Resolve" },
           { path: "/self-healing", label: "Self-Healing" },
-          { path: "/predictive-failure", label: "Predictive Failure" },
-          { path: "/predictive-maintenance", label: "Predictive AI" },
+          { path: "/predictive-failure", label: "Predictive Intelligence" },
+          { path: "/predictive-failure", label: "Predictive Intelligence" },
         ]
       },
       { path: "/dashboard-builder", icon: LayoutGrid, label: "Dashboard Builder" },
@@ -317,7 +311,7 @@ export const navGroups = [
           { path: "/reports", label: "Reports" },
           { path: "/executive-reports", label: "Executive" },
           { path: "/client-reports", label: "Client Reports" },
-          { path: "/sla-report-gen", label: "SLA Reports" },
+          { path: "/sla-report-gen", label: "SLA Center" },
           { path: "/qbr-generator", label: "QBR Generator" },
           { path: "/it-roadmap", label: "IT Roadmap" },
         ]
