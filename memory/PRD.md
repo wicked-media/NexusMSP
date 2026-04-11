@@ -11,61 +11,62 @@ NexusOps is a unified RMM/PSA platform for managed service providers. Monitor, m
 
 ## Completed Features
 
-### Phase 1-23 (DONE)
-Full MSP platform: Ticketing, CRM, invoicing, RMM, networking, scheduling, reporting, white-label, AI copilot, client portal, voice-to-ticket, gamification, SOC & Security, Onboarding, Dashboard, Technicians, Patch Agent, RustDesk live integration, Nav Consolidation, Module Visibility, Microsoft SSO, Global Settings Hub, Email-to-Lead/Ticket, Notifications Revamp, Kanban Board, Workshop Bench, Dispatch Map
+### Phase 1-27 (DONE)
+Full MSP platform: Ticketing, CRM, invoicing, RMM, networking, scheduling, reporting, white-label, AI copilot, client portal, voice-to-ticket, gamification, SOC & Security, Onboarding, Dashboard, Technicians, Patch Agent, RustDesk live, Nav Consolidation, Module Visibility, Microsoft SSO, Global Settings Hub, Email-to-Lead/Ticket, Notifications Revamp, Kanban Board, Workshop Bench, Dispatch Map, Code Quality & Security Hardening, Module Consolidation (5 Centers)
 
-### Phase 24-25: Code Quality & Security Hardening (DONE)
-- XSS Protection (DOMPurify), SSL verification fix, document.write sanitized
-- Secure token storage (secureStorage XOR cipher wrapper)
-- Python SystemRandom, hook dependencies, mutable defaults fixed
+### Phase 28-29: Finance Center + Recurring Billing (DONE - 2026-04-11)
+- 8-tab Finance Center (Overview, Invoices, Estimates, Recurring, Contacts, Accounts, Sync Log, Aging)
+- Enterprise-grade Recurring Billing (MRR/ARR, forecast, contract dates, escalation, batch generate)
+- Invoice Email feature (mocked, ready for Resend)
+- Ticket Enhancements (bulk actions, SLA countdowns, quick templates)
 
-### Phase 26: RustDesk Integration Fixes (DONE - 2026-04-10)
-- Fixed inverted SSL verify logic, URL normalization, test connection
+### Phase 30: Morning Checks + Live Terminal + Remote Hub + Templates (DONE - 2026-04-11)
 
-### Phase 27: Module Consolidation (DONE - 2026-04-11)
-- Merged 13 overlapping pages into 5 unified tabbed Centers
+**Morning Checks Dashboard** (`/morning-checks`):
+- Health Score gauge (0-100, color coded)
+- KPI cards: Devices Offline, Critical Tickets, SLA Breaches, Backups Failed, Security Alerts
+- Client Health RAG Board (Red/Amber/Green per client with device/ticket/backup status)
+- Offline devices list, critical tickets list, overnight tickets
+- Quick stats: unassigned tickets, critical patches, invoices due
+- Phone system (Yeastar) status
+- Overdue invoices summary
+- Scheduled tasks for today
+- Refresh on demand
 
-### Phase 28: Tickets & Billing Revamp + Xero Finance Center (DONE - 2026-04-11)
-**Finance Center (XeroDashboardPage)**: 8-tab unified financial hub
-- Overview, Invoices (CRUD + email), Estimates (CRUD + convert), Recurring, Contacts, Accounts, Sync Log, Aging
-**Ticket Enhancements**: Bulk actions (close/assign/priority/status/tag), SLA countdown badges, Quick Template picker
+**Live Terminal** (Scripting page):
+- New "Live Terminal" tab with split-pane view
+- Left: Script selector, target device dropdown, Execute button, code preview
+- Right: Dark terminal output console with macOS-style dots header
+- Real-time output with timestamps, color coding (blue=info, green=success, red=error, yellow=warning)
+- Animated line-by-line output display
+- Recent runs history with status, duration
+- Clear button to reset output
 
-### Phase 29: Enhanced Recurring Billing + Invoice Email (DONE - 2026-04-11)
-**Recurring Billing Module (Enterprise Grade)**:
-- KPI dashboard: MRR, ARR, Active Templates, Due for Generation, Total Templates
-- 12-Month Revenue Forecast bar chart with escalation projections
-- Rich template cards with expand/collapse detail view
-- Per-template details: contract period, payment terms, total billed, collection rate, notes, line items breakdown, generated invoice history
-- Create/Edit/Delete templates with full fields: frequency (weekly/fortnightly/monthly/quarterly/yearly), payment terms, tax rate, contract dates, annual escalation %, auto-generate/auto-send toggles, billing email, notes
-- Generate Now button per template (creates invoice immediately)
-- Batch Generate All Due button (bulk invoice creation)
-- Search + status filter (active/paused)
+**Remote Access Multi-Provider Hub**:
+- Backend supports 4 providers: RustDesk, MeshCentral, Splashtop, Apache Guacamole
+- Per-provider settings, connection testing, activation toggle
+- Provider info: license type, features, documentation links
+- Ready for credential configuration
 
-**Invoice Email Feature**:
-- Email dialog with invoice preview (client, amount, due date, status)
-- Recipient email, subject, message fields
-- Email button on every invoice in Invoices tab
-- Send Reminder button on overdue invoices in Aging tab
-- MOCKED email sending (logged to MongoDB, ready for Resend integration)
-
-**Backend Additions**:
-- `PUT /api/xero/recurring/{id}` - Edit templates
-- `DELETE /api/xero/recurring/{id}` - Delete templates
-- `POST /api/xero/recurring/{id}/generate` - Generate invoice from template
-- `POST /api/xero/recurring/batch-generate` - Batch generate all due
-- `GET /api/xero/recurring/{id}/history` - Generated invoice history
-- `GET /api/xero/recurring/forecast` - 12-month forecast + MRR/ARR
-- `POST /api/xero/invoices/{id}/email` - Send (mocked) invoice email
-- `GET /api/xero/invoices/{id}/emails` - Email history per invoice
+**Module Templates** (34 total):
+- 12 Ticket Templates (Password Reset, New User, Network Down, Email, Printer, VPN, Slow PC, Backup Fail, Security Incident, Server Down, Software Install, Offboarding)
+- 4 Onboarding Templates (IT Audit, M365 Migration, Security Baseline, RMM Deployment)
+- 4 SLA Templates (Platinum/Gold/Silver/Bronze with response/resolution times)
+- 6 Runbook Templates (Server Down, Ransomware, New Employee, Client Offboarding, Firewall Change, Backup Investigation)
+- 8 Script Templates (Disk Cleanup, AD Audit, Windows Update, Service Health, Backup Verify, Network Diag, SSL Check, Linux Health)
 
 ## Prioritized Backlog
+
+### P1 - High Value
+- Hudu integration fixes (live data not working)
+- Surface templates in frontend UI (currently backend only — need template pickers in Tickets, Onboarding, SLA, Runbooks)
+- Remote Access Provider UI page (frontend for configuring MeshCentral/Splashtop/Guacamole)
 
 ### P2 - Feature Expansion
 - Workflow Automation Builder (IF/THEN visual rules engine)
 - Knowledge Base / Wiki enhancements
 - Scheduled PDF Reports
 - CRM integrations (Pax8, Domotz)
-- Cross-platform scripting library
 
 ### P3 - Tech Debt
 - Refactor TicketsPage.jsx (~4000 lines) into sub-components
@@ -78,12 +79,16 @@ Full MSP platform: Ticketing, CRM, invoicing, RMM, networking, scheduling, repor
 - Client Portal: john@acmecorp.com / portal123
 
 ## Key API Endpoints
-- `/api/auth/login`, `/api/settings/*`
-- `/api/xero/*` (Finance Center - invoices, estimates, recurring, contacts, accounts, sync, email)
+- `/api/morning-checks` (NOC daily briefing)
+- `/api/xero/*` (Finance Center)
 - `/api/tickets/*`, `/api/tickets/bulk-action`
-- `/api/rustdesk/live/*`
+- `/api/scripts/{id}/live-run`, `/api/script-executions/{id}`
+- `/api/remote-providers`, `/api/remote-providers/{id}/settings`
+- `/api/templates/{module}` (tickets, onboarding, sla, runbooks, scripts)
 
 ## Mocked Integrations
-- Xero accounting (all endpoints use local MongoDB, no live Xero API)
-- Email sending (logged to MongoDB, not sent via Resend)
-- AI config, dashboard data seeders
+- Xero accounting (local MongoDB)
+- Email sending (logged, not sent via Resend)
+- Remote providers (static config, no live connections)
+- Script execution (simulated output)
+- Morning checks (aggregates from DB)
