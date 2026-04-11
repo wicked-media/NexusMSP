@@ -20,7 +20,7 @@ import {
   RefreshCw, Loader2, CreditCard, Receipt, Search, BarChart3, Clock, Plus,
   Send, Ban, History, Repeat, ArrowRight, Pause, Play, XCircle, Mail,
   Pencil, Trash2, Zap, CalendarDays, Percent, Shield, ChevronDown, ChevronUp,
-  Palette, Eye, Download
+  Palette, Eye, Download, Link2, Copy
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
@@ -119,6 +119,9 @@ export default function XeroDashboardPage() {
   const [emailForm, setEmailForm] = useState({ to_email: "", subject: "", message: "" });
   const [emailSending, setEmailSending] = useState(false);
   const [batchGenerating, setBatchGenerating] = useState(false);
+  const [payLinkDialog, setPayLinkDialog] = useState(null);
+  const [payLinkResult, setPayLinkResult] = useState(null);
+  const [generatingLink, setGeneratingLink] = useState(false);
 
   const emptyInvForm = { client_name: "", reference: "", due_date: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
   const emptyEstForm = { title: "", client_name: "", valid_until: "", notes: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
@@ -245,6 +248,26 @@ export default function XeroDashboardPage() {
   };
   const previewPdf = (inv) => {
     window.open(`${API}/invoices/${inv.id}/pdf?token=${token}`, "_blank");
+  };
+
+  // Payment link generation
+  const generatePaymentLink = async (inv) => {
+    setGeneratingLink(true);
+    setPayLinkResult(null);
+    try {
+      const res = await axios.post(`${API}/payment-links`, {
+        invoice_id: inv.id,
+        expires_days: 14,
+        allowed_methods: ["card", "becs", "bank_transfer"],
+      }, { headers });
+      const linkUrl = `${window.location.origin}/pay/${res.data.token}`;
+      setPayLinkResult({ ...res.data, url: linkUrl });
+      setPayLinkDialog(inv);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to generate payment link");
+    } finally {
+      setGeneratingLink(false);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -418,6 +441,7 @@ export default function XeroDashboardPage() {
                           <div className="flex items-center justify-end gap-1">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadPdf(inv)} title="Download PDF" data-testid={`pdf-${inv.id}`}><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEmailDialog(inv)} title="Email Invoice" data-testid={`email-${inv.id}`}><Mail className="w-3.5 h-3.5 text-cyan-400" /></Button>
+                            {inv.amount_due > 0 && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => generatePaymentLink(inv)} title="Payment Link" disabled={generatingLink} data-testid={`paylink-${inv.id}`}><Link2 className="w-3.5 h-3.5 text-amber-400" /></Button>}
                             {inv.status === "DRAFT" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleSendInvoice(inv)} title="Mark Sent"><Send className="w-3.5 h-3.5 text-blue-400" /></Button>}
                             {inv.amount_due > 0 && inv.status !== "DRAFT" && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }} title="Record Payment" data-testid={`pay-${inv.id}`}><CreditCard className="w-3.5 h-3.5 text-emerald-400" /></Button>}
                             {inv.status !== "PAID" && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleVoidInvoice(inv)} title="Void"><Ban className="w-3.5 h-3.5 text-red-400" /></Button>}
@@ -886,6 +910,37 @@ export default function XeroDashboardPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setRecDialog({ open: false, editing: null })}>Cancel</Button>
             <Button onClick={handleSaveRecurring} data-testid="submit-recurring-btn">{recDialog.editing ? <><Pencil className="w-4 h-4 mr-1" />Update Template</> : <><Plus className="w-4 h-4 mr-1" />Create Template</>}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Link Dialog */}
+      <Dialog open={!!payLinkDialog} onOpenChange={v => { if (!v) { setPayLinkDialog(null); setPayLinkResult(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Link2 className="w-5 h-5 text-amber-400" />Payment Link Generated</DialogTitle>
+            <DialogDescription>One-time payment link for {payLinkDialog?.invoice_number}</DialogDescription>
+          </DialogHeader>
+          {payLinkResult && (
+            <div className="space-y-4">
+              <Card className="bg-muted/10"><CardContent className="py-3 px-4 space-y-1">
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Invoice:</span><span className="font-mono font-bold">{payLinkResult.invoice_number}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Balance:</span><span className="font-mono text-amber-400">${payLinkResult.balance_at_creation?.toFixed(2)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Expires:</span><span className="text-xs">{new Date(payLinkResult.expires_at).toLocaleDateString()}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Methods:</span><span className="text-xs">Card, BECS, Bank Transfer</span></div>
+              </CardContent></Card>
+              <div className="space-y-2">
+                <Label className="text-xs">Payment Link URL</Label>
+                <div className="flex gap-2">
+                  <Input value={payLinkResult.url} readOnly className="font-mono text-xs" data-testid="payment-link-url" />
+                  <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(payLinkResult.url); toast.success("Link copied!"); }} data-testid="copy-payment-link"><Copy className="w-4 h-4" /></Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Share this link with your client. They can pay via card, BECS direct debit, or manual bank transfer. The link expires after {payLinkResult.expires_days} days or once fully paid.</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setPayLinkDialog(null); setPayLinkResult(null); }}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
