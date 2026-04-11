@@ -30,6 +30,7 @@ export const navGroups = [
     title: "Service Desk",
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+      { path: "/morning-checks", icon: Activity, label: "Morning Checks" },
       {
         path: "/tickets", icon: Ticket, label: "Tickets",
         children: [

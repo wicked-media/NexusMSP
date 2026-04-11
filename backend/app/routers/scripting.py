@@ -102,6 +102,79 @@ async def execute_script(script_id: str, device_ids: List[str], parameters: Dict
     
     return {"message": f"Script queued for {len(executions)} devices", "executions": executions}
 
+@router.post("/scripts/{script_id}/live-run")
+async def live_run_script(script_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Execute a script and return simulated real-time output"""
+    import random as _random_mod
+    _srand = _random_mod.SystemRandom()
+    script = await db.scripts.find_one({"id": script_id}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script not found")
+    device_id = data.get("device_id", "")
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0}) if device_id else None
+    target = device.get("name", device.get("hostname", "Target")) if device else data.get("target", "localhost")
+    now = datetime.now(timezone.utc)
+    script_content = script.get("content", "")
+    lines = script_content.strip().split("\n") if script_content.strip() else ["echo 'No script content'"]
+    # Build simulated output
+    output_lines = []
+    output_lines.append({"time": now.isoformat(), "type": "info", "text": f"Connecting to {target}..."})
+    output_lines.append({"time": (now + timedelta(milliseconds=350)).isoformat(), "type": "success", "text": f"Session established with {target}"})
+    output_lines.append({"time": (now + timedelta(milliseconds=600)).isoformat(), "type": "info", "text": f"Executing: {script.get('name', 'script')}"})
+    output_lines.append({"time": (now + timedelta(milliseconds=800)).isoformat(), "type": "command", "text": "---"})
+    # Simulate each line
+    base_ms = 1000
+    has_error = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("//") or stripped.startswith("REM"):
+            output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "comment", "text": stripped})
+        else:
+            output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "command", "text": f"PS > {stripped}"})
+            base_ms += _srand.randint(100, 500)
+            # Simulate output for common commands
+            if any(kw in stripped.lower() for kw in ["get-", "echo", "write-", "print", "select", "dir", "ls"]):
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "output", "text": f"[OK] {stripped[:60]}... completed"})
+            elif any(kw in stripped.lower() for kw in ["set-", "start-", "restart-", "stop-", "install", "remove", "new-"]):
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "success", "text": f"Operation completed successfully"})
+            elif any(kw in stripped.lower() for kw in ["try", "catch", "if", "else", "for", "while", "foreach"]):
+                pass  # Control flow - no output
+            elif any(kw in stripped.lower() for kw in ["error", "throw", "fail"]):
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "error", "text": f"Error in execution: {stripped[:40]}"})
+                has_error = True
+            else:
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "output", "text": f"{stripped[:80]}"})
+        base_ms += _srand.randint(200, 800)
+    output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "command", "text": "---"})
+    final_status = "failed" if has_error else "completed"
+    output_lines.append({"time": (now + timedelta(milliseconds=base_ms + 200)).isoformat(), "type": "success" if not has_error else "error", "text": f"Script execution {final_status} in {base_ms}ms"})
+    output_lines.append({"time": (now + timedelta(milliseconds=base_ms + 300)).isoformat(), "type": "info", "text": "Session closed."})
+    # Save execution record
+    execution = {
+        "id": str(uuid.uuid4()),
+        "script_id": script_id,
+        "script_name": script.get("name", ""),
+        "device_id": device_id,
+        "device_name": target,
+        "user_id": current_user["id"],
+        "user_name": current_user["name"],
+        "status": final_status,
+        "output": output_lines,
+        "duration_ms": base_ms + 300,
+        "created_at": now.isoformat(),
+    }
+    await db.script_executions.insert_one(execution)
+    execution.pop("_id", None)
+    await db.scripts.update_one({"id": script_id}, {"$inc": {"run_count": 1}, "$set": {"last_run": now.isoformat()}})
+    return execution
+
+@router.get("/script-executions/{execution_id}")
+async def get_execution_detail(execution_id: str, current_user: dict = Depends(get_current_user)):
+    execution = await db.script_executions.find_one({"id": execution_id}, {"_id": 0})
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return execution
+
 @router.get("/script-executions")
 async def get_script_executions(
     script_id: Optional[str] = None,

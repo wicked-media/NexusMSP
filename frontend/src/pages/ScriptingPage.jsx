@@ -203,6 +203,31 @@ export default function ScriptingPage() {
 
   const openRunDialog = (script) => { setSelectedScript(script); setSelectedDevices([]); setIsRunDialogOpen(true); };
 
+  // Live Terminal state
+  const [liveScript, setLiveScript] = useState(null);
+  const [liveDevice, setLiveDevice] = useState("");
+  const [liveOutput, setLiveOutput] = useState([]);
+  const [liveRunning, setLiveRunning] = useState(false);
+  const [liveHistory, setLiveHistory] = useState([]);
+
+  const handleLiveRun = async () => {
+    if (!liveScript) { toast.error("Select a script"); return; }
+    setLiveRunning(true);
+    setLiveOutput([{ time: new Date().toISOString(), type: "info", text: "Initializing execution..." }]);
+    try {
+      const res = await axios.post(`${API}/scripts/${liveScript.id}/live-run`, { device_id: liveDevice, target: liveDevice || "localhost" }, { headers });
+      const outputLines = res.data.output || [];
+      // Animate the output lines one by one
+      for (let i = 0; i < outputLines.length; i++) {
+        await new Promise(r => setTimeout(r, 120 + Math.random() * 200));
+        setLiveOutput(prev => [...prev.slice(0, i === 0 ? 0 : prev.length), outputLines[i]]);
+      }
+      setLiveHistory(prev => [{ id: res.data.id, script_name: res.data.script_name, device_name: res.data.device_name, status: res.data.status, duration_ms: res.data.duration_ms, created_at: res.data.created_at, output: outputLines }, ...prev.slice(0, 9)]);
+      toast.success(`Script ${res.data.status}`);
+    } catch { toast.error("Execution failed"); setLiveOutput(prev => [...prev, { time: new Date().toISOString(), type: "error", text: "Execution failed - check connection and try again" }]); }
+    finally { setLiveRunning(false); }
+  };
+
   const filteredScripts = scripts.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.description?.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
@@ -272,6 +297,7 @@ export default function ScriptingPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="scripts" className="gap-2"><Code className="w-4 h-4" />Scripts</TabsTrigger>
+          <TabsTrigger value="terminal" className="gap-2" data-testid="tab-terminal"><Terminal className="w-4 h-4" />Live Terminal</TabsTrigger>
           <TabsTrigger value="library" className="gap-2"><BookOpen className="w-4 h-4" />Library</TabsTrigger>
           <TabsTrigger value="history" className="gap-2"><Clock className="w-4 h-4" />History</TabsTrigger>
           <TabsTrigger value="scheduling" className="gap-2"><Calendar className="w-4 h-4" />Scheduling</TabsTrigger>
@@ -330,6 +356,95 @@ export default function ScriptingPage() {
               <p className="text-sm text-muted-foreground">Create your first automation script or import from the Library</p>
             </div>
           )}
+        </TabsContent>
+
+        {/* Live Terminal Tab */}
+        <TabsContent value="terminal" className="space-y-4" data-testid="live-terminal-tab">
+          <div className="grid grid-cols-2 gap-4 h-[550px]">
+            {/* Left: Script Selector + Code Preview */}
+            <div className="space-y-3 flex flex-col">
+              <div className="flex items-center gap-2">
+                <Select value={liveScript?.id || ""} onValueChange={v => setLiveScript(scripts.find(s => s.id === v))}>
+                  <SelectTrigger data-testid="live-script-select"><SelectValue placeholder="Select script..." /></SelectTrigger>
+                  <SelectContent>{scripts.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({scriptTypes[s.script_type]?.label})</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={liveDevice} onValueChange={setLiveDevice}>
+                  <SelectTrigger className="w-[200px]" data-testid="live-device-select"><SelectValue placeholder="Target device..." /></SelectTrigger>
+                  <SelectContent><SelectItem value="localhost">localhost</SelectItem>{devices.filter(d => d.status === "online").slice(0, 30).map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.hostname}</SelectItem>)}</SelectContent>
+                </Select>
+                <Button onClick={handleLiveRun} disabled={liveRunning || !liveScript} className="flex-shrink-0" data-testid="live-run-btn">
+                  {liveRunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}
+                  {liveRunning ? "Running..." : "Execute"}
+                </Button>
+              </div>
+              {liveScript ? (
+                <div className="flex-1 overflow-hidden">
+                  <CodeBlock content={liveScript.content} language={liveScript.script_type} />
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center bg-[#1a1b26] rounded-lg border border-[#2f3348]">
+                  <div className="text-center"><Terminal className="w-10 h-10 text-[#565f89] mx-auto mb-2" /><p className="text-sm text-[#565f89]">Select a script to preview</p></div>
+                </div>
+              )}
+              {/* Recent Runs */}
+              {liveHistory.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Recent Runs</p>
+                  {liveHistory.slice(0, 3).map(h => (
+                    <div key={h.id} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-muted/10 cursor-pointer hover:bg-muted/20" onClick={() => setLiveOutput(h.output)}>
+                      <span className="font-mono">{h.script_name}</span>
+                      <span className="text-muted-foreground">{h.device_name}</span>
+                      <Badge className={`text-[9px] ${h.status === "completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>{h.status}</Badge>
+                      <span className="font-mono text-muted-foreground">{h.duration_ms}ms</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Live Output Console */}
+            <div className="flex flex-col rounded-lg overflow-hidden border border-[#2f3348] bg-[#0d1117]">
+              <div className="flex items-center justify-between px-3 py-2 bg-[#161b22] border-b border-[#2f3348]">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-red-500/70" />
+                    <div className="w-3 h-3 rounded-full bg-amber-500/70" />
+                    <div className="w-3 h-3 rounded-full bg-emerald-500/70" />
+                  </div>
+                  <span className="text-[11px] font-mono text-[#8b949e]">Terminal Output</span>
+                  {liveRunning && <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-[10px] text-emerald-400">Running</span></div>}
+                </div>
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-[#8b949e] hover:text-white" onClick={() => setLiveOutput([])}><Trash2 className="w-3 h-3 mr-1" />Clear</Button>
+              </div>
+              <ScrollArea className="flex-1 p-3" data-testid="terminal-output">
+                <div className="font-mono text-xs space-y-0.5">
+                  {liveOutput.length === 0 && (
+                    <div className="flex items-center justify-center h-full py-20">
+                      <div className="text-center"><Terminal className="w-8 h-8 text-[#30363d] mx-auto mb-2" /><p className="text-[#484f58]">Select a script and click Execute to see live output</p></div>
+                    </div>
+                  )}
+                  {liveOutput.map((line, i) => {
+                    const colors = { info: "text-[#58a6ff]", success: "text-[#3fb950]", error: "text-[#f85149]", warning: "text-[#d29922]", command: "text-[#c9d1d9]", output: "text-[#8b949e]", comment: "text-[#484f58]" };
+                    const prefixes = { info: "i", success: "+", error: "!", warning: "~", command: "$", output: " ", comment: "#" };
+                    const lineColor = colors[line.type] || colors.output;
+                    const prefix = prefixes[line.type] || " ";
+                    return (
+                      <div key={`term-${i}`} className={`flex items-start gap-2 ${lineColor} ${line.type === "command" && line.text === "---" ? "border-t border-[#21262d] mt-1 pt-1" : ""}`}>
+                        {line.text !== "---" && (
+                          <>
+                            <span className="text-[#484f58] flex-shrink-0 w-14">{new Date(line.time).toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                            <span className="flex-shrink-0 w-3 text-center">{prefix}</span>
+                            <span className={`${line.type === "command" ? "font-semibold" : ""}`}>{line.text}</span>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {liveRunning && <div className="flex items-center gap-1 mt-1"><span className="text-[#3fb950] animate-pulse">_</span></div>}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
         </TabsContent>
 
         {/* Library Tab */}

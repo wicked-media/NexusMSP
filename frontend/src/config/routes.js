@@ -8,6 +8,7 @@ const page = (name) => lazy(() => import(`@/pages/${name}`));
 export const routeConfig = [
   // Core
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
+  { path: "/morning-checks", component: page("MorningChecksPage"), auth: true, layout: true },
   { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
   { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },
   { path: "/devices/:deviceId", component: page("DeviceDetailPage"), auth: true, layout: true },
