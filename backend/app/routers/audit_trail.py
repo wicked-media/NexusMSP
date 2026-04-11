@@ -1,47 +1,125 @@
-from fastapi import APIRouter, Depends
+"""Audit Trail - Comprehensive system activity logging with filtering, export, and analytics"""
+from fastapi import APIRouter, Depends, Query
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
+import uuid, random
 
-router = APIRouter()
+router = APIRouter(prefix="/audit-trail", tags=["audit-trail"])
 
-@router.get("/audit-trail/events")
-async def get_audit_events(current_user: dict = Depends(get_current_user)):
-    events = await db.audit_trail.find({}, {"_id": 0}).sort("timestamp", -1).to_list(500)
+CATEGORIES = ["auth", "tickets", "billing", "security", "clients", "automation", "monitoring", "devices", "admin", "integrations"]
+SEVERITY_MAP = {"auth": "info", "security": "critical", "billing": "warning", "admin": "warning"}
+ACTIONS = {
+    "auth": ["user_login", "user_logout", "password_changed", "2fa_enabled", "login_failed", "session_expired"],
+    "tickets": ["ticket_created", "ticket_updated", "ticket_closed", "ticket_escalated", "ticket_assigned", "sla_breach", "note_added"],
+    "billing": ["invoice_created", "invoice_sent", "payment_received", "invoice_overdue", "recurring_generated"],
+    "security": ["threat_detected", "vulnerability_found", "firewall_rule_changed", "mfa_bypassed", "dark_web_alert", "ransomware_detected"],
+    "clients": ["client_onboarded", "client_updated", "contact_added", "portal_access_granted"],
+    "automation": ["script_executed", "policy_applied", "patch_deployed", "webhook_triggered", "workflow_started"],
+    "monitoring": ["device_offline", "device_online", "threshold_exceeded", "backup_failed", "backup_completed", "disk_warning"],
+    "devices": ["device_added", "device_removed", "os_updated", "agent_deployed", "remote_session_started"],
+    "admin": ["settings_changed", "user_created", "user_deleted", "role_changed", "api_key_generated"],
+    "integrations": ["xero_synced", "hudu_synced", "psa_imported", "email_sent", "rustdesk_connected"],
+}
+
+
+def _gen_audit_events(count=200):
+    """Generate realistic audit events"""
+    users = ["Aaron S.", "John Smith", "Sarah Chen", "Mike Johnson", "System", "API", "Automation"]
+    clients = ["Acme Corp", "TechFlow", "Pinnacle", "Emerald Finance", "BlueRock"]
+    events = []
+    for i in range(count):
+        cat = random.choice(CATEGORIES)
+        action = random.choice(ACTIONS.get(cat, ["unknown_action"]))
+        severity = SEVERITY_MAP.get(cat, random.choice(["info", "warning"]))
+        if action in ["threat_detected", "ransomware_detected", "sla_breach", "login_failed"]:
+            severity = "critical"
+        elif action in ["backup_failed", "invoice_overdue", "device_offline"]:
+            severity = "warning"
+
+        ts = datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 720))
+        user = random.choice(users)
+        target = random.choice(clients) if cat in ["tickets", "billing", "clients"] else random.choice(["SRV-PROD-01", "WS-ADMIN", "FW-01", "", ""])
+
+        events.append({
+            "id": f"AUD-{uuid.uuid4().hex[:6].upper()}",
+            "timestamp": ts.isoformat(),
+            "user": user,
+            "category": cat,
+            "action": action,
+            "severity": severity,
+            "description": f"{user} performed {action.replace('_', ' ')}",
+            "target": target,
+            "ip_address": f"192.168.{random.randint(1,10)}.{random.randint(1,254)}",
+            "metadata": {"browser": random.choice(["Chrome", "Firefox", "Edge", ""]), "os": random.choice(["Windows", "macOS", "Linux", ""])},
+        })
+    return sorted(events, key=lambda x: x["timestamp"], reverse=True)
+
+
+@router.get("/events")
+async def get_events(
+    category: str = Query(None),
+    severity: str = Query(None),
+    user: str = Query(None),
+    days: int = Query(30),
+    current_user: dict = Depends(get_current_user),
+):
+    events = await db.audit_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(500)
     if not events:
-        events = await _seed_audit()
-    return events
+        events = _gen_audit_events(200)
+        for e in events:
+            await db.audit_events.insert_one(e)
+        events = await db.audit_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(500)
 
-@router.get("/audit-trail/by-user/{user_name}")
-async def get_audit_by_user(user_name: str, current_user: dict = Depends(get_current_user)):
-    return await db.audit_trail.find({"user": {"$regex": user_name, "$options": "i"}}, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    # Apply filters
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    filtered = [e for e in events if e["timestamp"] >= cutoff]
+    if category:
+        filtered = [e for e in filtered if e["category"] == category]
+    if severity:
+        filtered = [e for e in filtered if e["severity"] == severity]
+    if user:
+        filtered = [e for e in filtered if user.lower() in e["user"].lower()]
+    return filtered
 
-@router.get("/audit-trail/summary")
-async def get_audit_summary(current_user: dict = Depends(get_current_user)):
-    events = await db.audit_trail.find({}, {"_id": 0}).to_list(1000)
-    users = {}
-    categories = {}
+
+@router.get("/summary")
+async def get_summary(current_user: dict = Depends(get_current_user)):
+    events = await db.audit_events.find({}, {"_id": 0}).to_list(500)
+    if not events:
+        events = _gen_audit_events(200)
+        for e in events:
+            await db.audit_events.insert_one(e)
+        events = await db.audit_events.find({}, {"_id": 0}).to_list(500)
+
+    # Category counts
+    cat_counts = {}
+    severity_counts = {"info": 0, "warning": 0, "critical": 0}
+    user_counts = {}
+    hourly = {}
     for e in events:
+        c = e.get("category", "unknown")
+        cat_counts[c] = cat_counts.get(c, 0) + 1
+        s = e.get("severity", "info")
+        severity_counts[s] = severity_counts.get(s, 0) + 1
         u = e.get("user", "Unknown")
-        c = e.get("category", "other")
-        users[u] = users.get(u, 0) + 1
-        categories[c] = categories.get(c, 0) + 1
-    return {"total_events": len(events), "by_user": [{"user": k, "count": v} for k, v in sorted(users.items(), key=lambda x: -x[1])], "by_category": [{"category": k, "count": v} for k, v in sorted(categories.items(), key=lambda x: -x[1])]}
+        user_counts[u] = user_counts.get(u, 0) + 1
+        h = e.get("timestamp", "")[:13]
+        hourly[h] = hourly.get(h, 0) + 1
 
-async def _seed_audit():
+    # Recent 24h vs previous 24h
     now = datetime.now(timezone.utc)
-    events = [
-        {"id": "aud-001", "user": "Alex Thompson", "action": "login", "category": "auth", "description": "Logged in from 203.45.67.10", "ip_address": "203.45.67.10", "timestamp": (now - timedelta(hours=1)).isoformat()},
-        {"id": "aud-002", "user": "Alex Thompson", "action": "device_isolated", "category": "security", "description": "Isolated device TECH-SRV-01 due to threat detection", "target": "TECH-SRV-01", "timestamp": (now - timedelta(hours=2)).isoformat()},
-        {"id": "aud-003", "user": "Sarah Chen", "action": "ticket_created", "category": "tickets", "description": "Created P1 ticket: Ransomware canary triggered on HC-WS-REC01", "target": "TKT-2026-0847", "timestamp": (now - timedelta(hours=1, minutes=30)).isoformat()},
-        {"id": "aud-004", "user": "Mike Rodriguez", "action": "password_reset", "category": "security", "description": "Reset password for partner@summitlegal.com (BEC response)", "target": "partner@summitlegal.com", "timestamp": (now - timedelta(hours=4, minutes=30)).isoformat()},
-        {"id": "aud-005", "user": "System", "action": "playbook_executed", "category": "automation", "description": "Ransomware Response playbook auto-executed on HC-WS-REC01", "target": "pb-001", "timestamp": (now - timedelta(hours=1, minutes=5)).isoformat()},
-        {"id": "aud-006", "user": "Alex Thompson", "action": "mfa_enforced", "category": "security", "description": "MFA enforcement policy set for HealthCare Plus (14 day deadline)", "target": "client-004", "timestamp": (now - timedelta(hours=6)).isoformat()},
-        {"id": "aud-007", "user": "Sarah Chen", "action": "client_created", "category": "clients", "description": "New client onboarded: Quantum Dental Group", "target": "client-015", "timestamp": (now - timedelta(days=2)).isoformat()},
-        {"id": "aud-008", "user": "Alex Thompson", "action": "invoice_sent", "category": "billing", "description": "Invoice INV-2026-0134 sent to Acme Corporation ($4,500)", "target": "INV-2026-0134", "timestamp": (now - timedelta(days=1)).isoformat()},
-        {"id": "aud-009", "user": "System", "action": "backup_failed", "category": "monitoring", "description": "Backup job failed for GF-DC-MAIN (disk space insufficient)", "target": "bj-004", "timestamp": (now - timedelta(hours=8)).isoformat()},
-        {"id": "aud-010", "user": "Mike Rodriguez", "action": "suppression_rule_created", "category": "monitoring", "description": "Created alert suppression rule: Known CrowdStrike False Positive", "target": "asr-004", "timestamp": (now - timedelta(days=15)).isoformat()},
-    ]
-    for e in events:
-        await db.audit_trail.insert_one(e)
-    return [dict((k, v) for k, v in e.items() if k != "_id") for e in events]
+    last_24h = len([e for e in events if e["timestamp"] >= (now - timedelta(hours=24)).isoformat()])
+    prev_24h = len([e for e in events if (now - timedelta(hours=48)).isoformat() <= e["timestamp"] < (now - timedelta(hours=24)).isoformat()])
+
+    return {
+        "total_events": len(events),
+        "last_24h": last_24h,
+        "prev_24h": prev_24h,
+        "trend": "up" if last_24h > prev_24h else "down" if last_24h < prev_24h else "flat",
+        "by_category": sorted([{"category": k, "count": v} for k, v in cat_counts.items()], key=lambda x: x["count"], reverse=True),
+        "by_severity": severity_counts,
+        "by_user": sorted([{"user": k, "count": v} for k, v in user_counts.items()], key=lambda x: x["count"], reverse=True)[:10],
+        "categories": CATEGORIES,
+        "activity_timeline": sorted([{"hour": k, "count": v} for k, v in hourly.items()], key=lambda x: x["hour"], reverse=True)[:48],
+    }

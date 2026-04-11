@@ -163,16 +163,68 @@ export default function SmartSchedulePage() {
       {/* CALENDAR VIEW */}
       {viewMode === "calendar" && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-400" />Schedule ({events.length} events)</CardTitle></CardHeader>
-          <CardContent className="p-0">
+          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-400" />Weekly Schedule</CardTitle></CardHeader>
+          <CardContent>
+            {/* Visual Weekly Calendar */}
+            {(() => {
+              const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+              const hours = Array.from({ length: 10 }, (_, i) => i + 7); // 7am - 4pm
+              const today = new Date();
+              const weekStart = new Date(today);
+              weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+              const getEventsForDayHour = (dayIdx, hour) => {
+                const d = new Date(weekStart); d.setDate(weekStart.getDate() + dayIdx);
+                const dateStr = d.toISOString().split("T")[0];
+                return events.filter(e => e.date === dateStr && parseInt((e.time || "08:00").split(":")[0]) === hour);
+              };
+              return (
+                <div className="overflow-x-auto" data-testid="visual-calendar">
+                  <div className="grid grid-cols-[60px_repeat(7,1fr)] gap-0 min-w-[700px]">
+                    {/* Header Row */}
+                    <div className="h-10" />
+                    {days.map((day, i) => {
+                      const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+                      const isToday = d.toDateString() === today.toDateString();
+                      return (
+                        <div key={day} className={`h-10 flex items-center justify-center text-xs font-bold border-b border-border/30 ${isToday ? "text-cyan-400 bg-cyan-500/5" : "text-muted-foreground"}`}>
+                          {day} {d.getDate()}
+                        </div>
+                      );
+                    })}
+                    {/* Time Rows */}
+                    {hours.map(hour => (
+                      <>
+                        <div key={`h-${hour}`} className="h-16 flex items-start justify-end pr-2 pt-1 text-[10px] text-muted-foreground/60 font-mono border-r border-border/20">
+                          {hour}:00
+                        </div>
+                        {days.map((_, dayIdx) => {
+                          const dayEvents = getEventsForDayHour(dayIdx, hour);
+                          return (
+                            <div key={`${hour}-${dayIdx}`} className="h-16 border-b border-r border-border/10 p-0.5 hover:bg-muted/5 transition-colors relative">
+                              {dayEvents.map(ev => (
+                                <div key={ev.id} className={`rounded px-1.5 py-0.5 text-[10px] leading-tight mb-0.5 truncate cursor-pointer ${ev.type === "field_job" ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/20" : "bg-purple-500/20 text-purple-300 border border-purple-500/20"}`} title={`${ev.title} - ${ev.technician}`}>
+                                  <span className="font-bold">{ev.time?.slice(0,5)}</span> {ev.title?.slice(0, 20)}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Event count summary below calendar */}
+            <Separator className="my-3" />
             <Table>
               <TableHeader>
                 <TableRow><TableHead>Type</TableHead><TableHead>Title</TableHead><TableHead>Date</TableHead><TableHead>Time</TableHead><TableHead>Zone</TableHead><TableHead>Technician</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead></TableRow>
               </TableHeader>
               <TableBody>
                 {events.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No scheduled events</TableCell></TableRow>
-                ) : events.map(e => (
+                  <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No scheduled events</TableCell></TableRow>
+                ) : events.slice(0, 20).map(e => (
                   <TableRow key={e.id}>
                     <TableCell><Badge className={e.type === "field_job" ? "bg-cyan-500/20 text-cyan-400" : "bg-purple-500/20 text-purple-400"} style={{ fontSize: "10px" }}>{e.type === "field_job" ? "FIELD" : "WORKSHOP"}</Badge></TableCell>
                     <TableCell className="font-medium text-sm max-w-[250px] truncate">{e.title}</TableCell>

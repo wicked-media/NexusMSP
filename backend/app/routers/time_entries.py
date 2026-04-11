@@ -122,3 +122,87 @@ async def get_weekly_time_summary(current_user: dict = Depends(get_current_user)
         "total_entries": len(entries),
     }
 
+
+@router.post("/time-entries/generate-invoice")
+async def generate_invoice_from_time(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate an invoice from billable time entries for a client"""
+    client_name = data.get("client_name", "")
+    entry_ids = data.get("entry_ids", [])
+    if not client_name and not entry_ids:
+        raise HTTPException(status_code=400, detail="Provide client_name or entry_ids")
+
+    query = {"billable": True}
+    if entry_ids:
+        query["id"] = {"$in": entry_ids}
+    elif client_name:
+        query["client_name"] = client_name
+    entries = await db.time_entries.find(query, {"_id": 0}).to_list(500)
+    if not entries:
+        raise HTTPException(status_code=404, detail="No billable time entries found")
+
+    total_minutes = sum(e.get("minutes", 0) for e in entries)
+    total_amount = sum(e.get("total_amount", 0) for e in entries)
+    line_items = []
+    for e in entries:
+        hrs = round(e.get("minutes", 0) / 60, 2)
+        line_items.append({
+            "description": f'{e.get("ticket_title", "N/A")} - {e.get("description", "")}',
+            "hours": hrs,
+            "rate": e.get("hourly_rate", 75),
+            "amount": e.get("total_amount", 0),
+            "date": e.get("date", ""),
+            "tech": e.get("user_name", ""),
+        })
+
+    invoice = {
+        "id": f"INV-{uuid.uuid4().hex[:6].upper()}",
+        "client_name": client_name or entries[0].get("client_name", "Unknown"),
+        "status": "draft",
+        "total_hours": round(total_minutes / 60, 2),
+        "total_amount": round(total_amount, 2),
+        "line_items": line_items,
+        "entry_count": len(entries),
+        "generated_from": "time_tracking",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user.get("name", "Admin"),
+    }
+    await db.invoices.insert_one(invoice)
+    invoice.pop("_id", None)
+
+    # Mark time entries as invoiced
+    for e in entries:
+        await db.time_entries.update_one({"id": e["id"]}, {"$set": {"invoiced": True, "invoice_id": invoice["id"]}})
+
+    return invoice
+
+
+@router.post("/time-entries/bulk")
+async def bulk_create_time_entries(data: dict, current_user: dict = Depends(get_current_user)):
+    """Create multiple time entries at once"""
+    entries_data = data.get("entries", [])
+    if not entries_data:
+        raise HTTPException(status_code=400, detail="No entries provided")
+    created = []
+    for ed in entries_data:
+        entry = {
+            "id": f"TE-{uuid.uuid4().hex[:8]}",
+            "ticket_id": ed.get("ticket_id", ""),
+            "ticket_title": ed.get("ticket_title", ""),
+            "user_id": ed.get("user_id", current_user.get("id", "")),
+            "user_name": ed.get("user_name", current_user.get("name", "")),
+            "client_id": ed.get("client_id", ""),
+            "client_name": ed.get("client_name", ""),
+            "minutes": ed.get("minutes", 0),
+            "description": ed.get("description", ""),
+            "billable": ed.get("billable", True),
+            "date": ed.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+            "hourly_rate": ed.get("hourly_rate", 75),
+            "total_amount": round(ed.get("minutes", 0) / 60 * ed.get("hourly_rate", 75), 2) if ed.get("billable", True) else 0,
+            "category": ed.get("category", "general"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.time_entries.insert_one(entry)
+        entry.pop("_id", None)
+        created.append(entry)
+    return {"created": len(created), "entries": created}
+

@@ -53,6 +53,9 @@ export default function TimeTrackingPage() {
   const [timerDescription, setTimerDescription] = useState("");
   const [elapsedTime, setElapsedTime] = useState(0);
   const timerRef = useRef(null);
+  const [invoiceDialog, setInvoiceDialog] = useState(false);
+  const [invoiceClient, setInvoiceClient] = useState("");
+  const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [formData, setFormData] = useState({
     ticket_id: "", user_id: "", description: "", minutes: "",
     billable: true, date: new Date().toISOString().split("T")[0]
@@ -114,6 +117,17 @@ export default function TimeTrackingPage() {
     try { await axios.delete(`${API}/time-entries/${id}`, { headers }); toast.success("Deleted"); fetchData(); } catch { toast.error("Failed"); }
   };
 
+  const handleGenerateInvoice = async () => {
+    if (!invoiceClient) { toast.error("Select a client"); return; }
+    setGeneratingInvoice(true);
+    try {
+      const res = await axios.post(`${API}/time-entries/generate-invoice`, { client_name: invoiceClient }, { headers });
+      toast.success(`Invoice ${res.data.id} created: $${res.data.total_amount} for ${res.data.total_hours}h`);
+      setInvoiceDialog(false); setInvoiceClient(""); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to generate invoice"); }
+    finally { setGeneratingInvoice(false); }
+  };
+
   const fmtTime = (secs) => { const m = Math.floor(secs / 60); const s = secs % 60; return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; };
 
   // Computed stats
@@ -172,6 +186,7 @@ export default function TimeTrackingPage() {
         <div><h1 className="text-3xl font-bold tracking-tight">Time Tracking</h1><p className="text-muted-foreground">Track time, manage billing, analyze productivity</p></div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => exportCSV(filteredEntries.map(e => ({ Date: e.date, Ticket: e.ticket_number || "", Description: e.description, Minutes: e.minutes, Billable: e.billable ? "Yes" : "No", Technician: e.user_name || "" })), "time_entries")} data-testid="export-time-csv"><Download className="w-4 h-4 mr-2" />Export</Button>
+          <Button variant="secondary" size="sm" onClick={() => setInvoiceDialog(true)} data-testid="gen-invoice-from-time"><DollarSign className="w-4 h-4 mr-1" />Generate Invoice</Button>
           <Button onClick={() => setIsDialogOpen(true)} data-testid="add-time-entry-btn"><Plus className="w-4 h-4 mr-2" />Log Time</Button>
         </div>
       </div>
@@ -328,6 +343,40 @@ export default function TimeTrackingPage() {
             <div className="flex items-center gap-2"><Switch checked={formData.billable} onCheckedChange={v => setFormData({ ...formData, billable: v })} /><Label>Billable</Label></div>
             <DialogFooter><Button type="submit">Log Time</Button></DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Generate Invoice Dialog */}
+      <Dialog open={invoiceDialog} onOpenChange={setInvoiceDialog}>
+        <DialogContent aria-describedby="invoice-gen-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><DollarSign className="w-5 h-5 text-emerald-400" />Generate Invoice from Time</DialogTitle>
+          </DialogHeader>
+          <p id="invoice-gen-desc" className="text-sm text-muted-foreground">Generate a draft invoice from all unbilled billable time entries for a client.</p>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Client</Label>
+              <Select value={invoiceClient} onValueChange={setInvoiceClient}>
+                <SelectTrigger><SelectValue placeholder="Select client..." /></SelectTrigger>
+                <SelectContent>
+                  {clientSummary.filter(c => c.billableMinutes > 0).map(c => (
+                    <SelectItem key={c.name} value={c.name}>{c.name} ({Math.round(c.billableMinutes / 60)}h billable)</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {invoiceClient && clientSummary.find(c => c.name === invoiceClient) && (
+              <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-sm">
+                <p><strong>{clientSummary.find(c => c.name === invoiceClient)?.billableMinutes}</strong> billable minutes across <strong>{clientSummary.find(c => c.name === invoiceClient)?.entries}</strong> entries</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInvoiceDialog(false)}>Cancel</Button>
+            <Button onClick={handleGenerateInvoice} disabled={generatingInvoice || !invoiceClient} data-testid="confirm-gen-invoice">
+              {generatingInvoice ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1" />}
+              Generate Invoice
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
