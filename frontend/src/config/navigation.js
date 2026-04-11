@@ -180,17 +180,13 @@ export const navGroups = [
         ]
       },
       {
-        path: "/invoices", icon: Receipt, label: "Invoicing",
+        path: "/xero", icon: Receipt, label: "Finance Center",
         children: [
+          { path: "/xero", label: "Overview" },
           { path: "/invoices", label: "Invoices" },
-          { path: "/recurring-invoices", label: "Recurring" },
           { path: "/estimates", label: "Estimates" },
-        ]
-      },
-      {
-        path: "/billing-dashboard", icon: BarChart3, label: "Billing",
-        children: [
-          { path: "/billing-dashboard", label: "Command Center" },
+          { path: "/recurring-invoices", label: "Recurring" },
+          { path: "/billing-dashboard", label: "Billing Command" },
           { path: "/billing-recon", label: "Reconciliation" },
           { path: "/usage-billing", label: "Usage Billing" },
           { path: "/late-payment", label: "Late Payment AI" },
@@ -360,7 +356,6 @@ export const navGroups = [
           { path: "/acronis", label: "Acronis" },
           { path: "/pax8", label: "Pax8" },
           { path: "/gradient", label: "Gradient MSP" },
-          { path: "/xero", label: "Xero Accounting" },
           { path: "/webhook-builder", label: "Webhook Builder" },
           { path: "/git-scripts", label: "Git Scripts Sync" },
         ]

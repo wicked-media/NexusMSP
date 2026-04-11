@@ -92,6 +92,11 @@ export default function TicketsPage() {
   const [pushToExisting, setPushToExisting] = useState("");
   const [topTab, setTopTab] = useState("tickets");
   const [typeFilter, setTypeFilter] = useState("all");
+  // Bulk action state
+  const [selectedTickets, setSelectedTickets] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState("");
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workshopJobs, setWorkshopJobs] = useState([]);
   const [workshopStats, setWorkshopStats] = useState({});
   const [fieldJobs, setFieldJobs] = useState([]);
@@ -590,6 +595,42 @@ export default function TicketsPage() {
   };
 
   // Workshop + Field data is now loaded in fetchTickets
+
+  // ============ BULK ACTIONS ============
+  const toggleTicketSelect = (ticketId) => {
+    setSelectedTickets(prev => {
+      const next = new Set(prev);
+      if (next.has(ticketId)) next.delete(ticketId);
+      else next.add(ticketId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTickets.size === filteredTickets.length) {
+      setSelectedTickets(new Set());
+    } else {
+      setSelectedTickets(new Set(filteredTickets.map(t => t.id)));
+    }
+  };
+
+  const handleBulkAction = async () => {
+    if (selectedTickets.size === 0 || !bulkAction) return;
+    setBulkProcessing(true);
+    try {
+      const res = await axios.post(`${API}/tickets/bulk-action`, {
+        ticket_ids: Array.from(selectedTickets),
+        action: bulkAction,
+        value: bulkValue,
+      }, { headers });
+      toast.success(res.data.message);
+      setSelectedTickets(new Set());
+      setBulkAction("");
+      setBulkValue("");
+      fetchTickets();
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
+    finally { setBulkProcessing(false); }
+  };
 
   const handleCreateWsJob = async () => {
     try {
@@ -1561,6 +1602,19 @@ export default function TicketsPage() {
                     <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" />
                     <div className="flex items-center gap-3 flex-wrap">
                       <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
+                      {/* Quick Template Picker */}
+                      {cannedResponses.length > 0 && (
+                        <Select value="" onValueChange={v => { const tmpl = cannedResponses.find(c => c.id === v); if (tmpl) setNewNote(prev => prev ? `${prev}\n${tmpl.content}` : tmpl.content); }}>
+                          <SelectTrigger className="w-[180px] h-8 text-xs" data-testid="quick-template-picker"><SelectValue placeholder="Insert template..." /></SelectTrigger>
+                          <SelectContent>
+                            {cannedResponses.map(cr => (
+                              <SelectItem key={cr.id} value={cr.id}>
+                                <div className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-amber-400" /><span>{cr.title}</span></div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3411,6 +3465,63 @@ export default function TicketsPage() {
         <p className="text-sm text-muted-foreground ml-auto">{filteredTickets.length} of {tickets.length} tickets</p>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {(typeFilter === "all" || typeFilter === "sla") && (
+        <div className="flex items-center gap-2 px-1">
+          <Checkbox
+            checked={selectedTickets.size > 0 && selectedTickets.size === filteredTickets.length}
+            onCheckedChange={toggleSelectAll}
+            data-testid="select-all-checkbox"
+          />
+          <span className="text-xs text-muted-foreground mr-2">
+            {selectedTickets.size > 0 ? `${selectedTickets.size} selected` : "Select all"}
+          </span>
+          {selectedTickets.size > 0 && (
+            <>
+              <Separator orientation="vertical" className="h-5" />
+              <Select value={bulkAction} onValueChange={v => { setBulkAction(v); setBulkValue(""); }}>
+                <SelectTrigger className="w-[150px] h-8 text-xs" data-testid="bulk-action-select"><SelectValue placeholder="Bulk action..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="close">Close All</SelectItem>
+                  <SelectItem value="assign">Assign To...</SelectItem>
+                  <SelectItem value="priority">Change Priority</SelectItem>
+                  <SelectItem value="status">Change Status</SelectItem>
+                  <SelectItem value="tag">Add Tag</SelectItem>
+                </SelectContent>
+              </Select>
+              {bulkAction === "assign" && (
+                <Select value={bulkValue} onValueChange={setBulkValue}>
+                  <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue placeholder="Select user..." /></SelectTrigger>
+                  <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+              {bulkAction === "priority" && (
+                <Select value={bulkValue} onValueChange={setBulkValue}>
+                  <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Priority..." /></SelectTrigger>
+                  <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+              {bulkAction === "status" && (
+                <Select value={bulkValue} onValueChange={setBulkValue}>
+                  <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Status..." /></SelectTrigger>
+                  <SelectContent>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+              {bulkAction === "tag" && (
+                <Input className="w-[130px] h-8 text-xs" placeholder="Tag name..." value={bulkValue} onChange={e => setBulkValue(e.target.value)} />
+              )}
+              <Button size="sm" className="h-8 text-xs" onClick={handleBulkAction} disabled={bulkProcessing || !bulkAction || (bulkAction !== "close" && !bulkValue)} data-testid="apply-bulk-btn">
+                {bulkProcessing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
+                Apply ({selectedTickets.size})
+              </Button>
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setSelectedTickets(new Set()); setBulkAction(""); setBulkValue(""); }}>
+                <X className="w-3 h-3 mr-1" />Clear
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Ticket Cards */}
       <div className="space-y-2">
         {/* SLA Tickets */}
@@ -3427,18 +3538,27 @@ export default function TicketsPage() {
           const ticketContact = ticket.contact_id ? ticketClient?.contacts?.find(ct => ct.id === ticket.contact_id || ct.name === ticket.contact_id) : null;
           const contactName = ticket.contact_name || ticketContact?.name || "";
           const clientAddress = ticketClient?.address || "";
+          const slaHrs = ticket.sla_due ? differenceInHours(new Date(ticket.sla_due), new Date()) : null;
+          const isSelected = selectedTickets.has(ticket.id);
 
           return (
             <Card
               key={ticket.id}
-              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""} ${isClosed ? "opacity-60" : ""}`}
-              onClick={() => fetchTicketDetail(ticket)}
+              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""} ${isClosed ? "opacity-60" : ""} ${isSelected ? "ring-2 ring-primary/50 bg-primary/5" : ""}`}
               data-testid={`ticket-row-${ticket.id}`}
             >
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
+                  {/* Checkbox */}
+                  <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleTicketSelect(ticket.id)}
+                      data-testid={`ticket-checkbox-${ticket.id}`}
+                    />
+                  </div>
                   {/* Type Icon */}
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10" onClick={() => fetchTicketDetail(ticket)}>
                     <Shield className="w-4 h-4 text-blue-400" />
                   </div>
                   {/* Ticket Number Badge */}
@@ -3487,7 +3607,7 @@ export default function TicketsPage() {
                   </div>
 
                   {/* Main Content */}
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0" onClick={() => fetchTicketDetail(ticket)}>
                     <div className="flex items-center gap-2 mb-0.5">
                       <p className="font-medium text-sm truncate">{ticket.title}</p>
                       {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
@@ -3513,7 +3633,16 @@ export default function TicketsPage() {
                   </div>
 
                   {/* Right Side Info */}
-                  <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="flex items-center gap-3 flex-shrink-0" onClick={() => fetchTicketDetail(ticket)}>
+                    {/* SLA Countdown */}
+                    {slaHrs !== null && !isClosed && (
+                      <div className={`text-center px-2 py-1 rounded-lg border ${slaHrs < 0 ? "bg-red-500/10 border-red-500/30" : slaHrs < 4 ? "bg-amber-500/10 border-amber-500/30" : "bg-emerald-500/10 border-emerald-500/30"}`} data-testid={`sla-countdown-${ticket.id}`}>
+                        <p className={`text-xs font-mono font-bold ${slaHrs < 0 ? "text-red-400" : slaHrs < 4 ? "text-amber-400" : "text-emerald-400"}`}>
+                          {slaHrs < 0 ? `-${Math.abs(slaHrs)}h` : `${slaHrs}h`}
+                        </p>
+                        <p className="text-[8px] text-muted-foreground">SLA</p>
+                      </div>
+                    )}
                     <div className="text-right">
                       <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
                       <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
