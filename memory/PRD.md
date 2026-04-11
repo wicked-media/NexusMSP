@@ -17,53 +17,46 @@ Full MSP platform: Ticketing, CRM, invoicing, RMM, networking, scheduling, repor
 ### Phase 24-25: Code Quality & Security Hardening (DONE)
 - XSS Protection (DOMPurify), SSL verification fix, document.write sanitized
 - Secure token storage (secureStorage XOR cipher wrapper)
-- Python SystemRandom across 53+ backend routers
-- 150+ Array Index Keys fixed, hook dependencies fixed
-- Mutable default args fixed, magic_portal.py secured with secrets.token_urlsafe
+- Python SystemRandom, hook dependencies, mutable defaults fixed
 
 ### Phase 26: RustDesk Integration Fixes (DONE - 2026-04-10)
-- Fixed inverted SSL verify logic across rustdesk.py, yeastar.py, splynx.py, hudu.py, networking.py
-- Added server URL normalization (auto-prepend https://)
-- Test Connection now tests current form input (not saved config)
-- Added RustDesk Server Pro requirement info box
-- Fixed missing Switch import that caused blank Remote Devices page
+- Fixed inverted SSL verify logic, URL normalization, test connection
 
 ### Phase 27: Module Consolidation (DONE - 2026-04-11)
-Merged 13 overlapping pages into 5 unified tabbed pages:
-- **Revenue Analytics** = Revenue Tracker + Revenue Tracking (MRR/ARR | Per-Ticket | Cohorts)
-- **Predictive Intelligence** = Predictive Failure + Predictive Maintenance (Predictions | Monitoring)
-- **SLA Center** = SLA Timer + SLA Penalties + SLA Report Gen (Timers | Penalties | Reports)
-- **Backup Center** = Backup Dashboard + Backup Compliance + Backup Verify (Dashboard | Compliance | Verify)
-- **Compliance Center** = Compliance + Compliance Frameworks + Compliance Report Gen (Frameworks | Scanner | Reports)
+- Merged 13 overlapping pages into 5 unified tabbed Centers
 
 ### Phase 28: Tickets & Billing Revamp + Xero Finance Center (DONE - 2026-04-11)
-**Finance Center (XeroDashboardPage)**:
-- Unified financial hub with 8 tabs: Overview, Invoices, Estimates, Recurring, Contacts, Accounts, Sync Log, Aging
-- Overview: Revenue stats, Monthly Revenue chart, Invoice Status pie chart, Collection Rate gauge, Receivables Aging bars, Recent Activity feed
-- Invoices: Full CRUD with search, status filter, create/send/pay/void actions
-- Estimates: CRUD with convert-to-invoice workflow
-- Recurring: Templates with pause/resume toggle, MRR calculation
-- Contacts: Xero contact mapping with balance info
-- Accounts: Chart of accounts
-- Sync Log: Full sync history with trigger sync
-- Aging: Aging buckets (Current, 30d, 60d, 90+) with overdue invoices list
-- Navigation consolidated: Invoicing + Billing merged under "Finance Center" in Business section
+**Finance Center (XeroDashboardPage)**: 8-tab unified financial hub
+- Overview, Invoices (CRUD + email), Estimates (CRUD + convert), Recurring, Contacts, Accounts, Sync Log, Aging
+**Ticket Enhancements**: Bulk actions (close/assign/priority/status/tag), SLA countdown badges, Quick Template picker
 
-**Ticket Enhancements**:
-- Bulk selection checkboxes on every ticket card
-- Select All / Deselect All functionality
-- Bulk actions bar: Close All, Assign To, Change Priority, Change Status, Add Tag
-- SLA Countdown badges on ticket cards with color coding (red/amber/green)
-- Quick Template picker dropdown in conversation tab for rapid note insertion
+### Phase 29: Enhanced Recurring Billing + Invoice Email (DONE - 2026-04-11)
+**Recurring Billing Module (Enterprise Grade)**:
+- KPI dashboard: MRR, ARR, Active Templates, Due for Generation, Total Templates
+- 12-Month Revenue Forecast bar chart with escalation projections
+- Rich template cards with expand/collapse detail view
+- Per-template details: contract period, payment terms, total billed, collection rate, notes, line items breakdown, generated invoice history
+- Create/Edit/Delete templates with full fields: frequency (weekly/fortnightly/monthly/quarterly/yearly), payment terms, tax rate, contract dates, annual escalation %, auto-generate/auto-send toggles, billing email, notes
+- Generate Now button per template (creates invoice immediately)
+- Batch Generate All Due button (bulk invoice creation)
+- Search + status filter (active/paused)
+
+**Invoice Email Feature**:
+- Email dialog with invoice preview (client, amount, due date, status)
+- Recipient email, subject, message fields
+- Email button on every invoice in Invoices tab
+- Send Reminder button on overdue invoices in Aging tab
+- MOCKED email sending (logged to MongoDB, ready for Resend integration)
 
 **Backend Additions**:
-- `/api/xero/estimates` - Full CRUD + convert to invoice
-- `/api/xero/recurring` - CRUD + pause/resume toggle
-- `/api/xero/sync-history` - Sync event log
-- `/api/xero/sync` - Trigger full sync
-- `/api/xero/invoices/{id}/void` - Void invoice
-- `/api/xero/invoices/{id}/send` - Send invoice
-- `/api/tickets/bulk-action` - Bulk close/assign/priority/status/tag
+- `PUT /api/xero/recurring/{id}` - Edit templates
+- `DELETE /api/xero/recurring/{id}` - Delete templates
+- `POST /api/xero/recurring/{id}/generate` - Generate invoice from template
+- `POST /api/xero/recurring/batch-generate` - Batch generate all due
+- `GET /api/xero/recurring/{id}/history` - Generated invoice history
+- `GET /api/xero/recurring/forecast` - 12-month forecast + MRR/ARR
+- `POST /api/xero/invoices/{id}/email` - Send (mocked) invoice email
+- `GET /api/xero/invoices/{id}/emails` - Email history per invoice
 
 ## Prioritized Backlog
 
@@ -76,24 +69,21 @@ Merged 13 overlapping pages into 5 unified tabbed pages:
 
 ### P3 - Tech Debt
 - Refactor TicketsPage.jsx (~4000 lines) into sub-components
-- Replace wildcard imports (33 files)
 - Fix Recharts console width/height warnings
 - Add missing aria-describedby for DialogContent accessibility
 - Decompose monolithic seed.py and navigation.js
-- Bluetooth barcode scanner integration
 
 ## Authentication
 - MSP Admin: aaron@stech.com.au / Lucky@2871$!
 - Client Portal: john@acmecorp.com / portal123
 
 ## Key API Endpoints
-- `/api/auth/login`, `/api/auth/microsoft/*`
-- `/api/settings/*`, `/api/notifications/*`, `/api/kanban-tickets/*`
-- `/api/rustdesk/live/*`, `/api/workshop/bench`, `/api/dispatch/*`
-- `/api/xero/*` (Finance Center - invoices, estimates, recurring, contacts, accounts, sync)
-- `/api/tickets/bulk-action` (Bulk ticket operations)
-- `/api/revenue-tracker/*`, `/api/revenue-tracking/*`
-- `/api/predictive-failure/*`, `/api/predictive/*`
-- `/api/sla-timer/*`, `/api/sla-penalties/*`, `/api/sla-report-gen/*`
-- `/api/backups/*`, `/api/backup-compliance/*`, `/api/backup-verify/*`
-- `/api/compliance/*`, `/api/compliance-frameworks/*`, `/api/compliance-generator/*`
+- `/api/auth/login`, `/api/settings/*`
+- `/api/xero/*` (Finance Center - invoices, estimates, recurring, contacts, accounts, sync, email)
+- `/api/tickets/*`, `/api/tickets/bulk-action`
+- `/api/rustdesk/live/*`
+
+## Mocked Integrations
+- Xero accounting (all endpoints use local MongoDB, no live Xero API)
+- Email sending (logged to MongoDB, not sent via Resend)
+- AI config, dashboard data seeders
