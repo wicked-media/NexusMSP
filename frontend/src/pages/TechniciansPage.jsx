@@ -26,7 +26,7 @@ import {
   Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
   Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
   Radio, Cable, ServerCrash, Siren, Settings, Archive, ArchiveRestore, Trash2,
-  Users, UserX, Tags, ChevronDown, SquareCheckBig
+  Users, UserX, Tags, ChevronDown, SquareCheckBig, Send
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
@@ -142,6 +142,11 @@ export default function TechniciansPage() {
   const [bulkCategories, setBulkCategories] = useState([]);
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [inviteDialog, setInviteDialog] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "technician", job_title: "", categories: [], message: "" });
+  const [inviteSending, setInviteSending] = useState(false);
+  const [invitesList, setInvitesList] = useState([]);
+  const [showInvites, setShowInvites] = useState(false);
   const DEFAULT_PASSWORD = "nexusops123";
   const [formData, setFormData] = useState({
     name: "", email: "", password: DEFAULT_PASSWORD, role: "technician", job_title: "",
@@ -172,6 +177,39 @@ export default function TechniciansPage() {
       const res = await axios.get(`${API}/technicians/leaderboard`, { headers });
       setLeaderboard(res.data);
     } catch { toast.error("Failed to load leaderboard"); }
+  };
+
+  const fetchInvites = async () => {
+    try { const r = await axios.get(`${API}/technicians/invites`, { headers }); setInvitesList(r.data); } catch {}
+  };
+
+  const handleSendInvite = async () => {
+    if (!inviteForm.name.trim() || !inviteForm.email.trim()) { toast.error("Name and email are required"); return; }
+    setInviteSending(true);
+    try {
+      const res = await axios.post(`${API}/technicians/invite`, inviteForm, { headers });
+      if (res.data.resend_configured) {
+        toast.success(`Invitation sent to ${inviteForm.email}`);
+      } else {
+        toast.success(`Invite created for ${inviteForm.email} (configure Resend for live email delivery)`);
+      }
+      setInviteDialog(false);
+      setInviteForm({ name: "", email: "", role: "technician", job_title: "", categories: [], message: "" });
+      fetchInvites();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to send invite"); }
+    finally { setInviteSending(false); }
+  };
+
+  const handleRevokeInvite = async (inviteId) => {
+    try { await axios.delete(`${API}/technicians/invites/${inviteId}`, { headers }); toast.success("Invite revoked"); fetchInvites(); }
+    catch { toast.error("Failed to revoke"); }
+  };
+
+  const handleResendInvite = async (inviteId) => {
+    try {
+      const r = await axios.post(`${API}/technicians/invites/${inviteId}/resend`, {}, { headers });
+      toast.success(r.data.resend_configured ? "Invite resent" : "Invite resent (Resend not configured)");
+    } catch { toast.error("Failed to resend"); }
   };
 
   const fetchAllAchievements = async () => {
@@ -887,6 +925,112 @@ export default function TechniciansPage() {
             <DialogFooter><Button onClick={() => handleBulkAction("set_categories")} data-testid="bulk-set-categories-btn"><Tags className="w-4 h-4 mr-1" />Apply Categories</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* INVITE TECHNICIAN DIALOG */}
+        <Dialog open={inviteDialog} onOpenChange={setInviteDialog}>
+          <DialogContent className="max-w-lg" aria-describedby="invite-dialog-desc">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Send className="w-5 h-5 text-violet-400" />Invite Technician</DialogTitle>
+              <DialogDescription id="invite-dialog-desc">Send an email invite to a new technician. They'll receive a link to set up their account.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Full Name *</Label><Input value={inviteForm.name} onChange={e => setInviteForm({...inviteForm, name: e.target.value})} placeholder="John Smith" data-testid="invite-name" /></div>
+                <div><Label>Email *</Label><Input type="email" value={inviteForm.email} onChange={e => setInviteForm({...inviteForm, email: e.target.value})} placeholder="john@company.com" data-testid="invite-email" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Role</Label>
+                  <Select value={inviteForm.role} onValueChange={v => setInviteForm({...inviteForm, role: v})}>
+                    <SelectTrigger data-testid="invite-role"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="technician">Technician</SelectItem>
+                      <SelectItem value="dispatcher">Dispatcher</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Job Title</Label>
+                  <Select value={inviteForm.job_title || "__none"} onValueChange={v => setInviteForm({...inviteForm, job_title: v === "__none" ? "" : v})}>
+                    <SelectTrigger><SelectValue placeholder="Select title" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">None</SelectItem>
+                      {JOB_TITLES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label className="mb-2 block">Categories</Label>
+                <div className="flex gap-2 flex-wrap">
+                  {TECH_CATEGORIES.map(cat => (
+                    <button key={cat.value} type="button"
+                      onClick={() => setInviteForm(p => ({ ...p, categories: p.categories.includes(cat.value) ? p.categories.filter(c => c !== cat.value) : [...p.categories, cat.value] }))}
+                      className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${inviteForm.categories.includes(cat.value) ? cat.color + " ring-1" : "bg-muted/30 text-muted-foreground border-muted hover:border-primary/40"}`}
+                      data-testid={`invite-cat-${cat.value}`}>
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-muted-foreground">
+                <p>The invited technician will receive an email with a link to set up their password and activate their account. The invite expires in 7 days.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setInviteDialog(false)}>Cancel</Button>
+              <Button onClick={handleSendInvite} disabled={inviteSending || !inviteForm.name.trim() || !inviteForm.email.trim()} data-testid="confirm-invite-btn">
+                {inviteSending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+                {inviteSending ? "Sending..." : "Send Invitation"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* INVITES LIST DIALOG */}
+        <Dialog open={showInvites} onOpenChange={setShowInvites}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" aria-describedby="invites-list-desc">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Pending Invitations</DialogTitle>
+              <DialogDescription id="invites-list-desc">Manage sent invitations for new technicians</DialogDescription>
+            </DialogHeader>
+            {invitesList.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground">
+                <Mail className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="font-medium">No invitations sent yet</p>
+                <p className="text-xs mt-1">Click "Invite" to send your first technician invite</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead>Status</TableHead><TableHead>Sent</TableHead><TableHead></TableHead></TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invitesList.map(inv => (
+                    <TableRow key={inv.id}>
+                      <TableCell className="font-medium">{inv.name}</TableCell>
+                      <TableCell className="text-sm">{inv.email}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs capitalize">{inv.role}</Badge></TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] ${inv.status === "pending" ? "bg-amber-500/20 text-amber-400" : inv.status === "accepted" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}`}>
+                          {inv.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{inv.created_at?.slice(0, 10)}</TableCell>
+                      <TableCell>
+                        {inv.status === "pending" && (
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => handleResendInvite(inv.id)} data-testid={`resend-${inv.id}`}><RefreshCw className="w-3 h-3 mr-1" />Resend</Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400" onClick={() => handleRevokeInvite(inv.id)} data-testid={`revoke-${inv.id}`}><XCircle className="w-3 h-3 mr-1" />Revoke</Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
@@ -908,6 +1052,8 @@ export default function TechniciansPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleCheckReorder} data-testid="check-reorder-btn"><RefreshCw className="w-4 h-4 mr-1" />Check Reorder</Button>
           <Button variant="outline" onClick={() => setShowLeaderboard(true)} data-testid="leaderboard-btn"><Trophy className="w-4 h-4 mr-1 text-yellow-500" />Leaderboard</Button>
+          <Button variant="outline" onClick={() => { fetchInvites(); setShowInvites(true); }} data-testid="view-invites-btn"><Mail className="w-4 h-4 mr-1" />Invites</Button>
+          <Button variant="secondary" onClick={() => setInviteDialog(true)} data-testid="invite-tech-btn"><Send className="w-4 h-4 mr-1" />Invite</Button>
           <Button onClick={() => { setEditingTech(null); resetForm(); setIsCreateOpen(true); }} data-testid="add-tech-btn"><Plus className="w-4 h-4 mr-1" />Add Technician</Button>
         </div>
       </div>

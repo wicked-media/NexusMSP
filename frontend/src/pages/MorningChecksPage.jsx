@@ -8,10 +8,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   Activity, AlertTriangle, Server, Wifi, WifiOff, Shield, HardDrive,
   Clock, Users, CheckCircle, XCircle, RefreshCw, Loader2, Ticket,
-  Phone, DollarSign, Calendar, ChevronRight, Zap
+  Phone, DollarSign, Calendar, ChevronRight, Zap, Mail, Send
 } from "lucide-react";
 
 const RAG = { red: { bg: "bg-red-500/15", border: "border-red-500/30", text: "text-red-400", dot: "bg-red-400" }, amber: { bg: "bg-amber-500/15", border: "border-amber-500/30", text: "text-amber-400", dot: "bg-amber-400" }, green: { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-400", dot: "bg-emerald-400" } };
@@ -37,6 +40,9 @@ export default function MorningChecksPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [emailDialog, setEmailDialog] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
+  const [sending, setSending] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
@@ -49,6 +55,22 @@ export default function MorningChecksPage() {
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleSendEmail = async () => {
+    if (!emailTo.trim()) { toast.error("Enter a recipient email"); return; }
+    setSending(true);
+    try {
+      const res = await axios.post(`${API}/morning-checks/send-email-report`, { to_email: emailTo.trim() }, { headers });
+      if (res.data.resend_configured) {
+        toast.success(res.data.message);
+      } else {
+        toast.success("Email report logged (configure Resend API key for live delivery)");
+      }
+      setEmailDialog(false);
+      setEmailTo("");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to send email"); }
+    finally { setSending(false); }
+  };
 
   if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -66,9 +88,38 @@ export default function MorningChecksPage() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">Generated: {now.toLocaleTimeString()}</span>
+          <Button variant="outline" size="sm" onClick={() => setEmailDialog(true)} data-testid="send-email-report-btn"><Mail className="w-4 h-4 mr-1" />Email Report</Button>
           <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-morning"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
         </div>
       </div>
+
+      {/* Email Report Dialog */}
+      <Dialog open={emailDialog} onOpenChange={setEmailDialog}>
+        <DialogContent className="max-w-md" aria-describedby="email-report-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-cyan-400" />Send Morning Check Email</DialogTitle>
+            <DialogDescription id="email-report-desc">Send the current NOC morning check briefing as a formatted email report.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Recipient Email</Label>
+              <Input type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="team@yourcompany.com" className="mt-1" data-testid="email-report-to" />
+            </div>
+            <div className="p-3 rounded-lg bg-muted/30 border border-border/40 text-xs text-muted-foreground space-y-1">
+              <p className="font-semibold text-foreground">Report includes:</p>
+              <p>Health Score: {health_score}% | {devices.offline} offline devices | {tickets.critical_high} critical tickets</p>
+              <p>{backups.failed} backup failures | {security.critical_alerts} security alerts</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailDialog(false)}>Cancel</Button>
+            <Button onClick={handleSendEmail} disabled={sending || !emailTo.trim()} data-testid="confirm-send-email-btn">
+              {sending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+              {sending ? "Sending..." : "Send Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Top Row: Health Gauge + Critical Counts */}
       <div className="grid grid-cols-6 gap-3">

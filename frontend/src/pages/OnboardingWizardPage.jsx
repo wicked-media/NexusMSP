@@ -20,7 +20,8 @@ import {
   Pause, Play, Clock, CalendarDays, AlertTriangle, ChevronRight,
   Search, Download, Upload, Globe, Phone, Mail, MapPin, Hash,
   Cpu, HardDrive, Network, Lock, Eye, Bell, Wrench,
-  ClipboardCheck, MessageSquare, Star, Target, Zap, BarChart3, X
+  ClipboardCheck, MessageSquare, Star, Target, Zap, BarChart3, X,
+  LayoutGrid, List, GripVertical
 } from "lucide-react";
 
 const STEP_ICONS = {
@@ -53,10 +54,99 @@ const STEP_LABELS = {
 const INDUSTRIES = ["Technology", "Healthcare", "Finance", "Education", "Manufacturing", "Retail", "Legal", "Accounting", "Construction", "Hospitality", "Non-Profit", "Government", "Real Estate", "Media", "Other"];
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "Europe/London", "Europe/Berlin", "Asia/Tokyo", "Australia/Sydney"];
 
+// ─── Kanban Board View ─────────────────────────────────────────────────────────
+function KanbanBoardView({ sessions, onSelect }) {
+  const COLUMNS = [
+    { key: "in_progress", label: "In Progress", color: "border-blue-500/40", bg: "bg-blue-500/5", text: "text-blue-400", icon: Play },
+    { key: "paused", label: "Paused", color: "border-amber-500/40", bg: "bg-amber-500/5", text: "text-amber-400", icon: Pause },
+    { key: "completed", label: "Completed", color: "border-emerald-500/40", bg: "bg-emerald-500/5", text: "text-emerald-400", icon: CheckCircle2 },
+  ];
+
+  const grouped = {};
+  COLUMNS.forEach(c => { grouped[c.key] = []; });
+  sessions.forEach(s => {
+    const status = s.status || "in_progress";
+    if (grouped[status]) grouped[status].push(s);
+    else grouped.in_progress.push(s);
+  });
+
+  return (
+    <div className="grid grid-cols-3 gap-4" data-testid="kanban-board">
+      {COLUMNS.map(col => {
+        const Icon = col.icon;
+        const items = grouped[col.key] || [];
+        return (
+          <div key={col.key} className={`rounded-xl border-2 ${col.color} ${col.bg} min-h-[400px]`}>
+            <div className="p-3 border-b border-border/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Icon className={`w-4 h-4 ${col.text}`} />
+                  <span className={`text-sm font-bold ${col.text}`}>{col.label}</span>
+                </div>
+                <Badge variant="outline" className={`text-xs ${col.text} border-current`}>{items.length}</Badge>
+              </div>
+            </div>
+            <div className="p-2 space-y-2">
+              {items.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground/50">
+                  <Circle className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                  <p className="text-xs">No sessions</p>
+                </div>
+              ) : items.map(s => {
+                const completedSteps = Object.values(s.steps || {}).filter(v => v.status === "completed").length;
+                const totalSteps = Object.keys(s.steps || {}).length || 8;
+                const pct = Math.round((completedSteps / totalSteps) * 100);
+                return (
+                  <Card
+                    key={s.id}
+                    className="cursor-pointer hover:ring-1 hover:ring-primary/30 transition-all border-border/40 bg-background/80"
+                    onClick={() => onSelect(s.id)}
+                    data-testid={`kanban-card-${s.id}`}
+                  >
+                    <CardContent className="p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <GripVertical className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-sm truncate">{s.client_name || "Unnamed"}</p>
+                          <p className="text-[10px] text-muted-foreground font-mono">{s.id}</p>
+                        </div>
+                      </div>
+                      <Progress value={pct} className="h-1 mb-2" />
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>{completedSteps}/{totalSteps} steps</span>
+                        <span className="flex items-center gap-1"><Target className="w-2.5 h-2.5" />{s.health_score || 0}%</span>
+                      </div>
+                      <div className="flex gap-0.5 mt-2">
+                        {STEP_KEYS.map(key => {
+                          const st = s.steps?.[key]?.status;
+                          return <div key={key} className={`h-1 flex-1 rounded-full ${st === "completed" ? "bg-emerald-500" : st === "skipped" ? "bg-amber-500/50" : "bg-border/40"}`} />;
+                        })}
+                      </div>
+                      <div className="flex items-center justify-between mt-2">
+                        <Badge variant="outline" className="text-[9px]">{s.template_name?.split(" ")[0]}</Badge>
+                        {s.priority && s.priority !== "normal" && (
+                          <Badge className={`text-[9px] ${s.priority === "urgent" ? "bg-red-500/20 text-red-400" : s.priority === "high" ? "bg-orange-500/20 text-orange-400" : "bg-blue-500/20 text-blue-400"}`}>
+                            {s.priority}
+                          </Badge>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Session List View ─────────────────────────────────────────────────────────
 function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState("kanban"); // kanban | list
 
   const filtered = sessions.filter(s => {
     if (filter !== "all" && s.status !== filter) return false;
@@ -98,7 +188,7 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Filters + View Toggle */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -111,11 +201,32 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
             </Button>
           ))}
         </div>
+        <div className="ml-auto flex rounded-lg border overflow-hidden">
+          <button onClick={() => setViewMode("kanban")} className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 ${viewMode === "kanban" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} data-testid="view-kanban">
+            <LayoutGrid className="w-3.5 h-3.5" />Board
+          </button>
+          <button onClick={() => setViewMode("list")} className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 ${viewMode === "list" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} data-testid="view-list">
+            <List className="w-3.5 h-3.5" />List
+          </button>
+        </div>
       </div>
 
-      {/* Session Cards */}
+      {/* Content - Kanban or List */}
       {loading ? (
         <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin" /></div>
+      ) : viewMode === "kanban" ? (
+        filtered.length === 0 ? (
+          <Card className="border-dashed border-border/40">
+            <CardContent className="py-16 text-center">
+              <Rocket className="w-14 h-14 mx-auto text-muted-foreground/20 mb-4" />
+              <p className="text-lg font-semibold mb-1">No Onboarding Sessions</p>
+              <p className="text-sm text-muted-foreground mb-5">Start your first client onboarding to get going.</p>
+              <Button onClick={onNew}><Plus className="w-4 h-4 mr-2" />Start Onboarding</Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <KanbanBoardView sessions={filtered} onSelect={onSelect} />
+        )
       ) : filtered.length === 0 ? (
         <Card className="border-dashed border-border/40">
           <CardContent className="py-16 text-center">

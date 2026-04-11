@@ -19,7 +19,8 @@ import {
   DollarSign, TrendingUp, AlertTriangle, CheckCircle, FileText, Users,
   RefreshCw, Loader2, CreditCard, Receipt, Search, BarChart3, Clock, Plus,
   Send, Ban, History, Repeat, ArrowRight, Pause, Play, XCircle, Mail,
-  Pencil, Trash2, Zap, CalendarDays, Percent, Shield, ChevronDown, ChevronUp
+  Pencil, Trash2, Zap, CalendarDays, Percent, Shield, ChevronDown, ChevronUp,
+  Palette, Eye
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
@@ -101,6 +102,13 @@ export default function XeroDashboardPage() {
   // Expanded recurring detail
   const [expandedRec, setExpandedRec] = useState(null);
   const [recHistory, setRecHistory] = useState([]);
+  // Branding
+  const [brandingTemplates, setBrandingTemplates] = useState({ builtin: [], custom: [] });
+  const [brandingSettings, setBrandingSettings] = useState({});
+  const [activeBrandingDoc, setActiveBrandingDoc] = useState("invoice");
+  const [brandingForm, setBrandingForm] = useState({});
+  const [brandingPreview, setBrandingPreview] = useState(null);
+  const [savingBranding, setSavingBranding] = useState(false);
   // Dialogs
   const [payDialog, setPayDialog] = useState(null);
   const [payAmount, setPayAmount] = useState("");
@@ -142,6 +150,36 @@ export default function XeroDashboardPage() {
   }, [token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const fetchBranding = async () => {
+    try {
+      const [tplRes, setRes] = await Promise.all([
+        axios.get(`${API}/doc-branding/templates`, { headers }),
+        axios.get(`${API}/doc-branding/settings`, { headers }),
+      ]);
+      setBrandingTemplates(tplRes.data);
+      setBrandingSettings(setRes.data);
+      const current = setRes.data[activeBrandingDoc] || {};
+      setBrandingForm(current);
+    } catch {}
+  };
+
+  const handleSaveBranding = async () => {
+    setSavingBranding(true);
+    try {
+      await axios.put(`${API}/doc-branding/settings/${activeBrandingDoc}`, brandingForm, { headers });
+      toast.success(`${activeBrandingDoc.replace("_", " ")} branding saved`);
+      fetchBranding();
+    } catch { toast.error("Failed to save branding"); }
+    finally { setSavingBranding(false); }
+  };
+
+  const handlePreviewTemplate = async (templateId) => {
+    try {
+      const res = await axios.get(`${API}/doc-branding/preview/${templateId}?doc_type=${activeBrandingDoc}`, { headers });
+      setBrandingPreview(res.data.preview_html);
+    } catch { toast.error("Failed to generate preview"); }
+  };
 
   const handleSync = async () => { setSyncing(true); try { await axios.post(`${API}/xero/sync`, {}, { headers }); toast.success("Xero sync completed"); fetchAll(); } catch { toast.error("Sync failed"); } finally { setSyncing(false); } };
 
@@ -256,7 +294,7 @@ export default function XeroDashboardPage() {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-8 w-full">
+        <TabsList className="grid grid-cols-9 w-full">
           <TabsTrigger value="overview" data-testid="tab-overview"><BarChart3 className="w-3 h-3 mr-1" />Overview</TabsTrigger>
           <TabsTrigger value="invoices" data-testid="tab-invoices"><Receipt className="w-3 h-3 mr-1" />Invoices ({invoices.length})</TabsTrigger>
           <TabsTrigger value="estimates" data-testid="tab-estimates"><FileText className="w-3 h-3 mr-1" />Estimates ({estimates.length})</TabsTrigger>
@@ -265,6 +303,7 @@ export default function XeroDashboardPage() {
           <TabsTrigger value="accounts" data-testid="tab-accounts"><DollarSign className="w-3 h-3 mr-1" />Accounts ({accounts.length})</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history"><History className="w-3 h-3 mr-1" />Sync Log</TabsTrigger>
           <TabsTrigger value="aging" data-testid="tab-aging"><AlertTriangle className="w-3 h-3 mr-1" />Aging</TabsTrigger>
+          <TabsTrigger value="branding" data-testid="tab-branding" onClick={() => { if (!brandingTemplates.builtin.length) fetchBranding(); }}><Palette className="w-3 h-3 mr-1" />Branding</TabsTrigger>
         </TabsList>
 
         {/* ============ OVERVIEW TAB ============ */}
@@ -626,6 +665,112 @@ export default function XeroDashboardPage() {
               </TableBody>
             </Table></CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ============ BRANDING TAB ============ */}
+        <TabsContent value="branding" className="space-y-4" data-testid="branding-tab-content">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold">Document Branding & Templates</h3>
+              <p className="text-sm text-muted-foreground">Customize the look of your invoices, purchase orders, estimates, and letterheads</p>
+            </div>
+          </div>
+
+          {/* Doc Type Selector */}
+          <div className="flex gap-2">
+            {[
+              { key: "invoice", label: "Invoice", icon: Receipt },
+              { key: "purchase_order", label: "Purchase Order", icon: CreditCard },
+              { key: "estimate", label: "Estimate", icon: FileText },
+              { key: "letterhead", label: "Letterhead", icon: FileText },
+            ].map(dt => (
+              <Button key={dt.key} variant={activeBrandingDoc === dt.key ? "default" : "outline"} size="sm" onClick={() => {
+                setActiveBrandingDoc(dt.key);
+                setBrandingForm(brandingSettings[dt.key] || {});
+                setBrandingPreview(null);
+              }} data-testid={`branding-doc-${dt.key}`}>
+                <dt.icon className="w-3 h-3 mr-1" />{dt.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-[1fr_350px] gap-4">
+            {/* Settings Form */}
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-sm">Company Details & Settings</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label className="text-xs">Company Name</Label><Input value={brandingForm.company_name || ""} onChange={e => setBrandingForm(p => ({...p, company_name: e.target.value}))} placeholder="Your Company Pty Ltd" data-testid="branding-company-name" /></div>
+                  <div><Label className="text-xs">ABN / Tax ID</Label><Input value={brandingForm.company_abn || ""} onChange={e => setBrandingForm(p => ({...p, company_abn: e.target.value}))} placeholder="12 345 678 901" /></div>
+                </div>
+                <div><Label className="text-xs">Company Address</Label><Input value={brandingForm.company_address || ""} onChange={e => setBrandingForm(p => ({...p, company_address: e.target.value}))} placeholder="123 Business St, Suite 100, Sydney NSW 2000" /></div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><Label className="text-xs">Phone</Label><Input value={brandingForm.company_phone || ""} onChange={e => setBrandingForm(p => ({...p, company_phone: e.target.value}))} placeholder="+61 2 9000 0000" /></div>
+                  <div><Label className="text-xs">Email</Label><Input value={brandingForm.company_email || ""} onChange={e => setBrandingForm(p => ({...p, company_email: e.target.value}))} placeholder="accounts@company.com" /></div>
+                  <div><Label className="text-xs">Website</Label><Input value={brandingForm.company_website || ""} onChange={e => setBrandingForm(p => ({...p, company_website: e.target.value}))} placeholder="https://company.com" /></div>
+                </div>
+                <Separator />
+                <div><Label className="text-xs">Footer Text</Label><Input value={brandingForm.footer_text || ""} onChange={e => setBrandingForm(p => ({...p, footer_text: e.target.value}))} placeholder="Thank you for your business" /></div>
+                <div><Label className="text-xs">Payment Instructions</Label><Textarea rows={2} value={brandingForm.payment_instructions || ""} onChange={e => setBrandingForm(p => ({...p, payment_instructions: e.target.value}))} placeholder="Bank: ANZ | BSB: 012-345 | Acc: 1234 5678" /></div>
+                <div><Label className="text-xs">Bank Details</Label><Input value={brandingForm.bank_details || ""} onChange={e => setBrandingForm(p => ({...p, bank_details: e.target.value}))} placeholder="BSB: 012-345 | Account: 1234 5678" /></div>
+                <div><Label className="text-xs">Terms & Conditions</Label><Textarea rows={2} value={brandingForm.terms_conditions || ""} onChange={e => setBrandingForm(p => ({...p, terms_conditions: e.target.value}))} placeholder="Payment due within 30 days..." /></div>
+                <Button onClick={handleSaveBranding} disabled={savingBranding} className="w-full" data-testid="save-branding-btn">
+                  {savingBranding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-1" />}
+                  Save {activeBrandingDoc.replace("_", " ")} Settings
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Template Selection + Preview */}
+            <div className="space-y-3">
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">Select Template</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {(brandingTemplates.builtin || []).map(tpl => (
+                    <div key={tpl.id}
+                      onClick={() => { setBrandingForm(p => ({...p, active_template_id: tpl.id})); handlePreviewTemplate(tpl.id); }}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${brandingForm.active_template_id === tpl.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border/40 hover:border-border"}`}
+                      data-testid={`tpl-select-${tpl.id}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-sm">{tpl.name}</p>
+                          <p className="text-xs text-muted-foreground">{tpl.description}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          {Object.values(tpl.color_scheme || {}).slice(0, 3).map((c, i) => (
+                            <div key={`cs-${i}`} className="w-4 h-4 rounded-full border border-border/50" style={{ backgroundColor: c }} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {(brandingTemplates.custom || []).map(tpl => (
+                    <div key={tpl.id}
+                      onClick={() => { setBrandingForm(p => ({...p, active_template_id: tpl.id})); handlePreviewTemplate(tpl.id); }}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${brandingForm.active_template_id === tpl.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border/40 hover:border-border"}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div><p className="font-semibold text-sm">{tpl.name}</p><p className="text-xs text-muted-foreground">{tpl.description}</p></div>
+                        <Badge variant="outline" className="text-[9px]">Custom</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {brandingPreview && (
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1"><Eye className="w-3 h-3" />Preview</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="border rounded-lg overflow-hidden" style={{ transform: "scale(0.55)", transformOrigin: "top left", height: "420px", width: "182%" }}>
+                      <div dangerouslySetInnerHTML={{ __html: brandingPreview }} />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 
