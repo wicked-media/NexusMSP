@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -15,11 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  DollarSign, TrendingUp, AlertTriangle, CheckCircle,
-  FileText, Users, RefreshCw, Loader2, CreditCard, Receipt, Search,
-  ArrowUpRight, BarChart3, Clock, Plus, Send, Eye, Trash2,
-  ArrowRightLeft, Ban, Calendar, Zap, History, PieChart,
-  Repeat, ArrowRight, Pause, Play, XCircle
+  DollarSign, TrendingUp, AlertTriangle, CheckCircle, FileText, Users,
+  RefreshCw, Loader2, CreditCard, Receipt, Search, BarChart3, Clock, Plus,
+  Send, Ban, History, Repeat, ArrowRight, Pause, Play, XCircle, Mail,
+  Pencil, Trash2, Zap, CalendarDays, Percent, Shield, ChevronDown, ChevronUp
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
@@ -37,8 +37,9 @@ const STATUS_COLORS = {
   DECLINED: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/30" },
   CONVERTED: { bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
 };
-
 const PIE_COLORS = ["#10b981", "#3b82f6", "#6b7280", "#ef4444", "#f59e0b", "#8b5cf6"];
+const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", yearly: "Annually" };
+const FREQ_SHORT = { weekly: "wk", fortnightly: "2wk", monthly: "mo", quarterly: "qtr", yearly: "yr" };
 
 function StatusBadge({ status }) {
   const sc = STATUS_COLORS[status] || STATUS_COLORS.DRAFT;
@@ -49,12 +50,30 @@ function AgingBar({ label, amount, total, color }) {
   const pct = total > 0 ? Math.min((amount / total) * 100, 100) : 0;
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono" style={{ color }}>${amount.toLocaleString("en", { minimumFractionDigits: 0 })}</span>
-      </div>
-      <div className="h-2 bg-muted/20 rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
+      <div className="flex justify-between text-xs"><span className="text-muted-foreground">{label}</span><span className="font-mono" style={{ color }}>${amount.toLocaleString("en", { minimumFractionDigits: 0 })}</span></div>
+      <div className="h-2 bg-muted/20 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} /></div>
+    </div>
+  );
+}
+
+function LineItemsEditor({ items, onChange }) {
+  const update = (i, field, value) => { const next = [...items]; next[i] = { ...next[i], [field]: value }; onChange(next); };
+  const remove = (i) => { const next = items.filter((_, j) => j !== i); onChange(next.length ? next : [{ description: "", quantity: 1, unit_price: 0 }]); };
+  const add = () => onChange([...items, { description: "", quantity: 1, unit_price: 0 }]);
+  return (
+    <div className="space-y-2">
+      <Label>Line Items</Label>
+      {items.map((item, i) => (
+        <div key={`li-${i}`} className="grid grid-cols-12 gap-2">
+          <Input className="col-span-6" placeholder="Description" value={item.description} onChange={e => update(i, "description", e.target.value)} />
+          <Input className="col-span-2" type="number" placeholder="Qty" value={item.quantity} onChange={e => update(i, "quantity", Number(e.target.value))} />
+          <Input className="col-span-3" type="number" step="0.01" placeholder="Unit Price" value={item.unit_price} onChange={e => update(i, "unit_price", Number(e.target.value))} />
+          <Button variant="ghost" size="sm" className="h-9 w-9 p-0 col-span-1" onClick={() => remove(i)}><XCircle className="w-4 h-4 text-muted-foreground" /></Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" className="text-xs" onClick={add}><Plus className="w-3 h-3 mr-1" />Add Line</Button>
+      <div className="text-right text-sm font-mono text-muted-foreground">
+        Subtotal: ${items.reduce((s, i) => s + (i.quantity || 0) * (i.unit_price || 0), 0).toLocaleString("en", { minimumFractionDigits: 2 })}
       </div>
     </div>
   );
@@ -70,27 +89,42 @@ export default function XeroDashboardPage() {
   const [estimates, setEstimates] = useState([]);
   const [recurring, setRecurring] = useState([]);
   const [syncHistory, setSyncHistory] = useState([]);
+  const [forecast, setForecast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   // Filters
   const [invSearch, setInvSearch] = useState("");
   const [invStatus, setInvStatus] = useState("all");
   const [estSearch, setEstSearch] = useState("");
+  const [recSearch, setRecSearch] = useState("");
+  const [recFilter, setRecFilter] = useState("all");
+  // Expanded recurring detail
+  const [expandedRec, setExpandedRec] = useState(null);
+  const [recHistory, setRecHistory] = useState([]);
   // Dialogs
   const [payDialog, setPayDialog] = useState(null);
   const [payAmount, setPayAmount] = useState("");
   const [createInvDialog, setCreateInvDialog] = useState(false);
   const [createEstDialog, setCreateEstDialog] = useState(false);
-  const [createRecDialog, setCreateRecDialog] = useState(false);
-  const [invForm, setInvForm] = useState({ client_name: "", reference: "", due_date: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
-  const [estForm, setEstForm] = useState({ title: "", client_name: "", valid_until: "", notes: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
-  const [recForm, setRecForm] = useState({ client_name: "", description: "", frequency: "monthly", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
+  const [recDialog, setRecDialog] = useState({ open: false, editing: null });
+  const [emailDialog, setEmailDialog] = useState(null);
+  const [emailForm, setEmailForm] = useState({ to_email: "", subject: "", message: "" });
+  const [emailSending, setEmailSending] = useState(false);
+  const [batchGenerating, setBatchGenerating] = useState(false);
+
+  const emptyInvForm = { client_name: "", reference: "", due_date: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
+  const emptyEstForm = { title: "", client_name: "", valid_until: "", notes: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
+  const emptyRecForm = { client_name: "", description: "", frequency: "monthly", payment_terms: 14, contract_start: "", contract_end: "", escalation_percent: 0, auto_send: false, auto_generate: true, notes: "", email: "", tax_rate: 10, line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
+
+  const [invForm, setInvForm] = useState(emptyInvForm);
+  const [estForm, setEstForm] = useState(emptyEstForm);
+  const [recForm, setRecForm] = useState(emptyRecForm);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [dRes, iRes, cRes, aRes, eRes, rRes, sRes] = await Promise.all([
+      const [dRes, iRes, cRes, aRes, eRes, rRes, sRes, fRes] = await Promise.all([
         axios.get(`${API}/xero/dashboard`, { headers }),
         axios.get(`${API}/xero/invoices`, { headers }),
         axios.get(`${API}/xero/contacts`, { headers }),
@@ -98,119 +132,85 @@ export default function XeroDashboardPage() {
         axios.get(`${API}/xero/estimates`, { headers }),
         axios.get(`${API}/xero/recurring`, { headers }),
         axios.get(`${API}/xero/sync-history`, { headers }),
+        axios.get(`${API}/xero/recurring/forecast`, { headers }),
       ]);
-      setDashboard(dRes.data);
-      setInvoices(iRes.data);
-      setContacts(cRes.data);
-      setAccounts(aRes.data);
-      setEstimates(eRes.data);
-      setRecurring(rRes.data);
-      setSyncHistory(sRes.data);
+      setDashboard(dRes.data); setInvoices(iRes.data); setContacts(cRes.data);
+      setAccounts(aRes.data); setEstimates(eRes.data); setRecurring(rRes.data);
+      setSyncHistory(sRes.data); setForecast(fRes.data);
     } catch { toast.error("Failed to load financial data"); }
     finally { setLoading(false); }
   }, [token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      await axios.post(`${API}/xero/sync`, {}, { headers });
-      toast.success("Xero sync completed");
-      fetchAll();
-    } catch { toast.error("Sync failed"); }
-    finally { setSyncing(false); }
-  };
+  const handleSync = async () => { setSyncing(true); try { await axios.post(`${API}/xero/sync`, {}, { headers }); toast.success("Xero sync completed"); fetchAll(); } catch { toast.error("Sync failed"); } finally { setSyncing(false); } };
 
-  const handlePay = async () => {
-    if (!payDialog || !payAmount) return;
-    try {
-      await axios.put(`${API}/xero/invoices/${payDialog.id}/pay`, { amount: parseFloat(payAmount) }, { headers });
-      toast.success("Payment recorded");
-      setPayDialog(null); setPayAmount("");
-      fetchAll();
-    } catch { toast.error("Payment failed"); }
-  };
+  const handlePay = async () => { if (!payDialog || !payAmount) return; try { await axios.put(`${API}/xero/invoices/${payDialog.id}/pay`, { amount: parseFloat(payAmount) }, { headers }); toast.success("Payment recorded"); setPayDialog(null); setPayAmount(""); fetchAll(); } catch { toast.error("Payment failed"); } };
 
-  const handleSendInvoice = async (inv) => {
-    try {
-      await axios.post(`${API}/xero/invoices/${inv.id}/send`, {}, { headers });
-      toast.success(`Invoice ${inv.invoice_number} sent`);
-      fetchAll();
-    } catch { toast.error("Failed to send"); }
-  };
+  const handleSendInvoice = async (inv) => { try { await axios.post(`${API}/xero/invoices/${inv.id}/send`, {}, { headers }); toast.success(`Invoice ${inv.invoice_number} sent`); fetchAll(); } catch { toast.error("Failed to send"); } };
+  const handleVoidInvoice = async (inv) => { try { await axios.put(`${API}/xero/invoices/${inv.id}/void`, {}, { headers }); toast.success(`Invoice ${inv.invoice_number} voided`); fetchAll(); } catch { toast.error("Failed to void"); } };
 
-  const handleVoidInvoice = async (inv) => {
-    try {
-      await axios.put(`${API}/xero/invoices/${inv.id}/void`, {}, { headers });
-      toast.success(`Invoice ${inv.invoice_number} voided`);
-      fetchAll();
-    } catch { toast.error("Failed to void"); }
-  };
+  const handleCreateInvoice = async () => { if (!invForm.client_name) { toast.error("Client name required"); return; } try { await axios.post(`${API}/xero/invoices`, invForm, { headers }); toast.success("Invoice created"); setCreateInvDialog(false); setInvForm(emptyInvForm); fetchAll(); } catch { toast.error("Failed to create invoice"); } };
+  const handleCreateEstimate = async () => { if (!estForm.title || !estForm.client_name) { toast.error("Title and client required"); return; } try { await axios.post(`${API}/xero/estimates`, estForm, { headers }); toast.success("Estimate created"); setCreateEstDialog(false); setEstForm(emptyEstForm); fetchAll(); } catch { toast.error("Failed to create estimate"); } };
+  const handleConvertEstimate = async (est) => { try { await axios.post(`${API}/xero/estimates/${est.id}/convert`, {}, { headers }); toast.success(`Estimate ${est.estimate_number} converted to invoice`); fetchAll(); } catch { toast.error("Conversion failed"); } };
 
-  const handleCreateInvoice = async () => {
-    if (!invForm.client_name) { toast.error("Client name required"); return; }
-    try {
-      await axios.post(`${API}/xero/invoices`, invForm, { headers });
-      toast.success("Invoice created");
-      setCreateInvDialog(false);
-      setInvForm({ client_name: "", reference: "", due_date: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
-      fetchAll();
-    } catch { toast.error("Failed to create invoice"); }
+  // Recurring handlers
+  const openRecDialog = (rec = null) => {
+    if (rec) {
+      setRecForm({ client_name: rec.client_name || "", description: rec.description || "", frequency: rec.frequency || "monthly", payment_terms: rec.payment_terms || 14, contract_start: rec.contract_start || "", contract_end: rec.contract_end || "", escalation_percent: rec.escalation_percent || 0, auto_send: rec.auto_send || false, auto_generate: rec.auto_generate !== false, notes: rec.notes || "", email: rec.email || "", tax_rate: rec.tax_rate || 10, line_items: rec.line_items?.length ? rec.line_items : [{ description: "", quantity: 1, unit_price: 0 }] });
+      setRecDialog({ open: true, editing: rec });
+    } else {
+      setRecForm(emptyRecForm);
+      setRecDialog({ open: true, editing: null });
+    }
   };
-
-  const handleCreateEstimate = async () => {
-    if (!estForm.title || !estForm.client_name) { toast.error("Title and client required"); return; }
-    try {
-      await axios.post(`${API}/xero/estimates`, estForm, { headers });
-      toast.success("Estimate created");
-      setCreateEstDialog(false);
-      setEstForm({ title: "", client_name: "", valid_until: "", notes: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
-      fetchAll();
-    } catch { toast.error("Failed to create estimate"); }
-  };
-
-  const handleConvertEstimate = async (est) => {
-    try {
-      await axios.post(`${API}/xero/estimates/${est.id}/convert`, {}, { headers });
-      toast.success(`Estimate ${est.estimate_number} converted to invoice`);
-      fetchAll();
-    } catch { toast.error("Conversion failed"); }
-  };
-
-  const handleCreateRecurring = async () => {
+  const handleSaveRecurring = async () => {
     if (!recForm.client_name || !recForm.description) { toast.error("Client and description required"); return; }
     try {
-      await axios.post(`${API}/xero/recurring`, recForm, { headers });
-      toast.success("Recurring template created");
-      setCreateRecDialog(false);
-      setRecForm({ client_name: "", description: "", frequency: "monthly", line_items: [{ description: "", quantity: 1, unit_price: 0 }] });
-      fetchAll();
-    } catch { toast.error("Failed to create recurring"); }
+      if (recDialog.editing) {
+        await axios.put(`${API}/xero/recurring/${recDialog.editing.id}`, recForm, { headers });
+        toast.success("Recurring template updated");
+      } else {
+        await axios.post(`${API}/xero/recurring`, recForm, { headers });
+        toast.success("Recurring template created");
+      }
+      setRecDialog({ open: false, editing: null }); setRecForm(emptyRecForm); fetchAll();
+    } catch { toast.error("Failed to save recurring template"); }
+  };
+  const handleDeleteRecurring = async (rec) => { try { await axios.delete(`${API}/xero/recurring/${rec.id}`, { headers }); toast.success("Template deleted"); if (expandedRec?.id === rec.id) setExpandedRec(null); fetchAll(); } catch { toast.error("Failed to delete"); } };
+  const handleToggleRecurring = async (rec) => { try { const res = await axios.put(`${API}/xero/recurring/${rec.id}/toggle`, {}, { headers }); toast.success(`Recurring invoice ${res.data.status}`); fetchAll(); } catch { toast.error("Failed to toggle"); } };
+  const handleGenerateNow = async (rec) => { try { const res = await axios.post(`${API}/xero/recurring/${rec.id}/generate`, {}, { headers }); toast.success(`Invoice ${res.data.invoice_number} generated`); fetchAll(); } catch { toast.error("Failed to generate"); } };
+  const handleBatchGenerate = async () => { setBatchGenerating(true); try { const res = await axios.post(`${API}/xero/recurring/batch-generate`, {}, { headers }); toast.success(res.data.message); fetchAll(); } catch { toast.error("Batch generate failed"); } finally { setBatchGenerating(false); } };
+  const toggleExpandRec = async (rec) => {
+    if (expandedRec?.id === rec.id) { setExpandedRec(null); return; }
+    setExpandedRec(rec);
+    try { const res = await axios.get(`${API}/xero/recurring/${rec.id}/history`, { headers }); setRecHistory(res.data); } catch { setRecHistory([]); }
   };
 
-  const handleToggleRecurring = async (rec) => {
+  // Email handler
+  const openEmailDialog = (inv) => { setEmailDialog(inv); setEmailForm({ to_email: "", subject: `Invoice ${inv.invoice_number} from NexusOps`, message: `Please find attached invoice ${inv.invoice_number} for $${inv.total?.toLocaleString("en", { minimumFractionDigits: 2 })}.\n\nPayment is due by ${inv.due_date}.\n\nThank you for your business.` }); };
+  const handleSendEmail = async () => {
+    if (!emailForm.to_email) { toast.error("Recipient email required"); return; }
+    setEmailSending(true);
     try {
-      const res = await axios.put(`${API}/xero/recurring/${rec.id}/toggle`, {}, { headers });
-      toast.success(`Recurring invoice ${res.data.status}`);
-      fetchAll();
-    } catch { toast.error("Failed to toggle"); }
+      await axios.post(`${API}/xero/invoices/${emailDialog.id}/email`, emailForm, { headers });
+      toast.success(`Invoice emailed to ${emailForm.to_email}`);
+      setEmailDialog(null); fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to send email"); }
+    finally { setEmailSending(false); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   const d = dashboard || {};
-  const filteredInvoices = invoices.filter(inv =>
-    (!invSearch || inv.client_name?.toLowerCase().includes(invSearch.toLowerCase()) || inv.invoice_number?.toLowerCase().includes(invSearch.toLowerCase())) &&
-    (invStatus === "all" || inv.status === invStatus)
-  );
-  const filteredEstimates = estimates.filter(est =>
-    !estSearch || est.client_name?.toLowerCase().includes(estSearch.toLowerCase()) || est.title?.toLowerCase().includes(estSearch.toLowerCase())
-  );
+  const fc = forecast || { mrr: 0, arr: 0, active_count: 0, forecast: [] };
+  const filteredInvoices = invoices.filter(inv => (!invSearch || inv.client_name?.toLowerCase().includes(invSearch.toLowerCase()) || inv.invoice_number?.toLowerCase().includes(invSearch.toLowerCase())) && (invStatus === "all" || inv.status === invStatus));
+  const filteredEstimates = estimates.filter(est => !estSearch || est.client_name?.toLowerCase().includes(estSearch.toLowerCase()) || est.title?.toLowerCase().includes(estSearch.toLowerCase()));
+  const filteredRecurring = recurring.filter(r => (!recSearch || r.client_name?.toLowerCase().includes(recSearch.toLowerCase()) || r.description?.toLowerCase().includes(recSearch.toLowerCase())) && (recFilter === "all" || r.status === recFilter));
   const pieData = Object.entries(d.by_status || {}).map(([status, data]) => ({ name: status, value: data.count, total: data.total }));
   const aging = d.aging || {};
   const agingTotal = (aging.current || 0) + (aging["30_days"] || 0) + (aging["60_days"] || 0) + (aging["90_plus"] || 0);
-  const totalRecurringMRR = recurring.filter(r => r.status === "active" && r.frequency === "monthly").reduce((s, r) => s + (r.amount || 0), 0);
+  const dueCount = recurring.filter(r => r.status === "active" && r.next_generation <= new Date().toISOString().split("T")[0]).length;
 
   return (
     <div className="space-y-5" data-testid="xero-dashboard">
@@ -218,7 +218,7 @@ export default function XeroDashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Finance Center</h1>
-          <p className="text-muted-foreground">Xero-powered accounting, invoicing & financial management</p>
+          <p className="text-muted-foreground">Xero-powered accounting, invoicing & recurring billing</p>
         </div>
         <div className="flex items-center gap-2">
           {d.last_sync && <span className="text-xs text-muted-foreground">Last sync: {new Date(d.last_sync).toLocaleString()}</span>}
@@ -235,7 +235,7 @@ export default function XeroDashboardPage() {
           { label: "Collected", value: d.total_paid, color: "text-blue-400", bg: "bg-blue-500/10", icon: CheckCircle },
           { label: "Outstanding", value: d.total_outstanding, color: "text-amber-400", bg: "bg-amber-500/10", icon: Clock },
           { label: "Overdue", value: d.total_overdue, color: "text-red-400", bg: "bg-red-500/10", icon: AlertTriangle, danger: d.total_overdue > 0 },
-          { label: "Recurring MRR", value: totalRecurringMRR, color: "text-violet-400", bg: "bg-violet-500/10", icon: Repeat },
+          { label: "Recurring MRR", value: fc.mrr, color: "text-violet-400", bg: "bg-violet-500/10", icon: Repeat },
         ].map((s, i) => {
           const Icon = s.icon;
           return (
@@ -276,16 +276,9 @@ export default function XeroDashboardPage() {
                 {(d.monthly_revenue || []).length > 0 ? (
                   <ResponsiveContainer width="100%" height={220}>
                     <AreaChart data={d.monthly_revenue}>
-                      <defs>
-                        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                      <Tooltip formatter={v => [`$${v.toLocaleString()}`, "Revenue"]} />
-                      <Area type="monotone" dataKey="revenue" stroke="#10b981" fill="url(#revGrad)" strokeWidth={2} />
+                      <defs><linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                      <Tooltip formatter={v => [`$${v.toLocaleString()}`, "Revenue"]} /><Area type="monotone" dataKey="revenue" stroke="#10b981" fill="url(#revGrad)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : <div className="h-[220px] flex items-center justify-center text-muted-foreground">No revenue data</div>}
@@ -296,13 +289,7 @@ export default function XeroDashboardPage() {
               <CardContent>
                 {pieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={220}>
-                    <RePieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                        {pieData.map((_, i) => <Cell key={`pie-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip formatter={(value, name) => [value, name]} />
-                      <Legend />
-                    </RePieChart>
+                    <RePieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={`pie-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip /><Legend /></RePieChart>
                   </ResponsiveContainer>
                 ) : <div className="h-[220px] flex items-center justify-center text-muted-foreground">No invoice data</div>}
               </CardContent>
@@ -317,12 +304,9 @@ export default function XeroDashboardPage() {
                     <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
                       <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/20" />
                       <circle cx="50" cy="50" r="40" fill="none" stroke={d.collection_rate >= 80 ? "#10b981" : d.collection_rate >= 50 ? "#f59e0b" : "#ef4444"} strokeWidth="8" strokeLinecap="round"
-                        strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (d.collection_rate || 0) / 100)}
-                        style={{ transition: "stroke-dashoffset 1s ease-in-out" }} />
+                        strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (d.collection_rate || 0) / 100)} style={{ transition: "stroke-dashoffset 1s ease-in-out" }} />
                     </svg>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-xl font-bold">{d.collection_rate || 0}%</span>
-                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center"><span className="text-xl font-bold">{d.collection_rate || 0}%</span></div>
                   </div>
                   <div className="space-y-1 text-sm">
                     <p className="text-muted-foreground">Invoices: <span className="font-mono text-foreground">{d.invoice_count || 0}</span></p>
@@ -349,10 +333,7 @@ export default function XeroDashboardPage() {
                     {syncHistory.slice(0, 6).map(e => (
                       <div key={e.id} className="flex items-start gap-2 text-xs">
                         <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${e.status === "success" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                        <div>
-                          <p className="text-muted-foreground">{e.message}</p>
-                          <p className="text-[10px] text-muted-foreground/60">{new Date(e.timestamp).toLocaleString()}</p>
-                        </div>
+                        <div><p className="text-muted-foreground">{e.message}</p><p className="text-[10px] text-muted-foreground/60">{new Date(e.timestamp).toLocaleString()}</p></div>
                       </div>
                     ))}
                   </div>
@@ -365,32 +346,14 @@ export default function XeroDashboardPage() {
         {/* ============ INVOICES TAB ============ */}
         <TabsContent value="invoices" className="space-y-3">
           <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Search invoices..." value={invSearch} onChange={e => setInvSearch(e.target.value)} data-testid="search-invoices" />
-            </div>
-            <Select value={invStatus} onValueChange={setInvStatus}>
-              <SelectTrigger className="w-[150px]" data-testid="inv-status-filter"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="DRAFT">Draft</SelectItem>
-                <SelectItem value="AUTHORISED">Authorised</SelectItem>
-                <SelectItem value="PAID">Paid</SelectItem>
-                <SelectItem value="VOIDED">Voided</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search invoices..." value={invSearch} onChange={e => setInvSearch(e.target.value)} data-testid="search-invoices" /></div>
+            <Select value={invStatus} onValueChange={setInvStatus}><SelectTrigger className="w-[150px]" data-testid="inv-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="DRAFT">Draft</SelectItem><SelectItem value="AUTHORISED">Authorised</SelectItem><SelectItem value="PAID">Paid</SelectItem><SelectItem value="VOIDED">Voided</SelectItem></SelectContent></Select>
             <Button size="sm" onClick={() => setCreateInvDialog(true)} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
           </div>
           <Card>
             <ScrollArea className="h-[420px]">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Date</TableHead>
-                    <TableHead>Due</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Due</TableHead><TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <TableHeader><TableRow><TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Date</TableHead><TableHead>Due</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="text-right">Due</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {filteredInvoices.map(inv => {
                     const isOverdue = inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0];
@@ -402,26 +365,13 @@ export default function XeroDashboardPage() {
                         <TableCell className={`text-sm ${isOverdue ? "text-red-400 font-medium" : "text-muted-foreground"}`}>{inv.due_date}</TableCell>
                         <TableCell><StatusBadge status={isOverdue ? "OVERDUE" : inv.status} /></TableCell>
                         <TableCell className="text-right font-mono">${inv.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                        <TableCell className={`text-right font-mono ${inv.amount_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                          ${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}
-                        </TableCell>
+                        <TableCell className={`text-right font-mono ${inv.amount_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
-                            {inv.status === "DRAFT" && (
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleSendInvoice(inv)} title="Send">
-                                <Send className="w-3.5 h-3.5 text-blue-400" />
-                              </Button>
-                            )}
-                            {inv.amount_due > 0 && inv.status !== "DRAFT" && inv.status !== "VOIDED" && (
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }} title="Record Payment" data-testid={`pay-${inv.id}`}>
-                                <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
-                              </Button>
-                            )}
-                            {inv.status !== "PAID" && inv.status !== "VOIDED" && (
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleVoidInvoice(inv)} title="Void">
-                                <Ban className="w-3.5 h-3.5 text-red-400" />
-                              </Button>
-                            )}
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEmailDialog(inv)} title="Email Invoice" data-testid={`email-${inv.id}`}><Mail className="w-3.5 h-3.5 text-cyan-400" /></Button>
+                            {inv.status === "DRAFT" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleSendInvoice(inv)} title="Mark Sent"><Send className="w-3.5 h-3.5 text-blue-400" /></Button>}
+                            {inv.amount_due > 0 && inv.status !== "DRAFT" && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }} title="Record Payment" data-testid={`pay-${inv.id}`}><CreditCard className="w-3.5 h-3.5 text-emerald-400" /></Button>}
+                            {inv.status !== "PAID" && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleVoidInvoice(inv)} title="Void"><Ban className="w-3.5 h-3.5 text-red-400" /></Button>}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -436,40 +386,20 @@ export default function XeroDashboardPage() {
         {/* ============ ESTIMATES TAB ============ */}
         <TabsContent value="estimates" className="space-y-3">
           <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Search estimates..." value={estSearch} onChange={e => setEstSearch(e.target.value)} data-testid="search-estimates" />
-            </div>
+            <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search estimates..." value={estSearch} onChange={e => setEstSearch(e.target.value)} data-testid="search-estimates" /></div>
             <Button size="sm" onClick={() => setCreateEstDialog(true)} data-testid="create-estimate-btn"><Plus className="w-4 h-4 mr-1" />New Estimate</Button>
           </div>
           <Card>
             <ScrollArea className="h-[420px]">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Estimate #</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead>
-                    <TableHead>Status</TableHead><TableHead>Valid Until</TableHead><TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <TableHeader><TableRow><TableHead>Estimate #</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead><TableHead>Valid Until</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {filteredEstimates.map(est => (
                     <TableRow key={est.id} data-testid={`estimate-${est.id}`}>
-                      <TableCell className="font-mono text-sm">{est.estimate_number}</TableCell>
-                      <TableCell className="font-medium">{est.title}</TableCell>
-                      <TableCell>{est.client_name}</TableCell>
-                      <TableCell><StatusBadge status={est.status} /></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{est.valid_until}</TableCell>
+                      <TableCell className="font-mono text-sm">{est.estimate_number}</TableCell><TableCell className="font-medium">{est.title}</TableCell><TableCell>{est.client_name}</TableCell>
+                      <TableCell><StatusBadge status={est.status} /></TableCell><TableCell className="text-sm text-muted-foreground">{est.valid_until}</TableCell>
                       <TableCell className="text-right font-mono">${est.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {est.status !== "CONVERTED" && est.status !== "DECLINED" && (
-                            <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => handleConvertEstimate(est)} data-testid={`convert-${est.id}`}>
-                              <ArrowRight className="w-3 h-3 mr-1 text-purple-400" />Convert
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+                      <TableCell className="text-right">{est.status !== "CONVERTED" && est.status !== "DECLINED" && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => handleConvertEstimate(est)} data-testid={`convert-${est.id}`}><ArrowRight className="w-3 h-3 mr-1 text-purple-400" />Convert</Button>}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -478,187 +408,223 @@ export default function XeroDashboardPage() {
           </Card>
         </TabsContent>
 
-        {/* ============ RECURRING TAB ============ */}
-        <TabsContent value="recurring" className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Card className="border-none shadow-none bg-violet-500/5"><CardContent className="py-2 px-4 flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-violet-400" /><span className="text-sm text-muted-foreground">Active MRR:</span>
-                <span className="font-mono font-bold text-violet-400">${totalRecurringMRR.toLocaleString()}/mo</span>
-              </CardContent></Card>
-            </div>
-            <Button size="sm" onClick={() => setCreateRecDialog(true)} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Template</Button>
-          </div>
-          <div className="space-y-2">
-            {recurring.map(rec => (
-              <Card key={rec.id} data-testid={`recurring-${rec.id}`}>
-                <CardContent className="py-3 px-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${rec.status === "active" ? "bg-violet-500/10" : "bg-muted/30"}`}>
-                        <Repeat className={`w-4 h-4 ${rec.status === "active" ? "text-violet-400" : "text-muted-foreground"}`} />
-                      </div>
+        {/* ============ RECURRING TAB (ENHANCED) ============ */}
+        <TabsContent value="recurring" className="space-y-4" data-testid="recurring-tab-content">
+          {/* KPI row */}
+          <div className="grid grid-cols-5 gap-3">
+            {[
+              { label: "Monthly MRR", value: fc.mrr, color: "text-violet-400", bg: "bg-violet-500/10", icon: Repeat },
+              { label: "Annual ARR", value: fc.arr, color: "text-emerald-400", bg: "bg-emerald-500/10", icon: TrendingUp },
+              { label: "Active Templates", value: fc.active_count, color: "text-blue-400", bg: "bg-blue-500/10", icon: FileText, isCurrency: false },
+              { label: "Due for Generation", value: dueCount, color: dueCount > 0 ? "text-amber-400" : "text-zinc-400", bg: dueCount > 0 ? "bg-amber-500/10" : "bg-zinc-500/10", icon: CalendarDays, isCurrency: false },
+              { label: "Total Templates", value: recurring.length, color: "text-zinc-400", bg: "bg-zinc-500/10", icon: Receipt, isCurrency: false },
+            ].map((s, i) => {
+              const Icon = s.icon;
+              return (
+                <Card key={`rec-stat-${i}`} data-testid={`rec-stat-${s.label.toLowerCase().replace(/\s/g, "-")}`}>
+                  <CardContent className="pt-3 pb-2">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-sm">{rec.client_name}</p>
+                        <p className={`text-xl font-black ${s.color}`}>{s.isCurrency !== false ? `$${(s.value || 0).toLocaleString("en", { minimumFractionDigits: 0 })}` : s.value}</p>
+                        <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                      </div>
+                      <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center`}><Icon className={`w-4 h-4 ${s.color}`} /></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Forecast Chart */}
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">12-Month Revenue Forecast (Recurring Only)</CardTitle></CardHeader>
+            <CardContent>
+              {fc.forecast?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={fc.forecast}>
+                    <XAxis dataKey="month" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip formatter={v => [`$${v.toLocaleString()}`, "Projected"]} />
+                    <Bar dataKey="projected" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-[180px] flex items-center justify-center text-muted-foreground">No forecast data</div>}
+            </CardContent>
+          </Card>
+
+          {/* Actions bar */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search templates..." value={recSearch} onChange={e => setRecSearch(e.target.value)} data-testid="search-recurring" /></div>
+            <Select value={recFilter} onValueChange={setRecFilter}><SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="paused">Paused</SelectItem></SelectContent></Select>
+            {dueCount > 0 && <Button size="sm" variant="outline" onClick={handleBatchGenerate} disabled={batchGenerating} data-testid="batch-generate-btn"><Zap className={`w-4 h-4 mr-1 ${batchGenerating ? "animate-pulse" : ""}`} />Generate Due ({dueCount})</Button>}
+            <Button size="sm" onClick={() => openRecDialog()} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Template</Button>
+          </div>
+
+          {/* Template Cards */}
+          <div className="space-y-2">
+            {filteredRecurring.map(rec => {
+              const isExpanded = expandedRec?.id === rec.id;
+              const isDue = rec.status === "active" && rec.next_generation <= new Date().toISOString().split("T")[0];
+              const collectionRate = rec.total_billed > 0 ? Math.round(((rec.total_collected || 0) / rec.total_billed) * 100) : 0;
+              return (
+                <Card key={rec.id} className={`transition-all ${isDue ? "border-amber-500/40" : ""} ${rec.status === "paused" ? "opacity-60" : ""}`} data-testid={`recurring-${rec.id}`}>
+                  <CardContent className="py-3 px-4">
+                    {/* Main Row */}
+                    <div className="flex items-center gap-4 cursor-pointer" onClick={() => toggleExpandRec(rec)}>
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${rec.status === "active" ? "bg-violet-500/10" : "bg-muted/30"}`}>
+                        <Repeat className={`w-5 h-5 ${rec.status === "active" ? "text-violet-400" : "text-muted-foreground"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{rec.client_name}</p>
+                          <Badge variant={rec.status === "active" ? "default" : "secondary"} className="text-[9px]">{rec.status}</Badge>
+                          {isDue && <Badge className="bg-amber-500/15 text-amber-400 text-[9px] border-amber-500/30">DUE</Badge>}
+                          {rec.auto_send && <Badge className="bg-cyan-500/10 text-cyan-400 text-[9px] border-cyan-500/30">AUTO-SEND</Badge>}
+                          {rec.escalation_percent > 0 && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30"><Percent className="w-2 h-2 mr-0.5" />{rec.escalation_percent}% p.a.</Badge>}
+                        </div>
                         <p className="text-xs text-muted-foreground">{rec.description}</p>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="font-mono font-bold">${rec.amount?.toLocaleString()}<span className="text-xs text-muted-foreground font-normal">/{rec.frequency === "monthly" ? "mo" : "yr"}</span></p>
-                        <p className="text-[10px] text-muted-foreground">Next: {rec.next_generation} | Generated: {rec.invoices_generated}x</p>
+                      <div className="flex items-center gap-5 flex-shrink-0">
+                        <div className="text-right">
+                          <p className="font-mono font-bold text-lg">${rec.amount?.toLocaleString()}<span className="text-xs text-muted-foreground font-normal">/{FREQ_SHORT[rec.frequency] || rec.frequency}</span></p>
+                          <p className="text-[10px] text-muted-foreground">Next: {rec.next_generation} | {rec.invoices_generated}x generated</p>
+                        </div>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleToggleRecurring(rec)} title={rec.status === "active" ? "Pause" : "Resume"}>
+                            {rec.status === "active" ? <Pause className="w-3.5 h-3.5 text-amber-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleGenerateNow(rec)} title="Generate Invoice Now" data-testid={`generate-${rec.id}`}>
+                            <Zap className="w-3.5 h-3.5 text-violet-400" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRecDialog(rec)} title="Edit"><Pencil className="w-3.5 h-3.5 text-blue-400" /></Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleDeleteRecurring(rec)} title="Delete"><Trash2 className="w-3.5 h-3.5 text-red-400" /></Button>
+                        </div>
+                        {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                       </div>
-                      <Badge variant={rec.status === "active" ? "default" : "secondary"} className="text-[10px]">{rec.status}</Badge>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleToggleRecurring(rec)} title={rec.status === "active" ? "Pause" : "Resume"}>
-                        {rec.status === "active" ? <Pause className="w-3.5 h-3.5 text-amber-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
-                      </Button>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    {/* Expanded Detail */}
+                    {isExpanded && (
+                      <div className="mt-4 pt-3 border-t space-y-4">
+                        <div className="grid grid-cols-4 gap-4">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Contract Period</p>
+                            <p className="text-sm font-mono">{rec.contract_start || "N/A"} {rec.contract_end ? `to ${rec.contract_end}` : "(Open-ended)"}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Payment Terms</p>
+                            <p className="text-sm font-mono">{rec.payment_terms || 14} days</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Total Billed</p>
+                            <p className="text-sm font-mono text-emerald-400">${(rec.total_billed || 0).toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Collection Rate</p>
+                            <p className={`text-sm font-mono ${collectionRate >= 80 ? "text-emerald-400" : collectionRate >= 50 ? "text-amber-400" : "text-red-400"}`}>{collectionRate}%</p>
+                          </div>
+                        </div>
+                        {rec.notes && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Notes</p><p className="text-xs text-muted-foreground">{rec.notes}</p></div>}
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Line Items</p>
+                          <div className="space-y-1">
+                            {(rec.line_items || []).map((li, i) => (
+                              <div key={`detail-li-${i}`} className="flex justify-between text-xs">
+                                <span>{li.description}</span>
+                                <span className="font-mono">{li.quantity} x ${li.unit_price?.toLocaleString()} = ${((li.quantity || 0) * (li.unit_price || 0)).toLocaleString()}</span>
+                              </div>
+                            ))}
+                            <Separator className="my-1" />
+                            <div className="flex justify-between text-xs font-medium"><span>Subtotal</span><span className="font-mono">${(rec.sub_total || 0).toLocaleString()}</span></div>
+                            <div className="flex justify-between text-xs text-muted-foreground"><span>Tax ({rec.tax_rate || 10}%)</span><span className="font-mono">${(rec.tax || 0).toLocaleString()}</span></div>
+                            <div className="flex justify-between text-sm font-bold"><span>Total</span><span className="font-mono">${(rec.amount || 0).toLocaleString()}</span></div>
+                          </div>
+                        </div>
+                        {/* Generated Invoice History */}
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Generated Invoice History</p>
+                          {recHistory.length > 0 ? (
+                            <div className="space-y-1">
+                              {recHistory.slice(0, 5).map(inv => (
+                                <div key={inv.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-muted/10">
+                                  <span className="font-mono">{inv.invoice_number}</span>
+                                  <span className="text-muted-foreground">{inv.date}</span>
+                                  <StatusBadge status={inv.status} />
+                                  <span className="font-mono">${inv.total?.toLocaleString()}</span>
+                                  <span className={`font-mono ${inv.amount_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>{inv.amount_due > 0 ? `$${inv.amount_due?.toLocaleString()} due` : "Paid"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : <p className="text-xs text-muted-foreground">No invoices generated yet from this template</p>}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+            {filteredRecurring.length === 0 && <div className="text-center py-12 text-muted-foreground">No recurring templates found</div>}
           </div>
         </TabsContent>
 
         {/* ============ CONTACTS TAB ============ */}
         <TabsContent value="contacts">
-          <Card>
-            <ScrollArea className="h-[420px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Client</TableHead><TableHead>Account #</TableHead><TableHead>Xero ID</TableHead>
-                    <TableHead>Status</TableHead><TableHead className="text-right">Balance Due</TableHead>
-                    <TableHead className="text-right">Overdue</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {contacts.map(c => (
-                    <TableRow key={c.id} data-testid={`contact-${c.id}`}>
-                      <TableCell className="font-medium">{c.client_name || c.name}</TableCell>
-                      <TableCell className="font-mono text-sm">{c.account_number}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{c.xero_contact_id}</TableCell>
-                      <TableCell><Badge className="bg-emerald-500/10 text-emerald-400 text-[10px]">{c.status}</Badge></TableCell>
-                      <TableCell className="text-right font-mono">${c.balance_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                      <TableCell className={`text-right font-mono ${c.overdue_amount > 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                        ${c.overdue_amount?.toLocaleString("en", { minimumFractionDigits: 2 })}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </Card>
+          <Card><ScrollArea className="h-[420px]"><Table>
+            <TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Account #</TableHead><TableHead>Xero ID</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Balance Due</TableHead><TableHead className="text-right">Overdue</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {contacts.map(c => (
+                <TableRow key={c.id} data-testid={`contact-${c.id}`}><TableCell className="font-medium">{c.client_name || c.name}</TableCell><TableCell className="font-mono text-sm">{c.account_number}</TableCell><TableCell className="font-mono text-xs text-muted-foreground">{c.xero_contact_id}</TableCell><TableCell><Badge className="bg-emerald-500/10 text-emerald-400 text-[10px]">{c.status}</Badge></TableCell><TableCell className="text-right font-mono">${c.balance_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell><TableCell className={`text-right font-mono ${c.overdue_amount > 0 ? "text-red-400" : "text-muted-foreground"}`}>${c.overdue_amount?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell></TableRow>
+              ))}
+            </TableBody>
+          </Table></ScrollArea></Card>
         </TabsContent>
 
         {/* ============ ACCOUNTS TAB ============ */}
         <TabsContent value="accounts">
-          <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead><TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {accounts.map(a => (
-                  <TableRow key={a.id} data-testid={`account-${a.id}`}>
-                    <TableCell className="font-mono">{a.code}</TableCell>
-                    <TableCell className="font-medium">{a.name}</TableCell>
-                    <TableCell><Badge variant="outline" className="text-[10px]">{a.type}</Badge></TableCell>
-                    <TableCell><Badge className="bg-emerald-500/10 text-emerald-400 text-[10px]">{a.status}</Badge></TableCell>
-                    <TableCell className="text-right font-mono">${a.balance?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
+          <Card><Table>
+            <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Balance</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {accounts.map(a => (<TableRow key={a.id} data-testid={`account-${a.id}`}><TableCell className="font-mono">{a.code}</TableCell><TableCell className="font-medium">{a.name}</TableCell><TableCell><Badge variant="outline" className="text-[10px]">{a.type}</Badge></TableCell><TableCell><Badge className="bg-emerald-500/10 text-emerald-400 text-[10px]">{a.status}</Badge></TableCell><TableCell className="text-right font-mono">${a.balance?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell></TableRow>))}
+            </TableBody>
+          </Table></Card>
         </TabsContent>
 
         {/* ============ SYNC HISTORY TAB ============ */}
         <TabsContent value="history">
           <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Xero Sync History</CardTitle>
-                <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing} data-testid="trigger-sync-btn">
-                  <RefreshCw className={`w-3 h-3 mr-1 ${syncing ? "animate-spin" : ""}`} />Trigger Sync
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[380px]">
-                <div className="space-y-2">
-                  {syncHistory.map(e => (
-                    <div key={e.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/20 transition-colors" data-testid={`sync-${e.id}`}>
-                      <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${e.status === "success" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[9px] px-1.5">{e.event_type}</Badge>
-                          <span className="text-[10px] text-muted-foreground">{new Date(e.timestamp).toLocaleString()}</span>
-                        </div>
-                        <p className="text-sm mt-0.5">{e.message}</p>
-                      </div>
-                    </div>
-                  ))}
+            <CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-sm">Xero Sync History</CardTitle><Button size="sm" variant="outline" onClick={handleSync} disabled={syncing} data-testid="trigger-sync-btn"><RefreshCw className={`w-3 h-3 mr-1 ${syncing ? "animate-spin" : ""}`} />Trigger Sync</Button></div></CardHeader>
+            <CardContent><ScrollArea className="h-[380px]"><div className="space-y-2">
+              {syncHistory.map(e => (
+                <div key={e.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/20 transition-colors" data-testid={`sync-${e.id}`}>
+                  <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${e.status === "success" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                  <div className="flex-1 min-w-0"><div className="flex items-center gap-2"><Badge variant="outline" className="text-[9px] px-1.5">{e.event_type}</Badge><span className="text-[10px] text-muted-foreground">{new Date(e.timestamp).toLocaleString()}</span></div><p className="text-sm mt-0.5">{e.message}</p></div>
                 </div>
-              </ScrollArea>
-            </CardContent>
+              ))}
+            </div></ScrollArea></CardContent>
           </Card>
         </TabsContent>
 
         {/* ============ AGING TAB ============ */}
         <TabsContent value="aging" className="space-y-4">
           <div className="grid grid-cols-4 gap-3">
-            {[
-              { label: "Current", amount: aging.current || 0, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-              { label: "1-30 Days", amount: aging["30_days"] || 0, color: "text-amber-400", bg: "bg-amber-500/10" },
-              { label: "31-60 Days", amount: aging["60_days"] || 0, color: "text-orange-400", bg: "bg-orange-500/10" },
-              { label: "90+ Days", amount: aging["90_plus"] || 0, color: "text-red-400", bg: "bg-red-500/10" },
-            ].map((b, i) => (
-              <Card key={`aging-${i}`}>
-                <CardContent className="pt-4 pb-3">
-                  <p className="text-[11px] text-muted-foreground">{b.label}</p>
-                  <p className={`text-2xl font-black ${b.color}`}>${b.amount.toLocaleString("en", { minimumFractionDigits: 0 })}</p>
-                </CardContent>
-              </Card>
+            {[{ label: "Current", amount: aging.current || 0, color: "text-emerald-400" }, { label: "1-30 Days", amount: aging["30_days"] || 0, color: "text-amber-400" }, { label: "31-60 Days", amount: aging["60_days"] || 0, color: "text-orange-400" }, { label: "90+ Days", amount: aging["90_plus"] || 0, color: "text-red-400" }].map((b, i) => (
+              <Card key={`aging-${i}`}><CardContent className="pt-4 pb-3"><p className="text-[11px] text-muted-foreground">{b.label}</p><p className={`text-2xl font-black ${b.color}`}>${b.amount.toLocaleString("en", { minimumFractionDigits: 0 })}</p></CardContent></Card>
             ))}
           </div>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Overdue Invoices</CardTitle></CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead>
-                    <TableHead>Days Overdue</TableHead><TableHead className="text-right">Amount Due</TableHead><TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.filter(inv => inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0]).map(inv => {
-                    const daysOverdue = Math.floor((new Date() - new Date(inv.due_date)) / (1000 * 60 * 60 * 24));
-                    return (
-                      <TableRow key={inv.id}>
-                        <TableCell className="font-mono">{inv.invoice_number}</TableCell>
-                        <TableCell>{inv.client_name}</TableCell>
-                        <TableCell className="text-red-400">{inv.due_date}</TableCell>
-                        <TableCell><Badge variant="destructive" className="text-[10px]">{daysOverdue}d overdue</Badge></TableCell>
-                        <TableCell className="text-right font-mono text-red-400">${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }}>
-                            <CreditCard className="w-3 h-3 mr-1" />Record Payment
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {invoices.filter(inv => inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0]).length === 0 && (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No overdue invoices</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
+            <CardContent><Table>
+              <TableHeader><TableRow><TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead><TableHead>Days Overdue</TableHead><TableHead className="text-right">Amount Due</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {invoices.filter(inv => inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0]).map(inv => {
+                  const daysOverdue = Math.floor((new Date() - new Date(inv.due_date)) / (1000 * 60 * 60 * 24));
+                  return (
+                    <TableRow key={inv.id}><TableCell className="font-mono">{inv.invoice_number}</TableCell><TableCell>{inv.client_name}</TableCell><TableCell className="text-red-400">{inv.due_date}</TableCell><TableCell><Badge variant="destructive" className="text-[10px]">{daysOverdue}d overdue</Badge></TableCell><TableCell className="text-right font-mono text-red-400">${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-right"><div className="flex items-center justify-end gap-1"><Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => openEmailDialog(inv)}><Mail className="w-3 h-3 mr-1" />Send Reminder</Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => { setPayDialog(inv); setPayAmount(String(inv.amount_due)); }}><CreditCard className="w-3 h-3 mr-1" />Record Payment</Button></div></TableCell></TableRow>
+                  );
+                })}
+                {invoices.filter(inv => inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0]).length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No overdue invoices</TableCell></TableRow>}
+              </TableBody>
+            </Table></CardContent>
           </Card>
         </TabsContent>
       </Tabs>
@@ -667,49 +633,45 @@ export default function XeroDashboardPage() {
 
       {/* Pay Dialog */}
       <Dialog open={!!payDialog} onOpenChange={v => { if (!v) setPayDialog(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record Payment - {payDialog?.invoice_number}</DialogTitle>
-            <DialogDescription>Record a payment against this invoice</DialogDescription>
-          </DialogHeader>
+        <DialogContent><DialogHeader><DialogTitle>Record Payment - {payDialog?.invoice_number}</DialogTitle><DialogDescription>Record a payment against this invoice</DialogDescription></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Client: {payDialog?.client_name}</p>
-            <p className="text-sm">Invoice Total: <span className="font-mono font-bold">${payDialog?.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</span></p>
-            <p className="text-sm">Amount Due: <span className="font-mono font-bold text-amber-400">${payDialog?.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</span></p>
+            <p className="text-sm">Total: <span className="font-mono font-bold">${payDialog?.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</span></p>
+            <p className="text-sm">Due: <span className="font-mono font-bold text-amber-400">${payDialog?.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</span></p>
             <div><Label>Payment Amount</Label><Input type="number" step="0.01" value={payAmount} onChange={e => setPayAmount(e.target.value)} data-testid="pay-amount" /></div>
           </div>
           <DialogFooter><Button onClick={handlePay} data-testid="confirm-pay-btn"><CreditCard className="w-4 h-4 mr-1" />Record Payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* Email Invoice Dialog */}
+      <Dialog open={!!emailDialog} onOpenChange={v => { if (!v) setEmailDialog(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Email Invoice - {emailDialog?.invoice_number}</DialogTitle><DialogDescription>Send this invoice to the client via email</DialogDescription></DialogHeader>
+          <div className="space-y-3">
+            <Card className="bg-muted/10"><CardContent className="py-3 px-4">
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Client:</span><span className="font-medium">{emailDialog?.client_name}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount:</span><span className="font-mono font-bold">${emailDialog?.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Due Date:</span><span>{emailDialog?.due_date}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Status:</span><StatusBadge status={emailDialog?.status || "DRAFT"} /></div>
+            </CardContent></Card>
+            <div><Label>Recipient Email *</Label><Input type="email" value={emailForm.to_email} onChange={e => setEmailForm(p => ({ ...p, to_email: e.target.value }))} placeholder="client@company.com" data-testid="email-to" /></div>
+            <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm(p => ({ ...p, subject: e.target.value }))} /></div>
+            <div><Label>Message</Label><Textarea rows={4} value={emailForm.message} onChange={e => setEmailForm(p => ({ ...p, message: e.target.value }))} /></div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Shield className="w-3 h-3" />Invoice PDF will be auto-attached (Resend integration)</div>
+          </div>
+          <DialogFooter><Button onClick={handleSendEmail} disabled={emailSending} data-testid="send-email-btn">{emailSending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}{emailSending ? "Sending..." : "Send Invoice Email"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Invoice Dialog */}
       <Dialog open={createInvDialog} onOpenChange={setCreateInvDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New Invoice</DialogTitle>
-            <DialogDescription>Create a new Xero invoice</DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-w-lg"><DialogHeader><DialogTitle>New Invoice</DialogTitle><DialogDescription>Create a new Xero invoice</DialogDescription></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Client Name</Label><Input value={invForm.client_name} onChange={e => setInvForm(p => ({ ...p, client_name: e.target.value }))} data-testid="inv-client" /></div>
-            <div><Label>Reference</Label><Input value={invForm.reference} onChange={e => setInvForm(p => ({ ...p, reference: e.target.value }))} /></div>
-            <div><Label>Due Date</Label><Input type="date" value={invForm.due_date} onChange={e => setInvForm(p => ({ ...p, due_date: e.target.value }))} /></div>
+            <div><Label>Client Name *</Label><Input value={invForm.client_name} onChange={e => setInvForm(p => ({ ...p, client_name: e.target.value }))} data-testid="inv-client" /></div>
+            <div className="grid grid-cols-2 gap-3"><div><Label>Reference</Label><Input value={invForm.reference} onChange={e => setInvForm(p => ({ ...p, reference: e.target.value }))} /></div><div><Label>Due Date</Label><Input type="date" value={invForm.due_date} onChange={e => setInvForm(p => ({ ...p, due_date: e.target.value }))} /></div></div>
             <Separator />
-            <div className="space-y-2">
-              <Label>Line Items</Label>
-              {invForm.line_items.map((item, i) => (
-                <div key={`inv-li-${i}`} className="grid grid-cols-6 gap-2">
-                  <Input className="col-span-3" placeholder="Description" value={item.description} onChange={e => { const items = [...invForm.line_items]; items[i] = { ...items[i], description: e.target.value }; setInvForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Qty" value={item.quantity} onChange={e => { const items = [...invForm.line_items]; items[i] = { ...items[i], quantity: Number(e.target.value) }; setInvForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Price" value={item.unit_price} onChange={e => { const items = [...invForm.line_items]; items[i] = { ...items[i], unit_price: Number(e.target.value) }; setInvForm(p => ({ ...p, line_items: items })); }} />
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => { const items = invForm.line_items.filter((_, j) => j !== i); setInvForm(p => ({ ...p, line_items: items.length ? items : [{ description: "", quantity: 1, unit_price: 0 }] })); }}>
-                    <XCircle className="w-4 h-4 text-muted-foreground" />
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" className="text-xs" onClick={() => setInvForm(p => ({ ...p, line_items: [...p.line_items, { description: "", quantity: 1, unit_price: 0 }] }))}>
-                <Plus className="w-3 h-3 mr-1" />Add Line
-              </Button>
-            </div>
+            <LineItemsEditor items={invForm.line_items} onChange={items => setInvForm(p => ({ ...p, line_items: items }))} />
           </div>
           <DialogFooter><Button onClick={handleCreateInvoice} data-testid="submit-invoice-btn"><Plus className="w-4 h-4 mr-1" />Create Invoice</Button></DialogFooter>
         </DialogContent>
@@ -717,77 +679,59 @@ export default function XeroDashboardPage() {
 
       {/* Create Estimate Dialog */}
       <Dialog open={createEstDialog} onOpenChange={setCreateEstDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New Estimate</DialogTitle>
-            <DialogDescription>Create a new project estimate</DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-w-lg"><DialogHeader><DialogTitle>New Estimate</DialogTitle><DialogDescription>Create a new project estimate</DialogDescription></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Title</Label><Input value={estForm.title} onChange={e => setEstForm(p => ({ ...p, title: e.target.value }))} data-testid="est-title" /></div>
-            <div><Label>Client Name</Label><Input value={estForm.client_name} onChange={e => setEstForm(p => ({ ...p, client_name: e.target.value }))} data-testid="est-client" /></div>
-            <div><Label>Valid Until</Label><Input type="date" value={estForm.valid_until} onChange={e => setEstForm(p => ({ ...p, valid_until: e.target.value }))} /></div>
+            <div><Label>Title *</Label><Input value={estForm.title} onChange={e => setEstForm(p => ({ ...p, title: e.target.value }))} data-testid="est-title" /></div>
+            <div className="grid grid-cols-2 gap-3"><div><Label>Client Name *</Label><Input value={estForm.client_name} onChange={e => setEstForm(p => ({ ...p, client_name: e.target.value }))} data-testid="est-client" /></div><div><Label>Valid Until</Label><Input type="date" value={estForm.valid_until} onChange={e => setEstForm(p => ({ ...p, valid_until: e.target.value }))} /></div></div>
             <div><Label>Notes</Label><Textarea rows={2} value={estForm.notes} onChange={e => setEstForm(p => ({ ...p, notes: e.target.value }))} /></div>
             <Separator />
-            <div className="space-y-2">
-              <Label>Line Items</Label>
-              {estForm.line_items.map((item, i) => (
-                <div key={`est-li-${i}`} className="grid grid-cols-6 gap-2">
-                  <Input className="col-span-3" placeholder="Description" value={item.description} onChange={e => { const items = [...estForm.line_items]; items[i] = { ...items[i], description: e.target.value }; setEstForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Qty" value={item.quantity} onChange={e => { const items = [...estForm.line_items]; items[i] = { ...items[i], quantity: Number(e.target.value) }; setEstForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Price" value={item.unit_price} onChange={e => { const items = [...estForm.line_items]; items[i] = { ...items[i], unit_price: Number(e.target.value) }; setEstForm(p => ({ ...p, line_items: items })); }} />
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => { const items = estForm.line_items.filter((_, j) => j !== i); setEstForm(p => ({ ...p, line_items: items.length ? items : [{ description: "", quantity: 1, unit_price: 0 }] })); }}>
-                    <XCircle className="w-4 h-4 text-muted-foreground" />
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" className="text-xs" onClick={() => setEstForm(p => ({ ...p, line_items: [...p.line_items, { description: "", quantity: 1, unit_price: 0 }] }))}>
-                <Plus className="w-3 h-3 mr-1" />Add Line
-              </Button>
-            </div>
+            <LineItemsEditor items={estForm.line_items} onChange={items => setEstForm(p => ({ ...p, line_items: items }))} />
           </div>
           <DialogFooter><Button onClick={handleCreateEstimate} data-testid="submit-estimate-btn"><Plus className="w-4 h-4 mr-1" />Create Estimate</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Create Recurring Dialog */}
-      <Dialog open={createRecDialog} onOpenChange={setCreateRecDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New Recurring Template</DialogTitle>
-            <DialogDescription>Set up automated recurring invoicing</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Client Name</Label><Input value={recForm.client_name} onChange={e => setRecForm(p => ({ ...p, client_name: e.target.value }))} data-testid="rec-client" /></div>
-            <div><Label>Description</Label><Input value={recForm.description} onChange={e => setRecForm(p => ({ ...p, description: e.target.value }))} /></div>
-            <div><Label>Frequency</Label>
-              <Select value={recForm.frequency} onValueChange={v => setRecForm(p => ({ ...p, frequency: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="quarterly">Quarterly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
-                </SelectContent>
-              </Select>
+      {/* Recurring Template Dialog (Create/Edit) */}
+      <Dialog open={recDialog.open} onOpenChange={v => { if (!v) setRecDialog({ open: false, editing: null }); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{recDialog.editing ? "Edit Recurring Template" : "New Recurring Template"}</DialogTitle><DialogDescription>Configure automated recurring invoicing for a client</DialogDescription></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Client Name *</Label><Input value={recForm.client_name} onChange={e => setRecForm(p => ({ ...p, client_name: e.target.value }))} data-testid="rec-client" /></div>
+              <div><Label>Billing Email</Label><Input type="email" value={recForm.email} onChange={e => setRecForm(p => ({ ...p, email: e.target.value }))} placeholder="billing@client.com" /></div>
             </div>
+            <div><Label>Service Description *</Label><Input value={recForm.description} onChange={e => setRecForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g. Managed IT Services - Monthly" /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Frequency</Label>
+                <Select value={recForm.frequency} onValueChange={v => setRecForm(p => ({ ...p, frequency: v }))}>
+                  <SelectTrigger data-testid="rec-frequency"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="fortnightly">Fortnightly</SelectItem><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem><SelectItem value="yearly">Annually</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Payment Terms (days)</Label><Input type="number" value={recForm.payment_terms} onChange={e => setRecForm(p => ({ ...p, payment_terms: Number(e.target.value) }))} /></div>
+              <div><Label>Tax Rate (%)</Label><Input type="number" step="0.1" value={recForm.tax_rate} onChange={e => setRecForm(p => ({ ...p, tax_rate: Number(e.target.value) }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Contract Start</Label><Input type="date" value={recForm.contract_start} onChange={e => setRecForm(p => ({ ...p, contract_start: e.target.value }))} /></div>
+              <div><Label>Contract End <span className="text-muted-foreground text-xs">(leave blank for open-ended)</span></Label><Input type="date" value={recForm.contract_end} onChange={e => setRecForm(p => ({ ...p, contract_end: e.target.value }))} /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Annual Escalation (%)</Label><Input type="number" step="0.5" value={recForm.escalation_percent} onChange={e => setRecForm(p => ({ ...p, escalation_percent: Number(e.target.value) }))} /><p className="text-[10px] text-muted-foreground mt-0.5">Auto price increase on anniversary</p></div>
+              <div className="flex flex-col justify-center gap-2">
+                <div className="flex items-center gap-2"><Switch checked={recForm.auto_generate} onCheckedChange={v => setRecForm(p => ({ ...p, auto_generate: v }))} /><Label className="text-sm">Auto-generate invoices</Label></div>
+              </div>
+              <div className="flex flex-col justify-center gap-2">
+                <div className="flex items-center gap-2"><Switch checked={recForm.auto_send} onCheckedChange={v => setRecForm(p => ({ ...p, auto_send: v }))} /><Label className="text-sm">Auto-send to client</Label></div>
+              </div>
+            </div>
+            <div><Label>Internal Notes</Label><Textarea rows={2} value={recForm.notes} onChange={e => setRecForm(p => ({ ...p, notes: e.target.value }))} placeholder="Service level details, contract terms, etc." /></div>
             <Separator />
-            <div className="space-y-2">
-              <Label>Line Items</Label>
-              {recForm.line_items.map((item, i) => (
-                <div key={`rec-li-${i}`} className="grid grid-cols-6 gap-2">
-                  <Input className="col-span-3" placeholder="Description" value={item.description} onChange={e => { const items = [...recForm.line_items]; items[i] = { ...items[i], description: e.target.value }; setRecForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Qty" value={item.quantity} onChange={e => { const items = [...recForm.line_items]; items[i] = { ...items[i], quantity: Number(e.target.value) }; setRecForm(p => ({ ...p, line_items: items })); }} />
-                  <Input type="number" placeholder="Price" value={item.unit_price} onChange={e => { const items = [...recForm.line_items]; items[i] = { ...items[i], unit_price: Number(e.target.value) }; setRecForm(p => ({ ...p, line_items: items })); }} />
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => { const items = recForm.line_items.filter((_, j) => j !== i); setRecForm(p => ({ ...p, line_items: items.length ? items : [{ description: "", quantity: 1, unit_price: 0 }] })); }}>
-                    <XCircle className="w-4 h-4 text-muted-foreground" />
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" className="text-xs" onClick={() => setRecForm(p => ({ ...p, line_items: [...p.line_items, { description: "", quantity: 1, unit_price: 0 }] }))}>
-                <Plus className="w-3 h-3 mr-1" />Add Line
-              </Button>
-            </div>
+            <LineItemsEditor items={recForm.line_items} onChange={items => setRecForm(p => ({ ...p, line_items: items }))} />
           </div>
-          <DialogFooter><Button onClick={handleCreateRecurring} data-testid="submit-recurring-btn"><Plus className="w-4 h-4 mr-1" />Create Template</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecDialog({ open: false, editing: null })}>Cancel</Button>
+            <Button onClick={handleSaveRecurring} data-testid="submit-recurring-btn">{recDialog.editing ? <><Pencil className="w-4 h-4 mr-1" />Update Template</> : <><Plus className="w-4 h-4 mr-1" />Create Template</>}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

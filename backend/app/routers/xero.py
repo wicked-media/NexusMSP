@@ -231,36 +231,84 @@ async def convert_estimate_to_invoice(estimate_id: str, current_user: dict = Dep
 
 # ============== XERO RECURRING ==============
 
+FREQ_DAYS = {"weekly": 7, "fortnightly": 14, "monthly": 30, "quarterly": 90, "yearly": 365}
+
 @router.get("/xero/recurring")
 async def get_xero_recurring(current_user: dict = Depends(get_current_user)):
-    recurring = await db.xero_recurring.find({}, {"_id": 0}).to_list(100)
+    recurring = await db.xero_recurring.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     if not recurring:
         await _seed_xero_recurring()
-        recurring = await db.xero_recurring.find({}, {"_id": 0}).to_list(100)
+        recurring = await db.xero_recurring.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return recurring
 
 @router.post("/xero/recurring")
 async def create_xero_recurring(data: dict, current_user: dict = Depends(get_current_user)):
     line_items = data.get("line_items", [])
+    tax_rate = data.get("tax_rate", 10)
     sub_total = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in line_items)
-    tax = round(sub_total * 0.1, 2)
+    tax = round(sub_total * tax_rate / 100, 2)
     total = round(sub_total + tax, 2)
+    freq = data.get("frequency", "monthly")
     rec = {
         "id": str(uuid.uuid4()),
         "client_id": data.get("client_id", ""),
         "client_name": data.get("client_name", ""),
         "description": data.get("description", ""),
-        "frequency": data.get("frequency", "monthly"),
+        "frequency": freq,
         "line_items": line_items,
+        "sub_total": sub_total,
+        "tax": tax,
+        "tax_rate": tax_rate,
         "amount": total,
+        "payment_terms": data.get("payment_terms", 14),
+        "contract_start": data.get("contract_start", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+        "contract_end": data.get("contract_end", ""),
+        "escalation_percent": data.get("escalation_percent", 0),
+        "auto_send": data.get("auto_send", False),
+        "auto_generate": data.get("auto_generate", True),
+        "notes": data.get("notes", ""),
+        "email": data.get("email", ""),
         "status": "active",
-        "next_generation": (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d"),
+        "next_generation": data.get("next_generation", (datetime.now(timezone.utc) + timedelta(days=FREQ_DAYS.get(freq, 30))).strftime("%Y-%m-%d")),
         "invoices_generated": 0,
+        "total_billed": 0,
+        "total_collected": 0,
+        "last_generated": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.xero_recurring.insert_one(rec)
     rec.pop("_id", None)
+    await _log_sync_event("recurring_created", f"Recurring template created for {rec['client_name']} - {rec['description']} (${total}/{freq})")
     return rec
+
+@router.put("/xero/recurring/{rec_id}")
+async def update_xero_recurring(rec_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    item = await db.xero_recurring.find_one({"id": rec_id})
+    if not item:
+        raise HTTPException(status_code=404, detail="Recurring item not found")
+    updates = {}
+    for field in ["client_name", "client_id", "description", "frequency", "line_items", "payment_terms",
+                   "contract_start", "contract_end", "escalation_percent", "auto_send", "auto_generate",
+                   "notes", "email", "next_generation", "tax_rate"]:
+        if field in data:
+            updates[field] = data[field]
+    if "line_items" in data:
+        tax_rate = data.get("tax_rate", item.get("tax_rate", 10))
+        sub_total = sum(li.get("quantity", 1) * li.get("unit_price", 0) for li in data["line_items"])
+        tax = round(sub_total * tax_rate / 100, 2)
+        updates["sub_total"] = sub_total
+        updates["tax"] = tax
+        updates["amount"] = round(sub_total + tax, 2)
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.xero_recurring.update_one({"id": rec_id}, {"$set": updates})
+    return {"message": "Recurring template updated"}
+
+@router.delete("/xero/recurring/{rec_id}")
+async def delete_xero_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.xero_recurring.delete_one({"id": rec_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Recurring item not found")
+    return {"message": "Recurring template deleted"}
 
 @router.put("/xero/recurring/{rec_id}/toggle")
 async def toggle_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
@@ -270,6 +318,105 @@ async def toggle_recurring(rec_id: str, current_user: dict = Depends(get_current
     new_status = "paused" if item.get("status") == "active" else "active"
     await db.xero_recurring.update_one({"id": rec_id}, {"$set": {"status": new_status}})
     return {"message": f"Recurring invoice {new_status}", "status": new_status}
+
+@router.post("/xero/recurring/{rec_id}/generate")
+async def generate_from_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
+    rec = await db.xero_recurring.find_one({"id": rec_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recurring item not found")
+    invoice = await _create_invoice_from_recurring(rec)
+    return invoice
+
+@router.post("/xero/recurring/batch-generate")
+async def batch_generate_recurring(current_user: dict = Depends(get_current_user)):
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    due_templates = await db.xero_recurring.find(
+        {"status": "active", "next_generation": {"$lte": now_str}}, {"_id": 0}
+    ).to_list(200)
+    generated = []
+    for rec in due_templates:
+        inv = await _create_invoice_from_recurring(rec)
+        generated.append(inv)
+    return {"message": f"Generated {len(generated)} invoices", "generated": len(generated), "invoices": generated}
+
+@router.get("/xero/recurring/{rec_id}/history")
+async def get_recurring_history(rec_id: str, current_user: dict = Depends(get_current_user)):
+    invoices = await db.xero_invoices.find(
+        {"recurring_id": rec_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return invoices
+
+@router.get("/xero/recurring/forecast")
+async def get_recurring_forecast(current_user: dict = Depends(get_current_user)):
+    active = await db.xero_recurring.find({"status": "active"}, {"_id": 0}).to_list(200)
+    now = datetime.now(timezone.utc)
+    forecast = []
+    for m in range(12):
+        month_start = (now + timedelta(days=30 * m)).replace(day=1)
+        month_label = month_start.strftime("%Y-%m")
+        total = 0
+        for rec in active:
+            freq = rec.get("frequency", "monthly")
+            amount = rec.get("amount", 0)
+            contract_end = rec.get("contract_end", "")
+            if contract_end and contract_end < month_label:
+                continue
+            escalation = rec.get("escalation_percent", 0)
+            years_ahead = m / 12
+            escalated_amount = amount * (1 + escalation / 100) ** years_ahead if escalation else amount
+            if freq == "monthly":
+                total += escalated_amount
+            elif freq == "quarterly" and m % 3 == 0:
+                total += escalated_amount
+            elif freq == "yearly" and m == 0:
+                total += escalated_amount
+            elif freq == "weekly":
+                total += escalated_amount * 4.33
+            elif freq == "fortnightly":
+                total += escalated_amount * 2.17
+        forecast.append({"month": month_label, "projected": round(total, 2)})
+    mrr = sum(r.get("amount", 0) for r in active if r.get("frequency") == "monthly")
+    mrr += sum(r.get("amount", 0) / 3 for r in active if r.get("frequency") == "quarterly")
+    mrr += sum(r.get("amount", 0) / 12 for r in active if r.get("frequency") == "yearly")
+    mrr += sum(r.get("amount", 0) * 4.33 for r in active if r.get("frequency") == "weekly")
+    arr = mrr * 12
+    return {"forecast": forecast, "mrr": round(mrr, 2), "arr": round(arr, 2), "active_count": len(active)}
+
+# ============== INVOICE EMAIL ==============
+
+@router.post("/xero/invoices/{invoice_id}/email")
+async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    to_email = data.get("to_email", "")
+    subject = data.get("subject", f"Invoice {invoice.get('invoice_number', '')} from NexusOps")
+    message = data.get("message", "")
+    if not to_email:
+        raise HTTPException(status_code=400, detail="Recipient email required")
+    # Log the email send (mocked for now - will use Resend when credentials are provided)
+    email_record = {
+        "id": str(uuid.uuid4()),
+        "invoice_id": invoice_id,
+        "invoice_number": invoice.get("invoice_number", ""),
+        "to_email": to_email,
+        "subject": subject,
+        "message": message,
+        "status": "sent",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.xero_invoice_emails.insert_one(email_record)
+    # Update invoice status to AUTHORISED if it was DRAFT
+    if invoice.get("status") == "DRAFT":
+        await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {"status": "AUTHORISED", "sent_at": datetime.now(timezone.utc).isoformat()}})
+    await _log_sync_event("invoice_emailed", f"Invoice {invoice.get('invoice_number', '')} emailed to {to_email}")
+    email_record.pop("_id", None)
+    return {"message": f"Invoice emailed to {to_email}", "email": email_record}
+
+@router.get("/xero/invoices/{invoice_id}/emails")
+async def get_invoice_emails(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    emails = await db.xero_invoice_emails.find({"invoice_id": invoice_id}, {"_id": 0}).sort("sent_at", -1).to_list(50)
+    return emails
 
 # ============== XERO SYNC HISTORY ==============
 
@@ -430,6 +577,45 @@ async def bulk_ticket_action(data: dict, current_user: dict = Depends(get_curren
 
 # ============== SEED HELPERS ==============
 
+async def _create_invoice_from_recurring(rec: dict) -> dict:
+    """Generate a new invoice from a recurring template."""
+    now = datetime.now(timezone.utc)
+    freq = rec.get("frequency", "monthly")
+    payment_terms = rec.get("payment_terms", 14)
+    invoice = {
+        "id": str(uuid.uuid4()),
+        "xero_invoice_id": f"INV-{uuid.uuid4().hex[:8].upper()}",
+        "invoice_number": f"INV-{str(await db.xero_invoices.count_documents({}) + 1).zfill(4)}",
+        "client_id": rec.get("client_id", ""),
+        "client_name": rec.get("client_name", ""),
+        "date": now.strftime("%Y-%m-%d"),
+        "due_date": (now + timedelta(days=payment_terms)).strftime("%Y-%m-%d"),
+        "status": "AUTHORISED" if rec.get("auto_send") else "DRAFT",
+        "line_items": rec.get("line_items", []),
+        "sub_total": rec.get("sub_total", 0),
+        "tax": rec.get("tax", 0),
+        "total": rec.get("amount", 0),
+        "amount_paid": 0,
+        "amount_due": rec.get("amount", 0),
+        "currency": "AUD",
+        "reference": f"Recurring: {rec.get('description', '')} ({freq})",
+        "recurring_id": rec.get("id", ""),
+        "created_at": now.isoformat(),
+    }
+    await db.xero_invoices.insert_one(invoice)
+    invoice.pop("_id", None)
+    # Update the recurring template
+    next_days = FREQ_DAYS.get(freq, 30)
+    new_next = (now + timedelta(days=next_days)).strftime("%Y-%m-%d")
+    total_billed = (rec.get("total_billed", 0) or 0) + rec.get("amount", 0)
+    await db.xero_recurring.update_one({"id": rec["id"]}, {"$set": {
+        "next_generation": new_next,
+        "last_generated": now.isoformat(),
+        "total_billed": total_billed,
+    }, "$inc": {"invoices_generated": 1}})
+    await _log_sync_event("recurring_generated", f"Invoice {invoice['invoice_number']} generated from recurring: {rec.get('description', '')} for {rec.get('client_name', '')}")
+    return invoice
+
 async def _log_sync_event(event_type: str, message: str):
     event = {
         "id": str(uuid.uuid4()),
@@ -492,31 +678,55 @@ async def _seed_xero_estimates():
         await db.xero_estimates.insert_one(est)
 
 async def _seed_xero_recurring():
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(10)
     if not clients:
         return
     now = datetime.now(timezone.utc)
     templates = [
-        {"description": "Managed IT Services - Monthly", "amount": 2500, "frequency": "monthly"},
-        {"description": "Backup & DR Services", "amount": 450, "frequency": "monthly"},
-        {"description": "Cybersecurity Suite", "amount": 800, "frequency": "monthly"},
-        {"description": "Cloud Hosting", "amount": 600, "frequency": "monthly"},
-        {"description": "Annual License Renewal", "amount": 4800, "frequency": "yearly"},
+        {"description": "Managed IT Services - Monthly", "amount": 2500, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 3, "auto_send": True, "auto_generate": True, "notes": "Includes remote monitoring, patch management, and unlimited helpdesk support.", "tax_rate": 10},
+        {"description": "Backup & DR Services", "amount": 450, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 2, "auto_send": True, "auto_generate": True, "notes": "Cloud backup with 30-day retention, daily verification, quarterly DR test.", "tax_rate": 10},
+        {"description": "Cybersecurity Suite", "amount": 800, "frequency": "monthly", "payment_terms": 7, "escalation_percent": 5, "auto_send": False, "auto_generate": True, "notes": "EDR, SIEM monitoring, vulnerability scanning, security awareness training.", "tax_rate": 10},
+        {"description": "Cloud Hosting & Infrastructure", "amount": 1200, "frequency": "monthly", "payment_terms": 30, "escalation_percent": 0, "auto_send": True, "auto_generate": True, "notes": "Azure hosting, 99.9% SLA, includes OS patching and monitoring.", "tax_rate": 10},
+        {"description": "VoIP Phone System", "amount": 350, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 2, "auto_send": True, "auto_generate": True, "notes": "20 handsets, unlimited domestic calls, Teams integration.", "tax_rate": 10},
+        {"description": "Network Support Retainer", "amount": 2800, "frequency": "quarterly", "payment_terms": 30, "escalation_percent": 3, "auto_send": False, "auto_generate": True, "notes": "Quarterly network health assessment, firewall management, switch/AP support.", "tax_rate": 10},
+        {"description": "Annual Microsoft 365 License Bundle", "amount": 8400, "frequency": "yearly", "payment_terms": 30, "escalation_percent": 5, "auto_send": True, "auto_generate": True, "notes": "Business Premium licenses x35 users. Annual renewal.", "tax_rate": 10},
+        {"description": "Weekly Maintenance Window", "amount": 375, "frequency": "weekly", "payment_terms": 7, "escalation_percent": 0, "auto_send": False, "auto_generate": True, "notes": "After-hours maintenance window: patching, updates, health checks.", "tax_rate": 10},
     ]
-    for idx, client in enumerate(clients[:5]):
+    for idx, client in enumerate(clients[:8]):
         tmpl = templates[idx % len(templates)]
+        sub_total = tmpl["amount"] / 1.1
+        tax = round(sub_total * tmpl["tax_rate"] / 100, 2)
+        contract_start = (now - timedelta(days=_srand.randint(90, 540))).strftime("%Y-%m-%d")
+        contract_end = (now + timedelta(days=_srand.randint(180, 730))).strftime("%Y-%m-%d") if idx % 3 != 0 else ""
+        gen_count = _srand.randint(3, 24)
+        total_billed = tmpl["amount"] * gen_count
+        total_collected = round(total_billed * _srand.uniform(0.75, 1.0), 2)
         rec = {
             "id": str(uuid.uuid4()),
             "client_id": client["id"],
             "client_name": client["name"],
             "description": tmpl["description"],
             "frequency": tmpl["frequency"],
-            "line_items": [{"description": tmpl["description"], "quantity": 1, "unit_price": tmpl["amount"]}],
+            "line_items": [{"description": tmpl["description"], "quantity": 1, "unit_price": round(sub_total, 2)}],
+            "sub_total": round(sub_total, 2),
+            "tax": tax,
+            "tax_rate": tmpl["tax_rate"],
             "amount": tmpl["amount"],
-            "status": "active" if idx < 4 else "paused",
-            "next_generation": (now + timedelta(days=_srand.randint(5, 25))).strftime("%Y-%m-%d"),
-            "invoices_generated": _srand.randint(3, 24),
-            "created_at": (now - timedelta(days=_srand.randint(60, 365))).isoformat(),
+            "payment_terms": tmpl["payment_terms"],
+            "contract_start": contract_start,
+            "contract_end": contract_end,
+            "escalation_percent": tmpl["escalation_percent"],
+            "auto_send": tmpl["auto_send"],
+            "auto_generate": tmpl["auto_generate"],
+            "notes": tmpl["notes"],
+            "email": client.get("email", f"billing@{client['name'].lower().replace(' ', '')}.com"),
+            "status": "active" if idx < 6 else "paused",
+            "next_generation": (now + timedelta(days=_srand.randint(1, 25))).strftime("%Y-%m-%d"),
+            "invoices_generated": gen_count,
+            "total_billed": total_billed,
+            "total_collected": total_collected,
+            "last_generated": (now - timedelta(days=_srand.randint(5, 30))).isoformat(),
+            "created_at": (now - timedelta(days=_srand.randint(90, 540))).isoformat(),
         }
         await db.xero_recurring.insert_one(rec)
 
