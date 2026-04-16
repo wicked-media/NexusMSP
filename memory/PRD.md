@@ -113,6 +113,12 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - **Dashboard**: Glass-morphism hero banner, gradient text greeting, attention strip, animated metric cards with gradient overlays, ticket volume AreaChart, fleet health PieChart, operational insights (failure predictions, backups, compliance), open tickets/alerts/activity feed columns, quick search modal (Ctrl+K)
 - **Morning Checks**: Matching glass-morphism hero with status badge, animated HealthGauge SVG with glow effects, animated metric cards, color-coded issues strip, offline devices/critical tickets/backup failures with gradient top borders, RAG Client Health Board, quick stats row, overdue invoices, phone system status, scheduled tasks, all-clear message
 
+### Phase 8: Remote Access Dialog Consistency + Device Agent & Disk Health (Apr 16, 2026)
+- **Remote Access Dialog Fix**: Replaced old-style 4-button dialog in DeviceDetailPage with the same 3-option dialog from Remote Access Hub: Open in RustDesk Client (hidden anchor launch, no blank tabs), Open Web Client, Copy ID to Clipboard, plus password display, relay server info, and troubleshooting tips
+- **Device Agent Scripts**: PowerShell (Windows) and Bash (Linux/macOS) agent scripts auto-generated per device via `/api/devices/{device_id}/agent-script`. Scripts collect system info, disk SMART health, CPU/RAM/disk usage, network info, security status and report back via `/api/devices/agent/report`
+- **Disk Health Monitoring**: New `device_disks` collection with per-drive SMART data (status, temperature, power hours, reallocated/pending sectors, model, serial, firmware, interface). Drive Health card added to DeviceDetailPage overview tab with usage bars, SMART badges, and health warnings
+- **Seed Data**: 15 disk entries across 10 devices with realistic hardware (Samsung, Seagate, Intel, WD, SK Hynix, Apple SSDs/HDDs/NVMe) including Warning status disks with sector issues
+
 ## Test Reports
 - iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
 - iteration_77.json: License Mgmt, Webhook Builder, Exec Reports, Audit Trail, Time Tracking, Smart Schedule (100%)
@@ -123,6 +129,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_82.json: Payment Links Dashboard (100% - 12/12 backend, all frontend verified)
 - iteration_83.json: Theme System + Gradient MSP Removal (100% - 12/12 backend, all frontend verified)
 - iteration_84.json: Dashboard & Morning Checks Visual Overhaul (100% - 21/21 frontend elements verified)
+- iteration_85.json: Remote Access Dialog Fix + Device Agent & Disk Health (100% - 17/17 backend, all frontend verified)
 
 ## Backlog (Prioritized)
 
@@ -149,3 +156,6 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - `/api/executive-reports/*` — Report list + generate
 - `/api/audit-trail/*` — Events + summary with filters
 - `/api/time-entries/*` — Time CRUD + generate-invoice + bulk
+- `/api/devices/{id}/disks` — GET disk health data per device
+- `/api/devices/{id}/agent-script?os_type=windows|linux` — GET downloadable agent script
+- `/api/devices/agent/report` — POST agent telemetry with disk SMART data
