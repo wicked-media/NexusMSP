@@ -140,6 +140,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_86.json: Login Wallpaper + Animated Login Features (100% - 11/11 backend, all frontend verified)
 - iteration_87.json: P1/P2/Revenue Batch — Workflows, Terminal, Billing Portal, Scheduled Reports, AI Triage (100% - 33/33 backend, all frontend verified)
 - iteration_88.json: Recurring Billing Overhaul — Full CRUD, templates, generate-now, line items, MRR/ARR stats (100% - 18/18 backend, all frontend verified)
+- iteration_89.json: Proposals + Contracts + Portal — Full proposal lifecycle, price increases, portal invoices/devices/health (100% - 20/20 backend, all frontend verified)
 
 ## Backlog (Prioritized)
 
