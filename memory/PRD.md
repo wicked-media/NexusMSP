@@ -118,6 +118,13 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - **Device Agent Scripts**: PowerShell (Windows) and Bash (Linux/macOS) agent scripts auto-generated per device via `/api/devices/{device_id}/agent-script`. Scripts collect system info, disk SMART health, CPU/RAM/disk usage, network info, security status and report back via `/api/devices/agent/report`
 - **Disk Health Monitoring**: New `device_disks` collection with per-drive SMART data (status, temperature, power hours, reallocated/pending sectors, model, serial, firmware, interface). Drive Health card added to DeviceDetailPage overview tab with usage bars, SMART badges, and health warnings
 - **Seed Data**: 15 disk entries across 10 devices with realistic hardware (Samsung, Seagate, Intel, WD, SK Hynix, Apple SSDs/HDDs/NVMe) including Warning status disks with sector issues
+- **Bulk Deploy Agent**: Dropdown in Devices list page bulk actions toolbar to download agent scripts for multiple selected devices at once
+
+### Phase 9: Login Page Wallpaper & Animated Features (Apr 16, 2026)
+- **Custom Login Wallpaper**: Upload custom 1920x1080 images in My Settings > Display > Login Page Wallpaper
+- **Template Gallery**: 6 curated wallpaper templates (Cyber City, Neon Glow, Dark Workspace, Tech Setup, Neon Nights, Minimalist) from Unsplash
+- **Overlay Control**: Adjustable overlay darkness slider (30-90%) for wallpaper readability
+- **Animated Login Features**: Time-of-day greeting with bouncing emoji (sun/moon), typing effect headline cycling through "Command Center / NOC Dashboard / Service Desk / Asset Manager / Security Hub", interactive particle network canvas with 60 nodes and connecting lines, staggered entrance animations
 
 ## Test Reports
 - iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
@@ -130,6 +137,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_83.json: Theme System + Gradient MSP Removal (100% - 12/12 backend, all frontend verified)
 - iteration_84.json: Dashboard & Morning Checks Visual Overhaul (100% - 21/21 frontend elements verified)
 - iteration_85.json: Remote Access Dialog Fix + Device Agent & Disk Health (100% - 17/17 backend, all frontend verified)
+- iteration_86.json: Login Wallpaper + Animated Login Features (100% - 11/11 backend, all frontend verified)
 
 ## Backlog (Prioritized)
 
