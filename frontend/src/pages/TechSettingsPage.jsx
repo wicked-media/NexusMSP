@@ -16,7 +16,8 @@ import { toast } from "sonner";
 import {
   User, Lock, Mail, Shield, Key, Bell, Clock, Palette, Globe, Award, Trophy,
   Star, Zap, Plus, Trash2, Copy, Eye, EyeOff, Monitor, Smartphone, LogOut,
-  CheckCircle, XCircle, Fingerprint, ArrowLeft, Loader2, ChevronRight, Settings, Moon
+  CheckCircle, XCircle, Fingerprint, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
+  Upload, Image
 } from "lucide-react";
 
 const BADGES = [
@@ -80,6 +81,13 @@ export default function TechSettingsPage() {
   // Display
   const [displayPrefs, setDisplayPrefs] = useState({});
 
+  // Login Wallpaper
+  const [wallpaperType, setWallpaperType] = useState("default");
+  const [wallpaperUrl, setWallpaperUrl] = useState(null);
+  const [wallpaperTemplates, setWallpaperTemplates] = useState([]);
+  const [wallpaperUploading, setWallpaperUploading] = useState(false);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.7);
+
   // Gamification
   const [gamProfile, setGamProfile] = useState(null);
 
@@ -113,6 +121,17 @@ export default function TechSettingsPage() {
       setApiKeys(aRes.data);
       setSessions(sRes.data);
       setDisplayPrefs(dRes.data);
+      // Fetch wallpaper settings
+      try {
+        const [wpRes, tplRes] = await Promise.all([
+          axios.get(`${API}/settings/login-wallpaper`, { headers }),
+          axios.get(`${API}/settings/login-wallpaper/templates`, { headers }),
+        ]);
+        setWallpaperType(wpRes.data.type || "default");
+        setWallpaperUrl(wpRes.data.url || null);
+        setOverlayOpacity(wpRes.data.overlay_opacity ?? 0.7);
+        setWallpaperTemplates(tplRes.data || []);
+      } catch {}
     } catch { toast.error("Failed to load settings"); }
     finally { setLoading(false); }
   };
@@ -749,6 +768,115 @@ export default function TechSettingsPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <Separator />
+
+                {/* Login Wallpaper */}
+                <div data-testid="wallpaper-section">
+                  <Label className="text-sm font-medium flex items-center gap-2"><Image className="w-4 h-4" />Login Page Wallpaper</Label>
+                  <p className="text-xs text-muted-foreground mb-3">Upload a custom 1920x1080 image or choose a template for the login page background</p>
+
+                  {/* Current wallpaper preview */}
+                  {wallpaperUrl && wallpaperType !== "default" && (
+                    <div className="mb-3 rounded-lg overflow-hidden border border-border/40 relative group" data-testid="wallpaper-preview">
+                      <img src={wallpaperUrl} alt="Login wallpaper" className="w-full h-32 object-cover" />
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="text-xs text-white font-medium">Current Wallpaper</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Wallpaper type selector */}
+                  <div className="flex gap-2 mb-3">
+                    <Button size="sm" variant={wallpaperType === "default" ? "default" : "outline"}
+                      onClick={async () => {
+                        setWallpaperType("default"); setWallpaperUrl(null);
+                        await axios.put(`${API}/settings/login-wallpaper`, { type: "default", url: null }, { headers });
+                        toast.success("Reset to default login background");
+                      }} data-testid="wallpaper-default">Default</Button>
+                    <Button size="sm" variant={wallpaperType === "template" ? "default" : "outline"}
+                      onClick={() => setWallpaperType("template")} data-testid="wallpaper-template-btn">Templates</Button>
+                    <Button size="sm" variant={wallpaperType === "custom" ? "default" : "outline"}
+                      onClick={() => setWallpaperType("custom")} data-testid="wallpaper-custom-btn">
+                      <Upload className="w-3 h-3 mr-1" />Upload
+                    </Button>
+                  </div>
+
+                  {/* Template Gallery */}
+                  {wallpaperType === "template" && (
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      {wallpaperTemplates.map(tpl => (
+                        <button key={tpl.id}
+                          onClick={async () => {
+                            setWallpaperUrl(tpl.url);
+                            await axios.put(`${API}/settings/login-wallpaper`, { type: "template", url: tpl.url, overlay_opacity: overlayOpacity }, { headers });
+                            toast.success(`Wallpaper set: ${tpl.name}`);
+                          }}
+                          className={`relative rounded-lg overflow-hidden border-2 transition-all hover:scale-[1.02] ${wallpaperUrl === tpl.url ? "border-primary ring-1 ring-primary" : "border-border/30"}`}
+                          data-testid={`wallpaper-${tpl.id}`}
+                        >
+                          <img src={tpl.url} alt={tpl.name} className="w-full h-20 object-cover" loading="lazy" />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
+                            <p className="text-[10px] text-white font-medium">{tpl.name}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Custom Upload */}
+                  {wallpaperType === "custom" && (
+                    <div className="mb-3">
+                      <div className="border-2 border-dashed border-border/50 rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                        <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                        <p className="text-sm text-muted-foreground mb-2">Drop an image or click to upload</p>
+                        <p className="text-[10px] text-muted-foreground mb-3">Recommended: 1920x1080, JPG/PNG, max 10MB</p>
+                        <input type="file" accept="image/*" className="hidden" id="wallpaper-upload"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            setWallpaperUploading(true);
+                            try {
+                              const formData = new FormData();
+                              formData.append("file", file);
+                              const res = await axios.post(`${API}/settings/login-wallpaper/upload`, formData, {
+                                headers: { ...headers, "Content-Type": "multipart/form-data" },
+                              });
+                              setWallpaperUrl(res.data.url);
+                              toast.success("Wallpaper uploaded!");
+                            } catch (err) { toast.error(err.response?.data?.detail || "Upload failed"); }
+                            finally { setWallpaperUploading(false); }
+                          }}
+                          data-testid="wallpaper-upload-input"
+                        />
+                        <Button size="sm" variant="outline" disabled={wallpaperUploading}
+                          onClick={() => document.getElementById("wallpaper-upload").click()}
+                          data-testid="wallpaper-upload-btn">
+                          {wallpaperUploading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Upload className="w-3 h-3 mr-1" />}
+                          {wallpaperUploading ? "Uploading..." : "Choose Image"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Overlay opacity slider */}
+                  {wallpaperType !== "default" && wallpaperUrl && (
+                    <div className="mt-2">
+                      <Label className="text-xs text-muted-foreground">Overlay Darkness: {Math.round(overlayOpacity * 100)}%</Label>
+                      <input type="range" min="0.3" max="0.9" step="0.05" value={overlayOpacity}
+                        onChange={async (e) => {
+                          const val = parseFloat(e.target.value);
+                          setOverlayOpacity(val);
+                        }}
+                        onMouseUp={async () => {
+                          await axios.put(`${API}/settings/login-wallpaper`, { type: wallpaperType, url: wallpaperUrl, overlay_opacity: overlayOpacity }, { headers });
+                        }}
+                        className="w-full h-1.5 rounded-full appearance-none bg-muted cursor-pointer mt-1"
+                        data-testid="wallpaper-opacity-slider"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <Separator />

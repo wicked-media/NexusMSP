@@ -9,6 +9,89 @@ import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 
+// Animated typing effect hook
+function useTypingEffect(texts, speed = 80, pause = 2000) {
+  const [display, setDisplay] = useState("");
+  const [textIdx, setTextIdx] = useState(0);
+  const [charIdx, setCharIdx] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const current = texts[textIdx];
+    let timeout;
+    if (!deleting && charIdx < current.length) {
+      timeout = setTimeout(() => setCharIdx(c => c + 1), speed);
+    } else if (!deleting && charIdx === current.length) {
+      timeout = setTimeout(() => setDeleting(true), pause);
+    } else if (deleting && charIdx > 0) {
+      timeout = setTimeout(() => setCharIdx(c => c - 1), speed / 2);
+    } else if (deleting && charIdx === 0) {
+      setDeleting(false);
+      setTextIdx(i => (i + 1) % texts.length);
+    }
+    setDisplay(current.slice(0, charIdx));
+    return () => clearTimeout(timeout);
+  }, [charIdx, deleting, textIdx, texts, speed, pause]);
+
+  return display;
+}
+
+// Particle canvas for login ambiance
+function ParticleField() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let animId;
+    const particles = [];
+    const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
+    resize();
+    window.addEventListener("resize", resize);
+    for (let i = 0; i < 60; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+        o: Math.random() * 0.4 + 0.1,
+      });
+    }
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(16, 185, 129, ${p.o})`;
+        ctx.fill();
+      });
+      // Draw lines between close particles
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(16, 185, 129, ${0.06 * (1 - dist / 120)})`;
+            ctx.stroke();
+          }
+        }
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => { cancelAnimationFrame(animId); window.removeEventListener("resize", resize); };
+  }, []);
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
+}
+
 export default function LoginPage() {
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
@@ -19,14 +102,24 @@ export default function LoginPage() {
   const [ssoLoading, setSsoLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [registerData, setRegisterData] = useState({ name: "", email: "", password: "" });
-  const canvasRef = useRef(null);
+  const [wallpaper, setWallpaper] = useState(null);
+
+  const typedText = useTypingEffect([
+    "Command Center",
+    "NOC Dashboard",
+    "Service Desk",
+    "Asset Manager",
+    "Security Hub",
+  ], 90, 2200);
 
   useEffect(() => {
-    // Check for SSO errors in URL
     const ssoError = searchParams.get("sso_error");
     if (ssoError) toast.error(`SSO Error: ${ssoError.replace(/_/g, " ")}`);
-    // Check if Microsoft SSO is enabled
     axios.get(`${API}/settings/microsoft-sso/status`).then(r => setSsoEnabled(r.data?.enabled)).catch(() => {});
+    // Fetch wallpaper setting
+    axios.get(`${API}/settings/login-wallpaper`).then(r => {
+      if (r.data?.url && r.data?.type !== "default") setWallpaper(r.data);
+    }).catch(() => {});
   }, [searchParams]);
 
   if (user) return <Navigate to="/" replace />;
@@ -56,23 +149,36 @@ export default function LoginPage() {
     setLoginData({ email: "aaron@stech.com.au", password: "" });
   };
 
+  const now = new Date();
+  const hour = now.getHours();
+  const timeGreeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const timeIcon = hour < 6 ? "🌙" : hour < 12 ? "☀️" : hour < 17 ? "🌤️" : hour < 21 ? "🌆" : "🌙";
+
   return (
     <div className="min-h-screen flex relative overflow-hidden" data-testid="login-page">
-      {/* Animated Background */}
-      <div className="absolute inset-0 bg-[#0a0a0f]">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `radial-gradient(circle at 25% 25%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
-                           radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
-                           radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%)`,
-        }} />
+      {/* Background Layer */}
+      <div className="absolute inset-0">
+        {wallpaper?.url ? (
+          <>
+            <img src={wallpaper.url} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ filter: "brightness(0.4)" }} />
+            <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${wallpaper.overlay_opacity || 0.7})` }} />
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-[#0a0a0f]">
+            <div className="absolute inset-0" style={{
+              backgroundImage: `radial-gradient(circle at 25% 25%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+                               radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
+                               radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%)`,
+            }} />
+          </div>
+        )}
         {/* Grid overlay */}
-        <div className="absolute inset-0 opacity-[0.03]" style={{
+        <div className="absolute inset-0 opacity-[0.02]" style={{
           backgroundImage: `linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px)`,
           backgroundSize: '60px 60px',
         }} />
-        {/* Floating orbs */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-[120px] animate-pulse" style={{animationDuration: '8s'}} />
-        <div className="absolute bottom-1/4 right-1/3 w-80 h-80 bg-blue-500/5 rounded-full blur-[100px] animate-pulse" style={{animationDuration: '12s', animationDelay: '2s'}} />
+        {/* Particle network */}
+        <ParticleField />
       </div>
 
       {/* Left Panel */}
@@ -81,7 +187,7 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="relative">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
                 <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
@@ -91,32 +197,41 @@ export default function LoginPage() {
             <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
           </div>
 
-          {/* Hero */}
+          {/* Hero with animated typing */}
           <div className="space-y-8 max-w-lg">
             <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-medium">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-medium backdrop-blur-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Platform Active
               </div>
+
+              {/* Animated time greeting */}
+              <div className="flex items-center gap-3 mb-2" data-testid="time-greeting">
+                <span className="text-3xl" style={{ animation: "floatBounce 3s ease-in-out infinite" }}>{timeIcon}</span>
+                <span className="text-lg text-zinc-400 font-medium">{timeGreeting}</span>
+              </div>
+
               <h1 className="text-5xl font-bold tracking-tight leading-[1.1] text-white">
-                Infrastructure<br />
+                Your IT<br />
                 <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                  Command Center
+                  {typedText}
                 </span>
+                <span className="inline-block w-0.5 h-10 bg-emerald-400 ml-1 align-middle" style={{ animation: "blink 1s step-end infinite" }} />
               </h1>
+
               <p className="text-base text-zinc-400 leading-relaxed max-w-md">
                 Unified RMM & PSA platform for modern managed service providers. Monitor, manage, and support from a single pane of glass.
               </p>
             </div>
 
-            {/* Stats */}
+            {/* Stats with entrance animation */}
             <div className="grid grid-cols-3 gap-6">
               {[
                 { value: "99.9%", label: "Uptime SLA", color: "emerald" },
                 { value: "< 2s", label: "Avg Response", color: "cyan" },
                 { value: "256-bit", label: "AES Encryption", color: "blue" },
               ].map((stat, i) => (
-                <div key={`k-${i}`} className="space-y-1">
+                <div key={`k-${i}`} className="space-y-1" style={{ animation: `fadeSlideIn 0.6s ease-out ${0.3 + i * 0.15}s both` }}>
                   <p className={`text-2xl font-bold font-mono text-${stat.color}-400`}>{stat.value}</p>
                   <p className="text-xs text-zinc-500">{stat.label}</p>
                 </div>
@@ -125,15 +240,15 @@ export default function LoginPage() {
 
             {/* Feature pills */}
             <div className="flex flex-wrap gap-2">
-              {["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"].map(f => (
-                <span key={f} className="px-3 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/50 text-xs text-zinc-400 font-medium">
+              {["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"].map((f, i) => (
+                <span key={f} className="px-3 py-1.5 rounded-md border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-sm text-xs text-zinc-400 font-medium" style={{ animation: `fadeSlideIn 0.5s ease-out ${0.6 + i * 0.08}s both` }}>
                   {f}
                 </span>
               ))}
             </div>
           </div>
 
-          {/* Bottom quote */}
+          {/* Bottom */}
           <div className="flex items-center gap-4 border-t border-zinc-800/50 pt-6">
             <div className="flex -space-x-2">
               {["AT", "SC", "MR"].map((init, i) => (
@@ -162,7 +277,7 @@ export default function LoginPage() {
             <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
           </div>
 
-          <div className="p-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-xl shadow-2xl shadow-black/20">
+          <div className="p-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-xl shadow-2xl shadow-black/20" style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>
             <Tabs defaultValue="login" className="w-full">
               <TabsList className="grid w-full grid-cols-2 mb-8 bg-zinc-800/50">
                 <TabsTrigger value="login" data-testid="login-tab" className="data-[state=active]:bg-zinc-700 data-[state=active]:text-white text-zinc-400">Sign In</TabsTrigger>
@@ -275,6 +390,13 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes fadeSlideIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes blink { 50% { opacity:0; } }
+        @keyframes floatBounce { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-8px); } }
+      `}</style>
     </div>
   );
 }
