@@ -95,6 +95,18 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - Status bar now says "Configured" instead of misleading "Connected"
 - Troubleshooting guidance in connect dialog
 
+### Phase 5: Payment Links Dashboard
+- New "Payment Links" tab in Finance Center
+- Summary stat cards: Active, Completed, Pending Transfers, Expired/Revoked
+- Pending Bank Transfer Confirmations queue with one-click Confirm buttons
+- All Payment Links table with status, methods, payment history, copy/revoke actions
+
+### Phase 6: Gradient Removal
+- Removed all bg-gradient-to-*, linear-gradient, radial-gradient from 39+ page files
+- Login page: solid dark background with subtle grid overlay
+- All header icons, progress bars, badges now use solid colors
+- Only decorative grid patterns (repeating-linear-gradient) remain
+
 ## Test Reports
 - iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
 - iteration_77.json: License Mgmt, Webhook Builder, Exec Reports, Audit Trail, Time Tracking, Smart Schedule (100%)
@@ -102,6 +114,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_79.json: Remote Access Integrations + Invoice PDF/Email (100% - 20/20 backend, all frontend verified)
 - iteration_80.json: Payment Links — CRUD, public page, 3 payment methods, partial payments (100% - 22/22 backend)
 - iteration_81.json: RustDesk Connect Fix — URI format, dialog, 3 connection methods (100% - 10/10 backend)
+- iteration_82.json: Payment Links Dashboard + Gradient Removal (100% - 12/12 backend, all frontend verified)
 
 ## Backlog (Prioritized)
 
