@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus } from "lucide-react";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { Label } from "../components/ui/label";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -44,12 +45,20 @@ export default function DeviceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteDialogOpen, setRemoteDialogOpen] = useState(false);
-  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [connectDialog, setConnectDialog] = useState(null);
+  const [showPassword, setShowPassword] = useState({});
+  const [connectLoading, setConnectLoading] = useState(false);
+  const [diskHealth, setDiskHealth] = useState([]);
 
   const fetchDetail = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/devices/${deviceId}/detail`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
+      // Fetch disk health
+      try {
+        const disksRes = await axios.get(`${API}/devices/${deviceId}/disks`, { headers: { Authorization: `Bearer ${token}` } });
+        setDiskHealth(disksRes.data);
+      } catch {}
     } catch (e) {
       console.error(e);
     } finally {
@@ -59,19 +68,37 @@ export default function DeviceDetailPage() {
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
-  const startRemoteSession = async (sessionType = "remote_desktop") => {
-    setRemoteLoading(true);
+  // Launch RustDesk via hidden anchor (no blank tab)
+  const launchRustDesk = (rdId) => {
+    const uri = `rustdesk://connection/new/${rdId}`;
+    const a = document.createElement("a");
+    a.href = uri;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 100);
+  };
+
+  const startRemoteAccess = async () => {
+    if (!dev.rustdesk_id) {
+      setRemoteDialogOpen(true);
+      return;
+    }
+    setConnectLoading(true);
     try {
-      await axios.post(`${API}/remote/sessions?device_id=${deviceId}&session_type=${sessionType}`, {}, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(`Remote ${sessionType.replace("_", " ")} session initiated`);
-      if (dev.rustdesk_id) {
-        window.open(`rustdesk://${dev.rustdesk_id}`, "_blank");
-      }
-      setRemoteDialogOpen(false);
+      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: dev.rustdesk_id }, { headers: { Authorization: `Bearer ${token}` } });
+      setConnectDialog({
+        rustdesk_id: dev.rustdesk_id,
+        connection_url: res.data.connection_url,
+        web_client_url: res.data.web_client_url,
+        relay_server: res.data.relay_server,
+        rustdesk_password: res.data.rustdesk_password,
+        device_name: dev.name,
+      });
     } catch (e) {
-      toast.error("Failed to start remote session");
+      toast.error(e.response?.data?.detail || "Failed to initiate connection");
     } finally {
-      setRemoteLoading(false);
+      setConnectLoading(false);
     }
   };
 
@@ -118,13 +145,18 @@ export default function DeviceDetailPage() {
         </div>
         <div className="flex gap-2">
           {dev.status === "online" && (
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setRemoteDialogOpen(true)} data-testid="remote-access-btn">
-              <ExternalLink className="w-4 h-4 mr-1" />Remote Access
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
+              {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
             </Button>
           )}
           {dev.status === "offline" && (
             <Button size="sm" variant="outline" disabled data-testid="remote-access-btn-disabled">
               <XCircle className="w-4 h-4 mr-1" />Offline
+            </Button>
+          )}
+          {dev.status === "warning" && (
+            <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
+              {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={fetchDetail}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
@@ -212,6 +244,68 @@ export default function DeviceDetailPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Disk Health / Drive Status */}
+              {diskHealth.length > 0 && (
+                <Card data-testid="disk-health-card">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><HardDrive className="w-4 h-4" />Drive Health ({diskHealth.length} drives)</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {diskHealth.map((disk, i) => {
+                        const smartColor = disk.smart_status === "OK" ? "text-emerald-500" : disk.smart_status === "Warning" ? "text-amber-500" : disk.smart_status === "Critical" ? "text-red-500" : "text-muted-foreground";
+                        const smartBg = disk.smart_status === "OK" ? "bg-emerald-500/10" : disk.smart_status === "Warning" ? "bg-amber-500/10" : disk.smart_status === "Critical" ? "bg-red-500/10" : "bg-muted/30";
+                        const usageColor = disk.usage_percent >= 90 ? "bg-red-500" : disk.usage_percent >= 75 ? "bg-amber-500" : "bg-emerald-500";
+                        return (
+                          <div key={disk.id || `disk-${i}`} className={`p-3 rounded-lg border ${disk.smart_status === "Warning" ? "border-amber-500/20 bg-amber-500/5" : disk.smart_status === "Critical" ? "border-red-500/20 bg-red-500/5" : "border-border/40"}`} data-testid={`disk-${i}`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <HardDrive className={`w-4 h-4 ${smartColor}`} />
+                                <span className="font-mono text-sm font-semibold">{disk.drive_letter || disk.mount_point}</span>
+                                {disk.label && <span className="text-xs text-muted-foreground">({disk.label})</span>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`${smartBg} ${smartColor} text-[9px]`}>{disk.smart_status || "Unknown"}</Badge>
+                                <Badge variant="outline" className="text-[9px]">{disk.disk_type}</Badge>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="flex-1">
+                                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all ${usageColor}`} style={{ width: `${disk.usage_percent}%` }} />
+                                </div>
+                              </div>
+                              <span className="text-xs font-mono font-bold w-12 text-right">{disk.usage_percent}%</span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2 text-[10px]">
+                              <div><span className="text-muted-foreground block">Total</span><span className="font-mono font-medium">{disk.total_gb} GB</span></div>
+                              <div><span className="text-muted-foreground block">Used</span><span className="font-mono font-medium">{disk.used_gb} GB</span></div>
+                              <div><span className="text-muted-foreground block">Free</span><span className="font-mono font-medium">{disk.free_gb} GB</span></div>
+                              <div><span className="text-muted-foreground block">FS</span><span className="font-mono font-medium">{disk.file_system}</span></div>
+                            </div>
+                            {(disk.model || disk.smart_temperature || disk.smart_hours) && (
+                              <div className="grid grid-cols-4 gap-2 text-[10px] mt-2 pt-2 border-t border-border/20">
+                                {disk.model && <div className="col-span-2"><span className="text-muted-foreground block">Model</span><span className="font-medium truncate block">{disk.model}</span></div>}
+                                {disk.smart_temperature != null && (
+                                  <div><span className="text-muted-foreground block">Temp</span><span className={`font-mono font-medium ${disk.smart_temperature > 50 ? "text-red-400" : disk.smart_temperature > 40 ? "text-amber-400" : "text-emerald-400"}`}>{disk.smart_temperature}°C</span></div>
+                                )}
+                                {disk.smart_hours != null && (
+                                  <div><span className="text-muted-foreground block">Power Hours</span><span className="font-mono font-medium">{disk.smart_hours.toLocaleString()}h</span></div>
+                                )}
+                              </div>
+                            )}
+                            {(disk.smart_reallocated_sectors > 0 || disk.smart_pending_sectors > 0) && (
+                              <div className="flex items-center gap-4 mt-2 pt-2 border-t border-border/20 text-[10px]">
+                                {disk.smart_reallocated_sectors > 0 && <span className="text-amber-400 font-semibold">Reallocated Sectors: {disk.smart_reallocated_sectors}</span>}
+                                {disk.smart_pending_sectors > 0 && <span className="text-red-400 font-semibold">Pending Sectors: {disk.smart_pending_sectors}</span>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Recent Events Preview */}
               <Card>
@@ -742,64 +836,112 @@ export default function DeviceDetailPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Remote Access Dialog */}
+      {/* Remote Access Dialog - No RustDesk ID configured */}
       <Dialog open={remoteDialogOpen} onOpenChange={setRemoteDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ExternalLink className="w-5 h-5" />Remote Access - {dev.name}</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="p-3 rounded-lg border bg-muted/30">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted-foreground">Connection Status</span>
-                <Badge className={dev.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}>
-                  <CheckCircle className="w-3 h-3 mr-1" />{dev.status === "online" ? "Ready" : "Unavailable"}
-                </Badge>
-              </div>
-              {dev.rustdesk_id && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">RustDesk ID</span>
-                  <span className="font-mono text-sm font-medium">{dev.rustdesk_id}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-sm text-muted-foreground">IP Address</span>
-                <span className="font-mono text-sm">{dev.ip_address || "N/A"}</span>
-              </div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-sm text-muted-foreground">OS</span>
-                <span className="text-sm">{dev.os} {dev.os_version || ""}</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Session Type</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("remote_desktop")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-remote-desktop">
-                  <Monitor className="w-5 h-5 mb-1" />
-                  <span className="text-xs">Remote Desktop</span>
-                </Button>
-                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("terminal")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-terminal">
-                  <Terminal className="w-5 h-5 mb-1" />
-                  <span className="text-xs">Terminal / SSH</span>
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("file_transfer")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-file-transfer">
-                  <HardDrive className="w-5 h-5 mb-1" />
-                  <span className="text-xs">File Transfer</span>
-                </Button>
-                <Button variant="outline" className="h-16 flex-col" onClick={() => startRemoteSession("view_only")} disabled={remoteLoading || dev.status !== "online"} data-testid="start-view-only">
-                  <Eye className="w-5 h-5 mb-1" />
-                  <span className="text-xs">View Only</span>
-                </Button>
-              </div>
-            </div>
-
-            {!dev.rustdesk_id && (
-              <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500">
-                No RustDesk ID configured. Set up the agent on this device for direct remote access.
-              </div>
-            )}
+        <DialogContent className="max-w-md" aria-describedby="no-rustdesk-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ExternalLink className="w-5 h-5" />Remote Access - {dev.name}</DialogTitle>
+            <DialogDescription id="no-rustdesk-desc">Configure remote access for this device</DialogDescription>
+          </DialogHeader>
+          <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-400 space-y-2">
+            <p className="font-semibold">No RustDesk ID Configured</p>
+            <p className="text-xs text-muted-foreground">This device does not have a RustDesk ID assigned. To enable remote access:</p>
+            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
+              <li>Install the NexusOps agent or RustDesk client on the device</li>
+              <li>Note the RustDesk ID displayed in the client</li>
+              <li>Assign the ID to this device in the Remote Access Hub</li>
+            </ol>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoteDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remote Connection Dialog - Matching Remote Access Hub style */}
+      <Dialog open={!!connectDialog} onOpenChange={v => { if (!v) setConnectDialog(null); }}>
+        <DialogContent className="max-w-md" aria-describedby="connect-device-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Play className="w-5 h-5 text-emerald-400" />Connect to {connectDialog?.device_name}</DialogTitle>
+            <DialogDescription id="connect-device-desc">Choose how to connect to this device</DialogDescription>
+          </DialogHeader>
+          {connectDialog && (
+            <div className="space-y-4">
+              {/* Device Info */}
+              <Card className="bg-zinc-800/50 border-border/30">
+                <CardContent className="py-3 px-4 space-y-1.5">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">RustDesk ID</span>
+                    <span className="font-mono font-bold text-emerald-400">{connectDialog.rustdesk_id}</span>
+                  </div>
+                  {connectDialog.rustdesk_password && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Password</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs">{showPassword["connect"] ? connectDialog.rustdesk_password : "********"}</span>
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setShowPassword(p => ({ ...p, connect: !p.connect }))}>
+                          {showPassword["connect"] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_password); toast.success("Password copied"); }}>
+                          <Copy className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {connectDialog.relay_server && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Relay Server</span>
+                      <span className="font-mono text-xs text-muted-foreground">{connectDialog.relay_server}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Connection Methods */}
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Launch Connection</Label>
+
+                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
+                  <Monitor className="w-5 h-5 mr-3" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Open in RustDesk Client</p>
+                    <p className="text-[10px] opacity-70">Requires RustDesk installed on this computer</p>
+                  </div>
+                </Button>
+
+                {connectDialog.web_client_url && (
+                  <Button className="w-full justify-start h-12" variant="outline" onClick={() => { window.open(connectDialog.web_client_url, "_blank"); toast.success("Opening web client..."); }} data-testid="launch-web-rustdesk">
+                    <Globe className="w-5 h-5 mr-3" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium">Open Web Client</p>
+                      <p className="text-[10px] text-muted-foreground">Connect via browser at {connectDialog.web_client_url}</p>
+                    </div>
+                  </Button>
+                )}
+
+                <Button className="w-full justify-start h-12" variant="outline" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_id); toast.success(`ID ${connectDialog.rustdesk_id} copied — paste into RustDesk`); }} data-testid="copy-rustdesk-id">
+                  <Copy className="w-5 h-5 mr-3" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Copy ID to Clipboard</p>
+                    <p className="text-[10px] text-muted-foreground">Manually paste into your RustDesk client</p>
+                  </div>
+                </Button>
+              </div>
+
+              <div className="text-xs text-muted-foreground bg-muted/10 p-3 rounded-lg">
+                <p className="font-medium mb-1">Troubleshooting</p>
+                <ul className="space-y-0.5 list-disc pl-3">
+                  <li>Ensure the RustDesk client is installed and running on your machine</li>
+                  <li>The target device must be online with RustDesk running</li>
+                  <li>If the native launch doesn't work, copy the ID and connect manually</li>
+                  {connectDialog.relay_server && <li>Your relay server is: <code className="font-mono text-emerald-400">{connectDialog.relay_server}</code></li>}
+                </ul>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
