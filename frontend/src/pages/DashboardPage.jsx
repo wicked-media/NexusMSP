@@ -219,7 +219,7 @@ export default function DashboardPage() {
           const Icon = m.icon;
           return (
             <Card key={`m-${i}`} className={`cursor-pointer transition-all duration-300 group overflow-hidden ${m.border}`} onClick={() => navigate(m.path)} data-testid={`metric-${m.label.toLowerCase().replace(/\s/g, "-")}`}>
-              <div className={`absolute inset-0 bg-gradient-to-br ${m.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+              <div className={`absolute inset-0 bg-gradient-to-br ${m.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
               <CardContent className="p-5 relative">
                 <div className="flex items-center justify-between">
                   <div>

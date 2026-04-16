@@ -201,7 +201,7 @@ export default function MorningChecksPage() {
             <AnimatedCard key={`mc-${i}`} delay={(i + 1) * 80}
               className={`overflow-hidden group ${s.danger ? "border-red-500/20" : ""}`}
               data-testid={`mc-${s.label.toLowerCase().replace(/\s/g, "-")}`}>
-              <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+              <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
               <CardContent className="pt-4 pb-3 relative">
                 <div className="flex items-center justify-between">
                   <div>
@@ -415,7 +415,7 @@ export default function MorningChecksPage() {
               const Icon = s.icon;
               return (
                 <AnimatedCard key={`qs-${i}`} delay={280 + i * 80} className="overflow-hidden group" data-testid={`${s.label.toLowerCase().replace(/\s/g, "-")}-stat`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                  <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
                   <CardContent className="pt-3 pb-2 relative">
                     <div className="flex items-center justify-between">
                       <div>
