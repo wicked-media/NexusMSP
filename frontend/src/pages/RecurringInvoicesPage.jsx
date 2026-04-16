@@ -1,53 +1,556 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Receipt, DollarSign, Calendar, RefreshCw } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import {
+  RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
+  Receipt, TrendingUp, Loader2, Copy, Send, Clock, FileText, Users,
+  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search
+} from "lucide-react";
+
+const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
+const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
+const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", paused: "bg-amber-500/10 text-amber-400 border-amber-500/20", cancelled: "bg-red-500/10 text-red-400 border-red-500/20" };
 
 export default function RecurringInvoicesPage() {
   const { token } = useAuth();
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
+  const [invoices, setInvoices] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("recurring");
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try { const res = await axios.get(`${API}/recurring-invoices/list`, { headers }); setInvoices(res.data); } catch (e) { toast.error("Failed"); }
-      setLoading(false);
-    };
-    fetchData();
-  }, []);
+  // Dialogs
+  const [showCreate, setShowCreate] = useState(false);
+  const [showEdit, setShowEdit] = useState(null);
+  const [showHistory, setShowHistory] = useState(null);
+  const [showTemplateCreate, setShowTemplateCreate] = useState(false);
+  const [showApplyTemplate, setShowApplyTemplate] = useState(null);
+  const [saving, setSaving] = useState(false);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
+  // Form
+  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
+  const [form, setForm] = useState(emptyForm);
+  const [templateForm, setTemplateForm] = useState({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] });
+  const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false });
 
-  const totalMRR = invoices.filter(i => i.frequency === "monthly").reduce((a, i) => a + (i.amount || 0), 0);
+  const fetchData = useCallback(async () => {
+    try {
+      const [riRes, statsRes, tplRes, cliRes] = await Promise.all([
+        axios.get(`${API}/recurring-invoices/list`, { headers }),
+        axios.get(`${API}/recurring-invoices/stats`, { headers }),
+        axios.get(`${API}/invoice-templates`, { headers }),
+        axios.get(`${API}/clients`, { headers }),
+      ]);
+      setInvoices(riRes.data);
+      setStats(statsRes.data);
+      setTemplates(tplRes.data);
+      setClients(cliRes.data);
+    } catch { toast.error("Failed to load data"); }
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const updateLineItem = (setter, items, idx, field, value) => {
+    const updated = [...items];
+    updated[idx] = { ...updated[idx], [field]: value };
+    if (field === "quantity" || field === "rate") {
+      const qty = parseFloat(updated[idx].quantity) || 0;
+      const rate = parseFloat(updated[idx].rate) || 0;
+      updated[idx].amount = (qty * rate).toFixed(2);
+    }
+    setter(prev => ({ ...prev, line_items: updated }));
+  };
+
+  const addLineItem = (setter) => setter(prev => ({ ...prev, line_items: [...prev.line_items, { description: "", quantity: "1", rate: "", amount: "" }] }));
+  const removeLineItem = (setter, idx) => setter(prev => ({ ...prev, line_items: prev.line_items.filter((_, i) => i !== idx) }));
+
+  const calcSubtotal = (items) => items.reduce((a, li) => a + (parseFloat(li.amount) || 0), 0);
+
+  const createRecurring = async () => {
+    if (!form.client_id || !form.description) { toast.error("Client and description required"); return; }
+    if (form.line_items.filter(li => li.description && li.amount).length === 0) { toast.error("Add at least one line item"); return; }
+    setSaving(true);
+    try {
+      const data = { ...form, tax_rate: parseFloat(form.tax_rate) || 0, line_items: form.line_items.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
+      await axios.post(`${API}/recurring-invoices/create`, data, { headers });
+      toast.success("Recurring invoice created");
+      setShowCreate(false);
+      setForm(emptyForm);
+      fetchData();
+    } catch { toast.error("Failed to create"); }
+    finally { setSaving(false); }
+  };
+
+  const saveEdit = async () => {
+    if (!showEdit) return;
+    setSaving(true);
+    try {
+      const data = { ...showEdit, tax_rate: parseFloat(showEdit.tax_rate) || 0, line_items: showEdit.line_items?.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
+      await axios.put(`${API}/recurring-invoices/${showEdit.id}`, data, { headers });
+      toast.success("Updated");
+      setShowEdit(null);
+      fetchData();
+    } catch { toast.error("Failed to update"); }
+    finally { setSaving(false); }
+  };
+
+  const toggleRI = async (id) => {
+    try {
+      const res = await axios.post(`${API}/recurring-invoices/${id}/toggle`, {}, { headers });
+      toast.success(res.data.status === "active" ? "Activated" : "Paused");
+      fetchData();
+    } catch { toast.error("Failed"); }
+  };
+
+  const generateNow = async (id) => {
+    try {
+      const res = await axios.post(`${API}/recurring-invoices/${id}/generate-now`, {}, { headers });
+      toast.success(res.data.message);
+      fetchData();
+    } catch { toast.error("Failed to generate"); }
+  };
+
+  const duplicateRI = async (id) => {
+    try {
+      await axios.post(`${API}/recurring-invoices/${id}/duplicate`, {}, { headers });
+      toast.success("Duplicated");
+      fetchData();
+    } catch { toast.error("Failed"); }
+  };
+
+  const deleteRI = async (id) => {
+    if (!window.confirm("Delete this recurring invoice?")) return;
+    try {
+      await axios.delete(`${API}/recurring-invoices/${id}`, { headers });
+      toast.success("Deleted");
+      fetchData();
+    } catch { toast.error("Failed"); }
+  };
+
+  const createTemplate = async () => {
+    if (!templateForm.name.trim()) { toast.error("Name required"); return; }
+    setSaving(true);
+    try {
+      const data = { ...templateForm, tax_rate: parseFloat(templateForm.tax_rate) || 0, line_items: templateForm.line_items.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
+      await axios.post(`${API}/invoice-templates`, data, { headers });
+      toast.success("Template created");
+      setShowTemplateCreate(false);
+      fetchData();
+    } catch { toast.error("Failed"); }
+    finally { setSaving(false); }
+  };
+
+  const applyTemplate = async () => {
+    if (!showApplyTemplate || !applyForm.client_id) { toast.error("Select a client"); return; }
+    setSaving(true);
+    try {
+      await axios.post(`${API}/invoice-templates/${showApplyTemplate.id}/apply`, applyForm, { headers });
+      toast.success("Recurring invoice created from template");
+      setShowApplyTemplate(null);
+      setTab("recurring");
+      fetchData();
+    } catch { toast.error("Failed"); }
+    finally { setSaving(false); }
+  };
+
+  const deleteTemplate = async (id) => {
+    if (!window.confirm("Delete this template?")) return;
+    try {
+      await axios.delete(`${API}/invoice-templates/${id}`, { headers });
+      toast.success("Template deleted");
+      fetchData();
+    } catch { toast.error("Failed"); }
+  };
+
+  const filtered = invoices.filter(i => {
+    if (filterStatus !== "all" && i.status !== filterStatus) return false;
+    if (search && !i.client_name?.toLowerCase().includes(search.toLowerCase()) && !i.description?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+
+  // Line Items Editor Component
+  const LineItemsEditor = ({ items, setter }) => (
+    <div className="space-y-2">
+      <div className="grid grid-cols-12 gap-2 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+        <div className="col-span-5">Description</div><div className="col-span-2">Qty</div><div className="col-span-2">Rate</div><div className="col-span-2">Amount</div><div className="col-span-1"></div>
+      </div>
+      {items.map((li, idx) => (
+        <div key={`li-${idx}`} className="grid grid-cols-12 gap-2 items-center">
+          <Input className="col-span-5 h-8 text-xs" value={li.description} onChange={e => updateLineItem(setter, items, idx, "description", e.target.value)} placeholder="Service description" />
+          <Input className="col-span-2 h-8 text-xs font-mono" type="number" value={li.quantity} onChange={e => updateLineItem(setter, items, idx, "quantity", e.target.value)} />
+          <Input className="col-span-2 h-8 text-xs font-mono" type="number" value={li.rate} onChange={e => updateLineItem(setter, items, idx, "rate", e.target.value)} placeholder="0.00" />
+          <div className="col-span-2 text-xs font-mono font-bold">${parseFloat(li.amount || 0).toFixed(2)}</div>
+          <Button variant="ghost" size="sm" className="col-span-1 h-8 w-8 p-0" onClick={() => removeLineItem(setter, idx)} disabled={items.length <= 1}><Trash2 className="w-3 h-3" /></Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={() => addLineItem(setter)} className="mt-1"><Plus className="w-3 h-3 mr-1" />Add Line</Button>
+      <div className="text-right font-mono text-sm font-bold mt-2">Subtotal: ${calcSubtotal(items).toFixed(2)}</div>
+    </div>
+  );
 
   return (
-    <div className="space-y-6" data-testid="recurring-invoices-page">
-      <div><h1 className="text-2xl font-bold tracking-tight">Recurring Invoices</h1><p className="text-muted-foreground text-sm mt-1">Automated invoice generation from contracts</p></div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card><CardContent className="pt-5 flex items-center gap-3"><Receipt className="w-6 h-6 text-primary" /><div><p className="text-2xl font-bold">{invoices.length}</p><p className="text-xs text-muted-foreground">Recurring Templates</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><DollarSign className="w-6 h-6 text-emerald-500" /><div><p className="text-2xl font-bold">${totalMRR.toLocaleString()}</p><p className="text-xs text-muted-foreground">Monthly MRR</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><RefreshCw className="w-6 h-6 text-blue-500" /><div><p className="text-2xl font-bold">{invoices.reduce((a, i) => a + (i.invoices_generated || 0), 0)}</p><p className="text-xs text-muted-foreground">Invoices Generated</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><Calendar className="w-6 h-6 text-amber-500" /><div><p className="text-2xl font-bold">{invoices.filter(i => { const d = new Date(i.next_generation); return d <= new Date(Date.now() + 7*86400000); }).length}</p><p className="text-xs text-muted-foreground">Due This Week</p></div></CardContent></Card>
+    <div className="space-y-5" data-testid="recurring-invoices-page">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><RefreshCw className="w-6 h-6 text-blue-400" />Recurring Billing</h1>
+          <p className="text-muted-foreground mt-1">Manage recurring invoices, templates, and automated billing</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><FileText className="w-4 h-4 mr-1" />New Template</Button>
+          <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Recurring Invoice</Button>
+        </div>
       </div>
 
-      <Card><CardHeader><CardTitle className="text-lg">All Recurring Invoices</CardTitle></CardHeader>
-        <CardContent><div className="space-y-3">{invoices.map(i => (
-          <div key={i.id} className="p-4 rounded-lg border" data-testid={`rinv-${i.id}`}>
-            <div className="flex items-center justify-between">
-              <div><h3 className="font-semibold text-sm">{i.client_name}</h3><p className="text-xs text-muted-foreground">{i.description}</p></div>
-              <div className="text-right"><p className="text-lg font-bold">${i.amount?.toLocaleString()}</p><Badge variant="outline">{i.frequency}</Badge></div>
+      {/* Stats */}
+      {stats && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: "Monthly MRR", value: `$${stats.mrr?.toLocaleString()}`, icon: DollarSign, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+            { label: "Annual ARR", value: `$${stats.arr?.toLocaleString()}`, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
+            { label: "Active Templates", value: stats.active, icon: RefreshCw, color: "text-violet-400", bg: "bg-violet-500/10" },
+            { label: "Due This Week", value: stats.due_this_week, icon: Calendar, color: stats.due_this_week > 0 ? "text-amber-400" : "text-zinc-400", bg: stats.due_this_week > 0 ? "bg-amber-500/10" : "bg-zinc-500/10" },
+          ].map((s, i) => (
+            <Card key={`st-${i}`}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center`}><s.icon className={`w-5 h-5 ${s.color}`} /></div>
+                <div><p className="text-2xl font-bold">{s.value}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</p></div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="recurring" data-testid="tab-recurring">Recurring Invoices ({invoices.length})</TabsTrigger>
+          <TabsTrigger value="templates" data-testid="tab-templates">Invoice Templates ({templates.length})</TabsTrigger>
+        </TabsList>
+
+        {/* RECURRING INVOICES TAB */}
+        <TabsContent value="recurring" className="mt-4">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Search client, description..." value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-              <span>Next: {i.next_generation}</span><span>Generated: {i.invoices_generated}x</span><Badge variant={i.status === "active" ? "default" : "secondary"}>{i.status}</Badge>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="paused">Paused</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Client / Description</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Frequency</TableHead>
+                    <TableHead>Next Due</TableHead>
+                    <TableHead>Generated</TableHead>
+                    <TableHead>Total Billed</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.length === 0 && (
+                    <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No recurring invoices</TableCell></TableRow>
+                  )}
+                  {filtered.map(ri => (
+                    <TableRow key={ri.id} data-testid={`ri-row-${ri.id}`}>
+                      <TableCell>
+                        <p className="font-medium text-sm">{ri.client_name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate max-w-[200px]">{ri.description}</p>
+                        {ri.auto_send && <Badge variant="outline" className="text-[8px] mt-0.5 border-blue-500/20 text-blue-400">Auto-send</Badge>}
+                      </TableCell>
+                      <TableCell className="font-mono font-bold">${ri.amount?.toLocaleString()}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-[9px] capitalize">{ri.frequency}</Badge></TableCell>
+                      <TableCell className="text-xs">{ri.next_generation}</TableCell>
+                      <TableCell className="text-sm font-mono">{ri.invoices_generated}x</TableCell>
+                      <TableCell className="font-mono text-sm">${(ri.total_billed || 0).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <Badge className={`${STATUS_STYLES[ri.status]} text-[9px] border`}>{ri.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="ghost" title="Generate Now" onClick={() => generateNow(ri.id)} data-testid={`gen-${ri.id}`}><Zap className="w-3 h-3 text-amber-400" /></Button>
+                          <Button size="sm" variant="ghost" title={ri.status === "active" ? "Pause" : "Activate"} onClick={() => toggleRI(ri.id)}>{ri.status === "active" ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}</Button>
+                          <Button size="sm" variant="ghost" title="Edit" onClick={() => setShowEdit({ ...ri, tax_rate: String(ri.tax_rate || 10) })}><Edit className="w-3 h-3" /></Button>
+                          <Button size="sm" variant="ghost" title="History" onClick={() => setShowHistory(ri)}><Eye className="w-3 h-3" /></Button>
+                          <Button size="sm" variant="ghost" title="Duplicate" onClick={() => duplicateRI(ri.id)}><Copy className="w-3 h-3" /></Button>
+                          <Button size="sm" variant="ghost" title="Delete" className="text-red-400" onClick={() => deleteRI(ri.id)}><Trash2 className="w-3 h-3" /></Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TEMPLATES TAB */}
+        <TabsContent value="templates" className="mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map(tpl => (
+              <Card key={tpl.id} className="hover:border-primary/30 transition-colors" data-testid={`tpl-${tpl.id}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center justify-between">
+                    <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-blue-400" />{tpl.name}</span>
+                    <Badge variant="outline" className="text-[9px] capitalize">{tpl.category?.replace(/_/g, " ")}</Badge>
+                  </CardTitle>
+                  <p className="text-[10px] text-muted-foreground">{tpl.description}</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 mb-3">
+                    {(tpl.line_items || []).map((li, i) => (
+                      <div key={`tli-${i}`} className="flex items-center justify-between text-xs">
+                        <span className="truncate max-w-[200px]">{li.description}</span>
+                        <span className="font-mono font-bold">${parseFloat(li.amount || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <Separator className="mb-3" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Tax: {tpl.tax_rate}% | {TERMS_LABELS[tpl.payment_terms] || tpl.payment_terms}</span>
+                    <span>Used {tpl.usage_count || 0}x</span>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" className="flex-1" onClick={() => { setShowApplyTemplate(tpl); setApplyForm({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false }); }} data-testid={`apply-${tpl.id}`}>
+                      <Plus className="w-3 h-3 mr-1" />Use Template
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-red-400" onClick={() => deleteTemplate(tpl.id)}><Trash2 className="w-3 h-3" /></Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {templates.length === 0 && <p className="col-span-3 text-center py-12 text-muted-foreground">No templates yet. Create one to speed up recurring invoice setup.</p>}
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* CREATE RECURRING DIALOG */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-ri-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><RefreshCw className="w-5 h-5 text-blue-400" />New Recurring Invoice</DialogTitle>
+            <DialogDescription id="create-ri-desc">Set up automated recurring billing for a client</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Client</Label>
+                <Select value={form.client_id} onValueChange={v => { const c = clients.find(x => x.id === v); setForm(p => ({ ...p, client_id: v, client_name: c?.name || "" })); }}>
+                  <SelectTrigger data-testid="ri-client-select"><SelectValue placeholder="Select client..." /></SelectTrigger>
+                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Frequency</Label>
+                <Select value={form.frequency} onValueChange={v => setForm(p => ({ ...p, frequency: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(FREQ_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div><Label>Description</Label><Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g., Monthly Managed IT Services" data-testid="ri-description" /></div>
+            <Separator />
+            <Label className="text-sm font-medium">Line Items</Label>
+            <LineItemsEditor items={form.line_items} setter={setForm} />
+            <Separator />
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Tax Rate (%)</Label><Input type="number" value={form.tax_rate} onChange={e => setForm(p => ({ ...p, tax_rate: e.target.value }))} /></div>
+              <div><Label>Payment Terms</Label>
+                <Select value={form.payment_terms} onValueChange={v => setForm(p => ({ ...p, payment_terms: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(TERMS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Start Date</Label><Input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} /></div>
+            </div>
+            <div className="flex items-center gap-4 p-3 rounded-lg border">
+              <Switch checked={form.auto_send} onCheckedChange={v => setForm(p => ({ ...p, auto_send: v }))} data-testid="ri-auto-send" />
+              <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Automatically email invoice when generated</p></div>
+              {form.auto_send && <Input value={form.auto_send_email} onChange={e => setForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
+            </div>
+            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Invoice notes..." rows={2} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button onClick={createRecurring} disabled={saving} data-testid="ri-create-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Recurring Invoice"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* EDIT DIALOG */}
+      <Dialog open={!!showEdit} onOpenChange={v => { if (!v) setShowEdit(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-ri-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5" />Edit Recurring Invoice</DialogTitle>
+            <DialogDescription id="edit-ri-desc">Update the recurring invoice settings</DialogDescription>
+          </DialogHeader>
+          {showEdit && (
+            <div className="space-y-4">
+              <div><Label>Description</Label><Input value={showEdit.description || ""} onChange={e => setShowEdit(p => ({ ...p, description: e.target.value }))} /></div>
+              <Label className="text-sm font-medium">Line Items</Label>
+              <LineItemsEditor items={showEdit.line_items || []} setter={setShowEdit} />
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>Frequency</Label>
+                  <Select value={showEdit.frequency} onValueChange={v => setShowEdit(p => ({ ...p, frequency: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(FREQ_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Tax Rate (%)</Label><Input type="number" value={showEdit.tax_rate} onChange={e => setShowEdit(p => ({ ...p, tax_rate: e.target.value }))} /></div>
+                <div><Label>Payment Terms</Label>
+                  <Select value={showEdit.payment_terms || "net_30"} onValueChange={v => setShowEdit(p => ({ ...p, payment_terms: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(TERMS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 p-3 rounded-lg border">
+                <Switch checked={showEdit.auto_send} onCheckedChange={v => setShowEdit(p => ({ ...p, auto_send: v }))} />
+                <div><p className="text-sm font-medium">Auto-send</p></div>
+                {showEdit.auto_send && <Input value={showEdit.auto_send_email || ""} onChange={e => setShowEdit(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
+              </div>
+              <div><Label>Notes</Label><Textarea value={showEdit.notes || ""} onChange={e => setShowEdit(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEdit(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Changes"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* HISTORY DIALOG */}
+      <Dialog open={!!showHistory} onOpenChange={v => { if (!v) setShowHistory(null); }}>
+        <DialogContent className="max-w-lg" aria-describedby="hist-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Clock className="w-5 h-5" />Generation History — {showHistory?.client_name}</DialogTitle>
+            <DialogDescription id="hist-desc">{showHistory?.description}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {(showHistory?.generation_history || []).length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground text-sm">No invoices generated yet</p>
+            ) : (
+              (showHistory?.generation_history || []).reverse().map((h, i) => (
+                <div key={`h-${i}`} className="flex items-center justify-between p-3 rounded-lg border text-sm">
+                  <div><p className="font-mono font-medium">{h.invoice_number}</p><p className="text-[10px] text-muted-foreground">{new Date(h.generated_at).toLocaleDateString()} by {h.generated_by}</p></div>
+                  <span className="font-mono font-bold">${h.amount?.toLocaleString()}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowHistory(null)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CREATE TEMPLATE DIALOG */}
+      <Dialog open={showTemplateCreate} onOpenChange={setShowTemplateCreate}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-tpl-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />New Invoice Template</DialogTitle>
+            <DialogDescription id="create-tpl-desc">Create a reusable billing template</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Template Name</Label><Input value={templateForm.name} onChange={e => setTemplateForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Standard MSP Monthly" data-testid="tpl-name" /></div>
+              <div><Label>Category</Label>
+                <Select value={templateForm.category} onValueChange={v => setTemplateForm(p => ({ ...p, category: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="managed_services">Managed Services</SelectItem>
+                    <SelectItem value="security">Security</SelectItem>
+                    <SelectItem value="backup">Backup & DR</SelectItem>
+                    <SelectItem value="consulting">Consulting</SelectItem>
+                    <SelectItem value="haas">Hardware-as-a-Service</SelectItem>
+                    <SelectItem value="project">Project Work</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div><Label>Description</Label><Input value={templateForm.description} onChange={e => setTemplateForm(p => ({ ...p, description: e.target.value }))} placeholder="Template description..." /></div>
+            <Separator />
+            <Label className="text-sm font-medium">Line Items</Label>
+            <LineItemsEditor items={templateForm.line_items} setter={setTemplateForm} />
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Tax Rate (%)</Label><Input type="number" value={templateForm.tax_rate} onChange={e => setTemplateForm(p => ({ ...p, tax_rate: e.target.value }))} /></div>
+              <div><Label>Payment Terms</Label>
+                <Select value={templateForm.payment_terms} onValueChange={v => setTemplateForm(p => ({ ...p, payment_terms: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(TERMS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
-        ))}</div></CardContent>
-      </Card>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTemplateCreate(false)}>Cancel</Button>
+            <Button onClick={createTemplate} disabled={saving} data-testid="tpl-create-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Template"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* APPLY TEMPLATE DIALOG */}
+      <Dialog open={!!showApplyTemplate} onOpenChange={v => { if (!v) setShowApplyTemplate(null); }}>
+        <DialogContent className="max-w-md" aria-describedby="apply-tpl-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Plus className="w-5 h-5 text-emerald-400" />Create from Template</DialogTitle>
+            <DialogDescription id="apply-tpl-desc">Using: {showApplyTemplate?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Client</Label>
+              <Select value={applyForm.client_id} onValueChange={v => { const c = clients.find(x => x.id === v); setApplyForm(p => ({ ...p, client_id: v, client_name: c?.name || "" })); }}>
+                <SelectTrigger data-testid="apply-client"><SelectValue placeholder="Select client..." /></SelectTrigger>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Frequency</Label>
+              <Select value={applyForm.frequency} onValueChange={v => setApplyForm(p => ({ ...p, frequency: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{Object.entries(FREQ_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Start Date</Label><Input type="date" value={applyForm.start_date} onChange={e => setApplyForm(p => ({ ...p, start_date: e.target.value }))} /></div>
+            <div className="flex items-center gap-3 p-3 rounded-lg border">
+              <Switch checked={applyForm.auto_send} onCheckedChange={v => setApplyForm(p => ({ ...p, auto_send: v }))} />
+              <span className="text-sm">Auto-send invoices when generated</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowApplyTemplate(null)}>Cancel</Button>
+            <Button onClick={applyTemplate} disabled={saving} data-testid="apply-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Recurring Invoice"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
