@@ -295,6 +295,11 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [expandedMenus, setExpandedMenus] = useState(new Set());
+  const [sidebarBrand, setSidebarBrand] = useState(null);
+
+  useEffect(() => {
+    axios.get(`${API}/settings/branding/public`).then(r => { if (r.data?.company_name) setSidebarBrand(r.data); }).catch(() => {});
+  }, []);
 
   // Get user's enabled modules (default: all enabled)
   const enabledModules = user?.enabled_modules || navGroups.map(g => g.id);
@@ -345,16 +350,24 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
         <div className={`h-16 flex items-center border-b border-border px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                <Zap className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <span className="font-bold text-lg tracking-tight">NexusOps</span>
+              {sidebarBrand?.company_icon_url ? (
+                <img src={sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                  <Zap className="w-5 h-5 text-primary-foreground" />
+                </div>
+              )}
+              <span className="font-bold text-lg tracking-tight">{sidebarBrand?.company_name || "NexusOps"}</span>
             </div>
           )}
           {collapsed && (
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
-            </div>
+            sidebarBrand?.company_icon_url ? (
+              <img src={sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" />
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                <Zap className="w-5 h-5 text-primary-foreground" />
+              </div>
+            )
           )}
           <Button
             variant="ghost"

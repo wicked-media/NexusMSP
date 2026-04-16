@@ -139,6 +139,7 @@ export default function LoginPage() {
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [registerData, setRegisterData] = useState({ name: "", email: "", password: "" });
   const [wallpaper, setWallpaper] = useState(null);
+  const [brand, setBrand] = useState({ company_name: "NexusOps", login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"], powered_by_visible: true });
 
   const typedText = useTypingEffect([
     "Command Center",
@@ -152,9 +153,15 @@ export default function LoginPage() {
     const ssoError = searchParams.get("sso_error");
     if (ssoError) toast.error(`SSO Error: ${ssoError.replace(/_/g, " ")}`);
     axios.get(`${API}/settings/microsoft-sso/status`).then(r => setSsoEnabled(r.data?.enabled)).catch(() => {});
-    // Fetch wallpaper setting
     axios.get(`${API}/settings/login-wallpaper`).then(r => {
       if (r.data?.url && r.data?.type !== "default") setWallpaper(r.data);
+    }).catch(() => {});
+    // Fetch branding
+    axios.get(`${API}/settings/branding/public`).then(r => {
+      if (r.data?.company_name) setBrand(r.data);
+      if (r.data?.company_name && r.data.company_name !== "NexusOps") {
+        document.title = r.data.company_name;
+      }
     }).catch(() => {});
   }, [searchParams]);
 
@@ -230,7 +237,7 @@ export default function LoginPage() {
               </div>
               <div className="absolute -inset-1 bg-emerald-500/20 rounded-lg blur-sm -z-10" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
+            <span className="text-xl font-bold tracking-tight text-white">{brand.company_name}</span>
           </div>
 
           {/* Hero with animated typing */}
@@ -256,7 +263,7 @@ export default function LoginPage() {
               </h1>
 
               <p className="text-base text-zinc-400 leading-relaxed max-w-md">
-                Unified RMM & PSA platform for modern managed service providers. Monitor, manage, and support from a single pane of glass.
+                {brand.login_tagline || "Unified RMM & PSA platform for modern managed service providers. Monitor, manage, and support from a single pane of glass."}
               </p>
             </div>
 
@@ -276,7 +283,7 @@ export default function LoginPage() {
 
             {/* Feature pills */}
             <div className="flex flex-wrap gap-2">
-              {["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"].map((f, i) => (
+              {(brand.login_features?.length > 0 ? brand.login_features : ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"]).map((f, i) => (
                 <span key={f} className="px-3 py-1.5 rounded-md border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-sm text-xs text-zinc-400 font-medium" style={{ animation: `fadeSlideIn 0.5s ease-out ${0.6 + i * 0.08}s both` }}>
                   {f}
                 </span>
@@ -310,7 +317,7 @@ export default function LoginPage() {
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
               </svg>
             </div>
-            <span className="text-xl font-bold tracking-tight text-white">NexusOps</span>
+            <span className="text-xl font-bold tracking-tight text-white">{brand.company_name}</span>
           </div>
 
           <div className="p-8 rounded-2xl border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-xl shadow-2xl shadow-black/20" style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>

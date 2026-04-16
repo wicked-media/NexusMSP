@@ -16,26 +16,45 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @router.get("/settings/branding")
 async def get_branding(current_user: dict = Depends(get_current_user)):
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    return branding or {
+    return branding or _default_branding()
+
+
+@router.get("/settings/branding/public")
+async def get_branding_public():
+    """Public endpoint for login page and sidebar branding (no auth)."""
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    b = branding or _default_branding()
+    return {
+        "company_name": b.get("company_name", "NexusOps"),
+        "company_logo_url": b.get("company_logo_url", ""),
+        "company_icon_url": b.get("company_icon_url", ""),
+        "favicon_url": b.get("favicon_url", ""),
+        "primary_color": b.get("primary_color", "#10b981"),
+        "accent_color": b.get("accent_color", "#06b6d4"),
+        "login_tagline": b.get("login_tagline", ""),
+        "login_features": b.get("login_features", []),
+        "powered_by_visible": b.get("powered_by_visible", True),
+    }
+
+
+def _default_branding():
+    return {
         "type": "branding",
         "company_name": "NexusOps",
         "company_logo_url": "",
         "company_icon_url": "",
-        "primary_color": "#6366f1",
+        "primary_color": "#10b981",
         "secondary_color": "#8b5cf6",
         "accent_color": "#06b6d4",
+        "login_tagline": "Unified RMM & PSA platform for modern managed service providers",
+        "login_features": ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
+        "powered_by_visible": True,
+        "sidebar_style": "default",
         "invoice_logo_url": "",
         "invoice_header_text": "",
         "invoice_footer_text": "",
-        "letterhead_logo_url": "",
-        "letterhead_header": "",
-        "letterhead_footer": "",
-        "contract_logo_url": "",
-        "contract_header_text": "",
-        "contract_footer_text": "",
-        "show_customer_logo_on_contracts": True,
-        "show_customer_logo_on_invoices": True,
-        "email_signature_html": "",
+        "email_sender_name": "",
+        "email_footer_text": "",
         "favicon_url": "",
         "updated_at": None,
     }

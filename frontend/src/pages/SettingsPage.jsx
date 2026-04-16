@@ -18,10 +18,11 @@ import {
   User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
   Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
-  CheckCircle, XCircle, KeyRound, Settings2, Plug
+  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff
 } from "lucide-react";
 
 const TABS = [
+  { id: "branding", label: "Platform Branding", icon: Palette },
   { id: "general", label: "General", icon: User },
   { id: "auth", label: "Authentication", icon: KeyRound },
   { id: "mailbox", label: "Mailbox & Email", icon: Mail },
@@ -32,9 +33,18 @@ const TABS = [
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState("branding");
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
+  const [branding, setBranding] = useState({
+    company_name: "NexusOps", company_logo_url: "", company_icon_url: "",
+    primary_color: "#10b981", secondary_color: "#8b5cf6", accent_color: "#06b6d4",
+    login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
+    powered_by_visible: true, sidebar_style: "default",
+    invoice_logo_url: "", invoice_header_text: "", invoice_footer_text: "",
+    email_sender_name: "", email_footer_text: "", favicon_url: "",
+  });
+  const [brandingSaving, setBrandingSaving] = useState(false);
   const [profileData, setProfileData] = useState({
     name: user?.name || "",
     email: user?.email || ""
@@ -82,7 +92,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -96,6 +106,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/microsoft-sso`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/settings/o365-mailbox`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
+          axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -108,6 +119,7 @@ export default function SettingsPage() {
         setSyncro(syncroRes.data);
         if (jnRes.data) setJobNumbering(jnRes.data);
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data }));
+        if (brandingRes.data && brandingRes.data.company_name) setBranding(prev => ({ ...prev, ...brandingRes.data }));
         if (mbxRes.data) {
           setMailbox(mbxRes.data);
           if (mbxRes.data.tenant_id) {
@@ -241,6 +253,112 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-6">
+
+      {/* ==================== PLATFORM BRANDING TAB ==================== */}
+      {activeTab === "branding" && (<>
+        <Card data-testid="branding-section">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Palette className="w-5 h-5" />Company Identity</CardTitle>
+            <CardDescription>Set your company name, logo, and colors. These appear across the entire platform.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Company / Platform Name</Label><Input value={branding.company_name || ""} onChange={e => setBranding(p => ({ ...p, company_name: e.target.value }))} placeholder="Your Company Name" data-testid="branding-company-name" /><p className="text-[10px] text-muted-foreground mt-1">Replaces "NexusOps" in sidebar, login page, and browser tab</p></div>
+              <div><Label>Email Sender Name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Used as the "From" name in outgoing emails</p></div>
+            </div>
+
+            <Separator />
+            <Label className="text-sm font-semibold">Logo & Icon</Label>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs">Company Logo (sidebar)</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                  {branding.company_logo_url ? <img src={branding.company_logo_url} alt="Logo" className="h-10 mx-auto mb-2 object-contain" /> : <Building className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  <input type="file" accept="image/*" className="hidden" id="logo-upload" onChange={async (e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const formData = new FormData(); formData.append("file", file);
+                    try { const res = await axios.post(`${API}/settings/branding/upload-logo?logo_type=company`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } }); setBranding(p => ({ ...p, company_logo_url: res.data.url })); toast.success("Logo uploaded"); } catch { toast.error("Upload failed"); }
+                  }} />
+                  <Button size="sm" variant="outline" onClick={() => document.getElementById("logo-upload").click()} data-testid="upload-logo-btn"><Upload className="w-3 h-3 mr-1" />Upload Logo</Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Sidebar Icon (small)</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                  {branding.company_icon_url ? <img src={branding.company_icon_url} alt="Icon" className="h-10 w-10 mx-auto mb-2 object-contain" /> : <Image className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  <input type="file" accept="image/*" className="hidden" id="icon-upload" onChange={async (e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const formData = new FormData(); formData.append("file", file);
+                    try { const res = await axios.post(`${API}/settings/branding/upload-logo?logo_type=icon`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } }); setBranding(p => ({ ...p, company_icon_url: res.data.url })); toast.success("Icon uploaded"); } catch { toast.error("Upload failed"); }
+                  }} />
+                  <Button size="sm" variant="outline" onClick={() => document.getElementById("icon-upload").click()}><Upload className="w-3 h-3 mr-1" />Upload Icon</Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Invoice / PDF Logo</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                  {branding.invoice_logo_url ? <img src={branding.invoice_logo_url} alt="Invoice Logo" className="h-10 mx-auto mb-2 object-contain" /> : <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  <input type="file" accept="image/*" className="hidden" id="invoice-logo-upload" onChange={async (e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const formData = new FormData(); formData.append("file", file);
+                    try { const res = await axios.post(`${API}/settings/branding/upload-logo?logo_type=invoice`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } }); setBranding(p => ({ ...p, invoice_logo_url: res.data.url })); toast.success("Invoice logo uploaded"); } catch { toast.error("Upload failed"); }
+                  }} />
+                  <Button size="sm" variant="outline" onClick={() => document.getElementById("invoice-logo-upload").click()}><Upload className="w-3 h-3 mr-1" />Upload</Button>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+            <Label className="text-sm font-semibold">Brand Colors</Label>
+            <div className="grid grid-cols-3 gap-4">
+              <div><Label className="text-xs">Primary Color</Label><div className="flex gap-2 items-center"><input type="color" value={branding.primary_color || "#10b981"} onChange={e => setBranding(p => ({ ...p, primary_color: e.target.value }))} className="w-10 h-10 rounded cursor-pointer border-0" /><Input value={branding.primary_color || ""} onChange={e => setBranding(p => ({ ...p, primary_color: e.target.value }))} className="font-mono text-xs" /></div></div>
+              <div><Label className="text-xs">Secondary Color</Label><div className="flex gap-2 items-center"><input type="color" value={branding.secondary_color || "#8b5cf6"} onChange={e => setBranding(p => ({ ...p, secondary_color: e.target.value }))} className="w-10 h-10 rounded cursor-pointer border-0" /><Input value={branding.secondary_color || ""} onChange={e => setBranding(p => ({ ...p, secondary_color: e.target.value }))} className="font-mono text-xs" /></div></div>
+              <div><Label className="text-xs">Accent Color</Label><div className="flex gap-2 items-center"><input type="color" value={branding.accent_color || "#06b6d4"} onChange={e => setBranding(p => ({ ...p, accent_color: e.target.value }))} className="w-10 h-10 rounded cursor-pointer border-0" /><Input value={branding.accent_color || ""} onChange={e => setBranding(p => ({ ...p, accent_color: e.target.value }))} className="font-mono text-xs" /></div></div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Globe className="w-5 h-5" />Login Page Customization</CardTitle>
+            <CardDescription>Customize the text and features shown on the login page</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div><Label>Login Tagline</Label><Input value={branding.login_tagline || ""} onChange={e => setBranding(p => ({ ...p, login_tagline: e.target.value }))} placeholder="Unified RMM & PSA platform for modern managed service providers" /><p className="text-[10px] text-muted-foreground mt-1">Shown below the main heading on the login page</p></div>
+            <div><Label>Feature Pills (comma-separated)</Label><Input value={(branding.login_features || []).join(", ")} onChange={e => setBranding(p => ({ ...p, login_features: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))} placeholder="RMM, Ticketing, Invoicing, Networking, Assets, Reporting" /><p className="text-[10px] text-muted-foreground mt-1">Tags shown at the bottom of the login hero section</p></div>
+            <div className="flex items-center gap-3 p-3 rounded-lg border">
+              <Switch checked={branding.powered_by_visible !== false} onCheckedChange={v => setBranding(p => ({ ...p, powered_by_visible: v }))} data-testid="powered-by-toggle" />
+              <div><p className="text-sm font-medium">Show "Made with Emergent" badge</p><p className="text-[10px] text-muted-foreground">Toggle the powered-by badge visibility</p></div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Invoice & Email Branding</CardTitle>
+            <CardDescription>Customize text that appears on invoices and outgoing emails</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Invoice Header Text</Label><Input value={branding.invoice_header_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_header_text: e.target.value }))} placeholder="Your Company Pty Ltd | ABN 12 345 678 901" /></div>
+              <div><Label>Invoice Footer Text</Label><Input value={branding.invoice_footer_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_footer_text: e.target.value }))} placeholder="Payment terms: Net 30 | BSB: 123-456 | Acc: 12345678" /></div>
+            </div>
+            <div><Label>Email Footer Text</Label><Input value={branding.email_footer_text || ""} onChange={e => setBranding(p => ({ ...p, email_footer_text: e.target.value }))} placeholder="Your Company | 123 Main St | support@company.com" /></div>
+          </CardContent>
+        </Card>
+
+        <Button onClick={async () => {
+          setBrandingSaving(true);
+          try {
+            await axios.put(`${API}/settings/branding`, branding, { headers });
+            toast.success("Branding settings saved! Refresh to see changes across the platform.");
+          } catch { toast.error("Failed to save branding"); }
+          finally { setBrandingSaving(false); }
+        }} disabled={brandingSaving} className="w-full" data-testid="save-branding-btn">
+          {brandingSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+          Save Branding Settings
+        </Button>
+      </>)}
 
       {/* ==================== GENERAL TAB ==================== */}
       {activeTab === "general" && (<>
