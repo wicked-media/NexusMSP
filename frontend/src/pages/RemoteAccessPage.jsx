@@ -48,6 +48,7 @@ export default function RemoteAccessPage() {
   const [deployingDevice, setDeployingDevice] = useState(null);
   const [deployCmd, setDeployCmd] = useState("");
   const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [connectDialog, setConnectDialog] = useState(null);
   const [showBulkDeploy, setShowBulkDeploy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -129,17 +130,35 @@ export default function RemoteAccessPage() {
     finally { setTestingProvider(null); }
   };
 
+  // Launch RustDesk connection via protocol handler (no blank tab)
+  const launchRustDesk = (rdId) => {
+    const uri = `rustdesk://connection/new/${rdId}`;
+    // Use hidden anchor — avoids blank tab issue of window.open()
+    const a = document.createElement("a");
+    a.href = uri;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 100);
+  };
+
   // Quick connect
   const quickConnect = async () => {
     if (!quickId.trim()) return;
     setConnecting("quick");
     try {
-      await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: quickId }, { headers });
-      window.open(`rustdesk://${quickId}`, "_blank");
-      toast.success(`Connecting to ${quickId}...`);
+      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: quickId }, { headers });
+      // Show connection dialog with options
+      setConnectDialog({
+        rustdesk_id: quickId,
+        connection_url: res.data.connection_url,
+        web_client_url: res.data.web_client_url,
+        relay_server: res.data.relay_server,
+        device_name: quickId,
+      });
       setQuickId("");
       fetchData();
-    } catch { toast.error("Connection failed"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Connection failed"); }
     finally { setConnecting(null); }
   };
 
@@ -149,15 +168,22 @@ export default function RemoteAccessPage() {
     if (!rdId) { toast.error("No RustDesk ID assigned to this device"); return; }
     setConnecting(device.id);
     try {
+      let res;
       if (device.rd_entry_id) {
-        await axios.post(`${API}/rustdesk/devices/${device.rd_entry_id}/connect`, {}, { headers });
+        res = await axios.post(`${API}/rustdesk/devices/${device.rd_entry_id}/connect`, {}, { headers });
       } else {
-        await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: rdId }, { headers });
+        res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: rdId }, { headers });
       }
-      window.open(`rustdesk://${rdId}`, "_blank");
-      toast.success(`Connecting to ${device.name || device.hostname}...`);
+      setConnectDialog({
+        rustdesk_id: rdId,
+        rustdesk_password: res.data.rustdesk_password,
+        connection_url: res.data.connection_url,
+        web_client_url: res.data.web_client_url,
+        relay_server: res.data.relay_server,
+        device_name: device.name || device.hostname || rdId,
+      });
       fetchData();
-    } catch { toast.error("Connection failed"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Connection failed"); }
     finally { setConnecting(null); }
   };
 
@@ -320,7 +346,7 @@ export default function RemoteAccessPage() {
               <div className={`w-3 h-3 rounded-full ${serverConfigured ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
               <div>
                 <span className={`text-sm font-semibold ${serverConfigured ? "text-emerald-400" : "text-amber-400"}`}>
-                  {serverConfigured ? "RustDesk Server Connected" : "Server Not Configured"}
+                  {serverConfigured ? "RustDesk Server Configured" : "Server Not Configured"}
                 </span>
                 {config?.server_url && <span className="text-xs text-muted-foreground ml-2">{config.server_url}</span>}
                 {livePeers && <span className="text-xs text-blue-400 ml-2">({livePeers.count} live peers)</span>}
@@ -919,6 +945,96 @@ export default function RemoteAccessPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeployDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remote Connection Dialog */}
+      <Dialog open={!!connectDialog} onOpenChange={v => { if (!v) setConnectDialog(null); }}>
+        <DialogContent className="max-w-md" aria-describedby="connect-dialog-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Play className="w-5 h-5 text-emerald-400" />Connect to {connectDialog?.device_name}</DialogTitle>
+            <DialogDescription id="connect-dialog-desc">Choose how to connect to this device</DialogDescription>
+          </DialogHeader>
+          {connectDialog && (
+            <div className="space-y-4">
+              {/* Device Info */}
+              <Card className="bg-zinc-800/50 border-border/30">
+                <CardContent className="py-3 px-4 space-y-1.5">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">RustDesk ID</span>
+                    <span className="font-mono font-bold text-emerald-400">{connectDialog.rustdesk_id}</span>
+                  </div>
+                  {connectDialog.rustdesk_password && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Password</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs">{showPassword["connect"] ? connectDialog.rustdesk_password : "********"}</span>
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setShowPassword(p => ({ ...p, connect: !p.connect }))}>
+                          {showPassword["connect"] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_password); toast.success("Password copied"); }}>
+                          <Copy className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {connectDialog.relay_server && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Relay Server</span>
+                      <span className="font-mono text-xs text-muted-foreground">{connectDialog.relay_server}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Connection Methods */}
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Launch Connection</Label>
+
+                {/* Native RustDesk Client */}
+                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
+                  <Monitor className="w-5 h-5 mr-3" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Open in RustDesk Client</p>
+                    <p className="text-[10px] opacity-70">Requires RustDesk installed on this computer</p>
+                  </div>
+                </Button>
+
+                {/* Web Client (if server configured) */}
+                {connectDialog.web_client_url && (
+                  <Button className="w-full justify-start h-12" variant="outline" onClick={() => { window.open(connectDialog.web_client_url, "_blank"); toast.success("Opening web client..."); }} data-testid="launch-web-rustdesk">
+                    <Globe className="w-5 h-5 mr-3" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium">Open Web Client</p>
+                      <p className="text-[10px] text-muted-foreground">Connect via browser at {connectDialog.web_client_url}</p>
+                    </div>
+                  </Button>
+                )}
+
+                {/* Copy ID for manual connection */}
+                <Button className="w-full justify-start h-12" variant="outline" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_id); toast.success(`ID ${connectDialog.rustdesk_id} copied — paste into RustDesk`); }} data-testid="copy-rustdesk-id">
+                  <Copy className="w-5 h-5 mr-3" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Copy ID to Clipboard</p>
+                    <p className="text-[10px] text-muted-foreground">Manually paste into your RustDesk client</p>
+                  </div>
+                </Button>
+              </div>
+
+              <div className="text-xs text-muted-foreground bg-muted/10 p-3 rounded-lg">
+                <p className="font-medium mb-1">Troubleshooting</p>
+                <ul className="space-y-0.5 list-disc pl-3">
+                  <li>Ensure the RustDesk client is installed and running on your machine</li>
+                  <li>The target device must be online with RustDesk running</li>
+                  <li>If the native launch doesn't work, copy the ID and connect manually</li>
+                  {connectDialog.relay_server && <li>Your relay server is: <code className="font-mono text-emerald-400">{connectDialog.relay_server}</code></li>}
+                </ul>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

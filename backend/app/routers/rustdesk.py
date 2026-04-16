@@ -133,6 +133,8 @@ async def initiate_rustdesk_connection(device_id: str, current_user: dict = Depe
     if not device:
         raise HTTPException(status_code=404, detail="RustDesk device not found")
 
+    config = await _get_rustdesk_config()
+
     # Update last connected timestamp
     await db.rustdesk_devices.update_one(
         {"id": device_id},
@@ -152,11 +154,18 @@ async def initiate_rustdesk_connection(device_id: str, current_user: dict = Depe
         "ended_at": None,
     })
 
+    rd_id = device.get("rustdesk_id", "")
+    relay = config.get("relay_server", "").strip()
+    server_url = config.get("server_url", "").strip().rstrip("/")
+
     return {
         "message": "Connection initiated",
-        "rustdesk_id": device.get("rustdesk_id"),
+        "rustdesk_id": rd_id,
         "rustdesk_password": device.get("rustdesk_password"),
-        "connection_url": f"rustdesk://{device.get('rustdesk_id')}",
+        "connection_url": f"rustdesk://connection/new/{rd_id}",
+        "relay_server": relay,
+        "server_url": server_url,
+        "web_client_url": f"{server_url}" if server_url else None,
     }
 
 @router.get("/rustdesk/sessions")
@@ -268,6 +277,10 @@ async def quick_connect(data: dict, current_user: dict = Depends(get_current_use
     if not rd_id:
         raise HTTPException(status_code=400, detail="RustDesk ID required")
 
+    config = await _get_rustdesk_config()
+    relay = config.get("relay_server", "").strip()
+    server_url = config.get("server_url", "").strip().rstrip("/")
+
     # Log the session
     await db.rustdesk_sessions.insert_one({
         "id": str(uuid.uuid4()), "device_id": None, "client_id": None,
@@ -275,7 +288,14 @@ async def quick_connect(data: dict, current_user: dict = Depends(get_current_use
         "status": "initiated", "started_at": datetime.now(timezone.utc).isoformat(), "ended_at": None,
     })
 
-    return {"message": "Connection initiated", "rustdesk_id": rd_id, "connection_url": f"rustdesk://{rd_id}"}
+    return {
+        "message": "Connection initiated",
+        "rustdesk_id": rd_id,
+        "connection_url": f"rustdesk://connection/new/{rd_id}",
+        "relay_server": relay,
+        "server_url": server_url,
+        "web_client_url": f"{server_url}" if server_url else None,
+    }
 
 
 # ─── Patch Agent Deployment via RustDesk ───
