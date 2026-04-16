@@ -17,18 +17,87 @@ export const API = `${BACKEND_URL}/api`;
 const ThemeContext = createContext(null);
 export const useTheme = () => useContext(ThemeContext);
 
+const THEME_PRESETS = {
+  midnight: { label: "Midnight", bg: "#09090b", sidebar: "#0c0c10", accent: "emerald", font: "Inter" },
+  oceanic: { label: "Oceanic", bg: "#0a1628", sidebar: "#0b1a30", accent: "cyan", font: "Inter" },
+  carbon: { label: "Carbon", bg: "#111111", sidebar: "#161616", accent: "blue", font: "JetBrains Mono" },
+  arctic: { label: "Arctic", bg: "#0f172a", sidebar: "#0e1525", accent: "sky", font: "Inter" },
+  ember: { label: "Ember", bg: "#0d0807", sidebar: "#120c0a", accent: "orange", font: "Inter" },
+  phantom: { label: "Phantom", bg: "#0a0a12", sidebar: "#0d0d18", accent: "violet", font: "Inter" },
+};
+
+const ACCENT_COLORS = {
+  emerald: { primary: "142 76% 36%", ring: "142 76% 36%" },
+  blue: { primary: "217 91% 60%", ring: "217 91% 60%" },
+  cyan: { primary: "188 95% 43%", ring: "188 95% 43%" },
+  violet: { primary: "258 90% 66%", ring: "258 90% 66%" },
+  orange: { primary: "25 95% 53%", ring: "25 95% 53%" },
+  red: { primary: "0 84% 60%", ring: "0 84% 60%" },
+  sky: { primary: "199 89% 48%", ring: "199 89% 48%" },
+  rose: { primary: "347 77% 50%", ring: "347 77% 50%" },
+};
+
+const FONTS = {
+  "Inter": "'Inter', sans-serif",
+  "JetBrains Mono": "'JetBrains Mono', monospace",
+  "DM Sans": "'DM Sans', sans-serif",
+  "Space Grotesk": "'Space Grotesk', sans-serif",
+  "IBM Plex Sans": "'IBM Plex Sans', sans-serif",
+  "Outfit": "'Outfit', sans-serif",
+};
+
 export const ThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(() => localStorage.getItem("nexusops_theme") || "dark");
+  const [preset, setPreset] = useState(() => localStorage.getItem("nexusops_preset") || "midnight");
+  const [accent, setAccent] = useState(() => localStorage.getItem("nexusops_accent") || "emerald");
+  const [font, setFont] = useState(() => localStorage.getItem("nexusops_font") || "Inter");
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
     localStorage.setItem("nexusops_theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    const p = THEME_PRESETS[preset];
+    if (p && theme === "dark") {
+      document.documentElement.style.setProperty("--theme-bg", p.bg);
+      document.documentElement.style.setProperty("--theme-sidebar", p.sidebar);
+    } else {
+      document.documentElement.style.removeProperty("--theme-bg");
+      document.documentElement.style.removeProperty("--theme-sidebar");
+    }
+    localStorage.setItem("nexusops_preset", preset);
+  }, [preset, theme]);
+
+  useEffect(() => {
+    const a = ACCENT_COLORS[accent];
+    if (a) {
+      document.documentElement.style.setProperty("--primary", a.primary);
+      document.documentElement.style.setProperty("--ring", a.ring);
+    }
+    localStorage.setItem("nexusops_accent", accent);
+  }, [accent]);
+
+  useEffect(() => {
+    const f = FONTS[font];
+    if (f) document.documentElement.style.setProperty("--font-sans", f);
+    localStorage.setItem("nexusops_font", font);
+  }, [font]);
+
+  // Load Google Fonts dynamically
+  useEffect(() => {
+    const families = ["DM+Sans", "Space+Grotesk", "IBM+Plex+Sans", "Outfit", "JetBrains+Mono"];
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${families.map(f => `family=${f}:wght@400;500;600;700`).join("&")}&display=swap`;
+    document.head.appendChild(link);
+    return () => document.head.removeChild(link);
+  }, []);
+
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS }}>
       {children}
     </ThemeContext.Provider>
   );

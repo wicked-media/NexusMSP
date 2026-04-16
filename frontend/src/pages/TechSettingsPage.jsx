@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import {
   User, Lock, Mail, Shield, Key, Bell, Clock, Palette, Globe, Award, Trophy,
   Star, Zap, Plus, Trash2, Copy, Eye, EyeOff, Monitor, Smartphone, LogOut,
-  CheckCircle, XCircle, Fingerprint, ArrowLeft, Loader2, ChevronRight, Settings
+  CheckCircle, XCircle, Fingerprint, ArrowLeft, Loader2, ChevronRight, Settings, Moon
 } from "lucide-react";
 
 const BADGES = [
@@ -32,7 +32,7 @@ const BADGES = [
 
 export default function TechSettingsPage() {
   const { user, token } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
 
   const [profile, setProfile] = useState(null);
@@ -279,7 +279,7 @@ export default function TechSettingsPage() {
                     <span className="text-sm font-bold">Level {level}</span>
                   </div>
                   <div className="h-2 rounded-full bg-muted/50 overflow-hidden mb-1">
-                    <div className="h-full rounded-full bg-yellow-500 transition-all" style={{ width: `${xpProgress}%` }} />
+                    <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all" style={{ width: `${xpProgress}%` }} />
                   </div>
                   <p className="text-[10px] text-muted-foreground">{xp} / {nextLevelXp} XP</p>
                   {gamProfile.streak > 0 && (
@@ -674,30 +674,87 @@ export default function TechSettingsPage() {
           {/* DISPLAY TAB */}
           {activeTab === "display" && (
             <Card data-testid="settings-display-panel">
-              <CardHeader><CardTitle className="flex items-center gap-2"><Palette className="w-5 h-5" />Display & Preferences</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
+              <CardHeader><CardTitle className="flex items-center gap-2"><Palette className="w-5 h-5" />Appearance & Themes</CardTitle></CardHeader>
+              <CardContent className="space-y-6">
+                {/* Light/Dark Mode */}
                 <div>
-                  <Label>Theme</Label>
+                  <Label className="text-sm font-medium">Mode</Label>
                   <div className="flex items-center gap-3 mt-2">
                     <Button variant={theme === "dark" ? "default" : "outline"} onClick={() => { if (theme !== "dark") toggleTheme(); }} data-testid="theme-dark"><Moon className="w-4 h-4 mr-1" />Dark</Button>
                     <Button variant={theme === "light" ? "default" : "outline"} onClick={() => { if (theme !== "light") toggleTheme(); }} data-testid="theme-light"><Settings className="w-4 h-4 mr-1" />Light</Button>
                   </div>
                 </div>
+
                 <Separator />
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Accent Color</Label>
-                    <div className="flex gap-2 mt-2">
-                      {[
-                        { name: "blue", class: "bg-blue-500" }, { name: "purple", class: "bg-purple-500" },
-                        { name: "green", class: "bg-emerald-500" }, { name: "orange", class: "bg-orange-500" },
-                        { name: "red", class: "bg-red-500" }, { name: "cyan", class: "bg-cyan-500" },
-                      ].map(c => (
-                        <button key={c.name} onClick={() => setDisplayPrefs({ ...displayPrefs, accent_color: c.name })}
-                          className={`w-8 h-8 rounded-full ${c.class} transition-all ${displayPrefs.accent_color === c.name ? "ring-2 ring-offset-2 ring-offset-background ring-white scale-110" : "opacity-70 hover:opacity-100"}`}
-                          data-testid={`accent-${c.name}`} />
-                      ))}
-                    </div>
+
+                {/* Theme Presets */}
+                <div>
+                  <Label className="text-sm font-medium">Theme Preset</Label>
+                  <p className="text-xs text-muted-foreground mb-3">Choose a pre-built color scheme for the platform</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {Object.entries(THEME_PRESETS || {}).map(([key, p]) => (
+                      <button
+                        key={key}
+                        onClick={() => { setPreset(key); if (p.accent) setAccent(p.accent); }}
+                        className={`p-3 rounded-lg border text-left transition-all ${preset === key ? "border-primary ring-1 ring-primary" : "border-border/40 hover:border-border"}`}
+                        data-testid={`preset-${key}`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-6 h-4 rounded" style={{ background: p.bg }} />
+                          <div className="w-4 h-4 rounded" style={{ background: p.sidebar }} />
+                        </div>
+                        <p className="text-sm font-medium">{p.label}</p>
+                        <p className="text-[10px] text-muted-foreground capitalize">{p.accent} accent</p>
+                      </button>
+                    ))}
                   </div>
+                </div>
+
+                <Separator />
+
+                {/* Accent Color */}
+                <div>
+                  <Label className="text-sm font-medium">Accent Color</Label>
+                  <p className="text-xs text-muted-foreground mb-3">Applied to buttons, links, and interactive elements</p>
+                  <div className="flex gap-3">
+                    {Object.keys(ACCENT_COLORS || {}).map(c => {
+                      const colorMap = { emerald: "bg-emerald-500", blue: "bg-blue-500", cyan: "bg-cyan-500", violet: "bg-violet-500", orange: "bg-orange-500", red: "bg-red-500", sky: "bg-sky-500", rose: "bg-rose-500" };
+                      return (
+                        <button key={c} onClick={() => setAccent(c)}
+                          className={`w-10 h-10 rounded-full ${colorMap[c]} transition-all ${accent === c ? "ring-2 ring-offset-2 ring-offset-background ring-white scale-110" : "opacity-60 hover:opacity-100"}`}
+                          title={c}
+                          data-testid={`accent-${c}`}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Font Selection */}
+                <div>
+                  <Label className="text-sm font-medium">Font Family</Label>
+                  <p className="text-xs text-muted-foreground mb-3">Changes the primary typeface across the platform</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.keys(FONTS || {}).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setFont(f)}
+                        className={`p-3 rounded-lg border text-left transition-all ${font === f ? "border-primary bg-primary/5" : "border-border/40 hover:border-border"}`}
+                        data-testid={`font-${f.replace(/\s/g, "-").toLowerCase()}`}
+                      >
+                        <p className="text-lg font-semibold mb-0.5" style={{ fontFamily: (FONTS || {})[f] || f }}>Aa</p>
+                        <p className="text-xs text-muted-foreground">{f}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Existing Display Prefs */}
+                <div className="grid grid-cols-2 gap-4">
                   <div><Label>Date Format</Label>
                     <Select value={displayPrefs.date_format || "MMM d, yyyy"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, date_format: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -709,8 +766,6 @@ export default function TechSettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
                   <div><Label>Timezone</Label>
                     <Select value={displayPrefs.timezone || "Pacific/Auckland"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, timezone: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -721,6 +776,8 @@ export default function TechSettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div><Label>Language</Label>
                     <Select value={displayPrefs.language || "en"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, language: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>

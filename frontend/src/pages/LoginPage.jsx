@@ -58,14 +58,16 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex relative overflow-hidden" data-testid="login-page">
-      {/* Background */}
+      {/* Animated Background */}
       <div className="absolute inset-0 bg-[#0a0a0f]">
         <div className="absolute inset-0" style={{
-          background: "rgba(16, 185, 129, 0.03)",
+          backgroundImage: `radial-gradient(circle at 25% 25%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+                           radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
+                           radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%)`,
         }} />
         {/* Grid overlay */}
         <div className="absolute inset-0 opacity-[0.03]" style={{
-          backgroundImage: `repeating-linear-gradient(0deg, rgba(255,255,255,.1) 0px, rgba(255,255,255,.1) 1px, transparent 1px, transparent 60px), repeating-linear-gradient(90deg, rgba(255,255,255,.1) 0px, rgba(255,255,255,.1) 1px, transparent 1px, transparent 60px)`,
+          backgroundImage: `linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px)`,
           backgroundSize: '60px 60px',
         }} />
         {/* Floating orbs */}
@@ -79,7 +81,7 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="relative">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
                 <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
@@ -98,7 +100,7 @@ export default function LoginPage() {
               </div>
               <h1 className="text-5xl font-bold tracking-tight leading-[1.1] text-white">
                 Infrastructure<br />
-                <span className="text-emerald-400">
+                <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">
                   Command Center
                 </span>
               </h1>
@@ -152,7 +154,7 @@ export default function LoginPage() {
         <div className="w-full max-w-[380px]">
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center gap-3 mb-10 justify-center">
-            <div className="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
               </svg>
@@ -196,7 +198,7 @@ export default function LoginPage() {
                       </Button>
                     </div>
                   </div>
-                  <Button type="submit" className="w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="login-submit-button">
+                  <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="login-submit-button">
                     {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Sign In <ArrowRight className="w-4 h-4 ml-1" /></>}
                   </Button>
 
@@ -260,7 +262,7 @@ export default function LoginPage() {
                       required minLength={6} data-testid="register-password-input"
                       className="h-11 bg-zinc-800/50 border-zinc-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-white placeholder:text-zinc-600" />
                   </div>
-                  <Button type="submit" className="w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="register-submit-button">
+                  <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="register-submit-button">
                     {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4 ml-1" /></>}
                   </Button>
                 </form>

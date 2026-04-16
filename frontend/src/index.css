@@ -80,7 +80,7 @@
     
     body {
         @apply bg-background text-foreground antialiased;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: var(--font-sans, 'Inter', -apple-system, BlinkMacSystemFont, sans-serif);
     }
     
     h1, h2, h3, h4, h5, h6 {

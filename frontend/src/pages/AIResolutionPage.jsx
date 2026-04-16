@@ -75,7 +75,7 @@ export default function AIResolutionPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-violet-500 flex items-center justify-center"><Bot className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center"><Bot className="w-5 h-5 text-white" /></div>
             AI Auto-Resolution Engine
           </h1>
           <p className="text-muted-foreground mt-1">Autonomous issue detection, matching, and resolution — Atera Autopilot-style</p>

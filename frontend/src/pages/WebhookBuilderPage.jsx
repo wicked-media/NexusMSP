@@ -115,12 +115,12 @@ export default function WebhookBuilderPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-cyan-500 flex items-center justify-center"><Webhook className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center"><Webhook className="w-5 h-5 text-white" /></div>
             Webhook Builder
           </h1>
           <p className="text-muted-foreground mt-1">Create custom webhook integrations with any external service</p>
         </div>
-        <Button onClick={openCreate} data-testid="new-webhook-btn" className="bg-cyan-600"><Plus className="w-4 h-4 mr-1" />New Webhook</Button>
+        <Button onClick={openCreate} data-testid="new-webhook-btn" className="bg-gradient-to-r from-cyan-600 to-blue-600"><Plus className="w-4 h-4 mr-1" />New Webhook</Button>
       </div>
 
       {/* Stats */}
@@ -160,7 +160,7 @@ export default function WebhookBuilderPage() {
               <Card key={h.id} className={`border-border/40 transition-all ${h.status === "active" ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-amber-500/50 opacity-80"}`} data-testid={`webhook-${h.id}`}>
                 <CardContent className="pt-4 pb-3">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center border border-cyan-500/20">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center border border-cyan-500/20">
                       <Webhook className="w-5 h-5 text-cyan-400" />
                     </div>
                     <div className="flex-1 min-w-0">

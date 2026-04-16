@@ -59,7 +59,7 @@ export default function BackupDashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-teal-500 flex items-center justify-center"><Database className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center"><Database className="w-5 h-5 text-white" /></div>
             Backup Monitoring Aggregator
           </h1>
           <p className="text-muted-foreground mt-1">Unified backup status across Veeam, Datto, Acronis — all clients in one view</p>

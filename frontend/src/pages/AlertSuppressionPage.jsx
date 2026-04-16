@@ -90,7 +90,7 @@ export default function AlertSuppressionPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-amber-500 flex items-center justify-center"><BellOff className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center"><BellOff className="w-5 h-5 text-white" /></div>
             Alert Suppression Engine
           </h1>
           <p className="text-muted-foreground mt-1">Reduce noise with intelligent alert suppression rules</p>

@@ -1095,7 +1095,7 @@ export default function TechniciansPage() {
 
       {/* ON-CALL ROSTER */}
       {viewMode === "active" && activeOnCall.length > 0 && (
-        <Card className="border-emerald-500/30 bg-emerald-500/5 overflow-hidden">
+        <Card className="border-emerald-500/30 bg-gradient-to-r from-emerald-500/5 via-transparent to-cyan-500/5 overflow-hidden">
           <CardContent className="py-3 px-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">

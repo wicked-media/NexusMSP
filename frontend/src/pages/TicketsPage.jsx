@@ -1196,11 +1196,11 @@ export default function TicketsPage() {
         {/* Progress Tracker - Card Style */}
         {(() => {
           const stages = [
-            { key: "open", label: "Open", color: "bg-blue-500", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30", icon: "1" },
-            { key: "in_progress", label: "In Progress", color: "bg-yellow-500", bg: "bg-yellow-500/10", text: "text-yellow-400", border: "border-yellow-500/30", icon: "2" },
-            { key: "on_hold", label: "On Hold", color: "bg-orange-500", bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/30", icon: "3" },
-            { key: "resolved", label: "Resolved", color: "bg-emerald-500", bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", icon: "4" },
-            { key: "closed", label: "Closed", color: "bg-slate-500", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30", icon: "5" },
+            { key: "open", label: "Open", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30", icon: "1" },
+            { key: "in_progress", label: "In Progress", color: "from-yellow-500 to-amber-500", bg: "bg-yellow-500/10", text: "text-yellow-400", border: "border-yellow-500/30", icon: "2" },
+            { key: "on_hold", label: "On Hold", color: "from-orange-500 to-orange-600", bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/30", icon: "3" },
+            { key: "resolved", label: "Resolved", color: "from-emerald-500 to-green-600", bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", icon: "4" },
+            { key: "closed", label: "Closed", color: "from-slate-500 to-slate-600", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30", icon: "5" },
           ];
           const currentStatus = viewingTicket.status;
           const currentIdx = stages.findIndex(s => s.key === currentStatus);
@@ -1215,7 +1215,7 @@ export default function TicketsPage() {
                 </div>
                 {/* Progress bar */}
                 <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
-                  <div className={`h-full rounded-full ${stages[activeIdx].color} transition-all duration-700 ease-out`} style={{ width: `${Math.max(5, progressPercent)}%` }} />
+                  <div className={`h-full rounded-full bg-gradient-to-r ${stages[activeIdx].color} transition-all duration-700 ease-out`} style={{ width: `${Math.max(5, progressPercent)}%` }} />
                 </div>
                 {/* Stage cards */}
                 <div className="grid grid-cols-5 gap-2">
@@ -1236,7 +1236,7 @@ export default function TicketsPage() {
                         data-testid={`progress-stage-${stage.key}`}
                       >
                         <div className={`w-6 h-6 rounded-full mx-auto mb-1.5 flex items-center justify-center text-[10px] font-bold ${
-                          isActive ? `${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
+                          isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
                         }`}>
                           {isPast ? <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : stage.icon}
                         </div>
@@ -2286,12 +2286,12 @@ export default function TicketsPage() {
   // ============ WORKSHOP DETAIL VIEW ============
   if (viewWsJob) {
     const wsStages = [
-      { key: "checked_in", label: "Checked In", color: "bg-blue-500", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
-      { key: "diagnosing", label: "Diagnosing", color: "bg-purple-500", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
-      { key: "parts_ordered", label: "Parts Ordered", color: "bg-cyan-500", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
-      { key: "repairing", label: "Repairing", color: "bg-amber-500", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
-      { key: "ready_for_pickup", label: "Ready", color: "bg-green-500", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
-      { key: "collected", label: "Collected", color: "bg-slate-500", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30" },
+      { key: "checked_in", label: "Checked In", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+      { key: "diagnosing", label: "Diagnosing", color: "from-purple-500 to-purple-600", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
+      { key: "parts_ordered", label: "Parts Ordered", color: "from-cyan-500 to-cyan-600", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
+      { key: "repairing", label: "Repairing", color: "from-amber-500 to-amber-600", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
+      { key: "ready_for_pickup", label: "Ready", color: "from-green-500 to-green-600", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
+      { key: "collected", label: "Collected", color: "from-slate-500 to-slate-600", bg: "bg-slate-500/10", text: "text-slate-400", border: "border-slate-500/30" },
     ];
     const wsIdx = wsStages.findIndex(s => s.key === viewWsJob.repair_status);
     const wsActiveIdx = wsIdx >= 0 ? wsIdx : 0;
@@ -2326,7 +2326,7 @@ export default function TicketsPage() {
               <span className="text-xs font-mono text-muted-foreground">{wsProgress}%</span>
             </div>
             <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
-              <div className={`h-full rounded-full ${wsStages[wsActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, wsProgress)}%` }} />
+              <div className={`h-full rounded-full bg-gradient-to-r ${wsStages[wsActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, wsProgress)}%` }} />
             </div>
             <div className="grid grid-cols-6 gap-1.5">
               {wsStages.map((stage, i) => {
@@ -2336,7 +2336,7 @@ export default function TicketsPage() {
                   <button key={stage.key} onClick={() => handleWsStatus(viewWsJob.id, stage.key)}
                     className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
                     data-testid={`ws-progress-${stage.key}`}>
-                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
                       {isPast ? <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : i + 1}
                     </div>
                     <span className={`text-[9px] font-semibold block ${isActive ? stage.text : isPast ? "text-emerald-400" : "text-muted-foreground/60"}`}>{stage.label}</span>
@@ -2796,11 +2796,11 @@ export default function TicketsPage() {
   // ============ FIELD JOB DETAIL VIEW ============
   if (viewFjJob) {
     const fjStages = [
-      { key: "scheduled", label: "Scheduled", color: "bg-blue-500", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
-      { key: "en_route", label: "En Route", color: "bg-cyan-500", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
-      { key: "on_site", label: "On Site", color: "bg-purple-500", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
-      { key: "in_progress", label: "In Progress", color: "bg-amber-500", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
-      { key: "completed", label: "Completed", color: "bg-green-500", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
+      { key: "scheduled", label: "Scheduled", color: "from-blue-500 to-blue-600", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+      { key: "en_route", label: "En Route", color: "from-cyan-500 to-cyan-600", bg: "bg-cyan-500/10", text: "text-cyan-400", border: "border-cyan-500/30" },
+      { key: "on_site", label: "On Site", color: "from-purple-500 to-purple-600", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
+      { key: "in_progress", label: "In Progress", color: "from-amber-500 to-amber-600", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
+      { key: "completed", label: "Completed", color: "from-green-500 to-green-600", bg: "bg-green-500/10", text: "text-green-400", border: "border-green-500/30" },
     ];
     const fjIdx = fjStages.findIndex(s => s.key === viewFjJob.field_status);
     const fjActiveIdx = fjIdx >= 0 ? fjIdx : 0;
@@ -2836,7 +2836,7 @@ export default function TicketsPage() {
               <span className="text-xs font-mono text-muted-foreground">{fjProgress}%</span>
             </div>
             <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
-              <div className={`h-full rounded-full ${fjStages[fjActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, fjProgress)}%` }} />
+              <div className={`h-full rounded-full bg-gradient-to-r ${fjStages[fjActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, fjProgress)}%` }} />
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {fjStages.map((stage, i) => {
@@ -2846,7 +2846,7 @@ export default function TicketsPage() {
                   <button key={stage.key} onClick={() => handleFjStatus(viewFjJob.id, stage.key)}
                     className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
                     data-testid={`fj-progress-${stage.key}`}>
-                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                    <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
                       {isPast ? <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : i + 1}
                     </div>
                     <span className={`text-[9px] font-semibold block ${isActive ? stage.text : isPast ? "text-emerald-400" : "text-muted-foreground/60"}`}>{stage.label}</span>
@@ -3573,7 +3573,7 @@ export default function TicketsPage() {
                         : "bg-muted/40 border border-border/50 text-muted-foreground"
                       }`}
                       style={isBeingViewed ? {
-                        background: "rgba(34,211,238,0.12)",
+                        background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))",
                         backgroundSize: "200% 200%",
                         animation: "viewerShimmer 2s ease-in-out infinite, pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
                       } : undefined}
@@ -3583,7 +3583,7 @@ export default function TicketsPage() {
                       {isBeingViewed && (
                         <div className="absolute -top-2 -right-2 flex items-center" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} viewing: ${viewers.map(v => v.user_name).join(", ")}`}>
                           <div className="relative">
-                            <div className="w-5 h-5 rounded-full bg-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
                               {viewers.length > 1 ? (
                                 <span className="text-[8px] font-black text-white">{viewers.length}</span>
                               ) : (
@@ -3613,7 +3613,7 @@ export default function TicketsPage() {
                       {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
                       {hasNoNotes && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">AWAITING RESPONSE</Badge>}
                       {isBeingViewed && (
-                        <Badge className="bg-cyan-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]">
+                        <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]">
                           <Eye className="w-2.5 h-2.5" />
                           <Users className="w-2.5 h-2.5" />
                           {viewers.length} {viewers.length === 1 ? "viewer" : "viewers"}: {viewers.map(v => v.user_name).join(", ")}

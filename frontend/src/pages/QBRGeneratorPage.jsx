@@ -64,12 +64,12 @@ export default function QBRGeneratorPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center"><FileText className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center"><FileText className="w-5 h-5 text-white" /></div>
             QBR Report Generator
           </h1>
           <p className="text-muted-foreground mt-1">Auto-generate Quarterly Business Reviews with AI-powered insights & upsell recommendations</p>
         </div>
-        <Button onClick={() => setShowGenerate(true)} data-testid="generate-qbr-btn" className="bg-blue-600"><Plus className="w-4 h-4 mr-2" />Generate QBR</Button>
+        <Button onClick={() => setShowGenerate(true)} data-testid="generate-qbr-btn" className="bg-gradient-to-r from-blue-600 to-indigo-600"><Plus className="w-4 h-4 mr-2" />Generate QBR</Button>
       </div>
 
       {/* Aggregate Stats */}
@@ -108,7 +108,7 @@ export default function QBRGeneratorPage() {
                 <CardContent className="pt-4">
                   {/* Header */}
                   <div className="flex items-center gap-4 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : q.id)} data-testid={`qbr-card-${q.id}`}>
-                    <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center border border-blue-500/20">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center border border-blue-500/20">
                       <FileText className="w-5 h-5 text-blue-400" />
                     </div>
                     <div className="flex-1">

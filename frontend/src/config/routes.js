@@ -29,7 +29,6 @@ export const routeConfig = [
   { path: "/splynx-dashboard", component: page("SplynxDashboardPage"), auth: true, layout: true },
   { path: "/xero", component: page("XeroDashboardPage"), auth: true, layout: true },
   { path: "/o365-setup", component: page("O365SetupPage"), auth: true, layout: true },
-  { path: "/gradient", component: page("GradientPage"), auth: true, layout: true },
 
   // Reports & Analytics
   { path: "/reports", component: page("ReportsPage"), auth: true, layout: true },

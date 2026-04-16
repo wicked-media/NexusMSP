@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 
 const tierConfig = {
-  platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-slate-300/20", border: "border-slate-400/30", icon: Crown },
-  gold: { label: "Gold", color: "text-yellow-400", bg: "bg-yellow-400/20", border: "border-yellow-500/30", icon: Crown },
-  silver: { label: "Silver", color: "text-slate-400", bg: "bg-slate-400/20", border: "border-slate-500/30", icon: Star },
-  bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-amber-600/20", border: "border-amber-600/30", icon: Trophy },
+  platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-r from-slate-300/20 to-slate-500/20", border: "border-slate-400/30", icon: Crown },
+  gold: { label: "Gold", color: "text-yellow-400", bg: "bg-gradient-to-r from-yellow-400/20 to-amber-500/20", border: "border-yellow-500/30", icon: Crown },
+  silver: { label: "Silver", color: "text-slate-400", bg: "bg-gradient-to-r from-slate-400/20 to-slate-500/20", border: "border-slate-500/30", icon: Star },
+  bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-gradient-to-r from-amber-600/20 to-amber-700/20", border: "border-amber-600/30", icon: Trophy },
 };
 
 export default function LoyaltyDashboardPage() {

@@ -60,7 +60,7 @@ export default function IncidentHeatmapPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-red-500 flex items-center justify-center"><Flame className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-600 flex items-center justify-center"><Flame className="w-5 h-5 text-white" /></div>
             Incident Heatmap
           </h1>
           <p className="text-muted-foreground mt-1">Visual pattern analysis — when and where incidents occur most</p>

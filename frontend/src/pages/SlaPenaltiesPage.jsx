@@ -71,7 +71,7 @@ export default function SlaPenaltiesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-red-500 flex items-center justify-center"><Calculator className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center"><Calculator className="w-5 h-5 text-white" /></div>
             SLA Penalty Calculator
           </h1>
           <p className="text-muted-foreground mt-1">Auto-calculate penalties when SLAs are breached, issue client credits</p>

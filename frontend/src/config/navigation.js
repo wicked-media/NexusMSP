@@ -356,7 +356,6 @@ export const navGroups = [
           { path: "/domotz", label: "Domotz" },
           { path: "/acronis", label: "Acronis" },
           { path: "/pax8", label: "Pax8" },
-          { path: "/gradient", label: "Gradient MSP" },
           { path: "/webhook-builder", label: "Webhook Builder" },
           { path: "/git-scripts", label: "Git Scripts Sync" },
         ]

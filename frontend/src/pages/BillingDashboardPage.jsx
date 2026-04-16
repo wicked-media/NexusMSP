@@ -127,7 +127,7 @@ export default function BillingDashboardPage() {
       <div className="grid grid-cols-12 gap-4">
         {/* MRR/ARR */}
         <Card className="col-span-4 border-purple-500/20 overflow-hidden relative" data-testid="mrr-arr-card">
-          <div className="absolute top-0 left-0 w-full h-0.5 bg-purple-500" />
+          <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-purple-500 via-cyan-500 to-purple-500" />
           <CardContent className="pt-5 space-y-4">
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               <TrendingUp className="w-4 h-4 text-purple-400" />Recurring Revenue
@@ -162,7 +162,7 @@ export default function BillingDashboardPage() {
 
         {/* Collection Streak */}
         <Card className={`col-span-4 overflow-hidden relative ${streakCfg.ring}`} data-testid="streak-card">
-          <div className="absolute top-0 left-0 w-full h-0.5 bg-orange-500" />
+          <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-orange-500 via-red-500 to-yellow-500" />
           <CardContent className="pt-5 text-center">
             <div className="flex items-center justify-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               <Flame className="w-4 h-4 text-orange-400" />Cash Collection Streak

@@ -367,7 +367,7 @@ export default function DevicesPage() {
                           {isRemoted && (
                             <div className="absolute -top-2 -right-2" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} remoted: ${viewers.map(v => v.user_name).join(", ")}`}>
                               <div className="relative">
-                                <div className="w-4 h-4 rounded-full bg-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                                <div className="w-4 h-4 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
                                   {viewers.length > 1 ? (
                                     <span className="text-[7px] font-black text-white">{viewers.length}</span>
                                   ) : (
@@ -386,8 +386,8 @@ export default function DevicesPage() {
                             {d.name}
                             <Badge className={STATUS_COLORS[d.status] + " border text-[9px] capitalize px-1.5"}>{d.status}</Badge>
                             {isRemoted && (
-                              <Badge className="bg-cyan-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
-                                style={{ background: "rgba(34,211,238,0.12)", animation: "viewerShimmer 2s ease-in-out infinite" }}
+                              <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
+                                style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}
                                 data-testid={`remote-viewer-badge-${d.id}`}>
                                 <Eye className="w-2.5 h-2.5" />
                                 <Users className="w-2.5 h-2.5" />
@@ -446,7 +446,7 @@ export default function DevicesPage() {
                         {isRemoted && (
                           <div className="absolute -top-2 -right-2">
                             <div className="relative">
-                              <div className="w-5 h-5 rounded-full bg-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
+                              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
                                 {viewers.length > 1 ? <span className="text-[8px] font-black text-white">{viewers.length}</span> : <Eye className="w-2.5 h-2.5 text-white" />}
                               </div>
                               <div className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
@@ -463,7 +463,7 @@ export default function DevicesPage() {
                   </div>
                   {isRemoted && (
                     <div className="mb-3 px-2 py-1.5 rounded-md border border-cyan-500/20"
-                      style={{ background: "rgba(34,211,238,0.08)", animation: "viewerShimmer 2s ease-in-out infinite" }}>
+                      style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.08), rgba(139,92,246,0.08))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}>
                       <div className="flex items-center gap-1.5 text-[10px] text-cyan-400">
                         <Eye className="w-3 h-3" />
                         <span className="font-medium">{viewers.length} tech{viewers.length > 1 ? "s" : ""} remoted in: {viewers.map(v => v.user_name).join(", ")}</span>

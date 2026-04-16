@@ -25,11 +25,11 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 const chartStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };
 
 const STATUS_CONFIG = {
-  thriving: { color: "bg-emerald-500/20 text-emerald-400", ring: "ring-emerald-500/30", gradient: "bg-emerald-500", label: "Thriving" },
-  healthy: { color: "bg-blue-500/20 text-blue-400", ring: "ring-blue-500/30", gradient: "bg-blue-500", label: "Healthy" },
-  needs_attention: { color: "bg-amber-500/20 text-amber-400", ring: "ring-amber-500/30", gradient: "bg-amber-500", label: "Needs Attention" },
-  at_risk: { color: "bg-orange-500/20 text-orange-400", ring: "ring-orange-500/30", gradient: "bg-orange-500", label: "At Risk" },
-  critical: { color: "bg-red-500/20 text-red-400", ring: "ring-red-500/30", gradient: "bg-red-500", label: "Critical" },
+  thriving: { color: "bg-emerald-500/20 text-emerald-400", ring: "ring-emerald-500/30", gradient: "from-emerald-500 to-emerald-600", label: "Thriving" },
+  healthy: { color: "bg-blue-500/20 text-blue-400", ring: "ring-blue-500/30", gradient: "from-blue-500 to-blue-600", label: "Healthy" },
+  needs_attention: { color: "bg-amber-500/20 text-amber-400", ring: "ring-amber-500/30", gradient: "from-amber-500 to-amber-600", label: "Needs Attention" },
+  at_risk: { color: "bg-orange-500/20 text-orange-400", ring: "ring-orange-500/30", gradient: "from-orange-500 to-orange-600", label: "At Risk" },
+  critical: { color: "bg-red-500/20 text-red-400", ring: "ring-red-500/30", gradient: "from-red-500 to-red-600", label: "Critical" },
 };
 
 function HealthGauge({ score, size = 64 }) {
@@ -143,7 +143,7 @@ export default function ClientHealthPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-emerald-500 flex items-center justify-center"><Heart className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 flex items-center justify-center"><Heart className="w-5 h-5 text-white" /></div>
             Client Health Dashboard
           </h1>
           <p className="text-muted-foreground mt-1">{d.total} clients monitored | Average health: <span className={`font-bold ${d.avg_health >= 70 ? "text-emerald-400" : d.avg_health >= 50 ? "text-amber-400" : "text-red-400"}`}>{d.avg_health}/100</span></p>

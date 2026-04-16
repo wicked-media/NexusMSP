@@ -28,11 +28,11 @@ import {
 import { format } from "date-fns";
 
 const slaShieldConfig = {
-  platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-slate-200", border: "border-slate-400/50", fill: "#e2e8f0" },
-  gold: { label: "Gold", color: "text-yellow-400", bg: "bg-yellow-300", border: "border-yellow-500/50", fill: "#fbbf24" },
-  silver: { label: "Silver", color: "text-slate-400", bg: "bg-slate-300", border: "border-slate-500/50", fill: "#94a3b8" },
-  bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-amber-400", border: "border-amber-600/50", fill: "#d97706" },
-  standard: { label: "Standard", color: "text-gray-500", bg: "bg-gray-400", border: "border-gray-500/50", fill: "#6b7280" },
+  platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
+  gold: { label: "Gold", color: "text-yellow-400", bg: "bg-gradient-to-b from-yellow-300 to-yellow-500", border: "border-yellow-500/50", fill: "#fbbf24" },
+  silver: { label: "Silver", color: "text-slate-400", bg: "bg-gradient-to-b from-slate-300 to-slate-500", border: "border-slate-500/50", fill: "#94a3b8" },
+  bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-gradient-to-b from-amber-400 to-amber-700", border: "border-amber-600/50", fill: "#d97706" },
+  standard: { label: "Standard", color: "text-gray-500", bg: "bg-gradient-to-b from-gray-400 to-gray-600", border: "border-gray-500/50", fill: "#6b7280" },
 };
 
 const SLAShieldBadge = ({ tier, size = "sm" }) => {
