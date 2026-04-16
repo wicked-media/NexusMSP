@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Shield, CheckCircle, XCircle, AlertTriangle, Loader2, Lock, FileText, Users, BarChart3, Eye } from "lucide-react";
 
-const FW_COLORS = { "NIST 800-171": "from-blue-500 to-indigo-600", "CIS Controls v8": "from-emerald-500 to-teal-600", "SOC 2 Type II": "from-purple-500 to-violet-600", "HIPAA": "from-rose-500 to-pink-600" };
+const FW_COLORS = { "NIST 800-171": "bg-blue-500", "CIS Controls v8": "bg-emerald-500", "SOC 2 Type II": "bg-purple-500", "HIPAA": "bg-rose-500" };
 const FW_ICONS = { "NIST 800-171": Lock, "CIS Controls v8": Shield, "SOC 2 Type II": FileText, "HIPAA": Users };
 
 export default function ComplianceFrameworksPage() {
@@ -39,7 +39,7 @@ export default function ComplianceFrameworksPage() {
     <div className="space-y-5" data-testid="compliance-frameworks-page">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
+          <div className="h-10 w-10 rounded-lg bg-indigo-500 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
           Compliance Evidence & Framework Tracker
         </h1>
         <p className="text-muted-foreground mt-1">HIPAA, SOC 2, NIST, CIS — benchmark tracking with gap analysis and evidence collection</p>
@@ -73,11 +73,11 @@ export default function ComplianceFrameworksPage() {
           <Progress value={s.avg_compliance_pct} className={`h-3 ${s.avg_compliance_pct < 80 ? "[&>div]:bg-amber-500" : ""}`} />
           <div className="grid grid-cols-4 gap-3 mt-3">
             {data.frameworks.map(fw => {
-              const color = FW_COLORS[fw.name] || "from-slate-500 to-slate-600";
+              const color = FW_COLORS[fw.name] || "bg-slate-500";
               const Icon = FW_ICONS[fw.name] || Shield;
               return (
                 <div key={fw.id} className="flex items-center gap-2">
-                  <div className={`w-6 h-6 rounded bg-gradient-to-br ${color} flex items-center justify-center`}><Icon className="w-3 h-3 text-white" /></div>
+                  <div className={`w-6 h-6 rounded ${color} flex items-center justify-center`}><Icon className="w-3 h-3 text-white" /></div>
                   <div>
                     <p className="text-xs font-semibold">{fw.name}</p>
                     <p className={`text-[10px] font-bold ${fw.compliance_pct >= 80 ? "text-emerald-400" : "text-amber-400"}`}>{fw.compliance_pct}%</p>
@@ -93,7 +93,7 @@ export default function ComplianceFrameworksPage() {
       <div className="space-y-4">
         {data.frameworks.map(fw => {
           const isExpanded = expandedFw === fw.id;
-          const color = FW_COLORS[fw.name] || "from-slate-500 to-slate-600";
+          const color = FW_COLORS[fw.name] || "bg-slate-500";
           const Icon = FW_ICONS[fw.name] || Shield;
           const gapCategories = fw.categories.filter(c => c.pct < 100);
           return (
@@ -101,7 +101,7 @@ export default function ComplianceFrameworksPage() {
               <CardHeader className="pb-2 cursor-pointer" onClick={() => setExpandedFw(isExpanded ? null : fw.id)}>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${color} flex items-center justify-center`}><Icon className="w-4 h-4 text-white" /></div>
+                    <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center`}><Icon className="w-4 h-4 text-white" /></div>
                     {fw.name}
                   </CardTitle>
                   <div className="flex items-center gap-3">

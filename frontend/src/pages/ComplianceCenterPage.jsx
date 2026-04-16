@@ -16,7 +16,7 @@ import {
   Loader2, Lock, FileText, Users, BarChart3, Eye, RefreshCw, Download
 } from "lucide-react";
 
-const FW_COLORS = { "NIST 800-171": "from-blue-500 to-indigo-600", "CIS Controls v8": "from-emerald-500 to-teal-600", "SOC 2 Type II": "from-purple-500 to-violet-600", "HIPAA": "from-rose-500 to-pink-600" };
+const FW_COLORS = { "NIST 800-171": "bg-blue-500", "CIS Controls v8": "bg-emerald-500", "SOC 2 Type II": "bg-purple-500", "HIPAA": "bg-rose-500" };
 const FW_ICONS = { "NIST 800-171": Lock, "CIS Controls v8": Shield, "SOC 2 Type II": FileText, "HIPAA": Users };
 
 export default function ComplianceCenterPage() {
@@ -81,7 +81,7 @@ export default function ComplianceCenterPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-500 to-violet-700 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-purple-500 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
             Compliance Center
           </h1>
           <p className="text-muted-foreground mt-1">Framework tracking, automated scanning, and report generation</p>
@@ -112,10 +112,10 @@ export default function ComplianceCenterPage() {
             <div className="grid grid-cols-2 gap-4">
               {(fwData.frameworks || []).map(fw => {
                 const FwIcon = FW_ICONS[fw.name] || Shield;
-                const gradient = FW_COLORS[fw.name] || "from-gray-500 to-gray-700";
+                const gradient = FW_COLORS[fw.name] || "bg-gray-500";
                 return (
                   <Card key={fw.name} className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow" onClick={() => setExpandedFw(expandedFw === fw.name ? null : fw.name)}>
-                    <div className={`h-2 bg-gradient-to-r ${gradient}`} />
+                    <div className={`h-2 ${gradient}`} />
                     <CardContent className="pt-4">
                       <div className="flex items-center gap-3 mb-3"><FwIcon className="w-6 h-6 text-muted-foreground" /><div className="flex-1"><p className="font-semibold">{fw.name}</p><p className="text-xs text-muted-foreground">{fw.met}/{fw.total} controls met</p></div><span className={`text-2xl font-black ${fw.compliance_pct >= 80 ? "text-emerald-400" : fw.compliance_pct >= 60 ? "text-amber-400" : "text-red-400"}`}>{fw.compliance_pct}%</span></div>
                       <Progress value={fw.compliance_pct} className="h-2" />

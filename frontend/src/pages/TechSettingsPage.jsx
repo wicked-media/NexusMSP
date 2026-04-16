@@ -279,7 +279,7 @@ export default function TechSettingsPage() {
                     <span className="text-sm font-bold">Level {level}</span>
                   </div>
                   <div className="h-2 rounded-full bg-muted/50 overflow-hidden mb-1">
-                    <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all" style={{ width: `${xpProgress}%` }} />
+                    <div className="h-full rounded-full bg-yellow-500 transition-all" style={{ width: `${xpProgress}%` }} />
                   </div>
                   <p className="text-[10px] text-muted-foreground">{xp} / {nextLevelXp} XP</p>
                   {gamProfile.streak > 0 && (

@@ -54,7 +54,7 @@ export default function WarrantyTrackerPage() {
     <div className="space-y-5" data-testid="warranty-tracker-page">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
+          <div className="h-10 w-10 rounded-lg bg-rose-500 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
           Hardware Warranty & Lifecycle Tracker
         </h1>
         <p className="text-muted-foreground mt-1">Track warranty expiry, refresh candidates, and manufacturer coverage across all devices</p>

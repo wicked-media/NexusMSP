@@ -52,7 +52,7 @@ export default function RevenueAnalyticsPage() {
     <div data-testid="revenue-analytics-page" className="space-y-5">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center"><DollarSign className="w-5 h-5 text-white" /></div>
+          <div className="h-10 w-10 rounded-lg bg-emerald-500 flex items-center justify-center"><DollarSign className="w-5 h-5 text-white" /></div>
           Revenue Analytics
         </h1>
         <p className="text-muted-foreground mt-1">MRR/ARR tracking, per-ticket profitability, and cohort analysis</p>

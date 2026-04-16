@@ -93,7 +93,7 @@ export default function AuditTrailPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-amber-500 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-white" /></div>
             Audit Trail
           </h1>
           <p className="text-muted-foreground mt-1">Complete system activity log with compliance-grade event tracking</p>

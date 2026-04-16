@@ -90,7 +90,7 @@ function PortalLogin() {
       <Toaster position="top-right" richColors />
       <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/80 backdrop-blur">
         <CardHeader className="text-center space-y-3 pb-2">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-500 flex items-center justify-center">
             <Building2 className="w-7 h-7 text-white" />
           </div>
           <div>
@@ -149,7 +149,7 @@ function PortalLayout({ children, activePage, setPage }) {
             <img src={branding.logo_url} alt="Logo" className="h-8 object-contain" />
           ) : (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center"><Building2 className="w-4 h-4 text-white" /></div>
+              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center"><Building2 className="w-4 h-4 text-white" /></div>
               <span className="text-sm font-bold text-white truncate">{mspBranding.company_name || "NexusOps"}</span>
             </div>
           )}

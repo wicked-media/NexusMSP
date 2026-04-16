@@ -122,6 +122,8 @@ export default function XeroDashboardPage() {
   const [payLinkDialog, setPayLinkDialog] = useState(null);
   const [payLinkResult, setPayLinkResult] = useState(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const [paymentLinks, setPaymentLinks] = useState([]);
+  const [confirmingTransfer, setConfirmingTransfer] = useState(null);
 
   const emptyInvForm = { client_name: "", reference: "", due_date: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
   const emptyEstForm = { title: "", client_name: "", valid_until: "", notes: "", line_items: [{ description: "", quantity: 1, unit_price: 0 }] };
@@ -148,6 +150,8 @@ export default function XeroDashboardPage() {
       setDashboard(dRes.data); setInvoices(iRes.data); setContacts(cRes.data);
       setAccounts(aRes.data); setEstimates(eRes.data); setRecurring(rRes.data);
       setSyncHistory(sRes.data); setForecast(fRes.data);
+      // Fetch payment links
+      axios.get(`${API}/payment-links`, { headers }).then(r => setPaymentLinks(r.data)).catch(() => {});
     } catch { toast.error("Failed to load financial data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -263,11 +267,31 @@ export default function XeroDashboardPage() {
       const linkUrl = `${window.location.origin}/pay/${res.data.token}`;
       setPayLinkResult({ ...res.data, url: linkUrl });
       setPayLinkDialog(inv);
+      fetchAll();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to generate payment link");
     } finally {
       setGeneratingLink(false);
     }
+  };
+
+  // Payment link management
+  const revokePaymentLink = async (linkId) => {
+    try {
+      await axios.delete(`${API}/payment-links/${linkId}`, { headers });
+      toast.success("Payment link revoked");
+      fetchAll();
+    } catch { toast.error("Failed to revoke link"); }
+  };
+
+  const confirmBankTransfer = async (linkId, paymentId) => {
+    setConfirmingTransfer(paymentId);
+    try {
+      await axios.post(`${API}/payment-links/${linkId}/confirm-transfer`, { payment_id: paymentId }, { headers });
+      toast.success("Bank transfer confirmed — invoice updated");
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to confirm"); }
+    finally { setConfirmingTransfer(null); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -335,6 +359,7 @@ export default function XeroDashboardPage() {
           <TabsTrigger value="accounts" data-testid="tab-accounts"><DollarSign className="w-3 h-3 mr-1" />Accounts ({accounts.length})</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history"><History className="w-3 h-3 mr-1" />Sync Log</TabsTrigger>
           <TabsTrigger value="aging" data-testid="tab-aging"><AlertTriangle className="w-3 h-3 mr-1" />Aging</TabsTrigger>
+          <TabsTrigger value="pay-links" data-testid="tab-pay-links"><Link2 className="w-3 h-3 mr-1" />Payment Links ({paymentLinks.length})</TabsTrigger>
           <TabsTrigger value="branding" data-testid="tab-branding" onClick={() => { if (!brandingTemplates.builtin.length) fetchBranding(); }}><Palette className="w-3 h-3 mr-1" />Branding</TabsTrigger>
         </TabsList>
 
@@ -698,6 +723,124 @@ export default function XeroDashboardPage() {
                 {invoices.filter(inv => inv.status === "AUTHORISED" && inv.due_date < new Date().toISOString().split("T")[0]).length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No overdue invoices</TableCell></TableRow>}
               </TableBody>
             </Table></CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============ PAYMENT LINKS TAB ============ */}
+        <TabsContent value="pay-links" className="space-y-4" data-testid="pay-links-tab">
+          {/* Summary Stats */}
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { label: "Active Links", value: paymentLinks.filter(l => l.status === "active").length, color: "text-blue-400", bg: "bg-blue-500/10" },
+              { label: "Completed", value: paymentLinks.filter(l => l.status === "completed").length, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+              { label: "Pending Transfers", value: paymentLinks.reduce((n, l) => n + (l.payments || []).filter(p => p.status === "awaiting_confirmation").length, 0), color: "text-amber-400", bg: "bg-amber-500/10" },
+              { label: "Expired / Revoked", value: paymentLinks.filter(l => l.status === "expired" || l.status === "revoked").length, color: "text-red-400", bg: "bg-red-500/10" },
+            ].map(s => (
+              <Card key={s.label} className="border-border/30">
+                <CardContent className="pt-4 pb-4 text-center">
+                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Pending Bank Transfers Queue */}
+          {paymentLinks.some(l => (l.payments || []).some(p => p.status === "awaiting_confirmation")) && (
+            <Card className="border-amber-500/30 bg-amber-500/5" data-testid="pending-transfers-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" />Pending Bank Transfer Confirmations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="text-xs">Invoice</TableHead>
+                    <TableHead className="text-xs">Payer</TableHead>
+                    <TableHead className="text-xs">Reference</TableHead>
+                    <TableHead className="text-xs">Bank</TableHead>
+                    <TableHead className="text-xs text-right">Amount</TableHead>
+                    <TableHead className="text-xs">Date</TableHead>
+                    <TableHead className="text-xs text-right">Action</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {paymentLinks.flatMap(link => 
+                      (link.payments || []).filter(p => p.status === "awaiting_confirmation").map(p => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-mono text-xs font-bold">{link.invoice_number}</TableCell>
+                          <TableCell className="text-xs">{p.payer_name || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{p.reference || "—"}</TableCell>
+                          <TableCell className="text-xs">{p.bank_name || "—"}</TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold text-amber-400">${p.amount?.toFixed(2)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{p.initiated_at ? new Date(p.initiated_at).toLocaleDateString() : "—"}</TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" className="h-7 text-xs" onClick={() => confirmBankTransfer(link.id, p.id)} disabled={confirmingTransfer === p.id} data-testid={`confirm-transfer-${p.id}`}>
+                              {confirmingTransfer === p.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle className="w-3 h-3 mr-1" />}Confirm
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* All Payment Links Table */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">All Payment Links</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead className="text-xs">Invoice</TableHead>
+                  <TableHead className="text-xs">Client</TableHead>
+                  <TableHead className="text-xs">Balance</TableHead>
+                  <TableHead className="text-xs">Payments</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Methods</TableHead>
+                  <TableHead className="text-xs">Expires</TableHead>
+                  <TableHead className="text-xs">Created</TableHead>
+                  <TableHead className="text-xs text-right">Actions</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {paymentLinks.length === 0 ? (
+                    <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No payment links generated yet. Click the link icon on any invoice to create one.</TableCell></TableRow>
+                  ) : paymentLinks.map(link => {
+                    const paidTotal = (link.payments || []).filter(p => p.status === "paid").reduce((s, p) => s + (p.amount || 0), 0);
+                    const pendingTotal = (link.payments || []).filter(p => p.status === "awaiting_confirmation").reduce((s, p) => s + (p.amount || 0), 0);
+                    const statusColors = { active: "bg-blue-500/20 text-blue-400", completed: "bg-emerald-500/20 text-emerald-400", expired: "bg-red-500/20 text-red-400", revoked: "bg-zinc-500/20 text-zinc-400" };
+                    return (
+                      <TableRow key={link.id} data-testid={`paylink-row-${link.id}`}>
+                        <TableCell className="font-mono text-xs font-bold">{link.invoice_number}</TableCell>
+                        <TableCell className="text-xs">{link.client_name}</TableCell>
+                        <TableCell className="text-xs">
+                          <span className="font-mono">${link.balance_at_creation?.toFixed(2)}</span>
+                          {paidTotal > 0 && <span className="text-emerald-400 ml-1 text-[10px]">(-${paidTotal.toFixed(2)} paid)</span>}
+                          {pendingTotal > 0 && <span className="text-amber-400 ml-1 text-[10px]">(${pendingTotal.toFixed(2)} pending)</span>}
+                        </TableCell>
+                        <TableCell className="text-xs">{(link.payments || []).length} txn{(link.payments || []).length !== 1 ? "s" : ""}</TableCell>
+                        <TableCell><Badge className={`text-[10px] ${statusColors[link.status] || "bg-muted"}`}>{link.status}</Badge></TableCell>
+                        <TableCell className="text-[10px]">{(link.allowed_methods || []).map(m => m === "bank_transfer" ? "Bank" : m === "becs" ? "BECS" : "Card").join(", ")}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{link.expires_at ? new Date(link.expires_at).toLocaleDateString() : "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{link.created_at ? new Date(link.created_at).toLocaleDateString() : "—"}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {link.status === "active" && (
+                              <>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy Link" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/pay/${link.token}`); toast.success("Payment link copied"); }} data-testid={`copy-link-${link.id}`}><Copy className="w-3.5 h-3.5" /></Button>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400" title="Revoke" onClick={() => revokePaymentLink(link.id)} data-testid={`revoke-link-${link.id}`}><XCircle className="w-3.5 h-3.5" /></Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
           </Card>
         </TabsContent>
 

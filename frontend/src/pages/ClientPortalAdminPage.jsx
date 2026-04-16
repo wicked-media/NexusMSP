@@ -150,7 +150,7 @@ export default function ClientPortalAdminPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center"><Users className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-violet-500 flex items-center justify-center"><Users className="w-5 h-5 text-white" /></div>
             Portal User Management
           </h1>
           <p className="text-muted-foreground mt-1">Invite, manage, and control client portal access</p>

@@ -49,7 +49,7 @@ function MapView({ board, onAssign }) {
     <div className="relative w-full h-[500px] rounded-xl border bg-[#0c1021] overflow-hidden" data-testid="dispatch-map">
       {/* Grid lines */}
       <div className="absolute inset-0 opacity-10" style={{
-        backgroundImage: "linear-gradient(rgba(100,200,255,.15) 1px, transparent 1px), linear-gradient(90deg, rgba(100,200,255,.15) 1px, transparent 1px)",
+        backgroundImage: "repeating-linear-gradient(0deg, rgba(100,200,255,.15) 0px, rgba(100,200,255,.15) 1px, transparent 1px, transparent 60px), repeating-linear-gradient(90deg, rgba(100,200,255,.15) 0px, rgba(100,200,255,.15) 1px, transparent 1px, transparent 60px)",
         backgroundSize: "60px 60px"
       }} />
       {/* Title */}

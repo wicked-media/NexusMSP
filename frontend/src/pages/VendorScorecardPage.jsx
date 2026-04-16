@@ -69,7 +69,7 @@ export default function VendorScorecardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center"><Building2 className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center"><Building2 className="w-5 h-5 text-white" /></div>
             Vendor Scorecard & Spend Analytics
           </h1>
           <p className="text-muted-foreground mt-1">Track vendor performance, fulfillment rates, and spend optimization</p>

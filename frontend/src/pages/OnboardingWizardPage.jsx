@@ -159,14 +159,14 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+            <div className="h-10 w-10 rounded-lg bg-cyan-500 flex items-center justify-center">
               <Rocket className="w-5 h-5 text-white" />
             </div>
             Client Onboarding
           </h1>
           <p className="text-muted-foreground mt-1">Guided onboarding wizard for new MSP clients</p>
         </div>
-        <Button onClick={onNew} data-testid="new-onboarding-btn" className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700">
+        <Button onClick={onNew} data-testid="new-onboarding-btn" className="bg-cyan-600 hover:bg-cyan-700">
           <Plus className="w-4 h-4 mr-2" />New Onboarding
         </Button>
       </div>
@@ -300,10 +300,10 @@ function TemplateDialog({ open, onClose, onCreate }) {
   const [priority, setPriority] = useState("normal");
 
   const templates = {
-    small_office: { name: "Small Office (1-20 users)", desc: "Quick setup for small businesses", days: 3, icon: Building2, color: "from-green-500 to-emerald-600" },
-    mid_market: { name: "Mid-Market (21-100 users)", desc: "Standard onboarding with security baseline", days: 7, icon: Users, color: "from-blue-500 to-cyan-600" },
-    enterprise: { name: "Enterprise (100+ users)", desc: "White-glove onboarding with PM", days: 14, icon: Globe, color: "from-purple-500 to-indigo-600" },
-    break_fix: { name: "Break/Fix Client", desc: "Minimal onboarding for ad-hoc support", days: 1, icon: Wrench, color: "from-amber-500 to-orange-600" },
+    small_office: { name: "Small Office (1-20 users)", desc: "Quick setup for small businesses", days: 3, icon: Building2, color: "bg-green-500" },
+    mid_market: { name: "Mid-Market (21-100 users)", desc: "Standard onboarding with security baseline", days: 7, icon: Users, color: "bg-blue-500" },
+    enterprise: { name: "Enterprise (100+ users)", desc: "White-glove onboarding with PM", days: 14, icon: Globe, color: "bg-purple-500" },
+    break_fix: { name: "Break/Fix Client", desc: "Minimal onboarding for ad-hoc support", days: 1, icon: Wrench, color: "bg-amber-500" },
   };
 
   const handleCreate = () => {
@@ -338,7 +338,7 @@ function TemplateDialog({ open, onClose, onCreate }) {
                     data-testid={`template-${key}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-7 h-7 rounded-md bg-gradient-to-br ${t.color} flex items-center justify-center`}>
+                      <div className={`w-7 h-7 rounded-md ${t.color} flex items-center justify-center`}>
                         <Icon className="w-3.5 h-3.5 text-white" />
                       </div>
                       <span className="font-semibold text-sm">{t.name}</span>
@@ -1234,7 +1234,7 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
                   </Button>
                 </>
               ) : (
-                <Button className="w-full bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700" size="sm" onClick={completeOnboarding} disabled={saving || session?.status === "paused"} data-testid="complete-onboarding-btn">
+                <Button className="w-full bg-emerald-600 hover:bg-emerald-700" size="sm" onClick={completeOnboarding} disabled={saving || session?.status === "paused"} data-testid="complete-onboarding-btn">
                   {saving ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}
                   Complete Onboarding
                 </Button>

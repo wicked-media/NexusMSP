@@ -36,7 +36,7 @@ export default function TechUtilizationPage() {
     <div className="space-y-5" data-testid="tech-utilization-page">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center"><UserCog className="w-5 h-5 text-white" /></div>
+          <div className="h-10 w-10 rounded-lg bg-amber-500 flex items-center justify-center"><UserCog className="w-5 h-5 text-white" /></div>
           Technician Utilization & Profitability
         </h1>
         <p className="text-muted-foreground mt-1">Billable vs non-billable hours, utilization heatmaps, and revenue per technician</p>
@@ -126,7 +126,7 @@ export default function TechUtilizationPage() {
               <Card key={t.user_id} className={`border-border/40 ${i === 0 ? "border-amber-500/30" : ""}`}>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3 mb-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${i === 0 ? "bg-gradient-to-br from-amber-500 to-orange-600" : "bg-gradient-to-br from-slate-600 to-slate-700"}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${i === 0 ? "bg-amber-500" : "bg-slate-600"}`}>
                       {t.name?.charAt(0) || "?"}
                     </div>
                     <div>

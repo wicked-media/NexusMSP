@@ -85,7 +85,7 @@ export default function LicenseManagementPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center"><Layers className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center"><Layers className="w-5 h-5 text-white" /></div>
             License Management
           </h1>
           <p className="text-muted-foreground mt-1">Track, optimize, and manage software licenses across all clients</p>
@@ -231,7 +231,7 @@ export default function LicenseManagementPage() {
                 <Card key={v.vendor} className="border-border/40">
                   <CardContent className="pt-4 pb-3">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-violet-500/20 flex items-center justify-center"><Package className="w-5 h-5 text-blue-400" /></div>
+                      <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center"><Package className="w-5 h-5 text-blue-400" /></div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2"><h3 className="font-bold">{v.vendor}</h3><Badge variant="outline" className="text-[10px]">{v.licenses} licenses</Badge></div>
                         <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">

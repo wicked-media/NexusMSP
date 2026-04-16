@@ -83,14 +83,14 @@ export default function ExecutiveReportsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center"><FileText className="w-5 h-5 text-white" /></div>
+            <div className="h-10 w-10 rounded-lg bg-indigo-500 flex items-center justify-center"><FileText className="w-5 h-5 text-white" /></div>
             Executive Reports
           </h1>
           <p className="text-muted-foreground mt-1">Automated client reports with security, uptime, SLA metrics & trend analysis</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setShowGenerate(true)} data-testid="generate-report-btn" className="bg-gradient-to-r from-indigo-600 to-purple-600"><Plus className="w-4 h-4 mr-1" />Generate Report</Button>
+          <Button onClick={() => setShowGenerate(true)} data-testid="generate-report-btn" className="bg-indigo-600"><Plus className="w-4 h-4 mr-1" />Generate Report</Button>
         </div>
       </div>
 
@@ -139,7 +139,7 @@ export default function ExecutiveReportsPage() {
               <Card key={r.id} className="border-border/40 transition-all" data-testid={`exec-report-${r.id}`}>
                 <CardContent className="pt-4 pb-3">
                   <div className="flex items-center gap-4 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : r.id)}>
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center border border-indigo-500/20"><FileText className="w-5 h-5 text-indigo-400" /></div>
+                    <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center border border-indigo-500/20"><FileText className="w-5 h-5 text-indigo-400" /></div>
                     <div className="flex-1">
                       <h3 className="font-bold">{r.client_name}</h3>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
