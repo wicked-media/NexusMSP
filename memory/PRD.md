@@ -138,12 +138,9 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_84.json: Dashboard & Morning Checks Visual Overhaul (100% - 21/21 frontend elements verified)
 - iteration_85.json: Remote Access Dialog Fix + Device Agent & Disk Health (100% - 17/17 backend, all frontend verified)
 - iteration_86.json: Login Wallpaper + Animated Login Features (100% - 11/11 backend, all frontend verified)
+- iteration_87.json: P1/P2/Revenue Batch — Workflows, Terminal, Billing Portal, Scheduled Reports, AI Triage (100% - 33/33 backend, all frontend verified)
 
 ## Backlog (Prioritized)
-
-### P2 - Upcoming
-- Workflow Automation Builder (visual drag-and-drop)
-- Cross-platform scripting library
 
 ### P3 - Future
 - Decompose monolithic seed.py and navigation.js
@@ -151,6 +148,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - Bluetooth barcode scanner integration
 - Recharts console warnings fix
 - Missing aria-describedby on some DialogContent
+- Mobile-responsive optimization for field technicians
 
 ## Key API Endpoints
 - `/api/remote-providers` — GET all providers, PUT settings, PUT toggle, POST test
