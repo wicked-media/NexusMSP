@@ -101,11 +101,13 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - Pending Bank Transfer Confirmations queue with one-click Confirm buttons
 - All Payment Links table with status, methods, payment history, copy/revoke actions
 
-### Phase 6: Gradient Removal
-- Removed all bg-gradient-to-*, linear-gradient, radial-gradient from 39+ page files
-- Login page: solid dark background with subtle grid overlay
-- All header icons, progress bars, badges now use solid colors
-- Only decorative grid patterns (repeating-linear-gradient) remain
+### Phase 6: Theme Settings System
+- Removed Gradient MSP module (GradientPage.jsx + gradient.py + nav entry)
+- 6 theme presets: Midnight, Oceanic, Carbon, Arctic, Ember, Phantom
+- 8 accent colors: Emerald, Blue, Cyan, Violet, Orange, Red, Sky, Rose
+- 6 Google Fonts: Inter, JetBrains Mono, DM Sans, Space Grotesk, IBM Plex Sans, Outfit
+- All preferences persist via localStorage
+- CSS variables (--primary, --font-sans) apply globally to all Shadcn components
 
 ## Test Reports
 - iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
@@ -114,7 +116,8 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_79.json: Remote Access Integrations + Invoice PDF/Email (100% - 20/20 backend, all frontend verified)
 - iteration_80.json: Payment Links — CRUD, public page, 3 payment methods, partial payments (100% - 22/22 backend)
 - iteration_81.json: RustDesk Connect Fix — URI format, dialog, 3 connection methods (100% - 10/10 backend)
-- iteration_82.json: Payment Links Dashboard + Gradient Removal (100% - 12/12 backend, all frontend verified)
+- iteration_82.json: Payment Links Dashboard (100% - 12/12 backend, all frontend verified)
+- iteration_83.json: Theme System + Gradient MSP Removal (100% - 12/12 backend, all frontend verified)
 
 ## Backlog (Prioritized)
 
