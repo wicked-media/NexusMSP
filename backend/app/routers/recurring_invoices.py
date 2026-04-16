@@ -292,6 +292,105 @@ async def apply_template_to_recurring(template_id: str, data: dict, current_user
     return await create_recurring(create_data, current_user)
 
 
+
+# ============== SCHEDULER STATUS & LOGS ==============
+
+@router.get("/recurring-invoices/scheduler/status")
+async def get_scheduler_status(current_user: dict = Depends(get_current_user)):
+    """Get the auto-generation scheduler status and recent logs."""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Count due invoices
+    due_count = await db.recurring_invoices.count_documents({
+        "status": "active",
+        "next_generation": {"$lte": today_str},
+    })
+
+    # Recent scheduler logs
+    logs = await db.scheduler_logs.find(
+        {"type": {"$in": ["recurring_invoice", "recurring_invoice_error"]}},
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(20)
+
+    # Stats
+    total_auto_generated = await db.scheduler_logs.count_documents({"type": "recurring_invoice"})
+    errors = await db.scheduler_logs.count_documents({"type": "recurring_invoice_error"})
+
+    return {
+        "scheduler_active": True,
+        "check_interval_seconds": 300,
+        "due_now": due_count,
+        "total_auto_generated": total_auto_generated,
+        "total_errors": errors,
+        "recent_logs": logs,
+    }
+
+
+@router.post("/recurring-invoices/scheduler/run-now")
+async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
+    """Manually trigger the scheduler to process all due recurring invoices."""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    due_invoices = await db.recurring_invoices.find({
+        "status": "active",
+        "next_generation": {"$lte": today_str},
+    }, {"_id": 0}).to_list(100)
+
+    results = []
+    for ri in due_invoices:
+        try:
+            inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
+            due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
+
+            invoice = {
+                "id": f"inv-{uuid.uuid4().hex[:8]}",
+                "invoice_number": inv_number,
+                "client_id": ri.get("client_id", ""),
+                "client_name": ri.get("client_name", ""),
+                "description": ri.get("description", ""),
+                "line_items": ri.get("line_items", []),
+                "subtotal": ri.get("subtotal", ri.get("amount", 0)),
+                "tax_rate": ri.get("tax_rate", 0),
+                "tax_amount": ri.get("tax_amount", 0),
+                "total": ri.get("amount", 0),
+                "amount_due": ri.get("amount", 0),
+                "amount_paid": 0,
+                "currency": ri.get("currency", "AUD"),
+                "status": "sent",
+                "payment_status": "unpaid",
+                "due_date": due_date,
+                "recurring_invoice_id": ri["id"],
+                "notes": ri.get("notes", ""),
+                "auto_generated": True,
+                "created_at": now.isoformat(),
+                "created_by": "Manual Scheduler Run",
+            }
+            await db.invoices.insert_one(invoice)
+
+            next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
+            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": ri.get("amount", 0), "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run"}
+            await db.recurring_invoices.update_one({"id": ri["id"]}, {
+                "$inc": {"invoices_generated": 1, "total_billed": ri.get("amount", 0)},
+                "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
+                "$push": {"generation_history": gen_entry},
+            })
+
+            await db.scheduler_logs.insert_one({
+                "id": f"slog-{uuid.uuid4().hex[:8]}", "type": "recurring_invoice",
+                "recurring_invoice_id": ri["id"], "invoice_id": invoice["id"],
+                "invoice_number": inv_number, "client_name": ri.get("client_name", ""),
+                "amount": ri.get("amount", 0), "status": "generated",
+                "triggered_by": current_user.get("name", ""), "timestamp": now.isoformat(),
+            })
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": ri.get("amount", 0), "status": "generated"})
+        except Exception as e:
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": str(e)})
+
+    return {"processed": len(results), "results": results}
+
+
 # ============== HELPERS ==============
 
 def _calc_next_date(from_date_str: str, frequency: str) -> str:

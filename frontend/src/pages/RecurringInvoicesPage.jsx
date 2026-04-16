@@ -36,6 +36,8 @@ export default function RecurringInvoicesPage() {
   const [tab, setTab] = useState("recurring");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [schedulerStatus, setSchedulerStatus] = useState(null);
+  const [runningScheduler, setRunningScheduler] = useState(false);
 
   // Dialogs
   const [showCreate, setShowCreate] = useState(false);
@@ -53,16 +55,18 @@ export default function RecurringInvoicesPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [riRes, statsRes, tplRes, cliRes] = await Promise.all([
+      const [riRes, statsRes, tplRes, cliRes, schedRes] = await Promise.all([
         axios.get(`${API}/recurring-invoices/list`, { headers }),
         axios.get(`${API}/recurring-invoices/stats`, { headers }),
         axios.get(`${API}/invoice-templates`, { headers }),
         axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/recurring-invoices/scheduler/status`, { headers }),
       ]);
       setInvoices(riRes.data);
       setStats(statsRes.data);
       setTemplates(tplRes.data);
       setClients(cliRes.data);
+      setSchedulerStatus(schedRes.data);
     } catch { toast.error("Failed to load data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -181,6 +185,20 @@ export default function RecurringInvoicesPage() {
     } catch { toast.error("Failed"); }
   };
 
+  const runSchedulerNow = async () => {
+    setRunningScheduler(true);
+    try {
+      const res = await axios.post(`${API}/recurring-invoices/scheduler/run-now`, {}, { headers });
+      if (res.data.processed > 0) {
+        toast.success(`Generated ${res.data.processed} invoice(s)`);
+      } else {
+        toast.info("No invoices due for generation");
+      }
+      fetchData();
+    } catch { toast.error("Scheduler run failed"); }
+    finally { setRunningScheduler(false); }
+  };
+
   const filtered = invoices.filter(i => {
     if (filterStatus !== "all" && i.status !== filterStatus) return false;
     if (search && !i.client_name?.toLowerCase().includes(search.toLowerCase()) && !i.description?.toLowerCase().includes(search.toLowerCase())) return false;
@@ -246,6 +264,7 @@ export default function RecurringInvoicesPage() {
         <TabsList>
           <TabsTrigger value="recurring" data-testid="tab-recurring">Recurring Invoices ({invoices.length})</TabsTrigger>
           <TabsTrigger value="templates" data-testid="tab-templates">Invoice Templates ({templates.length})</TabsTrigger>
+          <TabsTrigger value="scheduler" data-testid="tab-scheduler">Auto-Scheduler</TabsTrigger>
         </TabsList>
 
         {/* RECURRING INVOICES TAB */}
@@ -354,6 +373,74 @@ export default function RecurringInvoicesPage() {
             ))}
             {templates.length === 0 && <p className="col-span-3 text-center py-12 text-muted-foreground">No templates yet. Create one to speed up recurring invoice setup.</p>}
           </div>
+        </TabsContent>
+
+        {/* SCHEDULER TAB */}
+        <TabsContent value="scheduler" className="mt-4 space-y-4">
+          <Card data-testid="scheduler-panel">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span className="flex items-center gap-2"><Zap className="w-4 h-4 text-amber-400" />Auto-Generation Scheduler</span>
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-emerald-500/10 text-emerald-400 text-[9px] border border-emerald-500/20">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse" />Active
+                  </Badge>
+                  <Button size="sm" onClick={runSchedulerNow} disabled={runningScheduler} data-testid="run-scheduler-btn">
+                    {runningScheduler ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+                    Run Now
+                  </Button>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="p-3 rounded-lg border bg-card text-center">
+                  <p className="text-2xl font-bold text-amber-400">{schedulerStatus?.due_now || 0}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">Due Now</p>
+                </div>
+                <div className="p-3 rounded-lg border bg-card text-center">
+                  <p className="text-2xl font-bold text-emerald-400">{schedulerStatus?.total_auto_generated || 0}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">Auto-Generated</p>
+                </div>
+                <div className="p-3 rounded-lg border bg-card text-center">
+                  <p className="text-2xl font-bold text-red-400">{schedulerStatus?.total_errors || 0}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">Errors</p>
+                </div>
+                <div className="p-3 rounded-lg border bg-card text-center">
+                  <p className="text-lg font-bold">{schedulerStatus?.check_interval_seconds ? `${schedulerStatus.check_interval_seconds / 60}m` : "5m"}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">Check Interval</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/10 mb-4 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground text-sm">How it works:</p>
+                <p>The scheduler checks every 5 minutes for active recurring invoices whose next generation date is today or earlier.</p>
+                <p>When found, it automatically generates the invoice, updates the next generation date, and logs the event.</p>
+                <p>If auto-send is enabled on the recurring invoice, the generated invoice will be marked for email delivery.</p>
+              </div>
+
+              <p className="text-sm font-medium mb-2">Recent Activity</p>
+              {(schedulerStatus?.recent_logs || []).length === 0 ? (
+                <p className="text-center py-6 text-muted-foreground text-sm">No scheduler activity yet. Invoices will be auto-generated when due.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {(schedulerStatus?.recent_logs || []).map((log, i) => (
+                    <div key={`log-${i}`} className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${log.type === "recurring_invoice_error" ? "bg-red-500/5 border border-red-500/10" : "bg-emerald-500/5 border border-emerald-500/10"}`}>
+                      <div className="flex items-center gap-2">
+                        {log.type === "recurring_invoice_error" ? <AlertTriangle className="w-3 h-3 text-red-400" /> : <CheckCircle className="w-3 h-3 text-emerald-400" />}
+                        <span className="font-medium">{log.client_name || "Unknown"}</span>
+                        {log.invoice_number && <span className="font-mono text-muted-foreground">{log.invoice_number}</span>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {log.amount && <span className="font-mono font-bold">${log.amount?.toLocaleString()}</span>}
+                        <span className="text-muted-foreground">{log.timestamp ? new Date(log.timestamp).toLocaleString() : ""}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

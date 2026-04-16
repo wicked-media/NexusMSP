@@ -116,6 +116,8 @@ async def startup_event():
     # Start RustDesk auto-sync background task
     import asyncio
     asyncio.create_task(_rustdesk_auto_sync_loop())
+    # Start recurring invoice auto-generation scheduler
+    asyncio.create_task(_recurring_invoice_scheduler())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 async def _rustdesk_auto_sync_loop():
@@ -167,6 +169,108 @@ async def _rustdesk_auto_sync_loop():
                 logger.debug(f"RustDesk auto-sync skipped: {e}")
         except Exception as e:
             logger.debug(f"RustDesk auto-sync loop error: {e}")
+            import asyncio
+            await asyncio.sleep(60)
+
+async def _recurring_invoice_scheduler():
+    """Background loop that checks for due recurring invoices and auto-generates them."""
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(300)  # Check every 5 minutes
+            now = datetime.now(timezone.utc)
+            today_str = now.strftime("%Y-%m-%d")
+
+            # Find active recurring invoices that are due today or overdue
+            due_invoices = await db.recurring_invoices.find({
+                "status": "active",
+                "next_generation": {"$lte": today_str},
+            }, {"_id": 0}).to_list(100)
+
+            if not due_invoices:
+                continue
+
+            generated_count = 0
+            for ri in due_invoices:
+                try:
+                    import uuid as _uuid
+                    inv_number = f"INV-{now.strftime('%Y%m')}-{_uuid.uuid4().hex[:4].upper()}"
+                    # Calculate due date from payment terms
+                    days_map = {"due_on_receipt": 0, "net_7": 7, "net_14": 14, "net_30": 30, "net_45": 45, "net_60": 60, "net_90": 90}
+                    days = days_map.get(ri.get("payment_terms", "net_30"), 30)
+                    from datetime import timedelta as _td
+                    due_date = (now + _td(days=days)).strftime("%Y-%m-%d")
+
+                    invoice = {
+                        "id": f"inv-{_uuid.uuid4().hex[:8]}",
+                        "invoice_number": inv_number,
+                        "client_id": ri.get("client_id", ""),
+                        "client_name": ri.get("client_name", ""),
+                        "description": ri.get("description", ""),
+                        "line_items": ri.get("line_items", []),
+                        "subtotal": ri.get("subtotal", ri.get("amount", 0)),
+                        "tax_rate": ri.get("tax_rate", 0),
+                        "tax_amount": ri.get("tax_amount", 0),
+                        "total": ri.get("amount", 0),
+                        "amount_due": ri.get("amount", 0),
+                        "amount_paid": 0,
+                        "currency": ri.get("currency", "AUD"),
+                        "status": "sent",
+                        "payment_status": "unpaid",
+                        "due_date": due_date,
+                        "recurring_invoice_id": ri["id"],
+                        "notes": ri.get("notes", ""),
+                        "auto_generated": True,
+                        "created_at": now.isoformat(),
+                        "created_by": "Auto-Scheduler",
+                    }
+                    await db.invoices.insert_one(invoice)
+
+                    # Calculate next generation date
+                    from app.routers.recurring_invoices import _calc_next_date
+                    next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
+                    gen_entry = {
+                        "invoice_id": invoice["id"],
+                        "invoice_number": inv_number,
+                        "amount": ri.get("amount", 0),
+                        "generated_at": now.isoformat(),
+                        "generated_by": "Auto-Scheduler",
+                    }
+                    await db.recurring_invoices.update_one({"id": ri["id"]}, {
+                        "$inc": {"invoices_generated": 1, "total_billed": ri.get("amount", 0)},
+                        "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
+                        "$push": {"generation_history": gen_entry},
+                    })
+                    generated_count += 1
+
+                    # Log the auto-generation
+                    await db.scheduler_logs.insert_one({
+                        "id": f"slog-{_uuid.uuid4().hex[:8]}",
+                        "type": "recurring_invoice",
+                        "recurring_invoice_id": ri["id"],
+                        "invoice_id": invoice["id"],
+                        "invoice_number": inv_number,
+                        "client_name": ri.get("client_name", ""),
+                        "amount": ri.get("amount", 0),
+                        "auto_send": ri.get("auto_send", False),
+                        "status": "generated",
+                        "timestamp": now.isoformat(),
+                    })
+
+                except Exception as e:
+                    logger.error(f"Failed to auto-generate invoice for {ri.get('id')}: {e}")
+                    await db.scheduler_logs.insert_one({
+                        "type": "recurring_invoice_error",
+                        "recurring_invoice_id": ri.get("id"),
+                        "error": str(e),
+                        "timestamp": now.isoformat(),
+                    })
+
+            if generated_count > 0:
+                logger.info(f"Recurring invoice scheduler: auto-generated {generated_count} invoices")
+
+        except Exception as e:
+            logger.debug(f"Recurring invoice scheduler error: {e}")
             import asyncio
             await asyncio.sleep(60)
 
