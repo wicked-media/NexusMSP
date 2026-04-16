@@ -2,16 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -157,6 +158,31 @@ export default function DevicesPage() {
     setSelectedDevices([]);
   };
 
+  const handleBulkDeployAgent = async (osType) => {
+    const count = selectedDevices.length;
+    const ext = osType === "windows" ? "ps1" : "sh";
+    try {
+      // Download a zip-like bundle or individual scripts
+      for (const deviceId of selectedDevices) {
+        const res = await axios.get(`${API}/devices/${deviceId}/agent-script?os_type=${osType}`, {
+          headers, responseType: "blob",
+        });
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `nexusops-agent-${deviceId}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+      toast.success(`${count} agent script${count > 1 ? "s" : ""} downloaded (${osType === "windows" ? "PowerShell" : "Bash"})`);
+      setSelectedDevices([]);
+    } catch {
+      toast.error("Failed to download agent scripts");
+    }
+  };
+
   const handleDiscoverDevices = async () => {
     if (!discoveryClientId) { toast.error("Select a client first"); return; }
     setDiscoveryLoading(true);
@@ -286,6 +312,19 @@ export default function DevicesPage() {
           <Badge variant="secondary">{selectedDevices.length} selected</Badge>
           <Button size="sm" variant="outline" onClick={handleBulkReboot} data-testid="bulk-reboot"><RefreshCw className="w-3 h-3 mr-1" />Reboot</Button>
           <Button size="sm" variant="outline" onClick={handleBulkScan} data-testid="bulk-scan"><Shield className="w-3 h-3 mr-1" />Scan</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" data-testid="bulk-deploy-agent"><Download className="w-3 h-3 mr-1" />Deploy Agent</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => handleBulkDeployAgent("windows")} data-testid="bulk-deploy-windows">
+                <Monitor className="w-4 h-4 mr-2" />Windows (PowerShell)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleBulkDeployAgent("linux")} data-testid="bulk-deploy-linux">
+                <Terminal className="w-4 h-4 mr-2" />Linux / macOS (Bash)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" variant="destructive" onClick={handleBulkDelete} data-testid="bulk-delete"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedDevices([])} className="ml-auto">Clear</Button>
         </div>
