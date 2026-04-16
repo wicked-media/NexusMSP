@@ -39,6 +39,7 @@ function useTypingEffect(texts, speed = 80, pause = 2000) {
 // Particle canvas for login ambiance
 function ParticleField() {
   const canvasRef = useRef(null);
+  const mouseRef = useRef({ x: -1000, y: -1000 });
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -48,25 +49,47 @@ function ParticleField() {
     const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
     resize();
     window.addEventListener("resize", resize);
-    for (let i = 0; i < 60; i++) {
+    const handleMouse = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    const handleLeave = () => { mouseRef.current = { x: -1000, y: -1000 }; };
+    canvas.addEventListener("mousemove", handleMouse);
+    canvas.addEventListener("mouseleave", handleLeave);
+    for (let i = 0; i < 70; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
         vx: (Math.random() - 0.5) * 0.3,
         vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
-        o: Math.random() * 0.4 + 0.1,
+        r: Math.random() * 1.8 + 0.5,
+        o: Math.random() * 0.5 + 0.1,
       });
     }
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const mx = mouseRef.current.x;
+      const my = mouseRef.current.y;
       particles.forEach(p => {
+        // Mouse magnetic attraction
+        const dxm = mx - p.x;
+        const dym = my - p.y;
+        const distM = Math.sqrt(dxm * dxm + dym * dym);
+        if (distM < 200 && distM > 1) {
+          const force = (200 - distM) / 200 * 0.02;
+          p.vx += (dxm / distM) * force;
+          p.vy += (dym / distM) * force;
+        }
+        // Dampen velocity
+        p.vx *= 0.99; p.vy *= 0.99;
         p.x += p.vx; p.y += p.vy;
         if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
         if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+        // Glow near mouse
+        const glowFactor = distM < 180 ? (1 - distM / 180) * 0.6 : 0;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(16, 185, 129, ${p.o})`;
+        ctx.arc(p.x, p.y, p.r + glowFactor * 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(16, 185, 129, ${p.o + glowFactor})`;
         ctx.fill();
       });
       // Draw lines between close particles
@@ -79,15 +102,28 @@ function ParticleField() {
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = `rgba(16, 185, 129, ${0.06 * (1 - dist / 120)})`;
+            ctx.strokeStyle = `rgba(16, 185, 129, ${0.08 * (1 - dist / 120)})`;
             ctx.stroke();
           }
+        }
+        // Draw lines to mouse
+        const dxm = mx - particles[i].x;
+        const dym = my - particles[i].y;
+        const distM = Math.sqrt(dxm * dxm + dym * dym);
+        if (distM < 150) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(mx, my);
+          ctx.strokeStyle = `rgba(52, 211, 153, ${0.15 * (1 - distM / 150)})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+          ctx.lineWidth = 1;
         }
       }
       animId = requestAnimationFrame(draw);
     };
     draw();
-    return () => { cancelAnimationFrame(animId); window.removeEventListener("resize", resize); };
+    return () => { cancelAnimationFrame(animId); window.removeEventListener("resize", resize); canvas.removeEventListener("mousemove", handleMouse); canvas.removeEventListener("mouseleave", handleLeave); };
   }, []);
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
 }

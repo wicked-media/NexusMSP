@@ -204,6 +204,12 @@ export const routeConfig = [
   { path: "/revenue-tracking", component: page("RevenueAnalyticsPage"), auth: true, layout: true },
   { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
 
+  // P1/P2 New Features
+  { path: "/workflow-automation", component: page("WorkflowAutomationPage"), auth: true, layout: true },
+  { path: "/device-terminal", component: page("DeviceTerminalPage"), auth: true, layout: true },
+  { path: "/scheduled-reports", component: page("ScheduledReportsPage"), auth: true, layout: true },
+  { path: "/billing-portal", component: page("StripeBillingPortalPage"), auth: true, layout: true },
+
   // Auth callback (no auth, no layout)
   { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
   { path: "/notifications", component: page("NotificationsPage"), auth: true, layout: true },

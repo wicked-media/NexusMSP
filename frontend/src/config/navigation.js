@@ -143,6 +143,8 @@ export const navGroups = [
           { path: "/runbooks", label: "Runbook Automation" },
           { path: "/scripting", label: "Scripting" },
           { path: "/doc-scanner", label: "Document Scanner" },
+          { path: "/workflow-automation", label: "Workflow Builder" },
+          { path: "/device-terminal", label: "Live Terminal" },
         ]
       },
     ]
@@ -190,6 +192,7 @@ export const navGroups = [
           { path: "/billing-dashboard", label: "Billing Command" },
           { path: "/billing-recon", label: "Reconciliation" },
           { path: "/usage-billing", label: "Usage Billing" },
+          { path: "/billing-portal", label: "Billing Portal" },
           { path: "/late-payment", label: "Late Payment AI" },
           { path: "/pricing-calc", label: "Pricing Calculator" },
         ]
@@ -311,6 +314,7 @@ export const navGroups = [
           { path: "/sla-report-gen", label: "SLA Center" },
           { path: "/qbr-generator", label: "QBR Generator" },
           { path: "/it-roadmap", label: "IT Roadmap" },
+          { path: "/scheduled-reports", label: "Scheduled Emails" },
         ]
       },
       {
