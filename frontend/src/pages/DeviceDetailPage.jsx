@@ -13,6 +13,7 @@ import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -102,6 +103,27 @@ export default function DeviceDetailPage() {
     }
   };
 
+  const downloadAgentScript = async (osType) => {
+    try {
+      const res = await axios.get(`${API}/devices/${deviceId}/agent-script?os_type=${osType}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: "blob",
+      });
+      const ext = osType === "windows" ? "ps1" : "sh";
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nexusops-agent-${deviceId}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success(`${osType === "windows" ? "PowerShell" : "Bash"} agent script downloaded`);
+    } catch {
+      toast.error("Failed to download agent script");
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin" /></div>;
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
 
@@ -159,6 +181,19 @@ export default function DeviceDetailPage() {
               {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
             </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="download-agent-btn"><Download className="w-4 h-4 mr-1" />Agent</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => downloadAgentScript("windows")} data-testid="download-agent-windows">
+                <Monitor className="w-4 h-4 mr-2" />Windows (PowerShell)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadAgentScript("linux")} data-testid="download-agent-linux">
+                <Terminal className="w-4 h-4 mr-2" />Linux / macOS (Bash)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={fetchDetail}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
         </div>
       </div>
