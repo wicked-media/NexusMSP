@@ -193,6 +193,7 @@ export const navGroups = [
           { path: "/billing-recon", label: "Reconciliation" },
           { path: "/usage-billing", label: "Usage Billing" },
           { path: "/billing-portal", label: "Billing Portal" },
+          { path: "/proposals", label: "Proposals & Quotes" },
           { path: "/late-payment", label: "Late Payment AI" },
           { path: "/pricing-calc", label: "Pricing Calculator" },
         ]

@@ -1,0 +1,76 @@
+{
+  "summary": "Iteration 89 - Proposals, Contracts & Portal API Testing Complete. All 20 backend API tests passed (100%). Frontend UI testing verified all features: Proposals page with stats, table, status badges, create dialog with line items editor (recurring/one-time billing types), MRR/Setup/Tax/Total breakdown. Contracts page and Client Portal Admin page also verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard charts", "issues": ["Console warning about chart width/height being -1 - cosmetic issue, charts still render"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration89_proposals_contracts_portal.py",
+    "/app/test_reports/pytest/pytest_results_iter89.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Console warning: 'Encountered two children with the same key' on Contracts page - should use unique keys for list items"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration89_proposals_contracts_portal.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Test proposals created and cleaned up during testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 89 tested 3 high-impact revenue features: 1) Proposal Builder with full lifecycle (create→send→accept→convert-to-contract), 2) Contract enhancements (link-recurring, apply-price-increase, price-history), 3) Client Portal API (invoices, devices/health, summary). All backend APIs working correctly. Key endpoints: GET /api/proposals/stats (returns total, by_status, total_value, won_value, pipeline_value, win_rate), POST /api/proposals (creates with line_items having billing_type: recurring/one_time), POST /api/proposals/{id}/send|accept|decline|duplicate|convert-to-contract, POST /api/contracts/{id}/apply-price-increase, GET /api/contracts/{id}/price-history, GET /api/portal-api/{token}/invoices|devices/health|summary. Navigation: Proposals at /proposals, Contracts at /contracts, Client Portal at /client-portal.",
+  "features_tested": {
+    "proposal_stats": {
+      "GET /api/proposals/stats": "PASS - Returns total, by_status (draft/sent/viewed/accepted/declined/expired/converted), total_value, won_value, pipeline_value, win_rate"
+    },
+    "proposal_crud": {
+      "GET /api/proposals": "PASS - Returns list of proposals",
+      "POST /api/proposals": "PASS - Creates proposal with line_items (recurring + one_time billing types), calculates subtotal/tax/total",
+      "GET /api/proposals/{id}": "PASS - Returns single proposal",
+      "DELETE /api/proposals/{id}": "PASS - Deletes proposal, returns 404 on subsequent GET"
+    },
+    "proposal_lifecycle": {
+      "POST /api/proposals/{id}/send": "PASS - Marks proposal as sent, sets sent_at timestamp",
+      "POST /api/proposals/{id}/accept": "PASS - Marks proposal as accepted, sets accepted_at timestamp",
+      "POST /api/proposals/{id}/decline": "PASS - Marks proposal as declined, sets declined_at timestamp",
+      "POST /api/proposals/{id}/duplicate": "PASS - Clones proposal with new ID, (Copy) prefix, draft status",
+      "POST /api/proposals/{id}/convert-to-contract": "PASS - Creates contract + recurring invoice from accepted proposal, marks proposal as converted"
+    },
+    "contract_enhancements": {
+      "POST /api/contracts/{id}/link-recurring": "PASS - Links contract to existing recurring invoice",
+      "GET /api/contracts/{id}/recurring-invoices": "PASS - Returns linked recurring invoices",
+      "POST /api/contracts/{id}/apply-price-increase": "PASS - Applies percentage increase to contract and linked RIs, logs to price_history",
+      "GET /api/contracts/{id}/price-history": "PASS - Returns price increase history array",
+      "Price increase validation": "PASS - Returns 400 when no increase values provided"
+    },
+    "client_portal_api": {
+      "POST /api/client-portal/generate-token/{client_id}": "PASS - Generates portal access token",
+      "GET /api/portal-api/{token}/invoices": "PASS - Returns client invoices through portal",
+      "GET /api/portal-api/{token}/devices/health": "PASS - Returns device health summary (total, online, offline, warning, devices)",
+      "GET /api/portal-api/{token}/summary": "PASS - Returns full client summary (client, devices, tickets, invoices)",
+      "Invalid token handling": "PASS - Returns 404 for invalid portal token"
+    },
+    "frontend_ui": {
+      "Proposals page": "PASS - Loads at /proposals with stats cards (Pipeline, Won Value, Win Rate, Drafts, Sent), proposals table, status badges, action buttons",
+      "Create proposal dialog": "PASS - Has client selector, title, summary, scope of work, line items editor with billing type selector (Recurring/One-Time), MRR/Setup/Tax/Total breakdown, contract term, payment terms, valid until",
+      "Contracts page": "PASS - Shows contracts with renewal alerts, SLA tiers, values, status",
+      "Client Portal Admin": "PASS - Shows client list with portal configuration"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  }
+}

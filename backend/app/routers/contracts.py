@@ -241,3 +241,109 @@ async def delete_line_item(item_id: str, current_user: dict = Depends(get_curren
         raise HTTPException(status_code=404, detail="Line item not found")
     return {"message": "Line item deleted"}
 
+
+# ============== CONTRACT ENHANCEMENTS ==============
+
+@router.post("/contracts/{contract_id}/link-recurring")
+async def link_contract_to_recurring(contract_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Link a contract to an existing or new recurring invoice."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    ri_id = data.get("recurring_invoice_id")
+    if ri_id:
+        ri = await db.recurring_invoices.find_one({"id": ri_id})
+        if not ri:
+            raise HTTPException(status_code=404, detail="Recurring invoice not found")
+        await db.recurring_invoices.update_one({"id": ri_id}, {"$set": {"contract_id": contract_id}})
+        await db.contracts.update_one({"id": contract_id}, {"$set": {"recurring_invoice_id": ri_id}})
+        return {"message": "Contract linked to recurring invoice", "recurring_invoice_id": ri_id}
+    return {"message": "No recurring invoice ID provided"}
+
+
+@router.get("/contracts/{contract_id}/recurring-invoices")
+async def get_contract_recurring_invoices(contract_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all recurring invoices linked to a contract."""
+    ris = await db.recurring_invoices.find({"contract_id": contract_id}, {"_id": 0}).to_list(50)
+    return ris
+
+
+@router.post("/contracts/{contract_id}/apply-price-increase")
+async def apply_price_increase(contract_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Apply a price increase to a contract and its linked recurring invoices."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+
+    increase_pct = float(data.get("increase_percent", 0))
+    increase_flat = float(data.get("increase_flat", 0))
+    reason = data.get("reason", "Annual price adjustment")
+    effective_date = data.get("effective_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    now = datetime.now(timezone.utc).isoformat()
+
+    if increase_pct <= 0 and increase_flat <= 0:
+        raise HTTPException(status_code=400, detail="Provide increase_percent or increase_flat")
+
+    # Update contract value
+    old_value = float(contract.get("value", 0))
+    old_mrr = float(contract.get("mrr", 0))
+    if increase_pct > 0:
+        new_value = round(old_value * (1 + increase_pct / 100), 2)
+        new_mrr = round(old_mrr * (1 + increase_pct / 100), 2)
+    else:
+        new_value = round(old_value + increase_flat, 2)
+        new_mrr = round(old_mrr + increase_flat, 2)
+
+    # Log the increase
+    increase_log = {
+        "date": now, "effective_date": effective_date, "reason": reason,
+        "old_value": old_value, "new_value": new_value,
+        "increase_percent": increase_pct, "increase_flat": increase_flat,
+        "applied_by": current_user.get("name", ""),
+    }
+
+    await db.contracts.update_one({"id": contract_id}, {
+        "$set": {"value": new_value, "mrr": new_mrr, "updated_at": now},
+        "$push": {"price_history": increase_log},
+    })
+
+    # Also update linked recurring invoices
+    updated_ris = 0
+    ris = await db.recurring_invoices.find({"contract_id": contract_id, "status": "active"}, {"_id": 0}).to_list(50)
+    for ri in ris:
+        old_amount = float(ri.get("amount", 0))
+        if increase_pct > 0:
+            new_amount = round(old_amount * (1 + increase_pct / 100), 2)
+        else:
+            new_amount = round(old_amount + increase_flat, 2)
+        # Update line items proportionally
+        new_items = []
+        for li in ri.get("line_items", []):
+            new_li = {**li}
+            old_li_amount = float(li.get("amount", 0))
+            if increase_pct > 0:
+                new_li["amount"] = round(old_li_amount * (1 + increase_pct / 100), 2)
+                new_li["rate"] = round(float(li.get("rate", 0)) * (1 + increase_pct / 100), 2)
+            new_items.append(new_li)
+        subtotal = sum(float(li.get("amount", 0)) for li in new_items)
+        tax_rate = float(ri.get("tax_rate", 10))
+        tax_amount = round(subtotal * tax_rate / 100, 2)
+        await db.recurring_invoices.update_one({"id": ri["id"]}, {"$set": {
+            "line_items": new_items, "subtotal": subtotal, "tax_amount": tax_amount,
+            "amount": round(subtotal + tax_amount, 2), "updated_at": now,
+        }})
+        updated_ris += 1
+
+    return {
+        "message": f"Price increase applied. Contract: ${old_value} → ${new_value}. Updated {updated_ris} recurring invoice(s).",
+        "old_value": old_value, "new_value": new_value, "recurring_invoices_updated": updated_ris,
+    }
+
+
+@router.get("/contracts/{contract_id}/price-history")
+async def get_price_history(contract_id: str, current_user: dict = Depends(get_current_user)):
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return contract.get("price_history", [])
+

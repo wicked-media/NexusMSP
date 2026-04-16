@@ -274,11 +274,32 @@ async def get_proposals(
         query["lead_id"] = lead_id
     if client_id:
         query["client_id"] = client_id
-    if status:
+    if status and status != "all":
         query["status"] = status
     
     proposals = await db.proposals.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return proposals
+
+
+@router.get("/proposals/stats")
+async def get_proposal_stats(current_user: dict = Depends(get_current_user)):
+    all_p = await db.proposals.find({}, {"_id": 0}).to_list(500)
+    total = len(all_p)
+    by_status = {}
+    for s in ["draft", "sent", "viewed", "accepted", "declined", "expired", "converted"]:
+        by_status[s] = len([p for p in all_p if p.get("status") == s])
+    total_value = sum(p.get("total", 0) for p in all_p)
+    won_value = sum(p.get("total", 0) for p in all_p if p.get("status") in ("accepted", "converted"))
+    pipeline_value = sum(p.get("total", 0) for p in all_p if p.get("status") in ("draft", "sent", "viewed"))
+    declined_count = by_status.get("declined", 0)
+    accepted_count = by_status.get("accepted", 0) + by_status.get("converted", 0)
+    win_rate = round((accepted_count / max(accepted_count + declined_count, 1)) * 100, 1)
+    return {
+        "total": total, "by_status": by_status,
+        "total_value": round(total_value, 2), "won_value": round(won_value, 2),
+        "pipeline_value": round(pipeline_value, 2), "win_rate": win_rate,
+    }
+
 
 @router.get("/proposals/{proposal_id}")
 async def get_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
@@ -406,5 +427,125 @@ async def get_crm_dashboard(current_user: dict = Depends(get_current_user)):
         },
         "lead_sources": [{"source": s['_id'], "count": s['count']} for s in sources],
         "conversion_rate": round((won_leads / total_leads * 100) if total_leads > 0 else 0, 1)
+    }
+
+
+# ============== ENHANCED PROPOSAL ENDPOINTS ==============
+
+@router.post("/proposals/{proposal_id}/accept")
+async def accept_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    p = await db.proposals.find_one({"id": proposal_id})
+    if not p:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.proposals.update_one({"id": proposal_id}, {"$set": {"status": "accepted", "accepted_at": now}})
+    return {"message": "Proposal accepted"}
+
+
+@router.post("/proposals/{proposal_id}/decline")
+async def decline_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    p = await db.proposals.find_one({"id": proposal_id})
+    if not p:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.proposals.update_one({"id": proposal_id}, {"$set": {"status": "declined", "declined_at": now}})
+    return {"message": "Proposal declined"}
+
+
+@router.post("/proposals/{proposal_id}/duplicate")
+async def duplicate_proposal(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    p = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    now = datetime.now(timezone.utc)
+    new_p = {**p}
+    new_p["id"] = f"prop-{uuid.uuid4().hex[:8]}"
+    new_p["proposal_number"] = f"PROP-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
+    new_p["title"] = f"(Copy) {p.get('title', '')}"
+    new_p["status"] = "draft"
+    new_p["sent_at"] = None
+    new_p["created_at"] = now.isoformat()
+    await db.proposals.insert_one(new_p)
+    return {k: v for k, v in new_p.items() if k != "_id"}
+
+
+@router.post("/proposals/{proposal_id}/convert-to-contract")
+async def convert_proposal_to_contract(proposal_id: str, current_user: dict = Depends(get_current_user)):
+    """Convert an accepted proposal into a contract + recurring invoice."""
+    p = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    now = datetime.now(timezone.utc)
+    line_items = p.get("line_items", [])
+    recurring_items = [li for li in line_items if li.get("billing_type") == "recurring"]
+    mrr = sum(float(li.get("amount", li.get("total", 0))) for li in recurring_items)
+
+    # Create contract
+    contract = {
+        "id": f"contract-{uuid.uuid4().hex[:8]}",
+        "client_id": p.get("client_id"),
+        "client_name": p.get("client_name"),
+        "name": p.get("title", ""),
+        "description": p.get("description", ""),
+        "value": p.get("total", 0),
+        "mrr": mrr,
+        "start_date": now.strftime("%Y-%m-%d"),
+        "end_date": (now + timedelta(days=365)).strftime("%Y-%m-%d"),
+        "sla_tier": "gold",
+        "status": "active",
+        "auto_renew": True,
+        "proposal_id": proposal_id,
+        "created_at": now,
+        "created_by": current_user.get("name", ""),
+    }
+    await db.contracts.insert_one(contract)
+
+    # Create recurring invoice if MRR exists
+    recurring_id = None
+    if mrr > 0:
+        tax_rate = float(p.get("tax_percent", p.get("tax_rate", 10)))
+        subtotal = sum(float(li.get("amount", li.get("total", 0))) for li in recurring_items)
+        tax_amount = round(subtotal * tax_rate / 100, 2)
+        ri = {
+            "id": f"ri-{uuid.uuid4().hex[:8]}",
+            "client_id": p.get("client_id"),
+            "client_name": p.get("client_name"),
+            "description": p.get("title", ""),
+            "line_items": recurring_items,
+            "subtotal": subtotal,
+            "tax_rate": tax_rate,
+            "tax_amount": tax_amount,
+            "amount": round(subtotal + tax_amount, 2),
+            "currency": "AUD",
+            "frequency": "monthly",
+            "start_date": now.strftime("%Y-%m-%d"),
+            "next_generation": (now + timedelta(days=30)).strftime("%Y-%m-%d"),
+            "contract_id": contract["id"],
+            "payment_terms": "net_30",
+            "auto_send": True,
+            "auto_send_email": p.get("client_email", ""),
+            "status": "active",
+            "invoices_generated": 0,
+            "total_billed": 0,
+            "generation_history": [],
+            "notes": f"Auto-created from proposal {p.get('proposal_number', proposal_id)}",
+            "created_by": current_user.get("name", ""),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        await db.recurring_invoices.insert_one(ri)
+        recurring_id = ri["id"]
+
+    await db.proposals.update_one({"id": proposal_id}, {"$set": {
+        "status": "converted",
+        "converted_to_contract": contract["id"],
+        "converted_to_recurring": recurring_id,
+    }})
+
+    return {
+        "message": "Proposal converted to contract" + (" and recurring invoice" if recurring_id else ""),
+        "contract_id": contract["id"],
+        "recurring_invoice_id": recurring_id,
     }
 

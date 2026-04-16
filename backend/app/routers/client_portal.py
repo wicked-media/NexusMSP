@@ -137,3 +137,72 @@ async def portal_get_devices(token: str):
 async def get_all_portal_configs(current_user: dict = Depends(get_current_user)):
     configs = await db.portal_configs.find({}, {"_id": 0}).to_list(100)
     return configs
+
+
+# ============== ENHANCED PORTAL API ENDPOINTS ==============
+
+@router.get("/portal-api/{token}/invoices")
+async def portal_get_invoices(token: str):
+    """Client portal: View invoices for this client."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    invoices = await db.invoices.find(
+        {"client_id": config["client_id"]},
+        {"_id": 0, "id": 1, "invoice_number": 1, "description": 1, "total": 1, "amount_due": 1,
+         "amount_paid": 1, "status": 1, "payment_status": 1, "due_date": 1, "created_at": 1, "currency": 1}
+    ).sort("created_at", -1).to_list(200)
+    return invoices
+
+
+@router.get("/portal-api/{token}/invoices/{invoice_id}")
+async def portal_get_invoice_detail(token: str, invoice_id: str):
+    """Client portal: View invoice detail."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    invoice = await db.invoices.find_one(
+        {"id": invoice_id, "client_id": config["client_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice
+
+
+@router.get("/portal-api/{token}/devices/health")
+async def portal_get_device_health(token: str):
+    """Client portal: View device health summary."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    devices = await db.devices.find(
+        {"client_id": config["client_id"]},
+        {"_id": 0, "id": 1, "name": 1, "device_type": 1, "os": 1, "status": 1,
+         "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "last_seen": 1, "ip_address": 1}
+    ).to_list(200)
+    total = len(devices)
+    online = len([d for d in devices if d.get("status") == "online"])
+    offline = len([d for d in devices if d.get("status") == "offline"])
+    warning = len([d for d in devices if d.get("status") == "warning"])
+    return {"total": total, "online": online, "offline": offline, "warning": warning, "devices": devices}
+
+
+@router.get("/portal-api/{token}/summary")
+async def portal_get_summary(token: str):
+    """Client portal: Get full client summary (devices, tickets, invoices, health)."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    cid = config["client_id"]
+    client = await db.clients.find_one({"id": cid}, {"_id": 0, "id": 1, "name": 1, "email": 1, "mrr": 1})
+    devices = await db.devices.find({"client_id": cid}, {"_id": 0, "status": 1}).to_list(500)
+    tickets = await db.tickets.find({"client_id": cid}, {"_id": 0, "status": 1, "priority": 1}).to_list(500)
+    invoices = await db.invoices.find({"client_id": cid}, {"_id": 0, "payment_status": 1, "amount_due": 1, "total": 1}).to_list(500)
+
+    return {
+        "client": client,
+        "devices": {"total": len(devices), "online": len([d for d in devices if d.get("status") == "online"]), "offline": len([d for d in devices if d.get("status") == "offline"])},
+        "tickets": {"total": len(tickets), "open": len([t for t in tickets if t.get("status") not in ("closed", "resolved")]), "critical": len([t for t in tickets if t.get("priority") == "critical"])},
+        "invoices": {"total": len(invoices), "outstanding": round(sum(i.get("amount_due", 0) for i in invoices if i.get("payment_status") != "paid"), 2), "paid": len([i for i in invoices if i.get("payment_status") == "paid"])},
+    }
+
