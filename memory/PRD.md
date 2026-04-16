@@ -57,7 +57,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 25. SOC / Security Operations
 26. Advanced MSP Modules (26 total including Vendor Scorecard, SLA Penalties, etc.)
 
-## Features Completed This Session (Apr 11, 2026)
+## Features Completed This Session (Apr 11-16, 2026)
 
 ### Phase 1: Remote Access Integrations Tab
 - Added "Integrations" tab to Remote Access Hub page
@@ -77,11 +77,31 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - Resend integration for real email sending (mocked when not configured)
 - Email history tracking with has_pdf field
 
+### Phase 3: One-Time Payment Links
+- Generate unique, expiring payment links per invoice
+- Public payment page (no auth) with invoice summary, line items, payment history
+- 3 payment methods: Stripe Card (Checkout), BECS Direct Debit (AU banks), Manual Bank Transfer
+- Partial payments — pay any amount with one method, rest with another
+- Links expire after configurable days or once fully paid
+- Admin can confirm bank transfers and revoke links
+- Payment link button + dialog in invoice table actions
+
+### Phase 4: Remote Access Connect Fix (Critical Bug)
+- Fixed: `window.open("rustdesk://")` was opening blank tabs instead of launching RustDesk
+- Replaced with hidden anchor `click()` — no blank tabs
+- Corrected URI format: `rustdesk://connection/new/{id}`
+- Connection dialog with 3 options: Native Client, Web Client, Copy ID
+- Backend returns relay_server and web_client_url for proper routing
+- Status bar now says "Configured" instead of misleading "Connected"
+- Troubleshooting guidance in connect dialog
+
 ## Test Reports
 - iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
 - iteration_77.json: License Mgmt, Webhook Builder, Exec Reports, Audit Trail, Time Tracking, Smart Schedule (100%)
 - iteration_78.json: Client Health Dashboard (100%)
 - iteration_79.json: Remote Access Integrations + Invoice PDF/Email (100% - 20/20 backend, all frontend verified)
+- iteration_80.json: Payment Links — CRUD, public page, 3 payment methods, partial payments (100% - 22/22 backend)
+- iteration_81.json: RustDesk Connect Fix — URI format, dialog, 3 connection methods (100% - 10/10 backend)
 
 ## Backlog (Prioritized)
 
