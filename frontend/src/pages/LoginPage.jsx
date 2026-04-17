@@ -56,14 +56,14 @@ function ParticleField() {
     const handleLeave = () => { mouseRef.current = { x: -1000, y: -1000 }; };
     canvas.addEventListener("mousemove", handleMouse);
     canvas.addEventListener("mouseleave", handleLeave);
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 80; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.8 + 0.5,
-        o: Math.random() * 0.5 + 0.1,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: (Math.random() - 0.5) * 0.6,
+        r: Math.random() * 2.5 + 1.2,
+        o: Math.random() * 0.5 + 0.3,
       });
     }
     const draw = () => {
@@ -75,21 +75,32 @@ function ParticleField() {
         const dxm = mx - p.x;
         const dym = my - p.y;
         const distM = Math.sqrt(dxm * dxm + dym * dym);
-        if (distM < 200 && distM > 1) {
-          const force = (200 - distM) / 200 * 0.02;
+        if (distM < 250 && distM > 1) {
+          const force = (250 - distM) / 250 * 0.04;
           p.vx += (dxm / distM) * force;
           p.vy += (dym / distM) * force;
         }
         // Dampen velocity
-        p.vx *= 0.99; p.vy *= 0.99;
+        p.vx *= 0.985; p.vy *= 0.985;
+        // Minimum drift so they always move
+        if (Math.abs(p.vx) < 0.15) p.vx += (Math.random() - 0.5) * 0.3;
+        if (Math.abs(p.vy) < 0.15) p.vy += (Math.random() - 0.5) * 0.3;
         p.x += p.vx; p.y += p.vy;
         if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
         if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
         // Glow near mouse
-        const glowFactor = distM < 180 ? (1 - distM / 180) * 0.6 : 0;
+        const glowFactor = distM < 200 ? (1 - distM / 200) * 0.8 : 0;
+        const radius = p.r + glowFactor * 4;
+        // Outer glow
+        if (glowFactor > 0.1) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(16, 185, 129, ${glowFactor * 0.15})`;
+          ctx.fill();
+        }
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r + glowFactor * 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(16, 185, 129, ${p.o + glowFactor})`;
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(52, 211, 153, ${Math.min(p.o + glowFactor, 1)})`;
         ctx.fill();
       });
       // Draw lines between close particles
@@ -98,11 +109,12 @@ function ParticleField() {
           const dx = particles[i].x - particles[j].x;
           const dy = particles[i].y - particles[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 120) {
+          if (dist < 150) {
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = `rgba(16, 185, 129, ${0.08 * (1 - dist / 120)})`;
+            ctx.strokeStyle = `rgba(52, 211, 153, ${0.2 * (1 - dist / 150)})`;
+            ctx.lineWidth = 0.8;
             ctx.stroke();
           }
         }
@@ -110,14 +122,13 @@ function ParticleField() {
         const dxm = mx - particles[i].x;
         const dym = my - particles[i].y;
         const distM = Math.sqrt(dxm * dxm + dym * dym);
-        if (distM < 150) {
+        if (distM < 200) {
           ctx.beginPath();
           ctx.moveTo(particles[i].x, particles[i].y);
           ctx.lineTo(mx, my);
-          ctx.strokeStyle = `rgba(52, 211, 153, ${0.15 * (1 - distM / 150)})`;
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+          ctx.strokeStyle = `rgba(52, 211, 153, ${0.35 * (1 - distM / 200)})`;
           ctx.lineWidth = 1;
+          ctx.stroke();
         }
       }
       animId = requestAnimationFrame(draw);
