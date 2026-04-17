@@ -201,6 +201,47 @@ async def portal_get_summary(token: str):
 
     return {
         "client": client,
+
+@router.get("/portal-api/{token}/tickets")
+async def portal_get_tickets(token: str):
+    """Client portal: View tickets for this client."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    tickets = await db.tickets.find(
+        {"client_id": config["client_id"]},
+        {"_id": 0, "id": 1, "title": 1, "priority": 1, "status": 1, "assigned_name": 1, "created_at": 1, "category": 1}
+    ).sort("created_at", -1).to_list(100)
+    return tickets
+
+
+@router.post("/portal-api/{token}/tickets")
+async def portal_submit_ticket(token: str, data: dict):
+    """Client portal: Submit a new support ticket."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal not found")
+    import uuid
+    client = await db.clients.find_one({"id": config["client_id"]}, {"_id": 0})
+    now = datetime.now(timezone.utc).isoformat()
+    ticket = {
+        "id": f"TKT-{uuid.uuid4().hex[:6].upper()}",
+        "title": data.get("title", ""),
+        "description": data.get("description", ""),
+        "priority": data.get("priority", "medium"),
+        "status": "open",
+        "category": "support",
+        "source": "client_portal",
+        "client_id": config["client_id"],
+        "client_name": client.get("name", "") if client else "",
+        "assigned_to": None,
+        "assigned_name": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.tickets.insert_one(ticket)
+    return {"message": "Ticket submitted", "ticket_id": ticket["id"]}
+
         "devices": {"total": len(devices), "online": len([d for d in devices if d.get("status") == "online"]), "offline": len([d for d in devices if d.get("status") == "offline"])},
         "tickets": {"total": len(tickets), "open": len([t for t in tickets if t.get("status") not in ("closed", "resolved")]), "critical": len([t for t in tickets if t.get("priority") == "critical"])},
         "invoices": {"total": len(invoices), "outstanding": round(sum(i.get("amount_due", 0) for i in invoices if i.get("payment_status") != "paid"), 2), "paid": len([i for i in invoices if i.get("payment_status") == "paid"])},

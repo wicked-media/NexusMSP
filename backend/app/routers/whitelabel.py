@@ -89,7 +89,7 @@ async def upload_branding_logo(logo_type: str = "company", file: UploadFile = Fi
     with open(filepath, "wb") as f:
         f.write(content)
     
-    logo_url = f"/uploads/branding/{filename}"
+    logo_url = f"/api/uploads/branding/{filename}"
     
     field_map = {
         "company": "company_logo_url",
@@ -126,7 +126,7 @@ async def upload_client_logo(client_id: str, file: UploadFile = File(...), curre
     with open(filepath, "wb") as f:
         f.write(content)
     
-    logo_url = f"/uploads/branding/{filename}"
+    logo_url = f"/api/uploads/branding/{filename}"
     await db.clients.update_one({"id": client_id}, {"$set": {"logo_url": logo_url}})
     
     return {"message": "Client logo uploaded", "url": logo_url}
