@@ -610,7 +610,7 @@ export default function ContractsPage() {
                               <DropdownMenuItem onClick={() => setPdfViewer({ open: true, url: `${API}/contracts/${contract.id}/pdf?token=${token}`, title: contract.name, downloadUrl: `${API}/contracts/${contract.id}/pdf/download?token=${token}` })}>
                                 <Eye className="w-3.5 h-3.5 mr-2" />Preview PDF
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => window.open(`${API}/contracts/${contract.id}/pdf/download?token=${token}`, "_blank")}>
+                              <DropdownMenuItem onClick={() => { const a = document.createElement("a"); a.href = `${API}/contracts/${contract.id}/pdf/download?token=${token}`; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); setTimeout(() => document.body.removeChild(a), 200); toast.success("Downloading contract PDF"); }}>
                                 <Download className="w-3.5 h-3.5 mr-2" />Download PDF
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditDialog(contract)}>

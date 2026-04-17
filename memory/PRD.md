@@ -18,23 +18,21 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 ## Features Completed (Apr 17, 2026)
 
 ### Phase 12: Client Portal + Invoice Themes + Icon Branding Fix
-- Fixed critical `client_portal.py` syntax error (duplicate routes mid-return)
-- Client Portal View Page (`/portal/:token`) with Overview, Devices, Tickets, Invoices tabs
-- Invoice PDF Themes: 5 built-in themes integrated into PDF generation
-- Theme Picker UI in Finance Center Branding tab
-- Icon branding fix: double `/api/` prefix, server-side placeholder filtering
-- Finance Center TabsList overflow fix (flex-wrap)
+- Fixed critical `client_portal.py` syntax error
+- Client Portal View Page with 4 tabs + ticket submission
+- Invoice PDF Themes (5 built-in) + Theme Picker UI
+- Icon branding fix + Finance Center TabsList overflow fix
 
-### Phase 13: PDF Viewer System Across All Document Types
-- **Reusable PdfViewerDialog component** — inline PDF preview with iframe, Download + Full Screen buttons
-- **Invoice Theme Preview** — Each theme card has Eye icon to generate sample PDF in selected theme
-- **Contract PDF Generation** — New `generate_contract_pdf()` with branded header, client/contract details, SLA tier box, line items, contract value, signature blocks, footer
-- **Contract PDF endpoints**: `GET /api/contracts/{id}/pdf?token=JWT` (preview) + `/pdf/download` (attachment)
-- **PO PDF Preview endpoint**: `GET /api/purchase-orders/{id}/pdf/preview?token=JWT` (inline, query-param auth)
-- **Invoice preview button** added to Finance Center invoice rows (Eye icon opens PdfViewerDialog)
-- **Contract preview/download** added to Contracts page dropdown menu
-- **PO preview button** added to Purchase Orders page (detail view + list table)
-- All PDF endpoints use query-param token auth for iframe compatibility
+### Phase 13: PDF Viewer System
+- Reusable PdfViewerDialog component (iframe + Download + Full Screen)
+- Contract PDF Generation with SLA tier, line items, signature blocks
+- PO PDF Preview endpoint (query-param auth)
+- Theme Preview (sample PDF per theme)
+- Preview/Download wired into Invoices, Contracts, PO pages
+
+### Phase 14: Bug Fixes — Invoice Download + RustDesk Auto-Connect
+- **Invoice Download Fix**: Changed `window.open()` to hidden anchor click to avoid popup blocker issues. Applied across invoices and contracts
+- **RustDesk URI Fix**: Changed from incorrect `rustdesk://connection/new/{id}` to correct `rustdesk://{id}@{server_host}` format (per official RustDesk protocol spec). Updated both frontend `launchRustDesk()` in DeviceDetailPage and RemoteAccessPage, and backend `quick-connect` + device connect endpoints. Self-hosted server hostname is now extracted and included in URI for auto-routing.
 
 ## Test Reports
 - iteration_93: Portal APIs + Invoice Themes (100% backend 16/16)
@@ -43,21 +41,14 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 ## Backlog (Prioritized)
 
 ### P3 - Future
-- Decompose monolithic seed.py and navigation.js
 - Refactor TicketsPage.jsx (>3800 lines) & TechniciansPage.jsx
-- Bluetooth barcode scanner integration
 - Recharts console warnings fix
 - Missing aria-describedby on some DialogContent
-- Mobile-responsive optimization for field technicians
+- Mobile-responsive optimization
 
 ## Key API Endpoints
 - `/api/invoices/{id}/pdf?token=JWT` — Invoice PDF preview
-- `/api/invoices/{id}/pdf/download?token=JWT` — Invoice PDF download
 - `/api/contracts/{id}/pdf?token=JWT` — Contract PDF preview
-- `/api/contracts/{id}/pdf/download?token=JWT` — Contract PDF download
 - `/api/purchase-orders/{id}/pdf/preview?token=JWT` — PO PDF preview
-- `/api/invoice-themes` — GET all themes, POST create custom
-- `/api/invoice-themes/active` — GET/PUT active theme
 - `/api/invoice-themes/{id}/preview-pdf?token=JWT` — Theme sample PDF
-- `/api/portal-api/{token}/summary` — Public portal summary
-- `/api/settings/branding` — Platform branding config
+- `/api/rustdesk/quick-connect` — RustDesk connection (now returns correct URI)

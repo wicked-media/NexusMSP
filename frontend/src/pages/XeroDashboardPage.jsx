@@ -269,7 +269,14 @@ export default function XeroDashboardPage() {
 
   // PDF download & preview
   const downloadPdf = (inv) => {
-    window.open(`${API}/invoices/${inv.id}/pdf/download?token=${token}`, "_blank");
+    const a = document.createElement("a");
+    a.href = `${API}/invoices/${inv.id}/pdf/download?token=${token}`;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 200);
     toast.success(`Downloading ${inv.invoice_number}.pdf`);
   };
   const previewPdf = (inv) => {

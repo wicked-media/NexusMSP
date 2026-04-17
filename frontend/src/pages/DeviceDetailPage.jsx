@@ -70,8 +70,15 @@ export default function DeviceDetailPage() {
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
   // Launch RustDesk via hidden anchor (no blank tab)
-  const launchRustDesk = (rdId) => {
-    const uri = `rustdesk://connection/new/${rdId}`;
+  const launchRustDesk = (rdId, relayServer) => {
+    let uri;
+    if (relayServer) {
+      // Self-hosted: rustdesk://ID@relay_host
+      const host = relayServer.replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
+      uri = `rustdesk://${rdId}@${host}`;
+    } else {
+      uri = `rustdesk://${rdId}`;
+    }
     const a = document.createElement("a");
     a.href = uri;
     a.style.display = "none";
@@ -936,7 +943,7 @@ export default function DeviceDetailPage() {
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">Launch Connection</Label>
 
-                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
+                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id, connectDialog.relay_server || connectDialog.web_client_url); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
                   <Monitor className="w-5 h-5 mr-3" />
                   <div className="text-left">
                     <p className="text-sm font-medium">Open in RustDesk Client</p>

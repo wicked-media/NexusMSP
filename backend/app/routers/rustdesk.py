@@ -158,12 +158,24 @@ async def initiate_rustdesk_connection(device_id: str, current_user: dict = Depe
     relay = config.get("relay_server", "").strip()
     server_url = config.get("server_url", "").strip().rstrip("/")
 
+    # Build correct RustDesk URI
+    server_host = ""
+    if relay:
+        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    elif server_url:
+        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    
+    if server_host:
+        connection_url = f"rustdesk://{rd_id}@{server_host}"
+    else:
+        connection_url = f"rustdesk://{rd_id}"
+
     return {
         "message": "Connection initiated",
         "rustdesk_id": rd_id,
         "rustdesk_password": device.get("rustdesk_password"),
-        "connection_url": f"rustdesk://connection/new/{rd_id}",
-        "relay_server": relay,
+        "connection_url": connection_url,
+        "relay_server": relay or server_host,
         "server_url": server_url,
         "web_client_url": f"{server_url}" if server_url else None,
     }
@@ -288,11 +300,23 @@ async def quick_connect(data: dict, current_user: dict = Depends(get_current_use
         "status": "initiated", "started_at": datetime.now(timezone.utc).isoformat(), "ended_at": None,
     })
 
+    # Build correct RustDesk URI
+    server_host = ""
+    if relay:
+        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    elif server_url:
+        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    
+    if server_host:
+        connection_url = f"rustdesk://{rd_id}@{server_host}"
+    else:
+        connection_url = f"rustdesk://{rd_id}"
+
     return {
         "message": "Connection initiated",
         "rustdesk_id": rd_id,
-        "connection_url": f"rustdesk://connection/new/{rd_id}",
-        "relay_server": relay,
+        "connection_url": connection_url,
+        "relay_server": relay or server_host,
         "server_url": server_url,
         "web_client_url": f"{server_url}" if server_url else None,
     }
