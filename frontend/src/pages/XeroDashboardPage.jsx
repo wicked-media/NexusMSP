@@ -109,6 +109,10 @@ export default function XeroDashboardPage() {
   const [brandingForm, setBrandingForm] = useState({});
   const [brandingPreview, setBrandingPreview] = useState(null);
   const [savingBranding, setSavingBranding] = useState(false);
+  // Invoice PDF Themes
+  const [pdfThemes, setPdfThemes] = useState([]);
+  const [activePdfTheme, setActivePdfTheme] = useState("theme-modern");
+  const [savingTheme, setSavingTheme] = useState(false);
   // Dialogs
   const [payDialog, setPayDialog] = useState(null);
   const [payAmount, setPayAmount] = useState("");
@@ -160,15 +164,29 @@ export default function XeroDashboardPage() {
 
   const fetchBranding = async () => {
     try {
-      const [tplRes, setRes] = await Promise.all([
+      const [tplRes, setRes, pdfThemesRes, activeThemeRes] = await Promise.all([
         axios.get(`${API}/doc-branding/templates`, { headers }),
         axios.get(`${API}/doc-branding/settings`, { headers }),
+        axios.get(`${API}/invoice-themes`, { headers }),
+        axios.get(`${API}/invoice-themes/active`, { headers }),
       ]);
       setBrandingTemplates(tplRes.data);
       setBrandingSettings(setRes.data);
       const current = setRes.data[activeBrandingDoc] || {};
       setBrandingForm(current);
+      setPdfThemes(pdfThemesRes.data || []);
+      setActivePdfTheme(activeThemeRes.data?.active_theme_id || "theme-modern");
     } catch {}
+  };
+
+  const handleSetPdfTheme = async (themeId) => {
+    setSavingTheme(true);
+    try {
+      await axios.put(`${API}/invoice-themes/active`, { theme_id: themeId }, { headers });
+      setActivePdfTheme(themeId);
+      toast.success("Invoice PDF theme updated");
+    } catch { toast.error("Failed to update theme"); }
+    finally { setSavingTheme(false); }
   };
 
   const handleSaveBranding = async () => {
@@ -946,6 +964,56 @@ export default function XeroDashboardPage() {
                   </CardContent>
                 </Card>
               )}
+            </div>
+          </div>
+
+          {/* Invoice PDF Theme Picker */}
+          <Separator className="my-4" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2"><Palette className="w-5 h-5" />Invoice PDF Theme</h3>
+                <p className="text-sm text-muted-foreground">Choose the visual style for generated PDF invoices</p>
+              </div>
+              {savingTheme && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            </div>
+            <div className="grid grid-cols-5 gap-3" data-testid="pdf-theme-grid">
+              {pdfThemes.map(theme => {
+                const isActive = activePdfTheme === theme.id;
+                const colors = theme.preview_colors || {};
+                return (
+                  <div key={theme.id}
+                    onClick={() => handleSetPdfTheme(theme.id)}
+                    className={`relative rounded-xl border-2 cursor-pointer transition-all overflow-hidden ${isActive ? "border-primary ring-2 ring-primary/30 shadow-lg" : "border-border/40 hover:border-border hover:shadow-md"}`}
+                    data-testid={`pdf-theme-${theme.id}`}
+                  >
+                    {/* Mini preview */}
+                    <div className="h-24 relative">
+                      <div className="absolute inset-x-0 top-0 h-8" style={{ backgroundColor: colors.header || "#10b981" }} />
+                      <div className="absolute inset-x-0 top-8 h-1" style={{ backgroundColor: colors.accent || "#06b6d4" }} />
+                      <div className="absolute left-2 top-1.5 w-4 h-4 rounded bg-white/30" />
+                      <div className="absolute left-7 top-2 h-2 w-12 rounded bg-white/40" />
+                      <div className="absolute right-2 top-2 h-2 w-8 rounded bg-white/20" />
+                      {/* Line items mock */}
+                      <div className="absolute inset-x-2 top-11 space-y-1">
+                        <div className="h-1.5 rounded bg-muted-foreground/10" />
+                        <div className="h-1.5 rounded bg-muted-foreground/5 w-4/5" />
+                        <div className="h-1.5 rounded bg-muted-foreground/10" />
+                        <div className="h-1.5 rounded bg-muted-foreground/5 w-3/5" />
+                      </div>
+                      {/* Total */}
+                      <div className="absolute bottom-1 right-2 h-2 w-10 rounded" style={{ backgroundColor: colors.accent || "#06b6d4", opacity: 0.3 }} />
+                    </div>
+                    {/* Label */}
+                    <div className="p-2 bg-card">
+                      <p className="font-semibold text-xs truncate">{theme.name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{theme.description}</p>
+                      {isActive && <Badge className="mt-1 bg-primary/10 text-primary border-primary/20 text-[9px]">Active</Badge>}
+                      {!theme.is_builtin && <Badge variant="outline" className="mt-1 text-[9px] ml-1">Custom</Badge>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </TabsContent>

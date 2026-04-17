@@ -273,7 +273,7 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label className="text-xs">Company Logo (sidebar)</Label>
                 <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-                  {branding.company_logo_url ? <img src={branding.company_logo_url} alt="Logo" className="h-10 mx-auto mb-2 object-contain" /> : <Building className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  {branding.company_logo_url ? <img src={branding.company_logo_url} alt="Logo" className="h-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <Building className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
                   <input type="file" accept="image/*" className="hidden" id="logo-upload" onChange={async (e) => {
                     const file = e.target.files?.[0]; if (!file) return;
                     const formData = new FormData(); formData.append("file", file);
@@ -285,7 +285,7 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label className="text-xs">Sidebar Icon (small)</Label>
                 <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-                  {branding.company_icon_url ? <img src={branding.company_icon_url} alt="Icon" className="h-10 w-10 mx-auto mb-2 object-contain" /> : <Image className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  {branding.company_icon_url ? <img src={branding.company_icon_url} alt="Icon" className="h-10 w-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <Image className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
                   <input type="file" accept="image/*" className="hidden" id="icon-upload" onChange={async (e) => {
                     const file = e.target.files?.[0]; if (!file) return;
                     const formData = new FormData(); formData.append("file", file);
@@ -297,7 +297,7 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label className="text-xs">Invoice / PDF Logo</Label>
                 <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-                  {branding.invoice_logo_url ? <img src={branding.invoice_logo_url} alt="Invoice Logo" className="h-10 mx-auto mb-2 object-contain" /> : <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  {branding.invoice_logo_url ? <img src={branding.invoice_logo_url} alt="Invoice Logo" className="h-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
                   <input type="file" accept="image/*" className="hidden" id="invoice-logo-upload" onChange={async (e) => {
                     const file = e.target.files?.[0]; if (!file) return;
                     const formData = new FormData(); formData.append("file", file);

@@ -42,7 +42,7 @@ const LogoUploader = ({ label, logoUrl, logoType, apiBase, headers, onUpload }) 
         <div className="w-20 h-20 rounded-lg border-2 border-dashed border-border flex items-center justify-center bg-muted/30 overflow-hidden cursor-pointer"
           onClick={() => inputRef.current?.click()}>
           {logoUrl ? (
-            <img src={`${API}${logoUrl}`} alt={label} className="w-full h-full object-contain" />
+            <img src={logoUrl.startsWith("http") ? logoUrl : logoUrl.startsWith("/api/") ? logoUrl : `${API}${logoUrl}`} alt={label} className="w-full h-full object-contain" />
           ) : (
             <Image className="w-8 h-8 text-muted-foreground/30" />
           )}

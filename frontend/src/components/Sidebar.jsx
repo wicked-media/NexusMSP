@@ -351,8 +351,9 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
           {!collapsed && (
             <div className="flex items-center gap-2">
               {sidebarBrand?.company_icon_url ? (
-                <img src={sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" />
-              ) : (
+                <img src={sidebarBrand.company_icon_url.startsWith("http") ? sidebarBrand.company_icon_url : sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" onError={e => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }} />
+              ) : null}
+              {!sidebarBrand?.company_icon_url && (
                 <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
                   <Zap className="w-5 h-5 text-primary-foreground" />
                 </div>
@@ -362,7 +363,7 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
           )}
           {collapsed && (
             sidebarBrand?.company_icon_url ? (
-              <img src={sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" />
+              <img src={sidebarBrand.company_icon_url.startsWith("http") ? sidebarBrand.company_icon_url : sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" onError={e => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }} />
             ) : (
               <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
                 <Zap className="w-5 h-5 text-primary-foreground" />
