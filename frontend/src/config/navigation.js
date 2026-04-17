@@ -145,6 +145,7 @@ export const navGroups = [
           { path: "/doc-scanner", label: "Document Scanner" },
           { path: "/workflow-automation", label: "Workflow Builder" },
           { path: "/device-terminal", label: "Live Terminal" },
+          { path: "/alert-rules", label: "Alert Rules Engine" },
         ]
       },
     ]

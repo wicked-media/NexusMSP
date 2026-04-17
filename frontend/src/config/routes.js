@@ -210,6 +210,7 @@ export const routeConfig = [
   { path: "/scheduled-reports", component: page("ScheduledReportsPage"), auth: true, layout: true },
   { path: "/billing-portal", component: page("StripeBillingPortalPage"), auth: true, layout: true },
   { path: "/proposals", component: page("ProposalBuilderPage"), auth: true, layout: true },
+  { path: "/alert-rules", component: page("AlertRulesPage"), auth: true, layout: true },
 
   // Auth callback (no auth, no layout)
   { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
