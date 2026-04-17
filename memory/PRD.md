@@ -1,7 +1,7 @@
 # NexusOps - RMM/PSA Platform PRD
 
 ## Overview
-NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Army knife" — with 190+ backend routers and 60+ frontend pages covering every aspect of MSP operations.
+NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Army knife" — with 200+ backend routers and 75+ frontend pages covering every aspect of MSP operations.
 
 ## Tech Stack
 - **Frontend**: React, Shadcn UI, TailwindCSS, Recharts
@@ -25,125 +25,72 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 5. Technicians (email invites, leaderboard)
 
 ### Finance & Billing
-6. Xero Finance Center (Invoices, Estimates, Contacts, Aging, Branding)
+6. Xero Finance Center (Invoices, Estimates, Contacts, Aging, Branding, PDF Themes)
 7. Recurring Billing (MRR/ARR forecasting)
 8. Document Branding & Templates (4 builtin templates, custom)
 9. Time Tracking (billable hours, invoice generation, bulk entry)
-10. **Invoice PDF Export** (NEW - branded PDF generation, download, email with attachment)
+10. Invoice PDF Export (branded PDF generation with 5 theme options)
 
 ### Client Intelligence
-11. **Client Health Dashboard** (radar chart, risk/positive factors, alert thresholds, snapshots)
+11. Client Health Dashboard (radar chart, risk/positive factors)
 12. Client Risk Scoring
-13. Executive Reports (auto-generated, KPIs, trends, recommendations)
+13. Executive Reports
 14. QBR Generator
 
 ### Operations & Scheduling
-15. Morning Checks Dashboard (with email reports)
-16. Client Onboarding Wizard (Kanban board + templates)
-17. Smart Schedule / Dispatch (visual weekly calendar, map, route optimization)
+15. Morning Checks Dashboard
+16. Client Onboarding Wizard
+17. Smart Schedule / Dispatch
 18. Scripting Live Terminal
 
 ### Remote Access & Monitoring
-19. **Remote Access Hub** (UPDATED - 7 providers: RustDesk, MeshCentral, Splashtop, ConnectWise ScreenConnect, TeamViewer, AnyDesk, Apache Guacamole)
-20. License Management (seat tracking, cost optimization, expiry alerts)
+19. Remote Access Hub (7 providers)
+20. License Management
 
 ### Platform & Integrations
-21. Webhook Builder (CRUD, 17 event triggers, payload editor, test/toggle)
-22. Audit Trail (filterable timeline, export CSV, category breakdown)
+21. Webhook Builder
+22. Audit Trail
 23. Global Settings Hub
-24. Multi-Tenant Client Portal (2FA)
+24. Multi-Tenant Client Portal (2FA + public token-based portal view)
 
 ### Security & Compliance
 25. SOC / Security Operations
-26. Advanced MSP Modules (26 total including Vendor Scorecard, SLA Penalties, etc.)
+26. Advanced MSP Modules (26 total)
 
-## Features Completed This Session (Apr 11-16, 2026)
+## Features Completed (Apr 11-17, 2026)
 
-### Phase 1: Remote Access Integrations Tab
-- Added "Integrations" tab to Remote Access Hub page
-- 7 providers displayed with status cards (Self-Hosted/Cloud badges, feature tags)
-- Configure dialog with per-provider API key/URL fields
-- Enable/disable toggle switches per provider
-- Test Connection and Save Settings functionality
-- Docs links for each provider
+### Phases 1-9 (Previous sessions - see CHANGELOG.md for details)
+- Remote Access Integrations, Invoice PDF Export & Email, One-Time Payment Links
+- Remote Access Connect Fix, Payment Links Dashboard, Theme Settings System
+- Dashboard & Morning Checks Visual Overhaul
+- Remote Access Dialog Consistency + Device Agent & Disk Health
+- Login Page Wallpaper & Animated Features
 
-### Phase 2: Invoice PDF Export & Email
-- Invoice PDF generation via fpdf2 with branded headers, line items, totals
-- PDF download button added to every invoice row in Finance Center
-- PDF preview endpoint (inline) and download endpoint (attachment)
-- Query param token auth for PDF endpoints (new-tab compatible)
-- Invoice email endpoint now generates PDF and attaches to email
-- HTML email template with invoice summary table
-- Resend integration for real email sending (mocked when not configured)
-- Email history tracking with has_pdf field
+### Phase 10: Workflow Automation, AI Triage, Recurring Billing Overhaul (Apr 16, 2026)
+- Workflow automation builder with visual rule chains
+- AI ticket triage system
+- Device terminal scripting
+- Scheduled reports system
+- Recurring billing complete overhaul with auto-generation scheduler in server.py
 
-### Phase 3: One-Time Payment Links
-- Generate unique, expiring payment links per invoice
-- Public payment page (no auth) with invoice summary, line items, payment history
-- 3 payment methods: Stripe Card (Checkout), BECS Direct Debit (AU banks), Manual Bank Transfer
-- Partial payments — pay any amount with one method, rest with another
-- Links expire after configurable days or once fully paid
-- Admin can confirm bank transfers and revoke links
-- Payment link button + dialog in invoice table actions
+### Phase 11: CRM Proposals, White-Label Branding, Enhanced Modules (Apr 16, 2026)
+- Complete CRM Proposal Builder (Draft -> Send -> Accept -> Convert)
+- Global Platform White-Label Branding System
+- Overhauled: Profitability Heatmap, Contract Profit, CSAT Surveys, Patch Compliance, Topology, Alert Rules
+- Auto-Ticket Merge with settings toggle
+- Warranty Tracker page overhaul
 
-### Phase 4: Remote Access Connect Fix (Critical Bug)
-- Fixed: `window.open("rustdesk://")` was opening blank tabs instead of launching RustDesk
-- Replaced with hidden anchor `click()` — no blank tabs
-- Corrected URI format: `rustdesk://connection/new/{id}`
-- Connection dialog with 3 options: Native Client, Web Client, Copy ID
-- Backend returns relay_server and web_client_url for proper routing
-- Status bar now says "Configured" instead of misleading "Connected"
-- Troubleshooting guidance in connect dialog
-
-### Phase 5: Payment Links Dashboard
-- New "Payment Links" tab in Finance Center
-- Summary stat cards: Active, Completed, Pending Transfers, Expired/Revoked
-- Pending Bank Transfer Confirmations queue with one-click Confirm buttons
-- All Payment Links table with status, methods, payment history, copy/revoke actions
-
-### Phase 6: Theme Settings System
-- Removed Gradient MSP module (GradientPage.jsx + gradient.py + nav entry)
-- 6 theme presets: Midnight, Oceanic, Carbon, Arctic, Ember, Phantom
-- 8 accent colors: Emerald, Blue, Cyan, Violet, Orange, Red, Sky, Rose
-- 6 Google Fonts: Inter, JetBrains Mono, DM Sans, Space Grotesk, IBM Plex Sans, Outfit
-- All preferences persist via localStorage
-- CSS variables (--primary, --font-sans) apply globally to all Shadcn components
-
-### Phase 7: Dashboard & Morning Checks Visual Overhaul (Apr 16, 2026)
-- **Dashboard**: Glass-morphism hero banner, gradient text greeting, attention strip, animated metric cards with gradient overlays, ticket volume AreaChart, fleet health PieChart, operational insights (failure predictions, backups, compliance), open tickets/alerts/activity feed columns, quick search modal (Ctrl+K)
-- **Morning Checks**: Matching glass-morphism hero with status badge, animated HealthGauge SVG with glow effects, animated metric cards, color-coded issues strip, offline devices/critical tickets/backup failures with gradient top borders, RAG Client Health Board, quick stats row, overdue invoices, phone system status, scheduled tasks, all-clear message
-
-### Phase 8: Remote Access Dialog Consistency + Device Agent & Disk Health (Apr 16, 2026)
-- **Remote Access Dialog Fix**: Replaced old-style 4-button dialog in DeviceDetailPage with the same 3-option dialog from Remote Access Hub: Open in RustDesk Client (hidden anchor launch, no blank tabs), Open Web Client, Copy ID to Clipboard, plus password display, relay server info, and troubleshooting tips
-- **Device Agent Scripts**: PowerShell (Windows) and Bash (Linux/macOS) agent scripts auto-generated per device via `/api/devices/{device_id}/agent-script`. Scripts collect system info, disk SMART health, CPU/RAM/disk usage, network info, security status and report back via `/api/devices/agent/report`
-- **Disk Health Monitoring**: New `device_disks` collection with per-drive SMART data (status, temperature, power hours, reallocated/pending sectors, model, serial, firmware, interface). Drive Health card added to DeviceDetailPage overview tab with usage bars, SMART badges, and health warnings
-- **Seed Data**: 15 disk entries across 10 devices with realistic hardware (Samsung, Seagate, Intel, WD, SK Hynix, Apple SSDs/HDDs/NVMe) including Warning status disks with sector issues
-- **Bulk Deploy Agent**: Dropdown in Devices list page bulk actions toolbar to download agent scripts for multiple selected devices at once
-
-### Phase 9: Login Page Wallpaper & Animated Features (Apr 16, 2026)
-- **Custom Login Wallpaper**: Upload custom 1920x1080 images in My Settings > Display > Login Page Wallpaper
-- **Template Gallery**: 6 curated wallpaper templates (Cyber City, Neon Glow, Dark Workspace, Tech Setup, Neon Nights, Minimalist) from Unsplash
-- **Overlay Control**: Adjustable overlay darkness slider (30-90%) for wallpaper readability
-- **Animated Login Features**: Time-of-day greeting with bouncing emoji (sun/moon), typing effect headline cycling through "Command Center / NOC Dashboard / Service Desk / Asset Manager / Security Hub", interactive particle network canvas with 60 nodes and connecting lines, staggered entrance animations
+### Phase 12: Client Portal Overhaul + Branded PDF Invoice Themes (Apr 17, 2026)
+- **Fixed client_portal.py critical syntax error** — duplicate routes inserted mid-return-statement broke all portal APIs (200 routers now vs 198)
+- **Client Portal View Page** (`/portal/:token`) — public token-based portal with Overview, Devices, Tickets, Invoices tabs + Submit Ticket dialog
+- **Invoice PDF Themes** — 5 built-in themes (Modern Professional, Classic Business, Minimal Clean, Bold Impact, Executive) with theme-specific headers, line item styles, footers, and color schemes
+- **Invoice Theme Picker UI** in Finance Center Branding tab with visual mini-previews and one-click activation
+- **Icon Branding Fix** — Fixed double `/api/` prefix in WhiteLabelPage logo preview, added server-side validation to filter out test placeholder images (<200 bytes), added onError fallbacks for broken images
+- **Finance Center TabsList fix** — Changed from grid-cols-9 to flex-wrap h-auto to properly accommodate 10 tabs
 
 ## Test Reports
-- iteration_76.json: Morning Check Email, Branding, Tech Invites, Onboarding Kanban (100%)
-- iteration_77.json: License Mgmt, Webhook Builder, Exec Reports, Audit Trail, Time Tracking, Smart Schedule (100%)
-- iteration_78.json: Client Health Dashboard (100%)
-- iteration_79.json: Remote Access Integrations + Invoice PDF/Email (100% - 20/20 backend, all frontend verified)
-- iteration_80.json: Payment Links — CRUD, public page, 3 payment methods, partial payments (100% - 22/22 backend)
-- iteration_81.json: RustDesk Connect Fix — URI format, dialog, 3 connection methods (100% - 10/10 backend)
-- iteration_82.json: Payment Links Dashboard (100% - 12/12 backend, all frontend verified)
-- iteration_83.json: Theme System + Gradient MSP Removal (100% - 12/12 backend, all frontend verified)
-- iteration_84.json: Dashboard & Morning Checks Visual Overhaul (100% - 21/21 frontend elements verified)
-- iteration_85.json: Remote Access Dialog Fix + Device Agent & Disk Health (100% - 17/17 backend, all frontend verified)
-- iteration_86.json: Login Wallpaper + Animated Login Features (100% - 11/11 backend, all frontend verified)
-- iteration_87.json: P1/P2/Revenue Batch — Workflows, Terminal, Billing Portal, Scheduled Reports, AI Triage (100% - 33/33 backend, all frontend verified)
-- iteration_88.json: Recurring Billing Overhaul — Full CRUD, templates, generate-now, line items, MRR/ARR stats (100% - 18/18 backend, all frontend verified)
-- iteration_89.json: Proposals + Contracts + Portal — Full proposal lifecycle, price increases, portal invoices/devices/health (100% - 20/20 backend, all frontend verified)
-- iteration_90.json: Platform Branding & White-Label — Settings hub, company name/logo/colors/login customization, sidebar+login page branding (100% - 14/14 backend, all frontend verified)
-- iteration_91.json: Enhanced Modules Batch — Profitability Heatmap, Contract Profit, CSAT Surveys, Patch Compliance, Network Topology, Alert Rules Engine, AI Copilot (100% - 16/16 backend, all 6 modules verified)
-- iteration_92.json: Auto-Ticket Merge + Product Enhancements — Vendor management, warranty tracker, product margins/low-stock, ticket merge with on/off setting (tested backend + frontend)
+- iteration_84-92: Previous sessions (100% pass rates)
+- iteration_93: Portal APIs + Invoice Themes + PDF Generation (100% backend 16/16, frontend 95%)
 
 ## Backlog (Prioritized)
 
@@ -156,17 +103,13 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - Mobile-responsive optimization for field technicians
 
 ## Key API Endpoints
-- `/api/remote-providers` — GET all providers, PUT settings, PUT toggle, POST test
-- `/api/remote-providers/{id}/settings` — GET/PUT provider config
-- `/api/invoices/{id}/pdf?token=JWT` — GET PDF preview (query param auth)
+- `/api/invoice-themes` — GET all themes, POST create custom theme
+- `/api/invoice-themes/active` — GET/PUT active theme selection
+- `/api/portal-api/{token}/summary` — Public portal summary
+- `/api/portal-api/{token}/tickets` — GET/POST portal tickets
+- `/api/portal-api/{token}/invoices` — GET portal invoices
+- `/api/portal-api/{token}/devices/health` — GET device health
+- `/api/settings/branding` — GET/PUT platform branding
+- `/api/settings/branding/upload-logo?logo_type=icon` — POST logo upload
+- `/api/invoices/{id}/pdf?token=JWT` — GET PDF preview
 - `/api/invoices/{id}/pdf/download?token=JWT` — GET PDF download
-- `/api/xero/invoices/{id}/email` — POST send invoice email with PDF
-- `/api/client-health/*` — Health dashboard, scores, detail, snapshot, alert config
-- `/api/license-management/*` — License CRUD + overview
-- `/api/webhook-builder/*` — Webhook CRUD + triggers + test
-- `/api/executive-reports/*` — Report list + generate
-- `/api/audit-trail/*` — Events + summary with filters
-- `/api/time-entries/*` — Time CRUD + generate-invoice + bulk
-- `/api/devices/{id}/disks` — GET disk health data per device
-- `/api/devices/{id}/agent-script?os_type=windows|linux` — GET downloadable agent script
-- `/api/devices/agent/report` — POST agent telemetry with disk SMART data

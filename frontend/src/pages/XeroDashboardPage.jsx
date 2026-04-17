@@ -368,7 +368,7 @@ export default function XeroDashboardPage() {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-9 w-full">
+        <TabsList className="flex flex-wrap h-auto w-full gap-1">
           <TabsTrigger value="overview" data-testid="tab-overview"><BarChart3 className="w-3 h-3 mr-1" />Overview</TabsTrigger>
           <TabsTrigger value="invoices" data-testid="tab-invoices"><Receipt className="w-3 h-3 mr-1" />Invoices ({invoices.length})</TabsTrigger>
           <TabsTrigger value="estimates" data-testid="tab-estimates"><FileText className="w-3 h-3 mr-1" />Estimates ({estimates.length})</TabsTrigger>
@@ -377,7 +377,7 @@ export default function XeroDashboardPage() {
           <TabsTrigger value="accounts" data-testid="tab-accounts"><DollarSign className="w-3 h-3 mr-1" />Accounts ({accounts.length})</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history"><History className="w-3 h-3 mr-1" />Sync Log</TabsTrigger>
           <TabsTrigger value="aging" data-testid="tab-aging"><AlertTriangle className="w-3 h-3 mr-1" />Aging</TabsTrigger>
-          <TabsTrigger value="pay-links" data-testid="tab-pay-links"><Link2 className="w-3 h-3 mr-1" />Payment Links ({paymentLinks.length})</TabsTrigger>
+          <TabsTrigger value="pay-links" data-testid="tab-pay-links"><Link2 className="w-3 h-3 mr-1" />Pay Links ({paymentLinks.length})</TabsTrigger>
           <TabsTrigger value="branding" data-testid="tab-branding" onClick={() => { if (!brandingTemplates.builtin.length) fetchBranding(); }}><Palette className="w-3 h-3 mr-1" />Branding</TabsTrigger>
         </TabsList>
 

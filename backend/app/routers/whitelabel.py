@@ -16,7 +16,27 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @router.get("/settings/branding")
 async def get_branding(current_user: dict = Depends(get_current_user)):
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    return branding or _default_branding()
+    result = branding or _default_branding()
+    # Validate logo URLs to filter out test placeholders
+    for key in ["company_logo_url", "company_icon_url", "invoice_logo_url", "letterhead_logo_url", "favicon_url"]:
+        if key in result:
+            result[key] = _validate_logo_url(result.get(key, ""))
+    return result
+
+
+def _validate_logo_url(url):
+    """Return URL only if the actual file is a real image (not a test placeholder)."""
+    if not url:
+        return ""
+    if url.startswith("/api/uploads/"):
+        fp = os.path.join("/app/backend", url.replace("/api/", "").lstrip("/"))
+    elif url.startswith("/uploads/"):
+        fp = os.path.join("/app/backend", url.lstrip("/"))
+    else:
+        return url
+    if os.path.isfile(fp) and os.path.getsize(fp) > 200:
+        return url
+    return ""
 
 
 @router.get("/settings/branding/public")
@@ -26,9 +46,9 @@ async def get_branding_public():
     b = branding or _default_branding()
     return {
         "company_name": b.get("company_name", "NexusOps"),
-        "company_logo_url": b.get("company_logo_url", ""),
-        "company_icon_url": b.get("company_icon_url", ""),
-        "favicon_url": b.get("favicon_url", ""),
+        "company_logo_url": _validate_logo_url(b.get("company_logo_url", "")),
+        "company_icon_url": _validate_logo_url(b.get("company_icon_url", "")),
+        "favicon_url": _validate_logo_url(b.get("favicon_url", "")),
         "primary_color": b.get("primary_color", "#10b981"),
         "accent_color": b.get("accent_color", "#06b6d4"),
         "login_tagline": b.get("login_tagline", ""),
