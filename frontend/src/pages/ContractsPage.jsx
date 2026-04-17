@@ -23,9 +23,12 @@ import {
   DollarSign,
   Calendar,
   RefreshCw,
-  Shield
+  Shield,
+  Eye,
+  Download
 } from "lucide-react";
 import { format } from "date-fns";
+import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 
 const slaShieldConfig = {
   platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
@@ -79,6 +82,7 @@ export default function ContractsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLineItemDialogOpen, setIsLineItemDialogOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState(null);
+  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "" });
   const [formData, setFormData] = useState({
     client_id: "",
     name: "",
@@ -603,6 +607,12 @@ export default function ContractsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setPdfViewer({ open: true, url: `${API}/contracts/${contract.id}/pdf?token=${token}`, title: contract.name, downloadUrl: `${API}/contracts/${contract.id}/pdf/download?token=${token}` })}>
+                                <Eye className="w-3.5 h-3.5 mr-2" />Preview PDF
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => window.open(`${API}/contracts/${contract.id}/pdf/download?token=${token}`, "_blank")}>
+                                <Download className="w-3.5 h-3.5 mr-2" />Download PDF
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditDialog(contract)}>
                                 Edit
                               </DropdownMenuItem>
@@ -634,6 +644,14 @@ export default function ContractsPage() {
           )}
         </CardContent>
       </Card>
+
+      <PdfViewerDialog
+        open={pdfViewer.open}
+        onOpenChange={v => setPdfViewer(p => ({ ...p, open: v }))}
+        pdfUrl={pdfViewer.url}
+        title={pdfViewer.title}
+        downloadUrl={pdfViewer.downloadUrl}
+      />
     </div>
   );
 }

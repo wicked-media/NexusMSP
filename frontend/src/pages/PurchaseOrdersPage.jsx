@@ -22,7 +22,7 @@ import {
   BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers
 } from "lucide-react";
 import { format } from "date-fns";
-
+import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
   pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
@@ -69,6 +69,7 @@ export default function PurchaseOrdersPage() {
   const [spendAnalytics, setSpendAnalytics] = useState(null);
   const [analyticsTab, setAnalyticsTab] = useState("list");
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "" });
   const [form, setForm] = useState({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
@@ -260,6 +261,14 @@ export default function PurchaseOrdersPage() {
       toast.success("PDF Downloaded");
     } catch { toast.error("Failed to generate PDF"); }
     finally { setPdfLoading(false); }
+  };
+  const handlePreviewPdf = (po) => {
+    setPdfViewer({
+      open: true,
+      url: `${API}/purchase-orders/${po.id}/pdf/preview?token=${token}`,
+      title: `PO ${po.po_number}`,
+      downloadUrl: "",
+    });
   };
 
   // --- Email Vendor ---
@@ -779,6 +788,9 @@ export default function PurchaseOrdersPage() {
                 )}
                 <Separator />
                 {/* PDF & Email */}
+                <Button variant="outline" className="w-full text-violet-400 border-violet-500/30 hover:bg-violet-500/10" onClick={() => handlePreviewPdf(po)} data-testid="preview-po-pdf">
+                  <Eye className="w-4 h-4 mr-1" />Preview PDF
+                </Button>
                 <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handleDownloadPdf(po)} disabled={pdfLoading} data-testid="download-po-pdf">
                   {pdfLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}Download PDF
                 </Button>
@@ -989,6 +1001,7 @@ export default function PurchaseOrdersPage() {
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Preview PDF" onClick={() => handlePreviewPdf(po)}><Eye className="w-3 h-3 text-violet-400" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Download PDF" onClick={() => handleDownloadPdf(po)}><Download className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Duplicate" onClick={() => handleDuplicate(po)}><Copy className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(po.id)}><Trash2 className="w-3 h-3" /></Button>
@@ -1003,6 +1016,13 @@ export default function PurchaseOrdersPage() {
       </Card>
 
       {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}
+      <PdfViewerDialog
+        open={pdfViewer.open}
+        onOpenChange={v => setPdfViewer(p => ({ ...p, open: v }))}
+        pdfUrl={pdfViewer.url}
+        title={pdfViewer.title}
+        downloadUrl={pdfViewer.downloadUrl}
+      />
     </div>
   );
 }

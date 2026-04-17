@@ -532,3 +532,485 @@ async def download_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_f
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{inv_num}.pdf"'}
     )
+
+
+# ──────── INVOICE THEME PREVIEW ────────
+
+@router.get("/invoice-themes/{theme_id}/preview-pdf")
+async def preview_theme_pdf(theme_id: str, user: dict = Depends(_get_user_from_token)):
+    """Generate a sample invoice PDF using a specific theme for preview."""
+    from app.routers.invoice_themes import BUILT_IN_THEMES
+    theme_config = None
+    for t in BUILT_IN_THEMES:
+        if t["id"] == theme_id:
+            theme_config = t.get("config", {})
+            break
+    if not theme_config:
+        custom = await db.invoice_themes.find_one({"id": theme_id}, {"_id": 0})
+        if custom:
+            theme_config = custom.get("config", {})
+    if not theme_config:
+        theme_config = {}
+
+    sample_invoice = {
+        "invoice_number": "INV-PREVIEW",
+        "client_name": "Acme Corporation Pty Ltd",
+        "client_email": "accounts@acmecorp.com.au",
+        "due_date": "2026-05-15",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "sent",
+        "payment_status": "unpaid",
+        "line_items": [
+            {"name": "Managed IT Services", "description": "Monthly retainer", "quantity": 1, "unit_price": 2500.00},
+            {"name": "Microsoft 365 Licenses", "description": "Business Premium x20", "quantity": 20, "unit_price": 33.00},
+            {"name": "Firewall Maintenance", "description": "FortiGate 60F", "quantity": 1, "unit_price": 150.00},
+            {"name": "Backup & DR Service", "description": "Veeam Cloud", "quantity": 5, "unit_price": 45.00},
+        ],
+        "subtotal": 3535.00,
+        "tax_rate": 10,
+        "tax": 353.50,
+        "total": 3888.50,
+        "amount_paid": 0,
+        "discount": 0,
+        "notes": "Payment terms: Net 30. Please reference invoice number on all remittances.",
+    }
+
+    branding = await _get_branding()
+    pdf_bytes = generate_invoice_pdf(sample_invoice, branding, theme_config)
+
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="theme-preview.pdf"'}
+    )
+
+
+# ──────── CONTRACT PDF ────────
+
+def generate_contract_pdf(contract, line_items, branding=None):
+    """Generate a professional branded contract PDF."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.add_page()
+
+    company_name = "NexusOps"
+    primary_color = (59, 130, 246)
+    accent_color = (6, 182, 212)
+    logo_path = None
+
+    if branding:
+        company_name = branding.get("company_name", "NexusOps")
+        primary_color = _hex_to_rgb(branding.get("primary_color", "#3B82F6"))
+        accent_color = _hex_to_rgb(branding.get("accent_color", "#06B6D4"), (6, 182, 212))
+        for logo_key in ["company_logo_url", "invoice_logo_url"]:
+            logo_url = branding.get(logo_key, "")
+            if logo_url:
+                if logo_url.startswith("/api/uploads/"):
+                    fp = os.path.join("/app/backend", logo_url.replace("/api/", "").lstrip("/"))
+                elif logo_url.startswith("/uploads/"):
+                    fp = os.path.join("/app/backend", logo_url.lstrip("/"))
+                else:
+                    fp = os.path.join(UPLOAD_DIR, os.path.basename(logo_url))
+                if os.path.isfile(fp) and os.path.getsize(fp) > 100:
+                    logo_path = fp
+                    break
+
+    cn = _safe_latin(company_name)
+
+    # Header
+    pdf.set_fill_color(*primary_color)
+    pdf.rect(0, 0, 210, 38, 'F')
+    pdf.set_fill_color(*accent_color)
+    pdf.rect(0, 36, 210, 2, 'F')
+
+    x_text = 12
+    if logo_path:
+        try:
+            pdf.image(logo_path, 10, 6, 25, 25)
+            x_text = 38
+        except Exception:
+            pass
+
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(x_text, 7)
+    pdf.cell(100, 10, cn)
+    pdf.set_font("Helvetica", "", 26)
+    pdf.set_xy(110, 4)
+    pdf.cell(90, 14, "SERVICE CONTRACT", align="R")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_xy(110, 22)
+    pdf.cell(90, 6, f"#{contract.get('id', 'N/A')[:12].upper()}", align="R")
+
+    # Contract details
+    pdf.set_y(45)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*primary_color)
+    pdf.cell(100, 5, "CLIENT")
+    pdf.cell(90, 5, "CONTRACT DETAILS", align="R")
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(30, 30, 30)
+    client_name = _safe_latin(contract.get("client_name", "N/A"))
+    pdf.cell(100, 7, client_name, ln=False)
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    contract_name = _safe_latin(contract.get("name", "Service Agreement"))
+    pdf.cell(90, 7, contract_name, align="R")
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(100, 100, 100)
+    ctype = (contract.get("contract_type", "managed_services") or "").replace("_", " ").title()
+    pdf.cell(100, 5, f"Type: {ctype}", ln=False)
+    pdf.cell(90, 5, f"Start: {contract.get('start_date', 'N/A')[:10]}", align="R")
+    pdf.ln()
+
+    sla = (contract.get("sla_tier", "standard") or "standard").title()
+    pdf.cell(100, 5, f"SLA Tier: {sla}", ln=False)
+    end_date = contract.get("end_date", "")
+    pdf.cell(90, 5, f"End: {end_date[:10] if end_date else 'Open-ended'}", align="R")
+    pdf.ln()
+
+    freq = (contract.get("billing_frequency", "monthly") or "monthly").title()
+    pdf.cell(100, 5, f"Billing: {freq}", ln=False)
+    status = (contract.get("status", "active") or "active").title()
+    auto_renew = "Yes" if contract.get("auto_renew") else "No"
+    pdf.cell(90, 5, f"Status: {status}  |  Auto-renew: {auto_renew}", align="R")
+    pdf.ln(10)
+
+    # SLA Box
+    pdf.set_fill_color(*accent_color)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(190, 8, _safe_latin(f"   SLA TIER: {sla.upper()} - Service Level Agreement"), 0, 1, "L", True)
+    pdf.ln(2)
+
+    sla_details = {
+        "Platinum": "1-hour response, 4-hour resolution, 24/7 coverage, dedicated account manager",
+        "Gold": "4-hour response, 8-hour resolution, business hours + after-hours emergency",
+        "Silver": "8-hour response, 24-hour resolution, business hours coverage",
+        "Bronze": "24-hour response, 48-hour resolution, business hours coverage",
+        "Standard": "Next business day response, best-effort resolution",
+    }
+    sla_desc = sla_details.get(sla, sla_details["Standard"])
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(80, 80, 80)
+    pdf.multi_cell(190, 4, sla_desc)
+    pdf.ln(5)
+
+    # Line items
+    if line_items:
+        col_w = [80, 30, 25, 30, 25]
+        headers_list = ["Service", "Frequency", "Qty", "Unit Price", "Total"]
+        pdf.set_fill_color(*primary_color)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 9)
+        for i, h in enumerate(headers_list):
+            al = "R" if i >= 3 else "C" if i in (1, 2) else "L"
+            pdf.cell(col_w[i], 9, f"  {h}" if i == 0 else h, 0, 0, al, True)
+        pdf.ln()
+
+        pdf.set_font("Helvetica", "", 9)
+        for idx, li in enumerate(line_items):
+            if idx % 2 == 1:
+                pdf.set_fill_color(245, 247, 250)
+            else:
+                pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(40, 40, 40)
+            name = _safe_latin(str(li.get("name", ""))[:40])
+            freq_li = (li.get("billing_frequency", "monthly") or "monthly").title()
+            qty = li.get("quantity", 1)
+            price = float(li.get("unit_price", 0))
+            total = qty * price
+            pdf.cell(col_w[0], 8, f"  {name}", 0, 0, "L", True)
+            pdf.cell(col_w[1], 8, freq_li, 0, 0, "C", True)
+            pdf.cell(col_w[2], 8, str(qty), 0, 0, "C", True)
+            pdf.cell(col_w[3], 8, f"${price:,.2f}", 0, 0, "R", True)
+            pdf.cell(col_w[4], 8, f"${total:,.2f}", 0, 1, "R", True)
+
+        pdf.set_draw_color(*primary_color)
+        pdf.set_line_width(0.5)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.set_line_width(0.2)
+        pdf.ln(5)
+
+    # Contract Value
+    value = float(contract.get("value", 0))
+    if value > 0:
+        box_x = 120
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(30, 30, 30)
+        pdf.set_xy(box_x, pdf.get_y())
+        pdf.cell(40, 8, f"{freq} Value:", 0, 0, "R")
+        pdf.cell(40, 8, f"${value:,.2f}", 0, 1, "R")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.set_xy(box_x, pdf.get_y())
+        annual = value * (12 if freq == "Monthly" else 4 if freq == "Quarterly" else 1)
+        pdf.cell(80, 6, f"Annual value: ${annual:,.2f}", 0, 1, "R")
+        pdf.ln(3)
+
+    # Notes
+    notes = _safe_latin(contract.get("notes", ""))
+    if notes:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*primary_color)
+        pdf.cell(0, 5, "NOTES / TERMS", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(0, 5, notes[:600])
+
+    # Signature block
+    pdf.ln(10)
+    pdf.set_draw_color(180, 180, 180)
+    y_sig = pdf.get_y()
+    if y_sig > 240:
+        pdf.add_page()
+        y_sig = 20
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*primary_color)
+    pdf.cell(0, 5, "SIGNATURES", ln=True)
+    pdf.ln(3)
+
+    pdf.set_draw_color(180, 180, 180)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    # Provider
+    pdf.cell(90, 5, f"For: {cn}")
+    pdf.cell(10, 5, "")
+    pdf.cell(90, 5, f"For: {client_name}")
+    pdf.ln(15)
+    pdf.line(10, pdf.get_y(), 95, pdf.get_y())
+    pdf.line(110, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(2)
+    pdf.cell(90, 5, "Authorized Signature")
+    pdf.cell(10, 5, "")
+    pdf.cell(90, 5, "Client Signature")
+    pdf.ln(8)
+    pdf.line(10, pdf.get_y(), 95, pdf.get_y())
+    pdf.line(110, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(2)
+    pdf.cell(90, 5, "Date")
+    pdf.cell(10, 5, "")
+    pdf.cell(90, 5, "Date")
+
+    # Footer
+    pdf.set_y(-25)
+    pdf.set_draw_color(*accent_color)
+    pdf.set_line_width(0.8)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(140, 140, 140)
+    footer = _safe_latin(branding.get("invoice_footer_text", "") if branding else "")
+    if footer:
+        pdf.cell(0, 4, footer[:120], ln=True, align="C")
+    pdf.cell(0, 4, f"Generated by {cn} on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+
+    return pdf.output()
+
+
+@router.get("/contracts/{contract_id}/pdf")
+async def get_contract_pdf(contract_id: str, user: dict = Depends(_get_user_from_token)):
+    """Generate and return contract as PDF for preview."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    line_items = await db.contract_line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(100)
+    branding = await _get_branding()
+    pdf_bytes = generate_contract_pdf(contract, line_items, branding)
+    name = _safe_latin(contract.get("name", "contract"))
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{name}.pdf"'}
+    )
+
+
+@router.get("/contracts/{contract_id}/pdf/download")
+async def download_contract_pdf(contract_id: str, user: dict = Depends(_get_user_from_token)):
+    """Download contract as PDF attachment."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    line_items = await db.contract_line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(100)
+    branding = await _get_branding()
+    pdf_bytes = generate_contract_pdf(contract, line_items, branding)
+    name = _safe_latin(contract.get("name", "contract"))
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'}
+    )
+
+
+# ──────── PO PDF (query-param token auth for iframe) ────────
+
+@router.get("/purchase-orders/{po_id}/pdf/preview")
+async def preview_po_pdf(po_id: str, user: dict = Depends(_get_user_from_token)):
+    """Preview PO as inline PDF (query param auth for iframe)."""
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    from fpdf import FPDF
+
+    company_name = branding.get("company_name", "NexusOps")
+    primary = _hex_to_rgb(branding.get("primary_color", "#3B82F6"))
+    accent = _hex_to_rgb(branding.get("accent_color", "#06B6D4"), (6, 182, 212))
+
+    logo_path = None
+    for key in ["company_logo_url", "invoice_logo_url"]:
+        url = branding.get(key, "")
+        if url:
+            if url.startswith("/api/uploads/"):
+                fp = os.path.join("/app/backend", url.replace("/api/", "").lstrip("/"))
+            elif url.startswith("/uploads/"):
+                fp = os.path.join("/app/backend", url.lstrip("/"))
+            else:
+                fp = os.path.join(UPLOAD_DIR, os.path.basename(url))
+            if os.path.isfile(fp) and os.path.getsize(fp) > 100:
+                logo_path = fp
+                break
+
+    cn = _safe_latin(company_name)
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.add_page()
+
+    # Header
+    pdf.set_fill_color(*primary)
+    pdf.rect(0, 0, 210, 35, 'F')
+    pdf.set_fill_color(*accent)
+    pdf.rect(0, 33, 210, 2, 'F')
+    x_text = 12
+    if logo_path:
+        try:
+            pdf.image(logo_path, 10, 5, 25, 25)
+            x_text = 38
+        except Exception:
+            pass
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(x_text, 7)
+    pdf.cell(100, 10, cn)
+    pdf.set_font("Helvetica", "", 28)
+    pdf.set_xy(120, 4)
+    pdf.cell(80, 14, "PURCHASE ORDER", align="R")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_xy(120, 20)
+    pdf.cell(80, 6, f"#{po.get('po_number', 'N/A')}", align="R")
+
+    # Vendor details
+    pdf.set_y(42)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*primary)
+    pdf.cell(100, 5, "VENDOR")
+    pdf.cell(90, 5, "ORDER DETAILS", align="R")
+    pdf.ln()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(100, 7, _safe_latin(po.get("vendor", "N/A")), ln=False)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(90, 7, f"PO #: {po.get('po_number', 'N/A')}", align="R")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(100, 5, f"Contact: {_safe_latin(po.get('vendor_contact', ''))}", ln=False)
+    pdf.cell(90, 5, f"Date: {str(po.get('created_at', ''))[:10]}", align="R")
+    pdf.ln()
+    pdf.cell(100, 5, f"Email: {_safe_latin(po.get('vendor_email', ''))}", ln=False)
+    pdf.cell(90, 5, f"Expected: {po.get('expected_delivery', 'N/A')}", align="R")
+    pdf.ln()
+    pdf.cell(100, 5, "", ln=False)
+    status = (po.get("status") or "draft").replace("_", " ").title()
+    pdf.cell(90, 5, f"Status: {status}", align="R")
+    pdf.ln(8)
+
+    # Line items
+    col_w = [80, 20, 35, 25, 30]
+    headers_list = ["Item", "Qty", "Unit Price", "Received", "Total"]
+    pdf.set_fill_color(*primary)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+    for i, h in enumerate(headers_list):
+        al = "R" if i >= 2 else "C" if i == 1 else "L"
+        pdf.cell(col_w[i], 9, f"  {h}" if i == 0 else h, 0, 0, al, True)
+    pdf.ln()
+    for idx, li in enumerate(po.get("line_items", [])):
+        pdf.set_fill_color(245, 247, 250) if idx % 2 == 1 else pdf.set_fill_color(255, 255, 255)
+        pdf.set_text_color(40, 40, 40)
+        pdf.set_font("Helvetica", "", 9)
+        name = _safe_latin(str(li.get("product_name", li.get("name", "")))[:40])
+        qty = li.get("quantity", 0)
+        price = float(li.get("unit_price", 0))
+        received = li.get("received_qty", 0)
+        total = qty * price
+        pdf.cell(col_w[0], 8, f"  {name}", 0, 0, "L", True)
+        pdf.cell(col_w[1], 8, str(qty), 0, 0, "C", True)
+        pdf.cell(col_w[2], 8, f"${price:,.2f}", 0, 0, "R", True)
+        pdf.cell(col_w[3], 8, f"{received}/{qty}", 0, 0, "C", True)
+        pdf.cell(col_w[4], 8, f"${total:,.2f}", 0, 1, "R", True)
+
+    pdf.set_draw_color(*primary)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.ln(5)
+
+    # Totals
+    box_x = 120
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.set_xy(box_x, pdf.get_y())
+    pdf.cell(40, 6, "Subtotal:", 0, 0, "R")
+    pdf.cell(40, 6, f"${po.get('subtotal', 0):,.2f}", 0, 1, "R")
+    if po.get("tax", 0) > 0:
+        pdf.set_xy(box_x, pdf.get_y())
+        pdf.cell(40, 6, "Tax:", 0, 0, "R")
+        pdf.cell(40, 6, f"${po.get('tax', 0):,.2f}", 0, 1, "R")
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(box_x, pdf.get_y() + 1, 200, pdf.get_y() + 1)
+    pdf.ln(3)
+    pdf.set_xy(box_x, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(40, 8, "Total:", 0, 0, "R")
+    pdf.cell(40, 8, f"${po.get('total', 0):,.2f}", 0, 1, "R")
+
+    # Notes
+    notes = _safe_latin(po.get("notes", ""))
+    if notes:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*primary)
+        pdf.cell(0, 5, "NOTES", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(0, 5, notes[:500])
+
+    # Footer
+    pdf.set_y(-25)
+    pdf.set_draw_color(*accent)
+    pdf.set_line_width(0.8)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(140, 140, 140)
+    pdf.cell(0, 4, f"Generated by {cn} on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+
+    return Response(
+        content=bytes(pdf.output()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="PO_{po.get("po_number", po_id)}.pdf"'}
+    )

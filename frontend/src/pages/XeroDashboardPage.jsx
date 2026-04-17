@@ -26,6 +26,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
   Pie, Cell, Legend, AreaChart, Area
 } from "recharts";
+import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 
 const STATUS_COLORS = {
   PAID: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30" },
@@ -263,13 +264,29 @@ export default function XeroDashboardPage() {
     finally { setEmailSending(false); }
   };
 
-  // PDF download
+  // PDF viewer state
+  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "" });
+
+  // PDF download & preview
   const downloadPdf = (inv) => {
     window.open(`${API}/invoices/${inv.id}/pdf/download?token=${token}`, "_blank");
     toast.success(`Downloading ${inv.invoice_number}.pdf`);
   };
   const previewPdf = (inv) => {
-    window.open(`${API}/invoices/${inv.id}/pdf?token=${token}`, "_blank");
+    setPdfViewer({
+      open: true,
+      url: `${API}/invoices/${inv.id}/pdf?token=${token}`,
+      title: `Invoice ${inv.invoice_number}`,
+      downloadUrl: `${API}/invoices/${inv.id}/pdf/download?token=${token}`,
+    });
+  };
+  const previewThemePdf = (themeId) => {
+    setPdfViewer({
+      open: true,
+      url: `${API}/invoice-themes/${themeId}/preview-pdf?token=${token}`,
+      title: `Theme Preview`,
+      downloadUrl: "",
+    });
   };
 
   // Payment link generation
@@ -482,6 +499,7 @@ export default function XeroDashboardPage() {
                         <TableCell className={`text-right font-mono ${inv.amount_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>${inv.amount_due?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => previewPdf(inv)} title="Preview PDF" data-testid={`preview-${inv.id}`}><Eye className="w-3.5 h-3.5 text-violet-400" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadPdf(inv)} title="Download PDF" data-testid={`pdf-${inv.id}`}><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEmailDialog(inv)} title="Email Invoice" data-testid={`email-${inv.id}`}><Mail className="w-3.5 h-3.5 text-cyan-400" /></Button>
                             {inv.amount_due > 0 && inv.status !== "VOIDED" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => generatePaymentLink(inv)} title="Payment Link" disabled={generatingLink} data-testid={`paylink-${inv.id}`}><Link2 className="w-3.5 h-3.5 text-amber-400" /></Button>}
@@ -1006,8 +1024,15 @@ export default function XeroDashboardPage() {
                     </div>
                     {/* Label */}
                     <div className="p-2 bg-card">
-                      <p className="font-semibold text-xs truncate">{theme.name}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{theme.description}</p>
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-xs truncate">{theme.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{theme.description}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={e => { e.stopPropagation(); previewThemePdf(theme.id); }} title="Preview PDF" data-testid={`theme-preview-${theme.id}`}>
+                          <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                        </Button>
+                      </div>
                       {isActive && <Badge className="mt-1 bg-primary/10 text-primary border-primary/20 text-[9px]">Active</Badge>}
                       {!theme.is_builtin && <Badge variant="outline" className="mt-1 text-[9px] ml-1">Custom</Badge>}
                     </div>
@@ -1155,6 +1180,15 @@ export default function XeroDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* PDF Viewer Dialog */}
+      <PdfViewerDialog
+        open={pdfViewer.open}
+        onOpenChange={v => setPdfViewer(p => ({ ...p, open: v }))}
+        pdfUrl={pdfViewer.url}
+        title={pdfViewer.title}
+        downloadUrl={pdfViewer.downloadUrl}
+      />
     </div>
   );
 }
