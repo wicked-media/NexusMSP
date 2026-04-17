@@ -120,8 +120,8 @@ async def get_warranties(client_id: Optional[str] = None, status: Optional[str] 
 
 @router.post("/warranties")
 async def create_warranty(warranty_data: dict, current_user: dict = Depends(get_current_user)):
-    client_name = None
-    if warranty_data.get('client_id'):
+    client_name = warranty_data.pop("client_name", None)
+    if warranty_data.get('client_id') and not client_name:
         client = await db.clients.find_one({"id": warranty_data['client_id']}, {"_id": 0})
         client_name = client['name'] if client else None
     
@@ -129,7 +129,7 @@ async def create_warranty(warranty_data: dict, current_user: dict = Depends(get_
     doc = warranty.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.warranties.insert_one(doc)
-    return warranty
+    return {k: v for k, v in doc.items() if k != "_id"}
 
 @router.put("/warranties/{warranty_id}")
 async def update_warranty(warranty_id: str, warranty_data: dict, current_user: dict = Depends(get_current_user)):

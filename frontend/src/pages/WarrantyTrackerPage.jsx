@@ -22,7 +22,7 @@ export default function WarrantyTrackerPage() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ device_name: "", client_name: "", vendor: "", serial_number: "", warranty_type: "manufacturer", start_date: "", expiry_date: "", coverage_value: "", coverage_details: "" });
+  const [form, setForm] = useState({ device_name: "", client_name: "", vendor: "", product_name: "", serial_number: "", warranty_type: "manufacturer", warranty_start: "", warranty_end: "", coverage_value: "", coverage_details: "" });
 
   const fetchData = useCallback(async () => {
     try {
@@ -39,10 +39,10 @@ export default function WarrantyTrackerPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const createWarranty = async () => {
-    if (!form.device_name || !form.expiry_date) { toast.error("Device and expiry date required"); return; }
+    if (!form.device_name || !form.warranty_end) { toast.error("Device and expiry date required"); return; }
     setSaving(true);
     try {
-      await axios.post(`${API}/warranties`, { ...form, coverage_value: parseFloat(form.coverage_value) || 0 }, { headers });
+      await axios.post(`${API}/warranties`, { ...form, coverage_value: parseFloat(form.coverage_value) || 0, product_name: form.product_name || form.device_name }, { headers });
       toast.success("Warranty added");
       setShowCreate(false);
       fetchData();
@@ -56,16 +56,18 @@ export default function WarrantyTrackerPage() {
   };
 
   const now = new Date().toISOString().split("T")[0];
-  const getExpiryStatus = (d) => { if (!d) return "unknown"; if (d < now) return "expired"; const diff = Math.ceil((new Date(d) - new Date()) / 86400000); if (diff <= 30) return "expiring_soon"; if (diff <= 90) return "expiring"; return "active"; };
+  const getExpiryStatus = (d) => { const exp = d || ""; if (!exp) return "unknown"; if (exp < now) return "expired"; const diff = Math.ceil((new Date(exp) - new Date()) / 86400000); if (diff <= 30) return "expiring_soon"; if (diff <= 90) return "expiring"; return "active"; };
   const statusStyle = (s) => s === "expired" ? "bg-red-500/10 text-red-400 border-red-500/20" : s === "expiring_soon" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : s === "expiring" ? "bg-orange-500/10 text-orange-400 border-orange-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  const daysUntil = (d) => { if (!d) return ""; const diff = Math.ceil((new Date(d) - new Date()) / 86400000); return diff < 0 ? `${Math.abs(diff)}d overdue` : diff === 0 ? "Today" : `${diff}d`; };
+  const daysUntil = (d) => { const exp = d || ""; if (!exp) return ""; const diff = Math.ceil((new Date(exp) - new Date()) / 86400000); return diff < 0 ? `${Math.abs(diff)}d overdue` : diff === 0 ? "Today" : `${diff}d`; };
+  const getExpiry = (w) => w.expiry_date || w.warranty_end || "";
 
   const filtered = warranties.filter(w => {
-    const es = getExpiryStatus(w.expiry_date);
+    const exp = getExpiry(w);
+    const es = getExpiryStatus(exp);
     if (filterStatus === "active" && es === "expired") return false;
     if (filterStatus === "expired" && es !== "expired") return false;
     if (filterStatus === "expiring" && !["expiring_soon", "expiring"].includes(es)) return false;
-    if (search && !w.device_name?.toLowerCase().includes(search.toLowerCase()) && !w.client_name?.toLowerCase().includes(search.toLowerCase()) && !w.serial_number?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !w.device_name?.toLowerCase().includes(search.toLowerCase()) && !w.client_name?.toLowerCase().includes(search.toLowerCase()) && !w.serial_number?.toLowerCase().includes(search.toLowerCase()) && !(w.product_name || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -111,17 +113,18 @@ export default function WarrantyTrackerPage() {
             <TableBody>
               {filtered.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-12 text-muted-foreground">No warranties found</TableCell></TableRow>}
               {filtered.map(w => {
-                const es = getExpiryStatus(w.expiry_date);
+                const exp = getExpiry(w);
+                const es = getExpiryStatus(exp);
                 return (
                   <TableRow key={w.id} className={es === "expired" ? "opacity-60" : es === "expiring_soon" ? "bg-amber-500/5" : ""}>
-                    <TableCell className="font-medium">{w.device_name}</TableCell>
+                    <TableCell className="font-medium">{w.device_name || w.product_name}</TableCell>
                     <TableCell className="text-xs">{w.client_name}</TableCell>
                     <TableCell className="text-xs">{w.vendor}</TableCell>
                     <TableCell className="font-mono text-xs">{w.serial_number}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[9px] capitalize">{w.warranty_type}</Badge></TableCell>
-                    <TableCell className="text-xs">{w.expiry_date}</TableCell>
-                    <TableCell className={`text-xs font-bold ${es === "expired" ? "text-red-400" : es === "expiring_soon" ? "text-amber-400" : "text-emerald-400"}`}>{daysUntil(w.expiry_date)}</TableCell>
-                    <TableCell className="font-mono text-xs">${w.coverage_value?.toLocaleString()}</TableCell>
+                    <TableCell className="text-xs">{exp}</TableCell>
+                    <TableCell className={`text-xs font-bold ${es === "expired" ? "text-red-400" : es === "expiring_soon" ? "text-amber-400" : "text-emerald-400"}`}>{daysUntil(exp)}</TableCell>
+                    <TableCell className="font-mono text-xs">${(w.coverage_value || 0)?.toLocaleString()}</TableCell>
                     <TableCell><Badge className={`${statusStyle(es)} text-[9px] border capitalize`}>{es.replace(/_/g, " ")}</Badge></TableCell>
                     <TableCell><Button size="sm" variant="ghost" className="text-red-400" onClick={() => deleteWarranty(w.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
                   </TableRow>
@@ -138,15 +141,16 @@ export default function WarrantyTrackerPage() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Device Name</Label><Input value={form.device_name} onChange={e => setForm(p => ({ ...p, device_name: e.target.value }))} placeholder="ACME-DC-01" data-testid="warr-device" /></div>
+              <div><Label>Product Name</Label><Input value={form.product_name} onChange={e => setForm(p => ({ ...p, product_name: e.target.value }))} placeholder="Dell PowerEdge R750" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div><Label>Client</Label><Input value={form.client_name} onChange={e => setForm(p => ({ ...p, client_name: e.target.value }))} placeholder="Acme Corp" /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div><Label>Vendor</Label><Input value={form.vendor} onChange={e => setForm(p => ({ ...p, vendor: e.target.value }))} placeholder="Dell, HP, etc." /></div>
-              <div><Label>Serial Number</Label><Input value={form.serial_number} onChange={e => setForm(p => ({ ...p, serial_number: e.target.value }))} /></div>
             </div>
+            <div><Label>Serial Number</Label><Input value={form.serial_number} onChange={e => setForm(p => ({ ...p, serial_number: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Start Date</Label><Input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} /></div>
-              <div><Label>Expiry Date</Label><Input type="date" value={form.expiry_date} onChange={e => setForm(p => ({ ...p, expiry_date: e.target.value }))} /></div>
+              <div><Label>Start Date</Label><Input type="date" value={form.warranty_start} onChange={e => setForm(p => ({ ...p, warranty_start: e.target.value }))} /></div>
+              <div><Label>Expiry Date</Label><Input type="date" value={form.warranty_end} onChange={e => setForm(p => ({ ...p, warranty_end: e.target.value }))} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Type</Label>

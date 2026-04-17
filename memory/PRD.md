@@ -143,6 +143,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - iteration_89.json: Proposals + Contracts + Portal — Full proposal lifecycle, price increases, portal invoices/devices/health (100% - 20/20 backend, all frontend verified)
 - iteration_90.json: Platform Branding & White-Label — Settings hub, company name/logo/colors/login customization, sidebar+login page branding (100% - 14/14 backend, all frontend verified)
 - iteration_91.json: Enhanced Modules Batch — Profitability Heatmap, Contract Profit, CSAT Surveys, Patch Compliance, Network Topology, Alert Rules Engine, AI Copilot (100% - 16/16 backend, all 6 modules verified)
+- iteration_92.json: Auto-Ticket Merge + Product Enhancements — Vendor management, warranty tracker, product margins/low-stock, ticket merge with on/off setting (tested backend + frontend)
 
 ## Backlog (Prioritized)
 
