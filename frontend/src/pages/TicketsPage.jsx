@@ -76,6 +76,7 @@ export default function TicketsPage() {
   const [smsForm, setSmsForm] = useState({ to: "", message: "", template_key: "" });
   const [smsTemplates, setSmsTemplates] = useState([]);
   const [smsSending, setSmsSending] = useState(false);
+  const [smsConfig, setSmsConfig] = useState({ signature: "", append_signature: true });
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [addItemProduct, setAddItemProduct] = useState("");
   const [addItemQty, setAddItemQty] = useState(1);
@@ -243,7 +244,7 @@ export default function TicketsPage() {
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes, smsRes, smsTmplRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
@@ -255,6 +256,7 @@ export default function TicketsPage() {
         axios.get(`${API}/ticket-enrichment/${ticket.id}`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/tickets/${ticket.id}/sms`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
@@ -267,6 +269,10 @@ export default function TicketsPage() {
       setEnrichment(enrichRes.data);
       setTicketSms(smsRes.data || []);
       setSmsTemplates(smsTmplRes.data || []);
+      if (smsCfgRes.data) setSmsConfig({
+        signature: smsCfgRes.data.signature || "",
+        append_signature: smsCfgRes.data.append_signature !== false,
+      });
       // Fetch client contacts for email auto-populate
       if (ticket.client_id) {
         axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(r.data || [])).catch(() => {});
@@ -1677,7 +1683,7 @@ export default function TicketsPage() {
                     <div><Label className="text-xs">Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="inline-email-subject" /></div>
                     <div>
                       <Label className="text-xs">Body</Label>
-                      <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="120px" />
+                      <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="320px" />
                     </div>
                     {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
                     <div className="flex justify-end">
@@ -1716,9 +1722,15 @@ export default function TicketsPage() {
                     <div>
                       <Label className="text-xs flex items-center justify-between">
                         <span>Message</span>
-                        <span className={`text-[10px] ${smsForm.message.length > 160 ? "text-amber-400" : "text-muted-foreground"}`}>
-                          {smsForm.message.length} chars · {Math.max(1, Math.ceil(smsForm.message.length / 160))} segment{smsForm.message.length > 160 ? "s" : ""}
-                        </span>
+                        {(() => {
+                          const sig = (smsConfig.append_signature && smsConfig.signature) ? smsConfig.signature : "";
+                          const effLen = smsForm.message.length + (sig && !smsForm.message.toLowerCase().includes(sig.toLowerCase()) ? sig.length + 2 : 0);
+                          return (
+                            <span className={`text-[10px] ${effLen > 160 ? "text-amber-400" : "text-muted-foreground"}`}>
+                              {effLen} chars · {Math.max(1, Math.ceil(effLen / 160))} segment{effLen > 160 ? "s" : ""}
+                            </span>
+                          );
+                        })()}
                       </Label>
                       <Textarea
                         value={smsForm.message}
@@ -1728,6 +1740,11 @@ export default function TicketsPage() {
                         maxLength={1600}
                         data-testid="sms-message-input"
                       />
+                      {smsConfig.append_signature && smsConfig.signature && !smsForm.message.toLowerCase().includes(smsConfig.signature.toLowerCase()) && (
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Signature auto-appended: <span className="font-mono text-emerald-400">"{smsConfig.signature}"</span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[11px] text-muted-foreground">Replies from this number will appear inline in this conversation.</span>

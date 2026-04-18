@@ -102,6 +102,8 @@ async def get_sms_settings(request: Request, current_user: dict = Depends(get_cu
         "password": _mask(password) if password else "",
         "password_set": bool(password),
         "default_sender": cfg.get("default_sender", "Mobile MSG"),
+        "signature": cfg.get("signature", "Kind Regards, NexusMSP"),
+        "append_signature": bool(cfg.get("append_signature", True)),
         "last_balance": cfg.get("last_balance"),
         "last_balance_at": cfg.get("last_balance_at"),
         "last_test_result": cfg.get("last_test_result"),
@@ -132,6 +134,10 @@ async def update_sms_settings(data: dict, current_user: dict = Depends(get_curre
 
     if "default_sender" in data:
         new_value["default_sender"] = (data.get("default_sender") or "Mobile MSG").strip()
+    if "signature" in data:
+        new_value["signature"] = (data.get("signature") or "").strip()
+    if "append_signature" in data:
+        new_value["append_signature"] = bool(data["append_signature"])
     if "enabled" in data:
         new_value["enabled"] = bool(data["enabled"])
 
@@ -183,11 +189,19 @@ async def _send_via_provider(to: str, message: str, sender: str = None, custom_r
 
 @router.post("/sms/send")
 async def send_sms(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    """Send an SMS. Body: {to, message, sender?, client_id?, ticket_id?, custom_ref?}"""
+    """Send an SMS. Body: {to, message, sender?, client_id?, ticket_id?, custom_ref?, skip_signature?}"""
     to = (data.get("to") or "").strip()
     message = (data.get("message") or "").strip()
     if not (to and message):
         raise HTTPException(status_code=400, detail="to and message required")
+
+    # Auto-append configured signature unless caller opts out or message already contains it
+    if not data.get("skip_signature"):
+        cfg = await _get_config()
+        sig = (cfg.get("signature") or "").strip()
+        if sig and cfg.get("append_signature", True) and sig.lower() not in message.lower():
+            message = f"{message}\n\n{sig}" if not message.endswith("\n") else f"{message}{sig}"
+
     if len(message) > 1600:
         raise HTTPException(status_code=400, detail="Message exceeds 1600 characters")
 
@@ -255,7 +269,7 @@ async def test_sms(data: dict = Body(...), current_user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail="to required")
 
     try:
-        res = await send_sms({"to": to, "message": msg, "custom_ref": "test"}, current_user=current_user)
+        res = await send_sms({"to": to, "message": msg, "custom_ref": "test", "skip_signature": True}, current_user=current_user)
         status = "sent"
         detail = f"Sent to {to} (id: {res.get('message_id')})"
     except HTTPException as e:

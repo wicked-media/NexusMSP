@@ -100,7 +100,7 @@ export default function SettingsPage() {
   const [resendSaving, setResendSaving] = useState(false);
   const [resendTesting, setResendTesting] = useState(false);
   const [resendTestEmail, setResendTestEmail] = useState("");
-  const [sms, setSms] = useState({ username: "", password: "", default_sender: "", password_set: false, enabled: false, status_webhook_url: "", inbound_webhook_url: "", last_balance: null, last_balance_at: null, last_test_result: null, last_test_at: null, last_test_message: "", updated_at: null, updated_by: null });
+  const [sms, setSms] = useState({ username: "", password: "", default_sender: "", signature: "Kind Regards, NexusMSP", append_signature: true, password_set: false, enabled: false, status_webhook_url: "", inbound_webhook_url: "", last_balance: null, last_balance_at: null, last_test_result: null, last_test_at: null, last_test_message: "", updated_at: null, updated_by: null });
   const [smsSenders, setSmsSenders] = useState([]);
   const [smsTestTo, setSmsTestTo] = useState("");
   const [smsTestMessage, setSmsTestMessage] = useState("NexusOps SMS test — integration working correctly.");
@@ -558,8 +558,8 @@ export default function SettingsPage() {
           {/* Rich Text Email Signature */}
           <div className="space-y-2">
             <Label>Email Signature (Rich Text)</Label>
-            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting like Outlook.</p>
-            <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="150px" />
+            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting, tables, and inline images. <strong>Pro tip:</strong> click the <span className="font-mono bg-muted px-1 rounded">HTML</span> toggle in the editor to paste a full raw HTML signature (e.g. exported from Outlook → File → Save As → Web Page). Outlook <code>cid:</code> inline images won't render — host images on a public URL or paste them as base64 data URIs.</p>
+            <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="300px" />
             <Button onClick={async () => {
               setSigSaving(true);
               try {
@@ -1387,6 +1387,35 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* SMS Signature */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-md border bg-emerald-500/5 border-emerald-500/10" data-testid="sms-signature-card">
+            <div className="md:col-span-2 space-y-1.5">
+              <Label>SMS Signature</Label>
+              <Input
+                value={sms.signature || ""}
+                onChange={e => setSms({ ...sms, signature: e.target.value })}
+                placeholder="Kind Regards, NexusMSP"
+                maxLength={100}
+                data-testid="sms-signature-input"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Auto-appended to outbound SMS when toggle is on. Skipped if the message already contains this text. Counts toward the 160-char segment total.
+              </p>
+            </div>
+            <div className="space-y-1.5 flex items-end">
+              <Label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!sms.append_signature}
+                  onChange={e => setSms({ ...sms, append_signature: e.target.checked })}
+                  data-testid="sms-append-signature-toggle"
+                  className="rounded"
+                />
+                Auto-append signature
+              </Label>
+            </div>
+          </div>
+
           {/* Webhook URLs */}
           <div className="border rounded-md p-3 bg-muted/30 space-y-2" data-testid="sms-webhook-urls">
             <p className="text-xs font-semibold flex items-center gap-2">
@@ -1443,6 +1472,8 @@ export default function SettingsPage() {
                     username: sms.username,
                     password: sms.password,
                     default_sender: sms.default_sender,
+                    signature: sms.signature,
+                    append_signature: sms.append_signature,
                     enabled: sms.enabled,
                   }, { headers });
                   toast.success("SMS settings saved");
