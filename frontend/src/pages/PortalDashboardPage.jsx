@@ -18,7 +18,7 @@ import {
   Loader2, LogOut, Ticket, Monitor, FileText, DollarSign, BookOpen, User,
   Plus, Send, ArrowLeft, Wifi, WifiOff, Shield, Clock, Search, CheckCircle,
   AlertTriangle, XCircle, Activity, ChevronRight, CreditCard, Eye, Download,
-  ExternalLink, Power
+  ExternalLink, Power, History
 } from "lucide-react";
 
 const STATUS_COLORS = {
@@ -65,13 +65,46 @@ export default function PortalDashboardPage() {
   // Remote connect
   const [connectingDeviceId, setConnectingDeviceId] = useState(null);
   const canRemote = profile?.user?.can_remote_devices === true;
+  const [consentDialog, setConsentDialog] = useState(null); // device to connect
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [activeRemoteSession, setActiveRemoteSession] = useState(null); // { session_id, device_name, started_at }
+  const [endSessionNotes, setEndSessionNotes] = useState("");
+  const [endingSession, setEndingSession] = useState(false);
+  const [remoteSessions, setRemoteSessions] = useState([]);
 
-  const handleRemoteConnect = async (device) => {
+  const fetchRemoteSessions = async () => {
+    try {
+      const r = await axios.get(`${API}/portal/v2/remote-sessions`, { headers });
+      setRemoteSessions(r.data || []);
+    } catch {}
+  };
+
+  const openConsentDialog = (device) => {
+    setConsentDialog(device);
+    setConsentChecked(false);
+  };
+
+  const confirmConsentAndConnect = async () => {
+    if (!consentDialog || !consentChecked) return;
+    const device = consentDialog;
     setConnectingDeviceId(device.id);
     try {
-      const { data } = await axios.post(`${API}/portal/v2/devices/${device.id}/remote-connect`, {}, { headers });
-      toast.success(`Launching RustDesk for ${device.name}…`);
-      // Attempt to open the native URI
+      const { data } = await axios.post(
+        `${API}/portal/v2/devices/${device.id}/remote-connect`,
+        {
+          consent_acknowledged: true,
+          user_agent: navigator.userAgent,
+        },
+        { headers }
+      );
+      toast.success(`Remote session started for ${device.name}`);
+      setActiveRemoteSession({
+        session_id: data.session_id,
+        device_name: device.name,
+        started_at: Date.now(),
+      });
+      setConsentDialog(null);
+      // Launch RustDesk via hidden anchor
       if (data.connection_url) {
         const a = document.createElement("a");
         a.href = data.connection_url;
@@ -80,14 +113,66 @@ export default function PortalDashboardPage() {
         a.click();
         document.body.removeChild(a);
         setTimeout(() => {
-          toast.info("Don't have RustDesk? Download it from rustdesk.com/download", { duration: 8000, action: { label: "Download", onClick: () => window.open(data.download_url, "_blank") } });
-        }, 3000);
+          toast.info("Don't have RustDesk?", { duration: 6000, action: { label: "Download", onClick: () => window.open(data.download_url, "_blank") } });
+        }, 2500);
       }
+      fetchRemoteSessions();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Remote connect failed");
     } finally {
       setConnectingDeviceId(null);
     }
+  };
+
+  const endRemoteSession = async () => {
+    if (!activeRemoteSession) return;
+    setEndingSession(true);
+    try {
+      const { data } = await axios.post(
+        `${API}/portal/v2/remote-sessions/${activeRemoteSession.session_id}/end`,
+        { notes: endSessionNotes },
+        { headers }
+      );
+      toast.success(`Session ended · ${Math.floor(data.duration_seconds / 60)}m ${data.duration_seconds % 60}s logged`);
+      setActiveRemoteSession(null);
+      setEndSessionNotes("");
+      fetchRemoteSessions();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to end session");
+    } finally {
+      setEndingSession(false);
+    }
+  };
+
+  const downloadSessionPdf = async (sessionId) => {
+    try {
+      const res = await axios.get(`${API}/portal/v2/remote-sessions/${sessionId}/pdf`, {
+        headers, responseType: "blob",
+      });
+      const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `remote-session-${sessionId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Failed to download PDF"); }
+  };
+
+  const handleRemoteConnect = (device) => openConsentDialog(device);
+
+  useEffect(() => {
+    if (canRemote) fetchRemoteSessions();
+    // eslint-disable-next-line
+  }, [canRemote]);
+
+  const fmtDuration = (s) => {
+    if (s == null) return "In progress";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h) return `${h}h ${m}m`;
+    if (m) return `${m}m ${sec}s`;
+    return `${sec}s`;
   };
 
   const logout = () => {
@@ -253,6 +338,7 @@ export default function PortalDashboardPage() {
             <TabsTrigger value="dashboard"><Activity className="w-3 h-3 mr-1" />Dashboard</TabsTrigger>
             <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets ({tickets.length})</TabsTrigger>
             <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices ({devices.length})</TabsTrigger>
+            {canRemote && <TabsTrigger value="sessions" data-testid="tab-sessions"><History className="w-3 h-3 mr-1" />Sessions ({remoteSessions.length})</TabsTrigger>}
             <TabsTrigger value="invoices"><DollarSign className="w-3 h-3 mr-1" />Invoices ({invoices.length})</TabsTrigger>
             <TabsTrigger value="kb"><BookOpen className="w-3 h-3 mr-1" />Knowledge Base</TabsTrigger>
             <TabsTrigger value="profile"><User className="w-3 h-3 mr-1" />Profile</TabsTrigger>
@@ -398,6 +484,60 @@ export default function PortalDashboardPage() {
               ))}
               {devices.length === 0 && <p className="text-sm text-muted-foreground col-span-3 text-center py-8">No devices found.</p>}
             </div>
+          </TabsContent>
+
+          {/* Remote Sessions Audit */}
+          <TabsContent value="sessions" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-400" />Remote Access Sessions</h2>
+                <p className="text-xs text-muted-foreground">Full audit history of remote sessions you've initiated. Each session has a downloadable PDF record.</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={fetchRemoteSessions} data-testid="refresh-sessions-btn">
+                <Activity className="w-3 h-3 mr-1" />Refresh
+              </Button>
+            </div>
+
+            {remoteSessions.length === 0 ? (
+              <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
+                <History className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p>No remote sessions yet.</p>
+                <p className="text-xs mt-1">Click "Remote" on any online device in the Devices tab to start one.</p>
+              </CardContent></Card>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Device</TableHead>
+                    <TableHead>Started</TableHead>
+                    <TableHead>Ended</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Audit PDF</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {remoteSessions.map(s => (
+                    <TableRow key={s.id} data-testid={`session-row-${s.id}`}>
+                      <TableCell className="text-sm font-medium">{s.device_name || "Unknown"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{s.started_at ? new Date(s.started_at).toLocaleString() : "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{s.ended_at ? new Date(s.ended_at).toLocaleString() : "—"}</TableCell>
+                      <TableCell className="text-xs">{fmtDuration(s.duration_seconds)}</TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] capitalize ${s.status === "completed" ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border" : "bg-amber-500/15 text-amber-400 border-amber-500/30 border"}`}>
+                          {s.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => downloadSessionPdf(s.id)} data-testid={`download-pdf-${s.id}`}>
+                          <Download className="w-3 h-3 mr-1" />PDF
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </TabsContent>
 
           {/* Invoices */}
@@ -602,6 +742,96 @@ export default function PortalDashboardPage() {
             <Button variant="ghost" onClick={() => setShowNewTicket(false)}>Cancel</Button>
             <Button onClick={createTicket} disabled={creatingTicket} data-testid="portal-ticket-submit">
               {creatingTicket ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remote Access Consent Dialog */}
+      <Dialog open={!!consentDialog} onOpenChange={v => !v && setConsentDialog(null)}>
+        <DialogContent className="sm:max-w-[520px]" aria-describedby="consent-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-emerald-400" />Remote Access Consent
+            </DialogTitle>
+          </DialogHeader>
+          <div id="consent-desc" className="space-y-3 text-sm">
+            <div className="p-3 rounded-md border bg-muted/30">
+              <p className="text-xs text-muted-foreground mb-1">You are about to initiate a remote session to:</p>
+              <p className="font-semibold">{consentDialog?.name}</p>
+              <p className="text-[11px] text-muted-foreground">{consentDialog?.os || consentDialog?.device_type}</p>
+            </div>
+            <div className="text-xs leading-relaxed p-3 border rounded-md bg-amber-500/5 border-amber-500/20">
+              <p className="font-semibold text-amber-400 flex items-center gap-1.5 mb-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" />Before you proceed, please acknowledge:
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-muted-foreground">
+                <li>This remote session is being initiated <strong>by you</strong> from the client portal.</li>
+                <li>The session will be <strong>logged and recorded</strong> for audit, compliance (SOC 2 / ISO 27001), and service-quality purposes.</li>
+                <li>An MSP technician may observe or assist during the session.</li>
+                <li>A tamper-evident PDF audit record will be generated and made available for your records.</li>
+              </ul>
+            </div>
+            <label className="flex items-start gap-2 p-3 rounded-md border cursor-pointer hover:bg-muted/40">
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={e => setConsentChecked(e.target.checked)}
+                className="mt-0.5"
+                data-testid="consent-checkbox"
+              />
+              <span className="text-xs">
+                <strong>I acknowledge and consent</strong> to the terms above. I understand this session will be recorded for audit purposes and I am authorising this remote access.
+              </span>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConsentDialog(null)} data-testid="consent-cancel">Cancel</Button>
+            <Button
+              onClick={confirmConsentAndConnect}
+              disabled={!consentChecked || connectingDeviceId === consentDialog?.id}
+              className="bg-emerald-600 hover:bg-emerald-700"
+              data-testid="consent-confirm"
+            >
+              {connectingDeviceId === consentDialog?.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Power className="w-4 h-4 mr-1" />}
+              Acknowledge & Connect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Active Remote Session (End dialog) */}
+      <Dialog open={!!activeRemoteSession} onOpenChange={v => !v && setActiveRemoteSession(null)}>
+        <DialogContent className="sm:max-w-[480px]" aria-describedby="end-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-emerald-400 animate-pulse" />Remote Session In Progress
+            </DialogTitle>
+          </DialogHeader>
+          <div id="end-desc" className="space-y-3 text-sm">
+            <div className="p-3 rounded-md border bg-emerald-500/5 border-emerald-500/20">
+              <p className="text-xs text-muted-foreground">Connected to</p>
+              <p className="font-semibold">{activeRemoteSession?.device_name}</p>
+              <p className="text-[11px] text-muted-foreground">Started {activeRemoteSession?.started_at ? new Date(activeRemoteSession.started_at).toLocaleTimeString() : ""}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Leave this dialog open while you use RustDesk. Click "End Session" when you're done to log the session duration and generate the audit PDF.
+            </p>
+            <div>
+              <Label className="text-xs">Session notes (optional)</Label>
+              <Textarea
+                placeholder="e.g. Fixed Outlook sync issue"
+                value={endSessionNotes}
+                onChange={e => setEndSessionNotes(e.target.value)}
+                className="min-h-[60px]"
+                data-testid="session-notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="destructive" onClick={endRemoteSession} disabled={endingSession} data-testid="end-session-btn">
+              {endingSession ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}
+              End Session
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -21,7 +21,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Acronis Settings card in Settings > Integrations (Client ID, Secret, Data Centre URL, Test Connection)
 - Backup status shows: machine name, tenant, health (ok/failed/warning), applied plans, last/next backup times
 
-## Recent Updates (Apr 18, 2026 — Live Chat overhaul + Client Portal remote access)
+## Recent Updates (Apr 18, 2026 — Remote Access Consent & Audit Trail)
+- **Consent-gated remote access**: Portal Remote button now opens a compliance consent dialog before launching RustDesk. Shows device details, SOC 2 / ISO 27001 disclosure, MSP-observation notice, and requires explicit checkbox acknowledgement. Backend rejects `remote-connect` without `consent_acknowledged: true`.
+- **Active-session tracking**: After consent, an "in progress" dialog stays open with session notes field and red "End Session" button. Ending the session computes duration and generates the audit record.
+- **Tamper-evident PDF audit records**: MSP-branded PDF per session including Session ID, Client, Initiated by, Device + OS, RustDesk ID, Started/Ended timestamps, Duration, Status, IP address, full consent text, acknowledgement timestamp, session notes. Generated via `reportlab`-style FPDF with MSP branding (uses `settings.branding.company_name`).
+- **New Portal "Sessions" tab** (shown only when `can_remote_devices=True`): lists all past remote sessions for the portal user with device / started / ended / duration / status / per-row PDF download button.
+- **Admin-side visibility**: `GET /api/remote-session-records` (optional client_id/status filters) + `GET /api/remote-session-records/{id}/pdf` for MSP audit access.
+- **New backend endpoints**:
+  - `POST /api/portal/v2/devices/{id}/remote-connect` now requires `{consent_acknowledged: true}`; creates a `remote_session_records` doc + audit link to `rustdesk_sessions`
+  - `POST /api/portal/v2/remote-sessions/{id}/end` with optional notes; computes duration
+  - `GET /api/portal/v2/remote-sessions` portal-scoped list
+  - `GET /api/portal/v2/remote-sessions/{id}/pdf` portal PDF download
+  - `GET /api/remote-session-records` admin list
+  - `GET /api/remote-session-records/{id}/pdf` admin PDF download
+- New MongoDB collection: `remote_session_records` with fields: id, type, client_id, client_name, portal_user_id/name/email, device_id/name/os, rustdesk_id, started_at, ended_at, duration_seconds, status, consent_acknowledged, consent_acknowledged_at, consent_text, ip_address, user_agent, notes, created_at
+- Verified end-to-end: consent → rejected without checkbox → accepted → session logged (4s) → End Session with notes → PDF downloaded successfully (2450 bytes, valid PDF-1.3)
+
+
 - **Live Chat enhanced** (was 139 lines → now feature-rich):
   - 5-card stats strip: Active / Assigned to Me / Unassigned / Messages Today / Closed
   - Queue panel with search + All/Active/Closed filter tabs + unread badges + last-message preview

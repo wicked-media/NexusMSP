@@ -766,3 +766,90 @@ async def get_live_audit_logs(current_user: dict = Depends(get_current_user)):
         pass
     
     return {"logs": logs[:100], "count": len(logs), "source": source}
+
+
+
+# ============== REMOTE SESSION AUDIT RECORDS (Admin) ==============
+
+@router.get("/remote-session-records")
+async def admin_list_remote_session_records(
+    client_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 200,
+    current_user: dict = Depends(get_current_user)
+):
+    """Admin endpoint — list all client-portal remote session audit records."""
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        query["status"] = status
+    recs = await db.remote_session_records.find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    return recs
+
+
+@router.get("/remote-session-records/{session_id}/pdf")
+async def admin_remote_session_pdf(session_id: str, current_user: dict = Depends(get_current_user)):
+    """Admin-side download of a portal remote-session audit PDF."""
+    from fpdf import FPDF
+    from fastapi.responses import Response
+
+    rec = await db.remote_session_records.find_one({"id": session_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Remote session record not found")
+
+    branding = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
+    msp_name = (branding.get("value", {}) or {}).get("company_name") or "NexusOps"
+
+    def _fmt_dur(s):
+        if s is None: return "In progress"
+        s = int(s or 0); h, rem = divmod(s, 3600); m, sec = divmod(rem, 60)
+        return f"{h}h {m}m {sec}s" if h else (f"{m}m {sec}s" if m else f"{sec}s")
+    def _fmt_dt(iso):
+        if not iso: return "—"
+        try:
+            return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception: return iso
+
+    pdf = FPDF(); pdf.add_page()
+    pdf.set_fill_color(15, 23, 42); pdf.rect(0, 0, 210, 25, "F")
+    pdf.set_font("Helvetica", "B", 16); pdf.set_text_color(255, 255, 255); pdf.set_xy(10, 8)
+    pdf.cell(0, 8, msp_name, ln=1)
+    pdf.set_font("Helvetica", "", 10); pdf.set_x(10); pdf.cell(0, 5, "Remote Access Session - Audit Record", ln=1)
+    pdf.set_text_color(0, 0, 0); pdf.set_y(35)
+    pdf.set_font("Helvetica", "B", 13); pdf.cell(0, 8, f"Session ID: {rec['id'][:8].upper()}", ln=1); pdf.ln(2)
+
+    def row(l, v):
+        pdf.set_font("Helvetica", "B", 10); pdf.cell(55, 7, l)
+        pdf.set_font("Helvetica", "", 10)
+        txt = str(v or "-").encode("latin-1", "replace").decode("latin-1")
+        if len(txt) > 85: txt = txt[:82] + "..."
+        pdf.cell(0, 7, txt, ln=1)
+
+    pdf.set_font("Helvetica", "B", 11); pdf.cell(0, 7, "Session Details", ln=1)
+    pdf.set_draw_color(200, 200, 200); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(2)
+    row("Client", rec.get("client_name"))
+    row("Initiated by", f"{rec.get('portal_user_name')} ({rec.get('portal_user_email')})")
+    row("Device", f"{rec.get('device_name')} ({rec.get('device_os', '—')})")
+    row("RustDesk ID", rec.get("rustdesk_id"))
+    row("Started at", _fmt_dt(rec.get("started_at")))
+    row("Ended at", _fmt_dt(rec.get("ended_at")))
+    row("Duration", _fmt_dur(rec.get("duration_seconds")))
+    row("Status", (rec.get("status") or "").capitalize())
+    row("IP address", rec.get("ip_address"))
+    pdf.ln(4); pdf.set_font("Helvetica", "B", 11); pdf.cell(0, 7, "Consent Acknowledgement", ln=1)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(2)
+    pdf.set_font("Helvetica", "", 10); pdf.multi_cell(0, 6, (rec.get("consent_text") or "-").encode("latin-1","replace").decode("latin-1"))
+    pdf.ln(1); pdf.set_font("Helvetica", "I", 9); pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 5, f"Acknowledged at: {_fmt_dt(rec.get('consent_acknowledged_at'))}", ln=1)
+    if rec.get("notes"):
+        pdf.ln(4); pdf.set_text_color(0, 0, 0); pdf.set_font("Helvetica", "B", 11); pdf.cell(0, 7, "Session Notes", ln=1)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(2)
+        pdf.set_font("Helvetica", "", 10); pdf.multi_cell(0, 6, rec.get("notes").encode("latin-1","replace").decode("latin-1"))
+    pdf.set_y(-25); pdf.set_font("Helvetica", "", 8); pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 5, f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · {msp_name}", ln=1, align="C")
+    pdf.cell(0, 5, "This document is a tamper-evident audit record of a client-initiated remote access session.", ln=1, align="C")
+
+    pdf_bytes = bytes(pdf.output(dest="S"))
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="remote-session-{rec["id"][:8]}.pdf"'})
