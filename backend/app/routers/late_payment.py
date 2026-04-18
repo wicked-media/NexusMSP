@@ -122,7 +122,7 @@ async def late_payment_predictions(current_user: dict = Depends(get_current_user
             continue
 
         predictions.append({
-            "id": f"lp-{cid[:8]}",
+            "id": f"lp-{cid}",
             "client_id": cid,
             "client_name": stats["name"],
             "risk": risk,
