@@ -123,3 +123,86 @@ async def apply_ai_triage(ticket_id: str, data: dict, current_user: dict = Depen
 async def get_triage_stats(current_user: dict = Depends(get_current_user)):
     total = await db.ai_triage_logs.count_documents({})
     return {"total_triages": total}
+
+
+# ── Keyword-based triage (fast, no AI needed) ──
+
+def _keyword_triage(title, description):
+    """Rule-based triage fallback when AI is not needed or unavailable."""
+    text = f"{title} {description}".lower()
+    category_rules = {
+        "security": ["virus", "malware", "ransomware", "phishing", "breach", "hack", "unauthorized", "suspicious", "firewall", "vpn"],
+        "network": ["network", "wifi", "internet", "switch", "router", "dns", "dhcp", "vlan", "bandwidth", "connectivity"],
+        "hardware": ["server", "disk", "memory", "ram", "cpu", "hardware", "printer", "monitor", "ups", "battery"],
+        "email": ["email", "outlook", "exchange", "mailbox", "spam", "calendar", "teams", "microsoft 365"],
+        "software": ["install", "update", "crash", "error", "license", "application", "software", "driver"],
+        "backup": ["backup", "restore", "recovery", "disaster", "replication", "snapshot"],
+    }
+    category, max_m = "support", 0
+    for cat, kws in category_rules.items():
+        m = sum(1 for kw in kws if kw in text)
+        if m > max_m:
+            max_m, category = m, cat
+
+    critical_kws = ["down", "outage", "emergency", "critical", "all users", "server down", "ransomware", "breach", "production"]
+    high_kws = ["urgent", "asap", "broken", "not working", "multiple users", "important"]
+    low_kws = ["request", "new user", "install", "setup", "question", "when you get a chance"]
+    cs = sum(2 for kw in critical_kws if kw in text)
+    hs = sum(1 for kw in high_kws if kw in text)
+    ls = sum(1 for kw in low_kws if kw in text)
+    priority = "critical" if cs >= 2 else "high" if hs >= 2 or cs >= 1 else "low" if ls >= 2 else "medium"
+    if priority == "medium" and any(w in text for w in ["server", "switch", "firewall", "all users"]):
+        priority = "high"
+
+    tags = []
+    tag_rules = {"server": ["server"], "network": ["network", "wifi"], "security": ["security", "virus"], "email": ["email", "outlook"], "printer": ["printer"], "backup": ["backup"], "cloud": ["azure", "aws", "365"], "vpn": ["vpn"]}
+    for tag, kws in tag_rules.items():
+        if any(kw in text for kw in kws):
+            tags.append(tag)
+
+    return {"category": category, "priority": priority, "tags": tags[:5], "confidence": min(95, 50 + max_m * 15)}
+
+
+@router.post("/ticket-triage/analyze")
+async def keyword_triage_ticket(body: dict, current_user: dict = Depends(get_current_user)):
+    """Fast keyword-based triage (no AI). Use /tickets/{id}/ai-triage for GPT-powered analysis."""
+    title = body.get("title", "")
+    description = body.get("description", "")
+    triage = _keyword_triage(title, description)
+
+    # Auto-route to best tech based on workload
+    techs = await db.users.find({"role": {"$in": ["admin", "technician"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
+    scored = []
+    for t in techs:
+        load = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
+        scored.append({"tech_id": t["id"], "tech_name": t["name"], "workload": load, "score": max(0, 100 - load * 10)})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    triage["recommended_assignee"] = scored[0] if scored else None
+    triage["all_candidates"] = scored[:3]
+    return {"triage": triage}
+
+
+@router.post("/ai/triage")
+async def ai_triage_standalone(data: dict, current_user: dict = Depends(get_current_user)):
+    """AI triage for new tickets (before creation). Redirects to keyword triage as fallback."""
+    return await keyword_triage_ticket(data, current_user)
+
+
+@router.post("/ai/auto-route")
+async def auto_route_ticket(data: dict, current_user: dict = Depends(get_current_user)):
+    """Apply triage suggestions to a ticket."""
+    ticket_id = data.get("ticket_id")
+    triage = data.get("triage", {})
+    if not ticket_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="ticket_id required")
+    update = {}
+    if triage.get("suggested_priority"): update["priority"] = triage["suggested_priority"]
+    if triage.get("suggested_technician_id"): update["assigned_to"] = triage["suggested_technician_id"]
+    if triage.get("suggested_category"): update["category"] = triage["suggested_category"]
+    if triage.get("tags"): update["tags"] = triage["tags"]
+    update["ai_triaged"] = True
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    return {"message": "Ticket auto-routed", "updates": update}

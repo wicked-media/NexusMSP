@@ -53,7 +53,7 @@ async def get_revenue_dashboard(current_user: dict = Depends(get_current_user)):
         total_cost += ticket_total_cost
         
         ticket_revenue.append({
-            "id": t["id"], "title": t["title"], "client_name": t.get("client_name", "Unknown"),
+            "id": t["id"], "title": t.get("title", "Untitled Ticket"), "client_name": t.get("client_name", "Unknown"),
             "priority": t.get("priority", "medium"), "status": t.get("status", "open"),
             "category": t.get("category"), "assigned_to": t.get("assigned_name"),
             "total_minutes": total_minutes, "billable_minutes": billable_minutes,
