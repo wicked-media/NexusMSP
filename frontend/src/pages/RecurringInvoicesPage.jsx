@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
   Receipt, TrendingUp, Loader2, Copy, Send, Clock, FileText, Users,
-  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search
+  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search, Cloud
 } from "lucide-react";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
@@ -48,7 +48,7 @@ export default function RecurringInvoicesPage() {
   const [saving, setSaving] = useState(false);
 
   // Form
-  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
+  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", include_acronis_usage: false, start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
   const [form, setForm] = useState(emptyForm);
   const [templateForm, setTemplateForm] = useState({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] });
   const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false });
@@ -309,6 +309,7 @@ export default function RecurringInvoicesPage() {
                         <p className="font-medium text-sm">{ri.client_name}</p>
                         <p className="text-[10px] text-muted-foreground truncate max-w-[200px]">{ri.description}</p>
                         {ri.auto_send && <Badge variant="outline" className="text-[8px] mt-0.5 border-blue-500/20 text-blue-400">Auto-send</Badge>}
+                        {ri.include_acronis_usage && <Badge variant="outline" className="text-[8px] mt-0.5 border-sky-500/30 text-sky-400" data-testid={`acronis-badge-${ri.id}`}><Cloud className="w-2.5 h-2.5 mr-0.5" />Acronis Auto</Badge>}
                       </TableCell>
                       <TableCell className="font-mono font-bold">${ri.amount?.toLocaleString()}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[9px] capitalize">{ri.frequency}</Badge></TableCell>
@@ -486,6 +487,18 @@ export default function RecurringInvoicesPage() {
               <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Automatically email invoice when generated</p></div>
               {form.auto_send && <Input value={form.auto_send_email} onChange={e => setForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
             </div>
+            <div className="flex items-center gap-4 p-3 rounded-lg border bg-sky-500/[0.03] border-sky-500/20">
+              <Switch checked={form.include_acronis_usage} onCheckedChange={v => setForm(p => ({ ...p, include_acronis_usage: v }))} data-testid="ri-acronis-auto-toggle" />
+              <div className="flex-1 flex items-start gap-2">
+                <Cloud className="w-4 h-4 text-sky-400 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">Auto-attach Acronis usage</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Pull live Acronis usage (workstations, servers, C2C storage, M365 etc.) for the linked client each time this invoice generates. Requires the client to be linked on the Backup Command Center → Tenants tab.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Invoice notes..." rows={2} /></div>
           </div>
           <DialogFooter>
@@ -526,6 +539,16 @@ export default function RecurringInvoicesPage() {
                 <Switch checked={showEdit.auto_send} onCheckedChange={v => setShowEdit(p => ({ ...p, auto_send: v }))} />
                 <div><p className="text-sm font-medium">Auto-send</p></div>
                 {showEdit.auto_send && <Input value={showEdit.auto_send_email || ""} onChange={e => setShowEdit(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
+              </div>
+              <div className="flex items-center gap-4 p-3 rounded-lg border bg-sky-500/[0.03] border-sky-500/20">
+                <Switch checked={!!showEdit.include_acronis_usage} onCheckedChange={v => setShowEdit(p => ({ ...p, include_acronis_usage: v }))} data-testid="ri-edit-acronis-auto-toggle" />
+                <div className="flex-1 flex items-start gap-2">
+                  <Cloud className="w-4 h-4 text-sky-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Auto-attach Acronis usage</p>
+                    <p className="text-[10px] text-muted-foreground">Auto-attach live Acronis usage as line items each generation.</p>
+                  </div>
+                </div>
               </div>
               <div><Label>Notes</Label><Textarea value={showEdit.notes || ""} onChange={e => setShowEdit(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
             </div>

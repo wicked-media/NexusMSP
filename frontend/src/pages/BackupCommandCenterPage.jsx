@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX, DollarSign, Save, Download, Eye, FileText } from "lucide-react";
+import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX, DollarSign, Save, Download, Eye, FileText, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export default function BackupCommandCenterPage() {
@@ -38,6 +38,9 @@ export default function BackupCommandCenterPage() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
   const [syncingBilling, setSyncingBilling] = useState(false);
+  const [autoBillBusy, setAutoBillBusy] = useState(null);
+  const [autoBillDialog, setAutoBillDialog] = useState(null);
+  const [autoBillFrequency, setAutoBillFrequency] = useState("monthly");
 
   const fetchAll = async () => {
     try {
@@ -204,6 +207,51 @@ export default function BackupCommandCenterPage() {
       toast.error(e.response?.data?.detail || "Billing sync failed");
     } finally {
       setSyncingBilling(false);
+    }
+  };
+
+  const handleToggleAutoBill = (clientRow) => {
+    if (clientRow.auto_bill_recurring) {
+      // already on — disable directly
+      disableAutoBill(clientRow.client_id);
+    } else if ((clientRow.active_recurring_invoices || []).length > 0) {
+      // active RIs exist — enable on all directly
+      enableAutoBill(clientRow.client_id, false);
+    } else {
+      // no RIs yet — ask whether to create a scaffold
+      setAutoBillDialog(clientRow);
+      setAutoBillFrequency("monthly");
+    }
+  };
+
+  const enableAutoBill = async (clientId, createIfMissing) => {
+    setAutoBillBusy(clientId);
+    try {
+      const res = await axios.post(
+        `${API}/acronis/billing/client/${clientId}/link-to-recurring`,
+        { create_if_missing: createIfMissing, frequency: autoBillFrequency, currency },
+        { headers }
+      );
+      toast.success(res.data.message || "Linked");
+      setAutoBillDialog(null);
+      fetchBilling();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to link");
+    } finally {
+      setAutoBillBusy(null);
+    }
+  };
+
+  const disableAutoBill = async (clientId) => {
+    setAutoBillBusy(clientId);
+    try {
+      const res = await axios.post(`${API}/acronis/billing/client/${clientId}/unlink-recurring`, {}, { headers });
+      toast.success(`Auto-bill disabled on ${res.data.disabled_on} recurring invoice(s)`);
+      fetchBilling();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to unlink");
+    } finally {
+      setAutoBillBusy(null);
     }
   };
 
@@ -572,7 +620,14 @@ export default function BackupCommandCenterPage() {
                         <div key={r.client_id} className="border rounded-md p-3 space-y-2" data-testid={`billing-client-${r.client_id}`}>
                           <div className="flex items-center justify-between">
                             <div>
-                              <p className="text-sm font-semibold">{r.client_name}</p>
+                              <p className="text-sm font-semibold flex items-center gap-2">
+                                {r.client_name}
+                                {r.auto_bill_recurring && (
+                                  <Badge variant="outline" className="text-[9px] border-sky-500/40 text-sky-400" data-testid={`auto-bill-badge-${r.client_id}`}>
+                                    <RefreshCw className="w-2.5 h-2.5 mr-0.5" />Auto-Billed via Recurring
+                                  </Badge>
+                                )}
+                              </p>
                               <p className="text-[11px] text-muted-foreground">
                                 {r.contract_id ? (
                                   <span className="text-emerald-400">✓ Contract: {r.contract_name}</span>
@@ -580,11 +635,33 @@ export default function BackupCommandCenterPage() {
                                   <span className="text-amber-400">⚠ No active contract — will skip on sync</span>
                                 )}
                                 {r.unknown_count > 0 && <span className="ml-2 text-amber-400">· {r.unknown_count} unknown offerings</span>}
+                                {r.active_recurring_invoices?.length > 0 && (
+                                  <span className="ml-2 text-muted-foreground">· {r.active_recurring_invoices.length} active recurring invoice{r.active_recurring_invoices.length !== 1 ? "s" : ""}</span>
+                                )}
                               </p>
                             </div>
-                            <div className="text-right">
-                              <p className="text-xl font-bold text-emerald-400">{currency} {r.total.toFixed(2)}</p>
-                              <p className="text-[10px] text-muted-foreground">{r.line_items.filter(l => !l.unknown).length} billable items</p>
+                            <div className="flex items-start gap-3">
+                              <Button
+                                size="sm"
+                                variant={r.auto_bill_recurring ? "outline" : "default"}
+                                className={r.auto_bill_recurring ? "text-sky-400 border-sky-500/40 hover:bg-sky-500/10" : "bg-sky-600 hover:bg-sky-700"}
+                                onClick={() => handleToggleAutoBill(r)}
+                                disabled={autoBillBusy === r.client_id}
+                                data-testid={`auto-bill-toggle-${r.client_id}`}
+                              >
+                                {autoBillBusy === r.client_id ? (
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                ) : r.auto_bill_recurring ? (
+                                  <XCircle className="w-3 h-3 mr-1" />
+                                ) : (
+                                  <RefreshCw className="w-3 h-3 mr-1" />
+                                )}
+                                {r.auto_bill_recurring ? "Disable Auto-Bill" : "Link to Recurring Invoice"}
+                              </Button>
+                              <div className="text-right">
+                                <p className="text-xl font-bold text-emerald-400">{currency} {r.total.toFixed(2)}</p>
+                                <p className="text-[10px] text-muted-foreground">{r.line_items.filter(l => !l.unknown).length} billable items</p>
+                              </div>
                             </div>
                           </div>
                           <Table>
@@ -640,6 +717,48 @@ export default function BackupCommandCenterPage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setLinkDialog(null)}>Cancel</Button>
             <Button onClick={handleLink} disabled={!linkClientId} data-testid="confirm-link-btn"><Link2 className="w-4 h-4 mr-1" />Link</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Auto-Bill via Recurring — create scaffold dialog */}
+      <Dialog open={!!autoBillDialog} onOpenChange={v => !v && setAutoBillDialog(null)}>
+        <DialogContent aria-describedby="auto-bill-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><RefreshCw className="w-5 h-5 text-sky-400" />Link Acronis Billing to Recurring Invoice</DialogTitle>
+            <DialogDescription id="auto-bill-desc">
+              {autoBillDialog?.client_name} has no active recurring invoices yet. Create one now so Acronis usage auto-attaches every period?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="border rounded-md p-3 bg-sky-500/[0.04] border-sky-500/20 text-xs space-y-1">
+              <p className="font-semibold">Scaffold summary</p>
+              <p className="text-muted-foreground">Client: <span className="text-foreground">{autoBillDialog?.client_name}</span></p>
+              <p className="text-muted-foreground">Current Acronis usage: <span className="text-emerald-400 font-semibold">{currency} {(autoBillDialog?.total || 0).toFixed(2)}</span></p>
+              <p className="text-muted-foreground">Will be auto-attached as line items each time the recurring invoice generates.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Billing Frequency</label>
+              <Select value={autoBillFrequency} onValueChange={setAutoBillFrequency}>
+                <SelectTrigger data-testid="auto-bill-frequency"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="quarterly">Quarterly</SelectItem>
+                  <SelectItem value="annually">Annually</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAutoBillDialog(null)}>Cancel</Button>
+            <Button
+              onClick={() => enableAutoBill(autoBillDialog.client_id, true)}
+              disabled={autoBillBusy === autoBillDialog?.client_id}
+              className="bg-sky-600 hover:bg-sky-700"
+              data-testid="confirm-auto-bill-create-btn"
+            >
+              {autoBillBusy === autoBillDialog?.client_id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
+              Create & Link
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

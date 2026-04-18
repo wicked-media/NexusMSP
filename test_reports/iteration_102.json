@@ -1,0 +1,61 @@
+{
+  "summary": "Completed comprehensive testing of Acronis Billing + Recurring Invoice Auto-Attach feature. All 13 backend tests passed (100%). Frontend UI verified: Create/Edit dialogs have Acronis Auto toggle with Cloud icon and descriptive text, Backup Command Center Billing tab shows per-client cards with Link/Disable Auto-Bill buttons and Auto-Billed via Recurring badges.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration102_acronis_recurring_billing.py",
+    "/app/test_reports/pytest/pytest_results_iter102.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration102_acronis_recurring_billing.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": "Admin: aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "None - used existing client-001 (Acme Corporation) with Acronis link",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 102 tested the Acronis Billing + Recurring Invoice Auto-Attach feature. Backend endpoints verified: GET /api/acronis/billing/preview (returns auto_bill_recurring + active_recurring_invoices), POST /api/acronis/billing/client/{id}/link-to-recurring (enables include_acronis_usage on all active RIs), POST /api/acronis/billing/client/{id}/link-to-recurring with create_if_missing (creates scaffold RI), POST /api/acronis/billing/client/{id}/unlink-recurring (disables include_acronis_usage), GET /api/recurring-invoices/by-client/{id}, POST /api/recurring-invoices/{id}/set-acronis-auto, POST /api/recurring-invoices/create with include_acronis_usage, POST /api/recurring-invoices/scheduler/run-now (auto-attaches Acronis usage). Frontend verified: RecurringInvoicesPage create/edit dialogs have Acronis Auto toggle (data-testid=ri-acronis-auto-toggle, ri-edit-acronis-auto-toggle), BackupCommandCenterPage Billing tab has per-client cards with Link/Disable buttons (data-testid=auto-bill-toggle-{client_id}) and Auto-Billed via Recurring badges (data-testid=auto-bill-badge-{client_id}).",
+  "features_verified": {
+    "backend_endpoints": {
+      "billing_preview_auto_bill_fields": "PASS - GET /api/acronis/billing/preview returns auto_bill_recurring and active_recurring_invoices per client",
+      "link_to_recurring": "PASS - POST /api/acronis/billing/client/{id}/link-to-recurring enables include_acronis_usage on all active RIs",
+      "link_to_recurring_create_scaffold": "PASS - POST with create_if_missing=true creates scaffold RI when no active RIs exist",
+      "unlink_recurring": "PASS - POST /api/acronis/billing/client/{id}/unlink-recurring disables include_acronis_usage on all RIs",
+      "recurring_by_client": "PASS - GET /api/recurring-invoices/by-client/{id} returns RIs with include_acronis_usage flag",
+      "set_acronis_auto": "PASS - POST /api/recurring-invoices/{id}/set-acronis-auto toggles flag on single RI",
+      "create_with_acronis_flag": "PASS - POST /api/recurring-invoices/create accepts include_acronis_usage in payload",
+      "scheduler_run_now_acronis_attach": "PASS - POST /api/recurring-invoices/scheduler/run-now auto-attaches Acronis usage when include_acronis_usage=true",
+      "generate_now_acronis_attach": "PASS - POST /api/recurring-invoices/{id}/generate-now auto-attaches Acronis usage"
+    },
+    "frontend_recurring_invoices_page": {
+      "create_dialog_acronis_toggle": "PASS - data-testid=ri-acronis-auto-toggle with Cloud icon and descriptive text",
+      "edit_dialog_acronis_toggle": "PASS - data-testid=ri-edit-acronis-auto-toggle with Cloud icon and descriptive text",
+      "row_acronis_badge": "PASS - data-testid=acronis-badge-{ri_id} shows on rows where include_acronis_usage is true"
+    },
+    "frontend_backup_command_center": {
+      "billing_tab": "PASS - data-testid=tab-billing navigates to billing section",
+      "per_client_cards": "PASS - data-testid=billing-client-{client_id} shows client billing preview",
+      "auto_bill_toggle_button": "PASS - data-testid=auto-bill-toggle-{client_id} shows 'Link to Recurring Invoice' or 'Disable Auto-Bill'",
+      "auto_bill_badge": "PASS - data-testid=auto-bill-badge-{client_id} shows 'Auto-Billed via Recurring' when enabled",
+      "scaffold_create_dialog": "PASS - data-testid=confirm-auto-bill-create-btn opens when client has no active RIs",
+      "frequency_selector": "PASS - data-testid=auto-bill-frequency allows selecting monthly/quarterly/annually"
+    },
+    "regression": {
+      "recurring_invoices_list": "PASS - GET /api/recurring-invoices/list returns 200",
+      "recurring_stats": "PASS - GET /api/recurring-invoices/stats returns MRR, ARR, totals",
+      "scheduler_status": "PASS - GET /api/recurring-invoices/scheduler/status returns scheduler info"
+    }
+  }
+}

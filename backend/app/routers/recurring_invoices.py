@@ -92,6 +92,7 @@ async def create_recurring(data: dict, current_user: dict = Depends(get_current_
         "auto_send": data.get("auto_send", False),
         "auto_send_email": data.get("auto_send_email", ""),
         "include_pdf": data.get("include_pdf", True),
+        "include_acronis_usage": bool(data.get("include_acronis_usage", False)),
         "status": "active",
         "invoices_generated": 0,
         "total_billed": 0,
@@ -129,6 +130,35 @@ async def delete_recurring(ri_id: str, current_user: dict = Depends(get_current_
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Deleted"}
+
+
+@router.get("/recurring-invoices/by-client/{client_id}")
+async def get_recurring_by_client(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Return active recurring invoices for a specific client (used by Acronis link UI)."""
+    docs = await db.recurring_invoices.find(
+        {"client_id": client_id},
+        {"_id": 0, "id": 1, "description": 1, "amount": 1, "currency": 1, "frequency": 1,
+         "status": 1, "include_acronis_usage": 1, "next_generation": 1, "last_generated": 1,
+         "invoices_generated": 1, "total_billed": 1}
+    ).sort("status", 1).to_list(100)
+    return docs
+
+
+@router.post("/recurring-invoices/{ri_id}/set-acronis-auto")
+async def set_acronis_auto(ri_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Toggle the include_acronis_usage flag on a specific recurring invoice."""
+    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
+    if not ri:
+        raise HTTPException(status_code=404, detail="Not found")
+    enabled = bool(data.get("include_acronis_usage", True))
+    await db.recurring_invoices.update_one(
+        {"id": ri_id},
+        {"$set": {
+            "include_acronis_usage": enabled,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"message": f"Acronis auto-billing {'enabled' if enabled else 'disabled'} on {ri_id}", "include_acronis_usage": enabled}
 
 
 @router.post("/recurring-invoices/{ri_id}/toggle")
@@ -383,18 +413,47 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
             inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
             due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
+            # Start from static line items (strip any prior Acronis auto-attach)
+            line_items = [li for li in ri.get("line_items", []) if not li.get("acronis_auto")]
+            acronis_attached = []
+
+            # Auto-attach Acronis usage if enabled — parity with /generate-now
+            if ri.get("include_acronis_usage", False) and ri.get("client_id"):
+                try:
+                    from app.routers.acronis import get_client_acronis_billing
+                    acr = await get_client_acronis_billing(ri["client_id"], current_user=current_user)
+                    if acr.get("linked") and acr.get("total", 0) > 0:
+                        for li in acr.get("line_items", []):
+                            acronis_attached.append({
+                                "description": f"Acronis — {li['label']} ({acr['period']})",
+                                "details": f"{li['quantity']} {li['unit']} × {acr['currency']} {li['unit_price']:.4f}",
+                                "quantity": li["quantity"],
+                                "rate": li["unit_price"],
+                                "amount": li["total"],
+                                "acronis_auto": True,
+                                "acronis_period": acr["period"],
+                            })
+                        line_items.extend(acronis_attached)
+                except Exception:
+                    pass  # Don't block scheduler on Acronis failure
+
+            subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
+            tax_rate = float(ri.get("tax_rate", 0))
+            tax_amount = round(subtotal * tax_rate / 100, 2)
+            total = round(subtotal + tax_amount, 2)
+
             invoice = {
                 "id": f"inv-{uuid.uuid4().hex[:8]}",
                 "invoice_number": inv_number,
                 "client_id": ri.get("client_id", ""),
                 "client_name": ri.get("client_name", ""),
                 "description": ri.get("description", ""),
-                "line_items": ri.get("line_items", []),
-                "subtotal": ri.get("subtotal", ri.get("amount", 0)),
-                "tax_rate": ri.get("tax_rate", 0),
-                "tax_amount": ri.get("tax_amount", 0),
-                "total": ri.get("amount", 0),
-                "amount_due": ri.get("amount", 0),
+                "line_items": line_items,
+                "subtotal": subtotal,
+                "tax_rate": tax_rate,
+                "tax_amount": tax_amount,
+                "total": total,
+                "amount_due": total,
                 "amount_paid": 0,
                 "currency": ri.get("currency", "AUD"),
                 "status": "sent",
@@ -403,15 +462,16 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "recurring_invoice_id": ri["id"],
                 "notes": ri.get("notes", ""),
                 "auto_generated": True,
+                "acronis_auto_attached": len(acronis_attached),
                 "created_at": now.isoformat(),
                 "created_by": "Manual Scheduler Run",
             }
             await db.invoices.insert_one(invoice)
 
             next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
-            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": ri.get("amount", 0), "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run"}
+            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run", "acronis_items": len(acronis_attached)}
             await db.recurring_invoices.update_one({"id": ri["id"]}, {
-                "$inc": {"invoices_generated": 1, "total_billed": ri.get("amount", 0)},
+                "$inc": {"invoices_generated": 1, "total_billed": total},
                 "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
                 "$push": {"generation_history": gen_entry},
             })
@@ -420,10 +480,11 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "id": f"slog-{uuid.uuid4().hex[:8]}", "type": "recurring_invoice",
                 "recurring_invoice_id": ri["id"], "invoice_id": invoice["id"],
                 "invoice_number": inv_number, "client_name": ri.get("client_name", ""),
-                "amount": ri.get("amount", 0), "status": "generated",
+                "amount": total, "status": "generated",
+                "acronis_items": len(acronis_attached),
                 "triggered_by": current_user.get("name", ""), "timestamp": now.isoformat(),
             })
-            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": ri.get("amount", 0), "status": "generated"})
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "status": "generated"})
         except Exception as e:
             results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": str(e)})
 

@@ -778,6 +778,13 @@ async def preview_acronis_billing(current_user: dict = Depends(get_current_user)
             {"_id": 0, "id": 1, "name": 1}
         )
 
+        # Fetch active recurring invoices for this client + auto-bill state
+        active_ris = await db.recurring_invoices.find(
+            {"client_id": client_id, "status": "active"},
+            {"_id": 0, "id": 1, "description": 1, "amount": 1, "frequency": 1, "include_acronis_usage": 1}
+        ).to_list(20)
+        auto_bill_enabled = any(r.get("include_acronis_usage") for r in active_ris)
+
         results.append({
             "client_id": client_id,
             "client_name": link.get("client_name", ""),
@@ -787,6 +794,8 @@ async def preview_acronis_billing(current_user: dict = Depends(get_current_user)
             "line_items": line_items,
             "total": round(total, 2),
             "unknown_count": sum(1 for li in line_items if li.get("unknown")),
+            "active_recurring_invoices": active_ris,
+            "auto_bill_recurring": auto_bill_enabled,
         })
 
     grand_total = sum(r["total"] for r in results)
@@ -960,6 +969,130 @@ async def get_client_acronis_billing(client_id: str, current_user: dict = Depend
         "last_synced": latest_snapshot.get("synced_at") if latest_snapshot else None,
         "last_synced_total": latest_snapshot.get("total") if latest_snapshot else None,
     }
+
+
+@router.post("/acronis/billing/client/{client_id}/link-to-recurring")
+async def link_client_billing_to_recurring(client_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Enable auto-attach of Acronis usage to this client's recurring invoice(s).
+    Body (all optional):
+      - recurring_invoice_id: target a specific RI (otherwise applies to all active RIs for the client)
+      - create_if_missing: if True and no active RI exists, create a scaffold one
+      - frequency, tax_rate, currency, description: used only when create_if_missing is True
+    """
+    data = data or {}
+
+    # Confirm the client is linked on Acronis side
+    link = await db.acronis_customer_links.find_one({"client_id": client_id}, {"_id": 0})
+    if not link:
+        raise HTTPException(status_code=400, detail="This client is not linked to an Acronis tenant. Link the tenant first on the Tenants tab.")
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    target_id = data.get("recurring_invoice_id")
+
+    modified, created_id = [], None
+
+    if target_id:
+        ri = await db.recurring_invoices.find_one({"id": target_id, "client_id": client_id}, {"_id": 0, "id": 1})
+        if not ri:
+            raise HTTPException(status_code=404, detail="Recurring invoice not found for this client")
+        await db.recurring_invoices.update_one(
+            {"id": target_id},
+            {"$set": {"include_acronis_usage": True, "updated_at": now}}
+        )
+        modified.append(target_id)
+    else:
+        active = await db.recurring_invoices.find(
+            {"client_id": client_id, "status": "active"}, {"_id": 0, "id": 1}
+        ).to_list(50)
+        for r in active:
+            await db.recurring_invoices.update_one(
+                {"id": r["id"]},
+                {"$set": {"include_acronis_usage": True, "updated_at": now}}
+            )
+            modified.append(r["id"])
+
+        # Optionally create a scaffold RI if none exists
+        if not modified and data.get("create_if_missing"):
+            new_id = f"ri-{uuid.uuid4().hex[:8]}"
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            frequency = data.get("frequency", "monthly")
+            scaffold = {
+                "id": new_id,
+                "client_id": client_id,
+                "client_name": client.get("name", ""),
+                "description": data.get("description", f"Acronis Usage Billing — {client.get('name','')}"),
+                "line_items": [],  # purely Acronis-driven
+                "subtotal": 0.0,
+                "tax_rate": float(data.get("tax_rate", 10)),
+                "tax_amount": 0.0,
+                "amount": 0.0,
+                "currency": data.get("currency", "AUD"),
+                "frequency": frequency,
+                "start_date": today,
+                "next_generation": today,  # bill right away next run
+                "end_date": None,
+                "contract_id": None,
+                "payment_terms": data.get("payment_terms", "net_30"),
+                "notes": "Auto-created to attach monthly Acronis usage. Line items sourced live each generation from Acronis.",
+                "auto_send": False,
+                "auto_send_email": "",
+                "include_pdf": True,
+                "include_acronis_usage": True,
+                "status": "active",
+                "invoices_generated": 0,
+                "total_billed": 0,
+                "last_generated": None,
+                "generation_history": [],
+                "created_by": current_user.get("name", ""),
+                "created_at": now,
+                "updated_at": now,
+            }
+            await db.recurring_invoices.insert_one(scaffold)
+            created_id = new_id
+            modified.append(new_id)
+
+    # Mark the link so the UI can show this client is auto-billed
+    await db.acronis_customer_links.update_one(
+        {"client_id": client_id},
+        {"$set": {
+            "auto_bill_recurring": True,
+            "auto_bill_ri_ids": modified,
+            "auto_bill_linked_at": now,
+            "auto_bill_linked_by": current_user.get("name", ""),
+        }}
+    )
+
+    return {
+        "client_id": client_id,
+        "client_name": client.get("name", ""),
+        "updated_recurring_invoices": modified,
+        "created_recurring_invoice_id": created_id,
+        "count": len(modified),
+        "message": (
+            f"Created new recurring invoice {created_id} with Acronis auto-billing" if created_id
+            else f"Enabled Acronis auto-billing on {len(modified)} recurring invoice(s)" if modified
+            else "No active recurring invoices found — pass create_if_missing=true to create one"
+        ),
+    }
+
+
+@router.post("/acronis/billing/client/{client_id}/unlink-recurring")
+async def unlink_client_billing_from_recurring(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Disable auto-attach of Acronis usage for this client (across all RIs)."""
+    now = datetime.now(timezone.utc).isoformat()
+    res = await db.recurring_invoices.update_many(
+        {"client_id": client_id, "include_acronis_usage": True},
+        {"$set": {"include_acronis_usage": False, "updated_at": now}}
+    )
+    await db.acronis_customer_links.update_one(
+        {"client_id": client_id},
+        {"$set": {"auto_bill_recurring": False, "auto_bill_unlinked_at": now}}
+    )
+    return {"client_id": client_id, "disabled_on": res.modified_count}
 
 
 @router.post("/acronis/sync")
