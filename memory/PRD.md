@@ -21,7 +21,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Acronis Settings card in Settings > Integrations (Client ID, Secret, Data Centre URL, Test Connection)
 - Backup status shows: machine name, tenant, health (ok/failed/warning), applied plans, last/next backup times
 
-## Recent Updates (Apr 18, 2026 — Remote Access Consent & Audit Trail)
+## Recent Updates (Apr 18, 2026 — Resend Settings UI + Settings page revamp)
+- **Resend email settings** now fully configurable via UI at **Settings → Integrations → Resend Email Delivery**:
+  - Editable API key (masked display, `clear` to remove custom key and revert to env), Sender Email (From), Reply-To, Test Email Recipient
+  - Status badges: Configured/Not Configured + source (DB override vs. Environment .env)
+  - Last-test-result badge with timestamp
+  - "Send Test Email" button delivers a branded test email and stores the result
+  - Backend: `GET/PUT /api/settings/resend`, `POST /api/settings/resend/test`
+  - `email_utils.send_email()` now reads from DB first (fallback to env) so admins can swap keys without redeploying
+
+- **Settings page revamped for easy navigation**:
+  - New **Quick-search input** in the page header — type "resend", "stripe", "logo", "acronis", "sso"… and get instant dropdown results with tab badges
+  - Search index covers 24+ settings across all 7 tabs (branding, general, auth, mailbox, integrations, AI, notifications)
+  - Click a result → auto-jumps to the correct tab, scrolls to the target card, and briefly highlights it
+  - All major cards now have stable `data-testid` anchors (resend/acronis/xero/stripe/hudu/syncro/ai/sso/notifications/…) so quick-jump is reliable
+  - Backend: a pre-existing destructuring bug (resend data was dropped into the wrong slot behind acronis) was fixed while wiring the new integration
+
+
 - **Consent-gated remote access**: Portal Remote button now opens a compliance consent dialog before launching RustDesk. Shows device details, SOC 2 / ISO 27001 disclosure, MSP-observation notice, and requires explicit checkbox acknowledgement. Backend rejects `remote-connect` without `consent_acknowledged: true`.
 - **Active-session tracking**: After consent, an "in progress" dialog stays open with session notes field and red "End Session" button. Ending the session computes duration and generates the audit record.
 - **Tamper-evident PDF audit records**: MSP-branded PDF per session including Session ID, Client, Initiated by, Device + OS, RustDesk ID, Started/Ended timestamps, Duration, Status, IP address, full consent text, acknowledgement timestamp, session notes. Generated via `reportlab`-style FPDF with MSP branding (uses `settings.branding.company_name`).

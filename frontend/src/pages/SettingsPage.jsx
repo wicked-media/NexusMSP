@@ -18,7 +18,7 @@ import {
   User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
   Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
-  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff
+  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search
 } from "lucide-react";
 
 const TABS = [
@@ -31,9 +31,45 @@ const TABS = [
   { id: "notifications", label: "Notifications", icon: Bell },
 ];
 
+// Search index: maps keywords → (tab, card anchor, human label)
+const SETTINGS_INDEX = [
+  // Branding
+  { tab: "branding", anchor: "branding-section", label: "Platform Branding", keywords: "branding logo company name colors favicon login tagline" },
+  { tab: "branding", anchor: "branding-section", label: "Company Logo", keywords: "logo image upload" },
+  { tab: "branding", anchor: "branding-section", label: "Favicon / Icon", keywords: "favicon icon browser tab" },
+  { tab: "branding", anchor: "branding-section", label: "Primary / Accent Colors", keywords: "color theme primary accent secondary brand" },
+  { tab: "branding", anchor: "branding-section", label: "Invoice Header / Footer", keywords: "invoice pdf branding header footer" },
+  // General
+  { tab: "general", anchor: "general-profile-card", label: "My Profile", keywords: "profile name email avatar user" },
+  { tab: "general", anchor: "general-jobnumber-card", label: "Job Numbering Prefixes", keywords: "job number sla prefix workshop cabling ticket numbering" },
+  { tab: "general", anchor: "general-threshold-card", label: "No-Notes Escalation Threshold", keywords: "sla no notes threshold escalation" },
+  { tab: "general", anchor: "general-users-card", label: "Team / Users", keywords: "users team technicians accounts invite" },
+  { tab: "general", anchor: "general-canned-card", label: "Canned Responses", keywords: "canned ticket response template reply" },
+  // Auth
+  { tab: "auth", anchor: "auth-sso-card", label: "Microsoft SSO", keywords: "sso microsoft azure ad entra single sign on oauth" },
+  // Mailbox
+  { tab: "mailbox", anchor: "mailbox-o365-card", label: "Microsoft 365 Inbox", keywords: "mailbox o365 office365 inbox ticket email to ticket" },
+  { tab: "mailbox", anchor: "mailbox-signature-card", label: "Email Signature", keywords: "email signature reply template" },
+  // Integrations
+  { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
+  { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
+  { tab: "integrations", anchor: "resend-settings-card", label: "Resend Email Delivery", keywords: "resend email smtp api key transactional onboarding welcome email notifications" },
+  { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
+  { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
+  { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
+  { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
+  { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
+  // AI
+  { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai anthropic gemini claude gpt model provider emergent llm key" },
+  // Notifications
+  { tab: "notifications", anchor: "notifications-prefs-card", label: "Email Alerts & Preferences", keywords: "notification email alerts preferences sla warnings device offline" },
+];
+
 export default function SettingsPage() {
   const { user, token } = useAuth();
   const [activeTab, setActiveTab] = useState("branding");
+  const [settingSearch, setSettingSearch] = useState("");
+  const [highlightAnchor, setHighlightAnchor] = useState("");
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
   const [branding, setBranding] = useState({
@@ -58,6 +94,10 @@ export default function SettingsPage() {
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
+  const [resend, setResend] = useState({ api_key: "", sender_email: "", reply_to: "", api_key_set: false, configured_from: "none", last_test_result: null, last_test_at: null, updated_at: null, updated_by: null });
+  const [resendSaving, setResendSaving] = useState(false);
+  const [resendTesting, setResendTesting] = useState(false);
+  const [resendTestEmail, setResendTestEmail] = useState("");
   const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
@@ -93,7 +133,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -109,12 +149,14 @@ export default function SettingsPage() {
           axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
+          axios.get(`${API}/settings/resend`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
         setXero(xeroRes.data);
         setStripe(stripeRes.data);
         if (acronisRes.data) setAcronis(prev => ({ ...prev, api_url: acronisRes.data.api_url || "", client_id: acronisRes.data.client_id || "", connected: acronisRes.data.connected || false }));
+        if (resendRes?.data) setResend(prev => ({ ...prev, ...resendRes.data, api_key: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -233,12 +275,81 @@ export default function SettingsPage() {
 
   const mailboxConnected = mailbox?.connected;
 
+  const filteredResults = settingSearch.trim().length >= 2
+    ? SETTINGS_INDEX.filter(item =>
+        item.label.toLowerCase().includes(settingSearch.toLowerCase()) ||
+        item.keywords.toLowerCase().includes(settingSearch.toLowerCase())
+      ).slice(0, 8)
+    : [];
+
+  // Apply/remove highlight CSS class to the targeted card
+  useEffect(() => {
+    if (!highlightAnchor) return;
+    const el = document.querySelector(`[data-testid="${highlightAnchor}"]`);
+    if (!el) return;
+    el.setAttribute("data-settings-highlight", "true");
+    const t = setTimeout(() => el.removeAttribute("data-settings-highlight"), 2200);
+    return () => { clearTimeout(t); el.removeAttribute("data-settings-highlight"); };
+  }, [highlightAnchor, activeTab]);
+
+  const jumpToSetting = (item) => {
+    setActiveTab(item.tab);
+    setSettingSearch("");
+    setHighlightAnchor(item.anchor);
+    // Wait for the target tab's DOM to mount, then scroll
+    setTimeout(() => {
+      const el = document.querySelector(`[data-testid="${item.anchor}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      setTimeout(() => setHighlightAnchor(""), 2500);
+    }, 150);
+  };
+
   return (
     <div className="max-w-5xl" data-testid="settings-page">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Platform configuration, integrations, and preferences</p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+          <p className="text-muted-foreground">Platform configuration, integrations, and preferences</p>
+        </div>
+        {/* Quick search */}
+        <div className="relative w-full md:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <Input
+            value={settingSearch}
+            onChange={e => setSettingSearch(e.target.value)}
+            placeholder="Search settings… (e.g. 'resend', 'stripe', 'logo')"
+            className="pl-9 h-10"
+            data-testid="settings-search-input"
+          />
+          {filteredResults.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full border bg-background shadow-xl rounded-md overflow-hidden" data-testid="settings-search-results">
+              {filteredResults.map((item, idx) => {
+                const tabMeta = TABS.find(t => t.id === item.tab);
+                const TabIcon = tabMeta?.icon || Settings2;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => jumpToSetting(item)}
+                    className="w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-muted text-sm border-b last:border-b-0"
+                    data-testid={`settings-search-result-${idx}`}
+                  >
+                    <TabIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="flex-1 truncate">{item.label}</span>
+                    <Badge variant="outline" className="text-[9px]">{tabMeta?.label || item.tab}</Badge>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {settingSearch.trim().length >= 2 && filteredResults.length === 0 && (
+            <div className="absolute z-20 mt-1 w-full border bg-background shadow-xl rounded-md p-3 text-xs text-muted-foreground" data-testid="settings-search-empty">
+              No matches for "<span className="font-mono">{settingSearch}</span>"
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tab Navigation */}
@@ -254,6 +365,13 @@ export default function SettingsPage() {
           );
         })}
       </div>
+
+      <style>{`
+        [data-settings-highlight="true"] {
+          box-shadow: 0 0 0 2px hsl(var(--primary));
+          transition: box-shadow 0.3s ease;
+        }
+      `}</style>
 
       <div className="space-y-6">
 
@@ -418,7 +536,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Email Signature & Canned Responses - Per Technician */}
-      <Card>
+      <Card data-testid="mailbox-signature-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Mail className="w-5 h-5 text-primary" />
@@ -485,7 +603,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Notifications */}
-      <Card>
+      <Card data-testid="notifications-prefs-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Bell className="w-5 h-5 text-primary" />
@@ -624,7 +742,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Job Numbering - in General tab */}
-      <Card>
+      <Card data-testid="general-jobnumber-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Tag className="w-5 h-5 text-primary" />
@@ -661,7 +779,7 @@ export default function SettingsPage() {
       {activeTab === "auth" && (<>
 
       {/* Microsoft SSO */}
-      <Card className="border-blue-500/20">
+      <Card className="border-blue-500/20" data-testid="auth-sso-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-blue-500" />
@@ -871,7 +989,7 @@ export default function SettingsPage() {
       {activeTab === "notifications" && (<>
 
       {/* No-Notes Escalation Threshold */}
-      <Card className="border-orange-500/20">
+      <Card className="border-orange-500/20" data-testid="general-threshold-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-orange-500" />
@@ -949,7 +1067,7 @@ export default function SettingsPage() {
       {activeTab === "integrations" && (<>
 
       {/* Xero Integration */}
-      <Card>
+      <Card data-testid="xero-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-blue-500" />
@@ -1026,6 +1144,131 @@ export default function SettingsPage() {
           }} data-testid="save-stripe-btn">
             <Save className="w-4 h-4 mr-2" />Save Stripe Settings
           </Button>
+        </CardContent>
+      </Card>
+
+
+      {/* Resend Email Integration */}
+      <Card data-testid="resend-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-emerald-500" />
+            <CardTitle>Resend Email Delivery</CardTitle>
+          </div>
+          <CardDescription>
+            Transactional email provider used for welcome emails, invoices, late-payment reminders, portal notifications and remote-session audit records.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className={resend.api_key_set ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="resend-status-badge">
+              {resend.api_key_set ? "Configured" : "Not Configured"}
+            </Badge>
+            {resend.configured_from && (
+              <Badge variant="outline" className="text-[10px] capitalize">Source: {resend.configured_from === "db" ? "Database (custom)" : resend.configured_from === "env" ? "Environment (.env)" : "None"}</Badge>
+            )}
+            {resend.last_test_result && (
+              <Badge variant="outline" className={`text-[10px] ${resend.last_test_result === "sent" ? "text-emerald-400 border-emerald-500/30" : resend.last_test_result === "failed" ? "text-red-400 border-red-500/30" : "text-amber-400 border-amber-500/30"}`}>
+                Last test: {resend.last_test_result} {resend.last_test_at ? `(${new Date(resend.last_test_at).toLocaleString()})` : ""}
+              </Badge>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Resend API Key</Label>
+              <Input
+                type="password"
+                value={resend.api_key}
+                onChange={e => setResend({ ...resend, api_key: e.target.value })}
+                placeholder={resend.api_key_set ? `Current: ${resend.api_key || "re_..."}` : "re_xxxxxxxxxxxxx"}
+                data-testid="resend-api-key-input"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Get your key at <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="text-primary underline">resend.com/api-keys</a>. Leave blank to keep current; type <span className="font-mono">clear</span> to remove the custom key (falls back to env).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Sender Email (From)</Label>
+              <Input
+                type="email"
+                value={resend.sender_email}
+                onChange={e => setResend({ ...resend, sender_email: e.target.value })}
+                placeholder="notifications@yourdomain.com"
+                data-testid="resend-sender-email"
+              />
+              <p className="text-[11px] text-muted-foreground">Must be a domain verified on your Resend account. Default: <span className="font-mono">onboarding@resend.dev</span> (Resend's sandbox).</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Reply-To Address (optional)</Label>
+              <Input
+                type="email"
+                value={resend.reply_to}
+                onChange={e => setResend({ ...resend, reply_to: e.target.value })}
+                placeholder="support@yourdomain.com"
+                data-testid="resend-reply-to"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Test Email Recipient</Label>
+              <Input
+                type="email"
+                value={resendTestEmail}
+                onChange={e => setResendTestEmail(e.target.value)}
+                placeholder={user?.email || "you@example.com"}
+                data-testid="resend-test-email-input"
+              />
+              <p className="text-[11px] text-muted-foreground">Sends a branded test email so you can confirm delivery.</p>
+            </div>
+          </div>
+
+          {resend.updated_at && (
+            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(resend.updated_at).toLocaleString()} by {resend.updated_by || "—"}</p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={async () => {
+                setResendSaving(true);
+                try {
+                  await axios.put(`${API}/settings/resend`, {
+                    api_key: resend.api_key,
+                    sender_email: resend.sender_email,
+                    reply_to: resend.reply_to,
+                  }, { headers });
+                  toast.success("Resend settings saved");
+                  const fresh = await axios.get(`${API}/settings/resend`, { headers });
+                  setResend({ ...fresh.data, api_key: "" });
+                } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); }
+                finally { setResendSaving(false); }
+              }}
+              disabled={resendSaving}
+              data-testid="save-resend-btn"
+            >
+              {resendSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Save Resend Settings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setResendTesting(true);
+                try {
+                  const res = await axios.post(`${API}/settings/resend/test`, { to_email: resendTestEmail || user?.email }, { headers });
+                  if (res.data.status === "sent") toast.success(`Test email sent to ${resendTestEmail || user?.email}`);
+                  else if (res.data.status === "mocked") toast.warning("Resend not configured — email was logged only");
+                  else toast.error(`Test failed: ${res.data.message}`);
+                  const fresh = await axios.get(`${API}/settings/resend`, { headers });
+                  setResend({ ...fresh.data, api_key: "" });
+                } catch (e) { toast.error(e.response?.data?.detail || "Test failed"); }
+                finally { setResendTesting(false); }
+              }}
+              disabled={resendTesting || !resend.api_key_set}
+              data-testid="test-resend-btn"
+            >
+              {resendTesting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <TestTube className="w-4 h-4 mr-2" />}
+              Send Test Email
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -1198,7 +1441,7 @@ export default function SettingsPage() {
       {activeTab === "ai" && (<>
 
       {/* AI Model Configuration */}
-      <Card>
+      <Card data-testid="ai-config-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-purple-500" />
@@ -1266,7 +1509,7 @@ export default function SettingsPage() {
       {activeTab === "integrations" && (<>
 
       {/* Hudu Integration */}
-      <Card>
+      <Card data-testid="hudu-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-cyan-500" />
@@ -1331,7 +1574,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Syncro RMM Integration */}
-      <Card>
+      <Card data-testid="syncro-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-orange-500" />
