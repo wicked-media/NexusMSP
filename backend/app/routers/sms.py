@@ -17,6 +17,37 @@ router = APIRouter(tags=["SMS"])
 MM_BASE = "https://api.mobilemessage.com.au/v1"
 
 
+# ============== DEFAULT SMS TEMPLATES ==============
+DEFAULT_SMS_TEMPLATES = [
+    {"key": "ticket_update", "name": "Ticket Update", "category": "ticket",
+     "body": "{client_name}, update on ticket #{ticket_number}: {comment_preview} — View: {portal_link}"},
+    {"key": "ticket_ready_pickup", "name": "Ticket Ready for Pickup", "category": "ticket",
+     "body": "Hi {client_name}, your device is ready for pickup. Ticket #{ticket_number}. Call us on {company_phone} to arrange a time."},
+    {"key": "ticket_closed", "name": "Ticket Resolved", "category": "ticket",
+     "body": "Hi {client_name}, ticket #{ticket_number} ({ticket_title}) has been resolved. Reply if you need further help."},
+    {"key": "ticket_tech_dispatched", "name": "Technician Dispatched", "category": "ticket",
+     "body": "Hi {client_name}, {technician_name} is on the way to your site for ticket #{ticket_number}. ETA {eta}."},
+    {"key": "overdue_invoice", "name": "Overdue Invoice Reminder", "category": "billing",
+     "body": "Hi {client_name}, invoice {invoice_number} for ${invoice_amount} is {days_overdue} days overdue. Pay now: {payment_link}. Reply HELP if you have any questions."},
+    {"key": "invoice_due_soon", "name": "Invoice Due Soon", "category": "billing",
+     "body": "Hi {client_name}, reminder: invoice {invoice_number} for ${invoice_amount} is due on {due_date}. Pay: {payment_link}"},
+    {"key": "payment_received", "name": "Payment Received", "category": "billing",
+     "body": "Thanks {client_name}! Payment of ${amount} received for invoice {invoice_number}. Thanks for your business."},
+    {"key": "appointment_reminder", "name": "Appointment Reminder", "category": "general",
+     "body": "Hi {client_name}, reminder of your appointment with {company_name} at {appointment_time}. Reply Y to confirm or call {company_phone} to reschedule."},
+]
+
+
+def _substitute(body: str, context: dict) -> str:
+    """Replace {placeholders} in a template body. Missing placeholders are left as-is."""
+    if not body:
+        return ""
+    result = body
+    for k, v in (context or {}).items():
+        result = result.replace("{" + k + "}", str(v) if v is not None else "")
+    return result
+
+
 # ============== CONFIG HELPERS ==============
 async def _get_config():
     doc = await db.settings.find_one({"key": "sms_config"}, {"_id": 0}) or {}
@@ -390,7 +421,39 @@ async def webhook_inbound(request: Request):
         "client_name": client.get("name") if client else None,
         "raw_payload": data,
     }
+
+    # Auto-link to ticket if custom_ref starts with tkt- or inv-
+    ref = data.get("custom_ref") or ""
+    if ref.startswith("tkt-"):
+        doc["ticket_id"] = ref[4:]
+    elif ref.startswith("inv-"):
+        doc["invoice_id"] = ref[4:]
+    else:
+        # Otherwise, if client has recent outbound SMS linked to a ticket, link to most recent one
+        if doc.get("client_id"):
+            recent = await db.sms_messages.find_one(
+                {"client_id": doc["client_id"], "direction": "outbound", "ticket_id": {"$ne": None}},
+                {"_id": 0, "ticket_id": 1},
+                sort=[("sent_at", -1)]
+            )
+            if recent and recent.get("ticket_id"):
+                doc["ticket_id"] = recent["ticket_id"]
+
     await db.sms_messages.insert_one(doc)
+
+    # If linked to a ticket, push an activity entry
+    if doc.get("ticket_id"):
+        await db.tickets.update_one(
+            {"id": doc["ticket_id"]},
+            {"$push": {"activity": {
+                "id": str(uuid.uuid4())[:8],
+                "type": "sms_received",
+                "user_name": doc.get("client_name") or sender_num,
+                "message": f"SMS reply: {doc['message'][:100]}",
+                "sms_id": doc["id"],
+                "timestamp": now,
+            }}, "$set": {"updated_at": now, "has_unread_sms": True}}
+        )
 
     await db.sms_webhook_log.insert_one({
         "id": str(uuid.uuid4()),
@@ -405,3 +468,201 @@ async def webhook_inbound(request: Request):
 async def mark_read(msg_id: str, current_user: dict = Depends(get_current_user)):
     await db.sms_messages.update_one({"id": msg_id}, {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True}
+
+
+# ============== SMS TEMPLATES ==============
+@router.get("/sms/templates")
+async def list_sms_templates(category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {"category": category} if category else {}
+    docs = await db.sms_templates.find(query, {"_id": 0}).sort("name", 1).to_list(200)
+    if not docs:
+        now = datetime.now(timezone.utc).isoformat()
+        for t in DEFAULT_SMS_TEMPLATES:
+            await db.sms_templates.insert_one({
+                "id": str(uuid.uuid4())[:8], **t,
+                "created_at": now, "seeded": True,
+            })
+        docs = await db.sms_templates.find(query, {"_id": 0}).sort("name", 1).to_list(200)
+    return docs
+
+
+@router.post("/sms/templates")
+async def create_sms_template(data: dict, current_user: dict = Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4())[:8],
+        "key": (data.get("key") or data.get("name", "")).lower().replace(" ", "_")[:32],
+        "name": data.get("name", ""),
+        "category": data.get("category", "general"),
+        "body": data.get("body", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user.get("name", ""),
+    }
+    if not doc["name"] or not doc["body"]:
+        raise HTTPException(status_code=400, detail="name and body required")
+    await db.sms_templates.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+
+@router.put("/sms/templates/{tid}")
+async def update_sms_template(tid: str, data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = {"name", "category", "body"}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return {"message": "No changes"}
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.sms_templates.update_one({"id": tid}, {"$set": updates})
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"message": "Updated"}
+
+
+@router.delete("/sms/templates/{tid}")
+async def delete_sms_template(tid: str, current_user: dict = Depends(get_current_user)):
+    res = await db.sms_templates.delete_one({"id": tid})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"message": "Deleted"}
+
+
+# ============== TICKET-LINKED SMS ==============
+@router.get("/tickets/{ticket_id}/sms")
+async def get_ticket_sms(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Return all SMS messages (outbound + inbound) linked to a ticket."""
+    msgs = await db.sms_messages.find(
+        {"$or": [{"ticket_id": ticket_id}, {"custom_ref": f"tkt-{ticket_id}"}]},
+        {"_id": 0, "provider_response": 0, "raw_payload": 0}
+    ).sort("sent_at", 1).to_list(500)
+    return msgs
+
+
+async def send_ticket_sms(ticket_id: str, message: str, to: str = None, template_key: str = None,
+                          user: dict = None):
+    """Helper used by ticket comment flow to also fire an SMS. Returns log doc id or None."""
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Resolve recipient
+    phone = to
+    if not phone and ticket.get("client_id"):
+        client = await db.clients.find_one({"id": ticket["client_id"]}, {"_id": 0, "phone": 1, "mobile": 1})
+        if client:
+            phone = client.get("mobile") or client.get("phone")
+    if not phone:
+        raise HTTPException(status_code=400, detail="No phone number on ticket/client")
+
+    # Template substitution
+    if template_key:
+        tmpl = await db.sms_templates.find_one({"key": template_key}, {"_id": 0})
+        if tmpl:
+            ctx = {
+                "client_name": ticket.get("client_name", ""),
+                "ticket_number": ticket.get("ticket_number") or ticket.get("id", "")[-6:],
+                "ticket_title": ticket.get("title", ""),
+                "ticket_id": ticket.get("id", ""),
+                "comment_preview": (message or "")[:100],
+                "portal_link": "",
+                "company_phone": "",
+                "company_name": "NexusOps",
+                "technician_name": user.get("name", "") if user else "",
+                "eta": "shortly",
+            }
+            message = _substitute(tmpl["body"], ctx)
+
+    data = {
+        "to": phone, "message": message,
+        "client_id": ticket.get("client_id"),
+        "client_name": ticket.get("client_name"),
+        "ticket_id": ticket_id,
+        "custom_ref": f"tkt-{ticket_id}",
+    }
+    result = await send_sms(data, current_user=user or {"id": "system", "name": "System"})
+    return result
+
+
+@router.post("/tickets/{ticket_id}/send-sms")
+async def send_sms_on_ticket(ticket_id: str, data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Send an SMS tied to a ticket (appears in ticket thread + SMS log)."""
+    result = await send_ticket_sms(
+        ticket_id=ticket_id,
+        message=data.get("message", ""),
+        to=data.get("to"),
+        template_key=data.get("template_key"),
+        user=current_user,
+    )
+    # Also append a note in the ticket activity
+    now = datetime.now(timezone.utc).isoformat()
+    await db.tickets.update_one(
+        {"id": ticket_id},
+        {"$push": {"activity": {
+            "id": str(uuid.uuid4())[:8],
+            "type": "sms_sent",
+            "user_name": current_user.get("name", ""),
+            "message": f"SMS sent: {data.get('message','')[:80]}",
+            "sms_id": result.get("id"),
+            "timestamp": now,
+        }}, "$set": {"updated_at": now}}
+    )
+    return result
+
+
+# ============== INVOICE OVERDUE SMS ==============
+@router.post("/invoices/{invoice_id}/send-sms-reminder")
+async def send_invoice_sms(invoice_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Send an SMS reminder for an overdue/due-soon invoice. Uses the configured template."""
+    data = data or {}
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    client = await db.clients.find_one({"id": invoice.get("client_id")}, {"_id": 0}) or {}
+    phone = data.get("to") or client.get("mobile") or client.get("phone")
+    if not phone:
+        raise HTTPException(status_code=400, detail="No mobile number on client")
+
+    template_key = data.get("template_key") or "overdue_invoice"
+    tmpl = await db.sms_templates.find_one({"key": template_key}, {"_id": 0})
+    if not tmpl:
+        # Seed defaults if missing
+        await list_sms_templates(current_user=current_user)
+        tmpl = await db.sms_templates.find_one({"key": template_key}, {"_id": 0})
+
+    # Compute days overdue
+    days_overdue = 0
+    try:
+        due = invoice.get("due_date")
+        if due:
+            due_dt = datetime.fromisoformat(str(due).replace("Z", "+00:00")) if "T" in str(due) else datetime.strptime(str(due)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            days_overdue = max(0, (datetime.now(timezone.utc) - due_dt).days)
+    except Exception:
+        pass
+
+    ctx = {
+        "client_name": client.get("name") or invoice.get("client_name", ""),
+        "invoice_number": invoice.get("invoice_number") or invoice.get("id", "")[-8:],
+        "invoice_amount": f"{float(invoice.get('total') or invoice.get('amount_due') or 0):.2f}",
+        "due_date": str(invoice.get("due_date", ""))[:10],
+        "days_overdue": str(days_overdue),
+        "payment_link": invoice.get("payment_link") or "",
+        "amount": f"{float(invoice.get('total') or 0):.2f}",
+        "company_name": "NexusOps",
+    }
+    message = _substitute(tmpl["body"] if tmpl else "", ctx) if tmpl else (data.get("message") or "")
+    if not message:
+        raise HTTPException(status_code=400, detail="Unable to build SMS body")
+
+    result = await send_sms({
+        "to": phone,
+        "message": message,
+        "client_id": invoice.get("client_id"),
+        "client_name": invoice.get("client_name"),
+        "custom_ref": f"inv-{invoice_id}",
+    }, current_user=current_user)
+
+    # Log against invoice
+    await db.invoices.update_one(
+        {"id": invoice_id},
+        {"$set": {"last_sms_reminder_at": datetime.now(timezone.utc).isoformat()},
+         "$inc": {"sms_reminders_sent": 1}}
+    )
+    return result
