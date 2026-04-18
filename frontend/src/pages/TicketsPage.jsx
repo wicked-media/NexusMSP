@@ -29,20 +29,8 @@ import {
   Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
+import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
 
-const priorityConfig = {
-  critical: { label: "Critical", class: "bg-red-500 text-white" },
-  high: { label: "High", class: "bg-orange-500 text-white" },
-  medium: { label: "Medium", class: "bg-yellow-500 text-white" },
-  low: { label: "Low", class: "bg-green-600 text-white" }
-};
-const statusConfig = {
-  open: { label: "Open", class: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
-  in_progress: { label: "In Progress", class: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
-  on_hold: { label: "On Hold", class: "bg-orange-500/10 text-orange-500 border-orange-500/20" },
-  resolved: { label: "Resolved", class: "bg-green-500/10 text-green-500 border-green-500/20" },
-  closed: { label: "Closed", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" }
-};
 
 export default function TicketsPage() {
   const { token, user } = useAuth();
@@ -857,15 +845,7 @@ export default function TicketsPage() {
     } catch { toast.error("Failed"); }
   };
 
-  const WS_STATUSES = {
-    checked_in: { label: "Checked In", class: "bg-blue-500/20 text-blue-400", icon: "inbox" },
-    diagnosing: { label: "Diagnosing", class: "bg-purple-500/20 text-purple-400", icon: "search" },
-    parts_ordered: { label: "Parts Ordered", class: "bg-cyan-500/20 text-cyan-400", icon: "truck" },
-    repairing: { label: "Repairing", class: "bg-amber-500/20 text-amber-400", icon: "wrench" },
-    ready_for_pickup: { label: "Ready for Pickup", class: "bg-green-500/20 text-green-400", icon: "check" },
-    collected: { label: "Collected", class: "bg-gray-500/20 text-gray-400", icon: "package" },
-    cancelled: { label: "Cancelled", class: "bg-red-500/20 text-red-400", icon: "x" },
-  };
+  const WS_STATUSES = WS_STATUSES_CONFIG;
 
   // ============ FIELD JOB ENRICHMENT HANDLERS ============
 

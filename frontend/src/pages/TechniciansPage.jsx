@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
+import { priorityConfig, statusConfig } from "@/config/ticketConfig";
 import {
   Plus, Search, Loader2, User, ArrowLeft, Ticket, Clock, AlertTriangle,
   CheckCircle, XCircle, Mail, Phone, Edit, Wrench, DollarSign, UserCheck,
@@ -61,18 +62,6 @@ const MODULES = [
 ];
 const ACTIONS = ["view", "create", "edit", "delete"];
 
-const priorityConfig = {
-  critical: { label: "Critical", class: "bg-red-500 text-white" },
-  high: { label: "High", class: "bg-orange-500 text-white" },
-  medium: { label: "Medium", class: "bg-yellow-500 text-white" },
-  low: { label: "Low", class: "bg-green-600 text-white" }
-};
-const statusConfig = {
-  open: { label: "Open", class: "text-blue-500 border-blue-500/30" },
-  in_progress: { label: "In Progress", class: "text-yellow-500 border-yellow-500/30" },
-  resolved: { label: "Resolved", class: "text-green-500 border-green-500/30" },
-  closed: { label: "Closed", class: "text-gray-500 border-gray-500/30" }
-};
 
 const ON_CALL_CATEGORIES = {
   sla: { label: "SLA", icon: Shield, bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40", ring: "ring-emerald-500/50", glow: "shadow-emerald-500/20 shadow-lg" },

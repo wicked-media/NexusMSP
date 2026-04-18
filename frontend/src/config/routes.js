@@ -202,6 +202,8 @@ export const routeConfig = [
   { path: "/intelligent-routing", component: page("IntelligentRoutingPage"), auth: true, layout: true },
   { path: "/client-portal", component: page("ClientPortalPage"), auth: true, layout: true },
   { path: "/portal/:token", component: page("ClientPortalViewPage"), auth: false, layout: false },
+  { path: "/portal-login", component: page("PortalLoginPage"), auth: false, layout: false },
+  { path: "/portal-dashboard", component: page("PortalDashboardPage"), auth: false, layout: false },
   { path: "/revenue-tracking", component: page("RevenueAnalyticsPage"), auth: true, layout: true },
   { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
 

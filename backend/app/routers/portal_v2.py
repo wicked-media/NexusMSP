@@ -217,6 +217,41 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
     return ticket
 
 
+@router.get("/tickets/{ticket_id}")
+async def portal_ticket_detail(ticket_id: str, user: dict = Depends(get_portal_user)):
+    """Get full ticket detail with messages/conversation."""
+    ticket = await db.tickets.find_one({"id": ticket_id, "client_id": user.get("client_id")}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    # Get ticket messages/notes
+    messages = await db.ticket_messages.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return {"ticket": ticket, "messages": messages}
+
+
+@router.post("/tickets/{ticket_id}/messages")
+async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Depends(get_portal_user)):
+    """Add a message to a ticket conversation from the portal."""
+    ticket = await db.tickets.find_one({"id": ticket_id, "client_id": user.get("client_id")}, {"_id": 0, "id": 1})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    message = {
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket_id,
+        "sender_name": user.get("name", "Client"),
+        "sender_email": user.get("email", ""),
+        "sender_type": "client",
+        "content": data.get("content", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.ticket_messages.insert_one(message)
+    message.pop("_id", None)
+    # Update ticket timestamp
+    await db.tickets.update_one({"id": ticket_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    return message
+
+
+
+
 # ==================== DEVICES ====================
 
 @router.get("/devices")
@@ -288,3 +323,36 @@ async def portal_qbr(user: dict = Depends(get_portal_user)):
     if not qbrs:
         qbrs = await db.qbr_reports.find({"client_id": cid}, {"_id": 0}).sort("generated_at", -1).to_list(10)
     return qbrs
+
+
+
+# ==================== KNOWLEDGE BASE ====================
+
+@router.get("/kb")
+async def portal_knowledge_base(user: dict = Depends(get_portal_user)):
+    """Get published knowledge base articles for clients."""
+    articles = await db.kb_articles.find(
+        {"status": "published", "visibility": {"$in": ["public", "client"]}},
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(100)
+    if not articles:
+        # Return built-in articles for demo
+        articles = [
+            {"id": "kb-001", "title": "How to Submit a Support Ticket", "category": "Getting Started",
+             "content": "You can submit tickets via the Client Portal by clicking 'New Ticket'. Include a detailed description of your issue for fastest resolution.",
+             "tags": ["tickets", "support"], "created_at": datetime.now(timezone.utc).isoformat()},
+            {"id": "kb-002", "title": "Setting Up Multi-Factor Authentication", "category": "Security",
+             "content": "MFA adds an extra layer of security. Go to your profile settings and enable 2FA using an authenticator app like Google Authenticator or Authy.",
+             "tags": ["security", "2fa"], "created_at": datetime.now(timezone.utc).isoformat()},
+            {"id": "kb-003", "title": "Understanding Your Invoice", "category": "Billing",
+             "content": "Your monthly invoice includes all managed services, project work, and any hardware purchases. Contact us if you have questions about specific line items.",
+             "tags": ["billing", "invoices"], "created_at": datetime.now(timezone.utc).isoformat()},
+            {"id": "kb-004", "title": "Password Reset Procedure", "category": "Getting Started",
+             "content": "If you need to reset your password, click 'Forgot Password' on the login screen or contact our help desk for immediate assistance.",
+             "tags": ["password", "account"], "created_at": datetime.now(timezone.utc).isoformat()},
+            {"id": "kb-005", "title": "Remote Support Sessions", "category": "Support",
+             "content": "When a technician needs to access your computer, you'll receive a link or code. Always verify the technician's identity before granting access.",
+             "tags": ["remote", "support"], "created_at": datetime.now(timezone.utc).isoformat()},
+        ]
+    return articles
+

@@ -265,7 +265,7 @@ export default function XeroDashboardPage() {
   };
 
   // PDF viewer state
-  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "" });
+  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "", emailInvoiceId: null });
 
   // PDF download & preview
   const downloadPdf = (inv) => {
@@ -285,6 +285,7 @@ export default function XeroDashboardPage() {
       url: `${API}/invoices/${inv.id}/pdf?token=${token}`,
       title: `Invoice ${inv.invoice_number}`,
       downloadUrl: `${API}/invoices/${inv.id}/pdf/download?token=${token}`,
+      emailInvoiceId: inv.id,
     });
   };
   const previewThemePdf = (themeId) => {
@@ -293,6 +294,7 @@ export default function XeroDashboardPage() {
       url: `${API}/invoice-themes/${themeId}/preview-pdf?token=${token}`,
       title: `Theme Preview`,
       downloadUrl: "",
+      emailInvoiceId: null,
     });
   };
 
@@ -540,7 +542,13 @@ export default function XeroDashboardPage() {
                       <TableCell className="font-mono text-sm">{est.estimate_number}</TableCell><TableCell className="font-medium">{est.title}</TableCell><TableCell>{est.client_name}</TableCell>
                       <TableCell><StatusBadge status={est.status} /></TableCell><TableCell className="text-sm text-muted-foreground">{est.valid_until}</TableCell>
                       <TableCell className="text-right font-mono">${est.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                      <TableCell className="text-right">{est.status !== "CONVERTED" && est.status !== "DECLINED" && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => handleConvertEstimate(est)} data-testid={`convert-${est.id}`}><ArrowRight className="w-3 h-3 mr-1 text-purple-400" />Convert</Button>}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setPdfViewer({ open: true, url: `${API}/estimates/${est.id}/pdf?token=${token}`, title: `Estimate ${est.estimate_number}`, downloadUrl: `${API}/estimates/${est.id}/pdf/download?token=${token}` })} title="Preview PDF"><Eye className="w-3.5 h-3.5 text-violet-400" /></Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { const a = document.createElement("a"); a.href = `${API}/estimates/${est.id}/pdf/download?token=${token}`; a.target = "_blank"; document.body.appendChild(a); a.click(); setTimeout(() => document.body.removeChild(a), 200); }} title="Download PDF"><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
+                          {est.status !== "CONVERTED" && est.status !== "DECLINED" && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => handleConvertEstimate(est)} data-testid={`convert-${est.id}`}><ArrowRight className="w-3 h-3 mr-1 text-purple-400" />Convert</Button>}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1195,6 +1203,12 @@ export default function XeroDashboardPage() {
         pdfUrl={pdfViewer.url}
         title={pdfViewer.title}
         downloadUrl={pdfViewer.downloadUrl}
+        onEmail={pdfViewer.emailInvoiceId ? async (email) => {
+          try {
+            await axios.post(`${API}/xero/invoices/${pdfViewer.emailInvoiceId}/email`, { to_email: email, subject: `Invoice - ${pdfViewer.title}`, message: `Please find attached ${pdfViewer.title}.` }, { headers });
+            toast.success(`Email sent to ${email}`);
+          } catch { toast.error("Failed to send email"); }
+        } : undefined}
       />
     </div>
   );

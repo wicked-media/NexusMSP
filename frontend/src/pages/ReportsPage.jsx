@@ -154,7 +154,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">Ticket Volume by Status</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <PieChart>
                       <Pie data={ticketData?.by_status || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="status">
                         {(ticketData?.by_status || []).map((e, i) => <Cell key={`k-${i}`} fill={statusColorMap[e.status] || COLORS[i]} />)}
@@ -170,7 +170,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <AreaChart data={revenueData?.monthly_trend || []}>
                       <defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22C55E" stopOpacity={0.3} /><stop offset="95%" stopColor="#22C55E" stopOpacity={0} /></linearGradient></defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -212,7 +212,7 @@ export default function ReportsPage() {
             <CardHeader className="pb-2"><CardTitle className="text-base">Technician Workload</CardTitle></CardHeader>
             <CardContent>
               <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart data={techData} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} />
@@ -236,7 +236,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">By Priority</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <PieChart>
                       <Pie data={ticketData?.by_priority || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="priority">
                         {(ticketData?.by_priority || []).map((e, i) => <Cell key={`k-${i}`} fill={priorityColorMap[e.priority] || COLORS[i]} />)}
@@ -251,7 +251,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">By Category</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <BarChart data={ticketData?.by_category || []}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="category" stroke="hsl(var(--muted-foreground))" fontSize={11} />
@@ -299,7 +299,7 @@ export default function ReportsPage() {
             <CardHeader className="pb-2"><CardTitle className="text-base">SLA Performance by Priority</CardTitle></CardHeader>
             <CardContent>
               <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart data={slaStats.byPriority}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="priority" stroke="hsl(var(--muted-foreground))" fontSize={11} />
@@ -327,7 +327,7 @@ export default function ReportsPage() {
             <CardHeader className="pb-2"><CardTitle className="text-base">Monthly Revenue Trend</CardTitle></CardHeader>
             <CardContent>
               <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <AreaChart data={revenueData?.monthly_trend || []}>
                     <defs><linearGradient id="rvg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22C55E" stopOpacity={0.3} /><stop offset="95%" stopColor="#22C55E" stopOpacity={0} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -375,7 +375,7 @@ export default function ReportsPage() {
             <CardHeader className="pb-2"><CardTitle className="text-base">Revenue per Client</CardTitle></CardHeader>
             <CardContent>
               <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart data={profitData.slice(0, 10)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={10} angle={-20} textAnchor="end" height={50} />
@@ -403,7 +403,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">Devices by Type</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <PieChart>
                       <Pie data={deviceData?.by_type || []} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="count" nameKey="type">
                         {(deviceData?.by_type || []).map((_, i) => <Cell key={`k-${i}`} fill={COLORS[i % COLORS.length]} />)}
@@ -418,7 +418,7 @@ export default function ReportsPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">Devices by OS</CardTitle></CardHeader>
               <CardContent>
                 <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <BarChart data={deviceData?.by_os || []}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="os" stroke="hsl(var(--muted-foreground))" fontSize={10} />

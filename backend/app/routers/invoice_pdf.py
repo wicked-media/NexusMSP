@@ -585,6 +585,249 @@ async def preview_theme_pdf(theme_id: str, user: dict = Depends(_get_user_from_t
     )
 
 
+# ──────── ESTIMATE PDF ────────
+
+def generate_estimate_pdf(estimate, branding=None, theme_config=None):
+    """Generate a branded estimate/quote PDF."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.add_page()
+
+    theme = theme_config or {}
+    company_name = "NexusOps"
+    primary_color = (59, 130, 246)
+    accent_color = (6, 182, 212)
+    logo_path = None
+
+    if branding:
+        company_name = branding.get("company_name", "NexusOps")
+        primary_color = _hex_to_rgb(branding.get("primary_color", "#3B82F6"))
+        accent_color = _hex_to_rgb(branding.get("accent_color", "#06B6D4"), (6, 182, 212))
+        for logo_key in ["invoice_logo_url", "company_logo_url"]:
+            logo_url = branding.get(logo_key, "")
+            if logo_url:
+                if logo_url.startswith("/api/uploads/"):
+                    fp = os.path.join("/app/backend", logo_url.replace("/api/", "").lstrip("/"))
+                elif logo_url.startswith("/uploads/"):
+                    fp = os.path.join("/app/backend", logo_url.lstrip("/"))
+                else:
+                    fp = os.path.join(UPLOAD_DIR, os.path.basename(logo_url))
+                if os.path.isfile(fp) and os.path.getsize(fp) > 100:
+                    logo_path = fp
+                    break
+
+    cn = _safe_latin(company_name)
+    est_num = estimate.get("estimate_number", "N/A")
+
+    # Header
+    pdf.set_fill_color(*primary_color)
+    pdf.rect(0, 0, 210, 35, 'F')
+    pdf.set_fill_color(*accent_color)
+    pdf.rect(0, 33, 210, 2, 'F')
+    x_text = 12
+    if logo_path:
+        try:
+            pdf.image(logo_path, 10, 5, 25, 25)
+            x_text = 38
+        except Exception:
+            pass
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(x_text, 7)
+    pdf.cell(100, 10, cn)
+    pdf.set_font("Helvetica", "", 28)
+    pdf.set_xy(120, 4)
+    pdf.cell(80, 14, "ESTIMATE", align="R")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_xy(120, 20)
+    pdf.cell(80, 6, f"#{est_num}", align="R")
+
+    # Bill To / Details
+    pdf.set_y(42)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*primary_color)
+    pdf.cell(100, 5, "PREPARED FOR")
+    pdf.cell(90, 5, "ESTIMATE DETAILS", align="R")
+    pdf.ln()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(100, 7, _safe_latin(estimate.get("client_name", "N/A")), ln=False)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(90, 7, f"Estimate #: {est_num}", align="R")
+    pdf.ln()
+    client_email = _safe_latin(estimate.get("client_email", ""))
+    if client_email:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(100, 5, client_email, ln=False)
+    else:
+        pdf.cell(100, 5, "", ln=False)
+    pdf.cell(90, 5, f"Date: {str(estimate.get('created_at', ''))[:10]}", align="R")
+    pdf.ln()
+    pdf.cell(100, 5, "", ln=False)
+    valid = estimate.get("valid_until", "")
+    pdf.cell(90, 5, f"Valid Until: {valid}" if valid else "", align="R")
+    pdf.ln()
+    status = (estimate.get("status") or "draft").replace("_", " ").title()
+    pdf.cell(100, 5, "", ln=False)
+    pdf.cell(90, 5, f"Status: {status}", align="R")
+    pdf.ln(8)
+
+    # Title
+    title = _safe_latin(estimate.get("title", ""))
+    if title:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(30, 30, 30)
+        pdf.cell(0, 7, title, ln=True)
+    desc = _safe_latin(estimate.get("description", ""))
+    if desc:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(0, 5, desc[:400])
+    pdf.ln(3)
+
+    # Line items
+    col_w = [75, 35, 20, 35, 25]
+    headers_list = ["Item", "Description", "Qty", "Unit Price", "Total"]
+    pdf.set_fill_color(*primary_color)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+    for i, h in enumerate(headers_list):
+        al = "R" if i >= 3 else "C" if i == 2 else "L"
+        pdf.cell(col_w[i], 9, f"  {h}" if i == 0 else h, 0, 0, al, True)
+    pdf.ln()
+    for idx, li in enumerate(estimate.get("line_items", [])):
+        pdf.set_fill_color(245, 247, 250) if idx % 2 == 1 else pdf.set_fill_color(255, 255, 255)
+        pdf.set_text_color(40, 40, 40)
+        pdf.set_font("Helvetica", "", 9)
+        name = _safe_latin(str(li.get("name", ""))[:38])
+        desc_li = _safe_latin(str(li.get("description", ""))[:20])
+        qty = li.get("quantity", 1)
+        price = float(li.get("unit_price", 0))
+        total = qty * price
+        pdf.cell(col_w[0], 8, f"  {name}", 0, 0, "L", True)
+        pdf.cell(col_w[1], 8, desc_li, 0, 0, "L", True)
+        pdf.cell(col_w[2], 8, str(qty), 0, 0, "C", True)
+        pdf.cell(col_w[3], 8, f"${price:,.2f}", 0, 0, "R", True)
+        pdf.cell(col_w[4], 8, f"${total:,.2f}", 0, 1, "R", True)
+    pdf.set_draw_color(*primary_color)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.ln(5)
+
+    # Totals
+    box_x = 120
+    subtotal = float(estimate.get("subtotal", estimate.get("sub_total", 0)))
+    tax_rate = float(estimate.get("tax_rate", 0))
+    tax = float(estimate.get("tax_amount", estimate.get("tax", 0)))
+    total = float(estimate.get("total", 0))
+    discount = float(estimate.get("discount", 0))
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.set_xy(box_x, pdf.get_y())
+    pdf.cell(40, 6, "Subtotal:", 0, 0, "R")
+    pdf.cell(40, 6, f"${subtotal:,.2f}", 0, 1, "R")
+    if discount > 0:
+        pdf.set_xy(box_x, pdf.get_y())
+        pdf.set_text_color(220, 38, 38)
+        pdf.cell(40, 6, "Discount:", 0, 0, "R")
+        pdf.cell(40, 6, f"-${discount:,.2f}", 0, 1, "R")
+    if tax_rate > 0 or tax > 0:
+        pdf.set_xy(box_x, pdf.get_y())
+        pdf.set_text_color(100, 100, 100)
+        label = f"Tax ({tax_rate}%):" if tax_rate else "Tax:"
+        pdf.cell(40, 6, label, 0, 0, "R")
+        pdf.cell(40, 6, f"${tax:,.2f}", 0, 1, "R")
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(box_x, pdf.get_y() + 1, 200, pdf.get_y() + 1)
+    pdf.ln(3)
+    pdf.set_xy(box_x, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(40, 8, "Total:", 0, 0, "R")
+    pdf.cell(40, 8, f"${total:,.2f}", 0, 1, "R")
+
+    # Notes/Terms
+    notes = _safe_latin(estimate.get("notes", ""))
+    terms = _safe_latin(estimate.get("terms", ""))
+    if notes:
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*primary_color)
+        pdf.cell(0, 5, "NOTES", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(0, 5, notes[:500])
+    if terms:
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*primary_color)
+        pdf.cell(0, 5, "TERMS & CONDITIONS", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(0, 5, terms[:500])
+
+    # Footer
+    pdf.set_y(-25)
+    pdf.set_draw_color(*accent_color)
+    pdf.set_line_width(0.8)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(140, 140, 140)
+    footer = _safe_latin(branding.get("invoice_footer_text", "") if branding else "")
+    if footer:
+        pdf.cell(0, 4, footer[:120], ln=True, align="C")
+    pdf.cell(0, 4, f"Generated by {cn} on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+    pdf.cell(0, 4, "This is an estimate only - not a tax invoice.", ln=True, align="C")
+
+    return pdf.output()
+
+
+@router.get("/estimates/{estimate_id}/pdf")
+async def get_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user_from_token)):
+    """Generate and return estimate as PDF for preview."""
+    estimate = await db.xero_estimates.find_one({"id": estimate_id}, {"_id": 0})
+    if not estimate:
+        estimate = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    branding = await _get_branding()
+    theme_config, _ = await _get_active_theme_config()
+    pdf_bytes = generate_estimate_pdf(estimate, branding, theme_config)
+    est_num = estimate.get("estimate_number", "estimate")
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{est_num}.pdf"'}
+    )
+
+
+@router.get("/estimates/{estimate_id}/pdf/download")
+async def download_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user_from_token)):
+    """Download estimate as PDF attachment."""
+    estimate = await db.xero_estimates.find_one({"id": estimate_id}, {"_id": 0})
+    if not estimate:
+        estimate = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    branding = await _get_branding()
+    theme_config, _ = await _get_active_theme_config()
+    pdf_bytes = generate_estimate_pdf(estimate, branding, theme_config)
+    est_num = estimate.get("estimate_number", "estimate")
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{est_num}.pdf"'}
+    )
+
+
+
 # ──────── CONTRACT PDF ────────
 
 def generate_contract_pdf(contract, line_items, branding=None):
