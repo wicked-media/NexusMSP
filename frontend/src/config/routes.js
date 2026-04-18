@@ -21,7 +21,7 @@ export const routeConfig = [
   { path: "/knowledge-base", component: page("KnowledgeBasePage"), auth: true, layout: true },
 
   // Integrations
-  { path: "/pax8", component: page("Pax8Page"), auth: true, layout: true },
+  { path: "/pax8", component: page("Pax8CommandCenterPage"), auth: true, layout: true },
   { path: "/domotz", component: page("DomotzPage"), auth: true, layout: true },
   { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
   { path: "/acronis", component: page("AcronisPage"), auth: true, layout: true },

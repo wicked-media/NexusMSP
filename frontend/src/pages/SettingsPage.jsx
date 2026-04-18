@@ -19,7 +19,7 @@ import {
   Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
   CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
-  Smartphone, Copy
+  Smartphone, Copy, Cloud
 } from "lucide-react";
 
 const TABS = [
@@ -57,6 +57,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "resend-settings-card", label: "Resend Email Delivery", keywords: "resend email smtp api key transactional onboarding welcome email notifications" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
+  { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
@@ -107,6 +108,8 @@ export default function SettingsPage() {
   const [smsSaving, setSmsSaving] = useState(false);
   const [smsTesting, setSmsTesting] = useState(false);
   const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
+  const [pax8, setPax8] = useState({ client_id: "", client_secret: "", client_secret_set: false, enabled: false, last_test_result: null, last_test_at: null, last_test_message: "", last_sync_at: null, last_sync_stats: null });
+  const [pax8Busy, setPax8Busy] = useState(false);
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
@@ -141,7 +144,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -159,6 +162,7 @@ export default function SettingsPage() {
           axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/settings/resend`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -167,6 +171,7 @@ export default function SettingsPage() {
         if (acronisRes.data) setAcronis(prev => ({ ...prev, api_url: acronisRes.data.api_url || "", client_id: acronisRes.data.client_id || "", connected: acronisRes.data.connected || false }));
         if (resendRes?.data) setResend(prev => ({ ...prev, ...resendRes.data, api_key: "" }));
         if (smsRes?.data) setSms(prev => ({ ...prev, ...smsRes.data, password: "" }));
+        if (pax8Res?.data) setPax8(prev => ({ ...prev, ...pax8Res.data, client_secret: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1568,6 +1573,108 @@ export default function SettingsPage() {
             }} data-testid="save-acronis-btn"><Save className="w-4 h-4 mr-2" />Save Acronis Settings</Button>
           </div>
           <p className="text-[10px] text-muted-foreground">Generate API credentials from Acronis Management Console: Settings &gt; API Clients &gt; Create API Client</p>
+        </CardContent>
+      </Card>
+
+      {/* Pax8 Integration */}
+      <Card data-testid="pax8-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Cloud className="w-5 h-5 text-indigo-400" />
+            <CardTitle>Pax8 (Microsoft / CSP Billing)</CardTitle>
+          </div>
+          <CardDescription>Sync Microsoft 365, Defender, Azure, and other CSP subscriptions from your Pax8 partner account. Auto-attach per-seat usage to recurring invoices every month.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={pax8.enabled ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {pax8.enabled ? "Connected" : "Not Configured"}
+            </Badge>
+            {pax8.last_test_result && (
+              <Badge variant="outline" className="text-[10px]">
+                Last test: {pax8.last_test_result}
+              </Badge>
+            )}
+            {pax8.last_sync_at && (
+              <span className="text-[11px] text-muted-foreground">
+                Last sync: {new Date(pax8.last_sync_at).toLocaleString()} — {pax8.last_sync_stats?.companies || 0} companies / {pax8.last_sync_stats?.subscriptions || 0} subs
+              </span>
+            )}
+          </div>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Client ID</Label>
+              <Input value={pax8.client_id || ""} onChange={e => setPax8({ ...pax8, client_id: e.target.value })} placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxx" data-testid="pax8-client-id" />
+            </div>
+            <div>
+              <Label className="text-xs">Client Secret</Label>
+              <Input
+                type="password"
+                value={pax8.client_secret || ""}
+                onChange={e => setPax8({ ...pax8, client_secret: e.target.value })}
+                placeholder={pax8.client_secret_set ? "••••••••  (enter new value to replace)" : "Enter client secret"}
+                data-testid="pax8-client-secret"
+              />
+              {pax8.client_secret_set && <p className="text-[10px] text-muted-foreground mt-1">Secret is stored — leave blank to keep existing.</p>}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!!pax8.enabled}
+                onChange={e => setPax8({ ...pax8, enabled: e.target.checked })}
+                data-testid="pax8-enabled-toggle"
+              />
+              <Label className="text-xs">Enable Pax8 sync</Label>
+            </div>
+            {pax8.last_test_message && (
+              <p className={`text-[11px] ${pax8.last_test_result === "success" ? "text-emerald-400" : "text-red-400"}`}>{pax8.last_test_message}</p>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={async () => {
+              setPax8Busy(true);
+              try {
+                const r = await axios.post(`${API}/pax8/test`, {}, { headers });
+                if (r.data.status === "success") toast.success(r.data.detail);
+                else toast.error(r.data.detail);
+                const fresh = await axios.get(`${API}/settings/pax8`, { headers });
+                setPax8({ ...fresh.data, client_secret: "" });
+              } catch (e) { toast.error(e.response?.data?.detail || "Test failed"); }
+              finally { setPax8Busy(false); }
+            }} disabled={pax8Busy} data-testid="test-pax8-btn">
+              {pax8Busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}Test Connection
+            </Button>
+            <Button variant="outline" onClick={async () => {
+              setPax8Busy(true);
+              try {
+                const r = await axios.post(`${API}/pax8/sync`, {}, { headers, timeout: 180000 });
+                toast.success(`Synced ${r.data.companies} companies · ${r.data.subscriptions} subs`);
+                const fresh = await axios.get(`${API}/settings/pax8`, { headers });
+                setPax8({ ...fresh.data, client_secret: "" });
+              } catch (e) { toast.error(e.response?.data?.detail || "Sync failed"); }
+              finally { setPax8Busy(false); }
+            }} disabled={pax8Busy} data-testid="sync-pax8-btn">
+              <RefreshCw className="w-4 h-4 mr-2" />Sync Now
+            </Button>
+            <Button onClick={async () => {
+              try {
+                const body = {
+                  client_id: pax8.client_id,
+                  enabled: !!pax8.enabled,
+                };
+                if (pax8.client_secret && !pax8.client_secret.includes("...")) {
+                  body.client_secret = pax8.client_secret;
+                }
+                await axios.put(`${API}/settings/pax8`, body, { headers });
+                toast.success("Pax8 settings saved");
+                const fresh = await axios.get(`${API}/settings/pax8`, { headers });
+                setPax8({ ...fresh.data, client_secret: "" });
+              } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+            }} data-testid="save-pax8-btn"><Save className="w-4 h-4 mr-2" />Save Pax8 Settings</Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Get your client ID + secret from the Pax8 Partner Portal → Integrations → API Credentials. Uses OAuth2 client_credentials against <code>https://api.pax8.com/v1/token</code>.
+          </p>
         </CardContent>
       </Card>
 

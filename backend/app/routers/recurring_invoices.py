@@ -93,6 +93,7 @@ async def create_recurring(data: dict, current_user: dict = Depends(get_current_
         "auto_send_email": data.get("auto_send_email", ""),
         "include_pdf": data.get("include_pdf", True),
         "include_acronis_usage": bool(data.get("include_acronis_usage", False)),
+        "include_pax8_usage": bool(data.get("include_pax8_usage", False)),
         "status": "active",
         "invoices_generated": 0,
         "total_billed": 0,
@@ -184,8 +185,8 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
     due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
-    # Start with the template's static line items (excluding any prior Acronis auto-attach)
-    line_items = [li for li in ri.get("line_items", []) if not li.get("acronis_auto")]
+    # Start with the template's static line items (excluding any prior auto-attach)
+    line_items = [li for li in ri.get("line_items", []) if not (li.get("acronis_auto") or li.get("pax8_auto"))]
 
     # Auto-attach Acronis usage if enabled and client is linked
     acronis_attached = []
@@ -207,6 +208,29 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
                 line_items.extend(acronis_attached)
         except Exception:
             pass  # Don't block invoice generation on Acronis failure
+
+    # Auto-attach Pax8 / Microsoft subscription usage
+    pax8_attached = []
+    if ri.get("include_pax8_usage", False) and ri.get("client_id"):
+        try:
+            from app.routers.pax8 import pax8_billing_client
+            p8 = await pax8_billing_client(ri["client_id"], current_user=current_user)
+            if p8.get("linked") and p8.get("total", 0) > 0:
+                for li in p8.get("line_items", []):
+                    pax8_attached.append({
+                        "description": f"Pax8 — {li['label']} ({p8['period']})",
+                        "details": f"{li['quantity']} {li['unit']} × {li['currency']} {li['unit_price']:.4f} · {li['billing_term']}",
+                        "quantity": li["quantity"],
+                        "rate": li["unit_price"],
+                        "amount": li["total"],
+                        "pax8_auto": True,
+                        "pax8_product_id": li.get("product_id"),
+                        "pax8_period": p8["period"],
+                        "pax8_billing_term": li["billing_term"],
+                    })
+                line_items.extend(pax8_attached)
+        except Exception:
+            pass
 
     # Recompute totals
     subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
@@ -234,6 +258,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         "recurring_invoice_id": ri_id,
         "notes": ri.get("notes", ""),
         "acronis_auto_attached": len(acronis_attached),
+        "pax8_auto_attached": len(pax8_attached),
         "created_at": now.isoformat(),
         "created_by": current_user.get("name", ""),
     }
@@ -242,7 +267,8 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     # Update recurring invoice stats
     gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total,
                  "generated_at": now.isoformat(), "generated_by": current_user.get("name", ""),
-                 "acronis_items": len(acronis_attached)}
+                 "acronis_items": len(acronis_attached),
+                 "pax8_items": len(pax8_attached)}
     next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
     await db.recurring_invoices.update_one({"id": ri_id}, {
         "$inc": {"invoices_generated": 1, "total_billed": total},
@@ -251,10 +277,15 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     })
 
     msg = f"Invoice {inv_number} generated"
+    extras = []
     if acronis_attached:
-        msg += f" (+{len(acronis_attached)} Acronis line items auto-attached)"
+        extras.append(f"{len(acronis_attached)} Acronis")
+    if pax8_attached:
+        extras.append(f"{len(pax8_attached)} Pax8")
+    if extras:
+        msg += f" (+{' + '.join(extras)} auto-attached line items)"
     return {"message": msg, "invoice_id": invoice["id"], "invoice_number": inv_number,
-            "amount": total, "acronis_items": len(acronis_attached)}
+            "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached)}
 
 
 @router.post("/recurring-invoices/{ri_id}/duplicate")
@@ -413,9 +444,10 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
             inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
             due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
-            # Start from static line items (strip any prior Acronis auto-attach)
-            line_items = [li for li in ri.get("line_items", []) if not li.get("acronis_auto")]
+            # Start from static line items (strip any prior auto-attach)
+            line_items = [li for li in ri.get("line_items", []) if not (li.get("acronis_auto") or li.get("pax8_auto"))]
             acronis_attached = []
+            pax8_attached = []
 
             # Auto-attach Acronis usage if enabled — parity with /generate-now
             if ri.get("include_acronis_usage", False) and ri.get("client_id"):
@@ -436,6 +468,28 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                         line_items.extend(acronis_attached)
                 except Exception:
                     pass  # Don't block scheduler on Acronis failure
+
+            # Auto-attach Pax8 subscription usage if enabled
+            if ri.get("include_pax8_usage", False) and ri.get("client_id"):
+                try:
+                    from app.routers.pax8 import pax8_billing_client
+                    p8 = await pax8_billing_client(ri["client_id"], current_user=current_user)
+                    if p8.get("linked") and p8.get("total", 0) > 0:
+                        for li in p8.get("line_items", []):
+                            pax8_attached.append({
+                                "description": f"Pax8 — {li['label']} ({p8['period']})",
+                                "details": f"{li['quantity']} {li['unit']} × {li['currency']} {li['unit_price']:.4f} · {li['billing_term']}",
+                                "quantity": li["quantity"],
+                                "rate": li["unit_price"],
+                                "amount": li["total"],
+                                "pax8_auto": True,
+                                "pax8_product_id": li.get("product_id"),
+                                "pax8_period": p8["period"],
+                                "pax8_billing_term": li["billing_term"],
+                            })
+                        line_items.extend(pax8_attached)
+                except Exception:
+                    pass
 
             subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
             tax_rate = float(ri.get("tax_rate", 0))
@@ -463,13 +517,14 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "notes": ri.get("notes", ""),
                 "auto_generated": True,
                 "acronis_auto_attached": len(acronis_attached),
+                "pax8_auto_attached": len(pax8_attached),
                 "created_at": now.isoformat(),
                 "created_by": "Manual Scheduler Run",
             }
             await db.invoices.insert_one(invoice)
 
             next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
-            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run", "acronis_items": len(acronis_attached)}
+            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run", "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached)}
             await db.recurring_invoices.update_one({"id": ri["id"]}, {
                 "$inc": {"invoices_generated": 1, "total_billed": total},
                 "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
@@ -482,9 +537,10 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "invoice_number": inv_number, "client_name": ri.get("client_name", ""),
                 "amount": total, "status": "generated",
                 "acronis_items": len(acronis_attached),
+                "pax8_items": len(pax8_attached),
                 "triggered_by": current_user.get("name", ""), "timestamp": now.isoformat(),
             })
-            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "status": "generated"})
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "status": "generated"})
         except Exception as e:
             results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": str(e)})
 

@@ -48,7 +48,7 @@ export default function RecurringInvoicesPage() {
   const [saving, setSaving] = useState(false);
 
   // Form
-  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", include_acronis_usage: false, start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
+  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", include_acronis_usage: false, include_pax8_usage: false, start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
   const [form, setForm] = useState(emptyForm);
   const [templateForm, setTemplateForm] = useState({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] });
   const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false });
@@ -310,6 +310,7 @@ export default function RecurringInvoicesPage() {
                         <p className="text-[10px] text-muted-foreground truncate max-w-[200px]">{ri.description}</p>
                         {ri.auto_send && <Badge variant="outline" className="text-[8px] mt-0.5 border-blue-500/20 text-blue-400">Auto-send</Badge>}
                         {ri.include_acronis_usage && <Badge variant="outline" className="text-[8px] mt-0.5 border-sky-500/30 text-sky-400" data-testid={`acronis-badge-${ri.id}`}><Cloud className="w-2.5 h-2.5 mr-0.5" />Acronis Auto</Badge>}
+                        {ri.include_pax8_usage && <Badge variant="outline" className="text-[8px] mt-0.5 border-indigo-500/30 text-indigo-400" data-testid={`pax8-badge-${ri.id}`}><Cloud className="w-2.5 h-2.5 mr-0.5" />Pax8 Auto</Badge>}
                       </TableCell>
                       <TableCell className="font-mono font-bold">${ri.amount?.toLocaleString()}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[9px] capitalize">{ri.frequency}</Badge></TableCell>
@@ -499,6 +500,18 @@ export default function RecurringInvoicesPage() {
                 </div>
               </div>
             </div>
+            <div className="flex items-center gap-4 p-3 rounded-lg border bg-indigo-500/[0.03] border-indigo-500/20">
+              <Switch checked={form.include_pax8_usage} onCheckedChange={v => setForm(p => ({ ...p, include_pax8_usage: v }))} data-testid="ri-pax8-auto-toggle" />
+              <div className="flex-1 flex items-start gap-2">
+                <Cloud className="w-4 h-4 text-indigo-400 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">Auto-attach Pax8 / Microsoft subscriptions</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Pull live Microsoft / CSP subscription usage (seat counts × unit price) from Pax8 each generation. Requires the client to be linked on Pax8 Command Center → Companies tab.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Invoice notes..." rows={2} /></div>
           </div>
           <DialogFooter>
@@ -547,6 +560,16 @@ export default function RecurringInvoicesPage() {
                   <div>
                     <p className="text-sm font-medium">Auto-attach Acronis usage</p>
                     <p className="text-[10px] text-muted-foreground">Auto-attach live Acronis usage as line items each generation.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 p-3 rounded-lg border bg-indigo-500/[0.03] border-indigo-500/20">
+                <Switch checked={!!showEdit.include_pax8_usage} onCheckedChange={v => setShowEdit(p => ({ ...p, include_pax8_usage: v }))} data-testid="ri-edit-pax8-auto-toggle" />
+                <div className="flex-1 flex items-start gap-2">
+                  <Cloud className="w-4 h-4 text-indigo-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Auto-attach Pax8 / Microsoft subscriptions</p>
+                    <p className="text-[10px] text-muted-foreground">Live seat × unit-price subs attached each generation.</p>
                   </div>
                 </div>
               </div>
