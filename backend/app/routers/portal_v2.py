@@ -305,7 +305,87 @@ async def portal_devices(user: dict = Depends(get_portal_user)):
         {"client_id": user.get("client_id")},
         {"_id": 0, "id": 1, "name": 1, "hostname": 1, "device_type": 1, "os": 1, "status": 1, "ip_address": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "last_heartbeat": 1, "antivirus_status": 1, "compliance_score": 1}
     ).to_list(500)
+    # Augment with RustDesk availability
+    rd_devices = await db.rustdesk_devices.find(
+        {"client_id": user.get("client_id")},
+        {"_id": 0, "id": 1, "device_id": 1, "rustdesk_id": 1, "name": 1, "status": 1}
+    ).to_list(500)
+    # Build a map: matched by device_id first, then by name
+    rd_by_dev_id = {rd.get("device_id"): rd for rd in rd_devices if rd.get("device_id")}
+    rd_by_name = {rd.get("name", "").lower(): rd for rd in rd_devices}
+    for d in devices:
+        rd = rd_by_dev_id.get(d["id"]) or rd_by_name.get((d.get("name") or "").lower()) or rd_by_name.get((d.get("hostname") or "").lower())
+        if rd:
+            d["rustdesk_available"] = True
+            d["rustdesk_device_id"] = rd["id"]
     return devices
+
+
+@router.post("/devices/{device_id}/remote-connect")
+async def portal_remote_connect(device_id: str, user: dict = Depends(get_portal_user)):
+    """Initiate a RustDesk remote-connect session from the client portal.
+    Strictly scoped to the portal user's own client_id."""
+    if not user.get("can_remote_devices", False):
+        raise HTTPException(status_code=403, detail="Remote access not permitted. Ask your MSP to enable it on your portal account.")
+
+    # Accept either the devices.id OR the rustdesk_devices.id or device_id (host mapping)
+    rd = await db.rustdesk_devices.find_one(
+        {"$or": [{"id": device_id}, {"device_id": device_id}], "client_id": user.get("client_id")},
+        {"_id": 0}
+    )
+    if not rd:
+        # Try by name lookup if devices.id was passed
+        dev = await db.devices.find_one({"id": device_id, "client_id": user.get("client_id")}, {"_id": 0, "name": 1, "hostname": 1})
+        if dev:
+            rd = await db.rustdesk_devices.find_one(
+                {"client_id": user.get("client_id"), "$or": [
+                    {"name": dev.get("name")}, {"name": dev.get("hostname")}
+                ]},
+                {"_id": 0}
+            )
+    if not rd:
+        raise HTTPException(status_code=404, detail="No RustDesk agent registered for this device. Please contact your MSP.")
+
+    # Pull config (reuse rustdesk settings)
+    settings = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+    config = settings.get("value", {})
+    rd_id = rd.get("rustdesk_id", "")
+    relay = (config.get("relay_server") or "").strip()
+    server_url = (config.get("server_url") or "").strip().rstrip("/")
+
+    server_host = ""
+    if relay:
+        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    elif server_url:
+        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    connection_url = f"rustdesk://{rd_id}@{server_host}" if server_host else f"rustdesk://{rd_id}"
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Log session
+    await db.rustdesk_sessions.insert_one({
+        "id": str(uuid.uuid4()),
+        "device_id": rd.get("id"),
+        "client_id": user.get("client_id"),
+        "rustdesk_id": rd_id,
+        "user_id": user.get("id"),
+        "user_name": user.get("name", user.get("email", "Portal user")),
+        "initiated_via": "client_portal",
+        "status": "initiated",
+        "started_at": now,
+        "ended_at": None,
+    })
+    await db.rustdesk_devices.update_one(
+        {"id": rd.get("id")},
+        {"$set": {"last_connected": now, "status": "connected"}}
+    )
+
+    return {
+        "message": "Remote connection initiated",
+        "rustdesk_id": rd_id,
+        "connection_url": connection_url,
+        "server_host": server_host,
+        "download_url": "https://rustdesk.com/download",
+    }
 
 
 # ==================== INVOICES ====================

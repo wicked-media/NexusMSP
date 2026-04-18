@@ -241,6 +241,7 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
         "can_create_tickets": data.get("can_create_tickets", True),
         "can_view_assets": data.get("can_view_assets", True),
         "can_view_invoices": data.get("can_view_invoices", False),
+        "can_remote_devices": data.get("can_remote_devices", False),
         "password_hash": hash_password(password),
         "is_active": True,
         "totp_enabled": False,
@@ -278,7 +279,7 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
         raise HTTPException(status_code=404, detail="Portal user not found")
 
     allowed_fields = {"name", "phone", "role", "is_primary_contact", "can_view_all_tickets",
-                      "can_create_tickets", "can_view_assets", "can_view_invoices", "is_active"}
+                      "can_create_tickets", "can_view_assets", "can_view_invoices", "can_remote_devices", "is_active"}
     updates = {k: v for k, v in data.items() if k in allowed_fields}
     if data.get("password"):
         updates["password_hash"] = hash_password(data["password"])

@@ -33,7 +33,7 @@ export default function ClientPortalPage() {
   // Portal Users
   const [portalUsers, setPortalUsers] = useState([]);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [userForm, setUserForm] = useState({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, send_welcome_email: true });
+  const [userForm, setUserForm] = useState({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, can_remote_devices: false, send_welcome_email: true });
   const [addingUser, setAddingUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState(null);
   const [editUserForm, setEditUserForm] = useState({});
@@ -100,7 +100,7 @@ export default function ClientPortalPage() {
       else toast.success(`Portal user created: ${res.data.email}` + (emailStatus === "skipped" ? "" : " (email failed)"));
       setShowTempPassword({ email: res.data.email, password: res.data.temp_password });
       setShowAddUser(false);
-      setUserForm({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, send_welcome_email: true });
+      setUserForm({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, can_remote_devices: false, send_welcome_email: true });
       const usersRes = await axios.get(`${API}/client-portal/users/${selectedClient}`, { headers });
       setPortalUsers(usersRes.data || []);
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to create user"); }
@@ -311,6 +311,7 @@ export default function ClientPortalPage() {
                                 {u.can_create_tickets && <Badge variant="secondary" className="text-[9px]">Tickets</Badge>}
                                 {u.can_view_assets && <Badge variant="secondary" className="text-[9px]">Devices</Badge>}
                                 {u.can_view_invoices && <Badge variant="secondary" className="text-[9px]">Invoices</Badge>}
+                                {u.can_remote_devices && <Badge className="text-[9px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border">Remote</Badge>}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -320,7 +321,7 @@ export default function ClientPortalPage() {
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
-                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => { setShowEditUser(u); setEditUserForm({ name: u.name, role: u.role, can_view_all_tickets: u.can_view_all_tickets, can_create_tickets: u.can_create_tickets, can_view_assets: u.can_view_assets, can_view_invoices: u.can_view_invoices, is_active: u.is_active !== false }); }}><Settings className="w-3 h-3" /></Button>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => { setShowEditUser(u); setEditUserForm({ name: u.name, role: u.role, can_view_all_tickets: u.can_view_all_tickets, can_create_tickets: u.can_create_tickets, can_view_assets: u.can_view_assets, can_view_invoices: u.can_view_invoices, can_remote_devices: u.can_remote_devices, is_active: u.is_active !== false }); }}><Settings className="w-3 h-3" /></Button>
                                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Reset Password" onClick={() => resetPassword(u.id)}><RotateCw className="w-3 h-3 text-amber-400" /></Button>
                                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete" onClick={() => deletePortalUser(u.id)}><Trash2 className="w-3 h-3" /></Button>
                               </div>
@@ -399,6 +400,7 @@ export default function ClientPortalPage() {
                 { key: "can_create_tickets", label: "Create Tickets", desc: "Submit new support tickets" },
                 { key: "can_view_assets", label: "View Devices", desc: "See device status and health" },
                 { key: "can_view_invoices", label: "View Invoices", desc: "Access billing information" },
+                { key: "can_remote_devices", label: "Remote Into Devices", desc: "Launch RustDesk remote sessions to their own devices" },
               ].map(p => (
                 <div key={p.key} className="flex items-center justify-between p-2 rounded border">
                   <div><p className="text-sm">{p.label}</p><p className="text-[10px] text-muted-foreground">{p.desc}</p></div>
@@ -450,6 +452,7 @@ export default function ClientPortalPage() {
               { key: "can_create_tickets", label: "Create Tickets" },
               { key: "can_view_assets", label: "View Devices" },
               { key: "can_view_invoices", label: "View Invoices" },
+              { key: "can_remote_devices", label: "Remote Into Devices" },
             ].map(p => (
               <div key={p.key} className="flex items-center justify-between p-2 rounded border">
                 <p className="text-sm">{p.label}</p>

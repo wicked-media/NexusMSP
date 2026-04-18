@@ -18,7 +18,7 @@ import {
   Loader2, LogOut, Ticket, Monitor, FileText, DollarSign, BookOpen, User,
   Plus, Send, ArrowLeft, Wifi, WifiOff, Shield, Clock, Search, CheckCircle,
   AlertTriangle, XCircle, Activity, ChevronRight, CreditCard, Eye, Download,
-  ExternalLink
+  ExternalLink, Power
 } from "lucide-react";
 
 const STATUS_COLORS = {
@@ -61,6 +61,34 @@ export default function PortalDashboardPage() {
   // Invoice detail + payment
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [payingInvoice, setPayingInvoice] = useState(false);
+
+  // Remote connect
+  const [connectingDeviceId, setConnectingDeviceId] = useState(null);
+  const canRemote = profile?.user?.can_remote_devices === true;
+
+  const handleRemoteConnect = async (device) => {
+    setConnectingDeviceId(device.id);
+    try {
+      const { data } = await axios.post(`${API}/portal/v2/devices/${device.id}/remote-connect`, {}, { headers });
+      toast.success(`Launching RustDesk for ${device.name}…`);
+      // Attempt to open the native URI
+      if (data.connection_url) {
+        const a = document.createElement("a");
+        a.href = data.connection_url;
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => {
+          toast.info("Don't have RustDesk? Download it from rustdesk.com/download", { duration: 8000, action: { label: "Download", onClick: () => window.open(data.download_url, "_blank") } });
+        }, 3000);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Remote connect failed");
+    } finally {
+      setConnectingDeviceId(null);
+    }
+  };
 
   const logout = () => {
     sessionStorage.removeItem("portal_token");
@@ -313,10 +341,17 @@ export default function PortalDashboardPage() {
 
           {/* Devices */}
           <TabsContent value="devices" className="space-y-4">
-            <h2 className="text-lg font-bold">Your Devices</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold">Your Devices</h2>
+              {!canRemote && (
+                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
+                  Remote access disabled — ask your MSP to enable
+                </Badge>
+              )}
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {devices.map(d => (
-                <Card key={d.id}>
+                <Card key={d.id} data-testid={`portal-device-${d.id}`}>
                   <CardContent className="py-3">
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${d.status === "online" ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
@@ -335,6 +370,29 @@ export default function PortalDashboardPage() {
                         {d.disk_usage != null && <span>Disk: {d.disk_usage}%</span>}
                       </div>
                     )}
+                    <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        {d.rustdesk_available ? (
+                          <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30 gap-1">
+                            <Shield className="w-2.5 h-2.5" />Remote ready
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[9px]">No agent</Badge>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] px-2"
+                        disabled={!canRemote || !d.rustdesk_available || d.status !== "online" || connectingDeviceId === d.id}
+                        onClick={() => handleRemoteConnect(d)}
+                        title={!canRemote ? "Remote access not enabled on your account" : !d.rustdesk_available ? "No RustDesk agent installed" : d.status !== "online" ? "Device is offline" : "Open remote session"}
+                        data-testid={`remote-btn-${d.id}`}
+                      >
+                        {connectingDeviceId === d.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Power className="w-3 h-3 mr-1" />}
+                        Remote
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
