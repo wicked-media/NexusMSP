@@ -405,4 +405,72 @@ class AcronisService:
                 return {"status": "unknown"}
             return response.json()
 
+    async def get_agents(self, tenant_id: str = None):
+        """Get agents with online/offline status."""
+        path = "/api/agent_manager/v2/agents?limit=500"
+        if tenant_id:
+            path += f"&tenant={tenant_id}"
+        resp = await self._get(path)
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
+
+    async def get_applications(self, tenant_id: str = None):
+        """Get ALL policy applications. Response.items is a list of lists (per-resource groups)."""
+        path = "/api/policy_management/v4/applications?limit=1000"
+        if tenant_id:
+            path += f"&context_tenant_id={tenant_id}"
+        resp = await self._get(path)
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
+
+    def flatten_applications(self, apps_response):
+        """Flatten nested items (list of lists) into a single flat list."""
+        items = apps_response.get("items", []) if isinstance(apps_response, dict) else []
+        flat = []
+        for grp in items:
+            if isinstance(grp, list):
+                flat.extend(grp)
+            elif isinstance(grp, dict):
+                flat.append(grp)
+        return flat
+
+    async def run_applications(self, runs: list):
+        """Trigger backup plan runs. `runs` is a list of {policy_id, resource_ids} dicts.
+        Acronis PUT /api/policy_management/v4/applications/run requires:
+          {"items": [resource_id, ...], "state": "running", "policy_id": "..."}
+        """
+        token = await self.get_token()
+        api_url, _, _ = await self.get_credentials()
+        url = f"{api_url}/api/policy_management/v4/applications/run"
+        results = []
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
+            for run in runs:
+                policy_id = run.get("policy_id")
+                resource_ids = run.get("resource_ids") or []
+                if not policy_id or not resource_ids:
+                    continue
+                payload = {"items": resource_ids, "state": "running", "policy_id": policy_id}
+                resp = await http_client.put(
+                    url,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json=payload
+                )
+                if resp.status_code == 401:
+                    self.access_token = None
+                    token = await self.get_token()
+                    resp = await http_client.put(
+                        url,
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json=payload
+                    )
+                results.append({
+                    "policy_id": policy_id,
+                    "resource_ids": resource_ids,
+                    "status_code": resp.status_code,
+                    "body": resp.text[:500] if resp.status_code >= 400 else "ok",
+                })
+        return results
+
 acronis_service = AcronisService()

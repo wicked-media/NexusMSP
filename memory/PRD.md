@@ -20,3 +20,9 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Link button on each tenant to map to NexusOps client
 - Acronis Settings card in Settings > Integrations (Client ID, Secret, Data Centre URL, Test Connection)
 - Backup status shows: machine name, tenant, health (ok/failed/warning), applied plans, last/next backup times
+
+## Recent Updates (Apr 18, 2026 — P0 Acronis enhancements)
+- **Clickable stat cards**: Machines / Healthy / Failed / Warning cards now navigate to Backup Status tab with status filter applied (banner + Clear filter button)
+- **Agent Online/Offline badges**: Backup Status table shows live agent connectivity (Online/Offline badges) via Acronis `/agent_manager/v2/agents` mapping — 132 online / 231 offline detected
+- **Run Backup action**: New POST `/api/acronis/backup/run` endpoint triggers `PUT /policy_management/v4/applications/run` with `{items:[resource_ids], state:'running', policy_id}`. Auto-discovers and groups by policy. Handles Zmqgw partial-success 500s gracefully. Per-row "Run Backup" button disabled when agent offline or no backup plan applied.
+

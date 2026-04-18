@@ -157,10 +157,41 @@ async def link_acronis_customer(customer_id: str, data: dict, current_user: dict
 @router.get("/acronis/backup-statuses")
 async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_user)):
     """Get backup status per machine from Acronis — grouped by tenant.
-    Includes last backup time, status, applied plans, next run."""
+    Includes last backup time, status, applied plans, next run, agent online state."""
     try:
         resp = await acronis_service.get_resource_statuses()
         items = resp.get("items", [])
+
+        # Fetch agents to map online status
+        agent_online_map = {}
+        try:
+            agents_data = await acronis_service.get_agents()
+            for ag in agents_data.get("items", []):
+                agent_online_map[ag.get("id", "")] = bool(ag.get("online", False))
+        except Exception:
+            pass
+
+        # Fetch all backup applications to map resource_id -> [application_ids]
+        resource_to_app_ids = {}
+        try:
+            apps_data = await acronis_service.get_applications()
+            flat_apps = acronis_service.flatten_applications(apps_data)
+            for app in flat_apps:
+                if not isinstance(app, dict):
+                    continue
+                if not app.get("enabled", True):
+                    continue
+                policy_type = (app.get("policy", {}) or {}).get("type", "") or ""
+                if "backup" not in policy_type:
+                    continue
+                ctx_id = (app.get("context", {}) or {}).get("id", "")
+                app_id = app.get("id")
+                if not (ctx_id and app_id):
+                    continue
+                resource_to_app_ids.setdefault(ctx_id, []).append(app_id)
+        except Exception:
+            pass
+
         machines = []
         for item in items:
             ctx = item.get("context", {})
@@ -175,6 +206,7 @@ async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_u
             next_run = None
             plan_names = agg.get("names", "")
 
+            backup_application_ids = []
             for bp in backup_policies:
                 lr = bp.get("last_run")
                 ls = bp.get("last_success_run")
@@ -185,6 +217,10 @@ async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_u
                     last_success = ls
                 if nr and (not next_run or nr < next_run):
                     next_run = nr
+
+            # Attach application IDs from the applications-map (source of truth for /run)
+            resource_id_for_apps = ctx.get("id", "")
+            backup_application_ids = resource_to_app_ids.get(resource_id_for_apps, [])
 
             # Determine backup health
             status = agg.get("status", "unknown")
@@ -199,12 +235,16 @@ async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_u
             else:
                 backup_health = status
 
+            agent_id = ctx.get("agent_id", "")
+            agent_online = agent_online_map.get(agent_id) if agent_id in agent_online_map else None
+
             machines.append({
                 "resource_id": ctx.get("id", ""),
                 "machine_name": ctx.get("name") or ctx.get("user_defined_name", "Unknown"),
                 "tenant_id": ctx.get("tenant_id", ""),
                 "tenant_name": ctx.get("tenant_name", ""),
-                "agent_id": ctx.get("agent_id", ""),
+                "agent_id": agent_id,
+                "agent_online": agent_online,
                 "backup_health": backup_health,
                 "aggregate_status": status,
                 "plan_names": plan_names,
@@ -212,6 +252,7 @@ async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_u
                 "last_success": last_success,
                 "next_backup": next_run,
                 "policy_count": len(backup_policies),
+                "backup_application_ids": backup_application_ids,
                 "all_policies": [{"type": p.get("type", ""), "last_run": p.get("last_run"), "next_run": p.get("next_run")} for p in policies],
                 "licensing": item.get("licensing", {}).get("current_offering_item", ""),
             })
@@ -242,6 +283,99 @@ async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_u
         }
     except Exception as e:
         return {"machines": [], "tenant_summary": {}, "total_machines": 0, "error": str(e)}
+
+
+@router.post("/acronis/backup/run")
+async def run_acronis_backup(data: dict, current_user: dict = Depends(get_current_user)):
+    """Trigger a manual backup run on one or more machines.
+    Body accepts either:
+      - {"application_ids": [...]}  (preferred, from backup-statuses)
+      - {"resource_id": "..."}      (auto-discovers backup applications for the resource)
+    """
+    application_ids = list(data.get("application_ids") or [])
+    resource_id = data.get("resource_id")
+
+    try:
+        # Load all applications once
+        apps_data = await acronis_service.get_applications()
+        flat_apps = acronis_service.flatten_applications(apps_data)
+
+        # If only resource_id, discover backup app_ids
+        if not application_ids and resource_id:
+            for app in flat_apps:
+                if not isinstance(app, dict) or not app.get("enabled", True):
+                    continue
+                ctx_id = (app.get("context", {}) or {}).get("id", "")
+                if ctx_id != resource_id:
+                    continue
+                ptype = (app.get("policy", {}) or {}).get("type", "") or ""
+                if "backup" in ptype:
+                    aid = app.get("id")
+                    if aid:
+                        application_ids.append(aid)
+
+        if not application_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No active backup plan found for this machine. Apply a backup plan first."
+            )
+
+        # Build map: app_id -> (policy_id, resource_id)
+        app_lookup = {}
+        for app in flat_apps:
+            if isinstance(app, dict) and app.get("id"):
+                app_lookup[app["id"]] = {
+                    "policy_id": (app.get("policy", {}) or {}).get("id"),
+                    "resource_id": (app.get("context", {}) or {}).get("id"),
+                }
+
+        # Group resource_ids by policy_id
+        grouped = {}
+        missing = []
+        for aid in application_ids:
+            info = app_lookup.get(aid)
+            if not info or not info.get("policy_id") or not info.get("resource_id"):
+                missing.append(aid)
+                continue
+            grouped.setdefault(info["policy_id"], []).append(info["resource_id"])
+
+        if not grouped:
+            raise HTTPException(status_code=400, detail="Unable to resolve backup plan details for the given applications")
+
+        runs = [{"policy_id": pid, "resource_ids": rids} for pid, rids in grouped.items()]
+        results = await acronis_service.run_applications(runs)
+
+        succeeded = [r for r in results if r.get("status_code") in (200, 202, 204)]
+        # Acronis often returns 500 with "Zmqgw" dispatcher errors when some agents are
+        # unreachable — but the run IS queued for reachable agents. Treat as partial success.
+        zmqgw_partial = [r for r in results if r.get("status_code") == 500 and "Zmqgw" in (r.get("body") or "")]
+        failed = [r for r in results if r not in succeeded and r not in zmqgw_partial]
+
+        if not succeeded and not zmqgw_partial and failed:
+            first = failed[0]
+            raise HTTPException(
+                status_code=first.get("status_code", 500),
+                detail=f"Acronis run failed: {first.get('body')}"
+            )
+
+        triggered = len(succeeded) + len(zmqgw_partial)
+        msg = f"Triggered {triggered} backup plan(s)"
+        if zmqgw_partial:
+            msg += " — some agents may be unreachable; check Activities tab"
+        if failed:
+            msg += f", {len(failed)} failed"
+
+        return {
+            "status": "triggered" if not failed else "partial",
+            "triggered_plans": triggered,
+            "failed_plans": len(failed),
+            "message": msg,
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Run backup failed: {str(e)}")
 
 
 @router.get("/acronis/activities")

@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server } from "lucide-react";
+import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX } from "lucide-react";
 
 export default function BackupCommandCenterPage() {
   const { token } = useAuth();
@@ -26,6 +26,8 @@ export default function BackupCommandCenterPage() {
   const [clients, setClients] = useState([]);
   const [linkDialog, setLinkDialog] = useState(null);
   const [linkClientId, setLinkClientId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // all | failed | warning | ok
+  const [runningId, setRunningId] = useState(null);
 
   const fetchAll = async () => {
     try {
@@ -71,6 +73,31 @@ export default function BackupCommandCenterPage() {
     } catch { toast.error("Link failed"); }
   };
 
+  const handleRunBackup = async (machine) => {
+    if (!machine?.resource_id && !(machine?.backup_application_ids?.length)) {
+      toast.error("Missing resource/application IDs");
+      return;
+    }
+    setRunningId(machine.resource_id);
+    try {
+      const payload = machine.backup_application_ids?.length
+        ? { application_ids: machine.backup_application_ids, resource_id: machine.resource_id }
+        : { resource_id: machine.resource_id };
+      const res = await axios.post(`${API}/acronis/backup/run`, payload, { headers });
+      toast.success(res.data?.message || `Backup triggered for ${machine.machine_name}`);
+      setTimeout(fetchAll, 2500);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to trigger backup");
+    } finally {
+      setRunningId(null);
+    }
+  };
+
+  const openStatusTab = (filter) => {
+    setStatusFilter(filter);
+    setTab("statuses");
+  };
+
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   const s = usageSummary || {};
@@ -95,10 +122,10 @@ export default function BackupCommandCenterPage() {
 
       <div className="grid grid-cols-6 gap-3">
         <Card><CardContent className="pt-4 pb-3"><Users className="w-5 h-5 text-blue-400 mb-1" /><p className="text-2xl font-bold">{s.total_tenants || customers.length || 0}</p><p className="text-[11px] text-muted-foreground">Tenants</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><Server className="w-5 h-5 text-violet-400 mb-1" /><p className="text-2xl font-bold">{bs.total_machines || s.total_resources || 0}</p><p className="text-[11px] text-muted-foreground">Machines</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><CheckCircle className="w-5 h-5 text-emerald-400 mb-1" /><p className="text-2xl font-bold text-emerald-400">{bs.healthy || s.protected_resources || 0}</p><p className="text-[11px] text-muted-foreground">Healthy</p></CardContent></Card>
-        <Card className={bs.failed > 0 ? "border-red-500/20" : ""}><CardContent className="pt-4 pb-3"><XCircle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{bs.failed || 0}</p><p className="text-[11px] text-muted-foreground">Failed</p></CardContent></Card>
-        <Card className={bs.warning > 0 ? "border-amber-500/20" : ""}><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold text-amber-400">{bs.warning || 0}</p><p className="text-[11px] text-muted-foreground">Warning</p></CardContent></Card>
+        <Card className="cursor-pointer hover:border-violet-500/40 transition-colors" onClick={() => openStatusTab("all")} data-testid="card-total-machines"><CardContent className="pt-4 pb-3"><Server className="w-5 h-5 text-violet-400 mb-1" /><p className="text-2xl font-bold">{bs.total_machines || s.total_resources || 0}</p><p className="text-[11px] text-muted-foreground">Machines</p></CardContent></Card>
+        <Card className="cursor-pointer hover:border-emerald-500/40 transition-colors" onClick={() => openStatusTab("ok")} data-testid="card-healthy"><CardContent className="pt-4 pb-3"><CheckCircle className="w-5 h-5 text-emerald-400 mb-1" /><p className="text-2xl font-bold text-emerald-400">{bs.healthy || s.protected_resources || 0}</p><p className="text-[11px] text-muted-foreground">Healthy</p></CardContent></Card>
+        <Card className={`cursor-pointer hover:border-red-500/60 transition-colors ${bs.failed > 0 ? "border-red-500/20" : ""}`} onClick={() => openStatusTab("failed")} data-testid="card-failed"><CardContent className="pt-4 pb-3"><XCircle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{bs.failed || 0}</p><p className="text-[11px] text-muted-foreground">Failed</p></CardContent></Card>
+        <Card className={`cursor-pointer hover:border-amber-500/60 transition-colors ${bs.warning > 0 ? "border-amber-500/20" : ""}`} onClick={() => openStatusTab("warning")} data-testid="card-warning"><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold text-amber-400">{bs.warning || 0}</p><p className="text-[11px] text-muted-foreground">Warning</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><Bell className="w-5 h-5 text-orange-400 mb-1" /><p className="text-2xl font-bold">{alerts.length}</p><p className="text-[11px] text-muted-foreground">Alerts</p></CardContent></Card>
       </div>
 
@@ -155,15 +182,41 @@ export default function BackupCommandCenterPage() {
 
         {/* Backup Status Tab */}
         <TabsContent value="statuses">
+          {statusFilter !== "all" && (
+            <div className="flex items-center justify-between mb-3 px-3 py-2 rounded-md bg-muted/40 border" data-testid="status-filter-banner">
+              <p className="text-xs text-muted-foreground">
+                Filtering by status: <span className={`font-semibold capitalize ${statusFilter === "failed" ? "text-red-400" : statusFilter === "warning" ? "text-amber-400" : "text-emerald-400"}`}>{statusFilter}</span>
+                {" "}— showing {(bs.machines || []).filter(m => m.backup_health === statusFilter).length} of {(bs.machines || []).length} machines
+              </p>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => setStatusFilter("all")} data-testid="clear-status-filter-btn">
+                <FilterX className="w-3 h-3 mr-1" />Clear filter
+              </Button>
+            </div>
+          )}
           <Table>
             <TableHeader><TableRow>
-              <TableHead>Machine</TableHead><TableHead>Tenant</TableHead><TableHead>Status</TableHead><TableHead>Applied Plans</TableHead><TableHead>Last Backup</TableHead><TableHead>Last Success</TableHead><TableHead>Next Backup</TableHead>
+              <TableHead>Machine</TableHead><TableHead>Tenant</TableHead><TableHead>Agent</TableHead><TableHead>Status</TableHead><TableHead>Applied Plans</TableHead><TableHead>Last Backup</TableHead><TableHead>Last Success</TableHead><TableHead>Next Backup</TableHead><TableHead className="text-right">Action</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {(bs.machines || []).map((m, i) => (
+              {(bs.machines || [])
+                .filter(m => statusFilter === "all" ? true : m.backup_health === statusFilter)
+                .map((m, i) => (
                 <TableRow key={m.resource_id || i} data-testid={`machine-${m.resource_id}`}>
                   <TableCell className="font-medium text-sm">{m.machine_name}</TableCell>
                   <TableCell className="text-sm">{m.tenant_name}</TableCell>
+                  <TableCell>
+                    {m.agent_online === true ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border text-[10px] gap-1" data-testid={`agent-online-${m.resource_id}`}>
+                        <Wifi className="w-3 h-3" />Online
+                      </Badge>
+                    ) : m.agent_online === false ? (
+                      <Badge className="bg-red-500/15 text-red-400 border-red-500/30 border text-[10px] gap-1" data-testid={`agent-offline-${m.resource_id}`}>
+                        <WifiOff className="w-3 h-3" />Offline
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">—</Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={m.backup_health === "ok" ? "default" : m.backup_health === "failed" ? "destructive" : "secondary"}
                       className={`text-[10px] capitalize ${m.backup_health === "ok" ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" : m.backup_health === "failed" ? "" : m.backup_health === "warning" ? "bg-amber-500/15 text-amber-400 border-amber-500/30" : ""}`}>
@@ -174,11 +227,28 @@ export default function BackupCommandCenterPage() {
                   <TableCell className="text-[11px] text-muted-foreground">{m.last_backup ? m.last_backup.slice(0, 16).replace("T", " ") : "Never"}</TableCell>
                   <TableCell className="text-[11px] text-muted-foreground">{m.last_success ? m.last_success.slice(0, 16).replace("T", " ") : "Never"}</TableCell>
                   <TableCell className="text-[11px] text-muted-foreground">{m.next_backup ? m.next_backup.slice(0, 16).replace("T", " ") : "—"}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={runningId === m.resource_id || (m.policy_count === 0) || m.agent_online === false}
+                      title={m.policy_count === 0 ? "No backup plan applied" : m.agent_online === false ? "Agent is offline" : "Run backup now"}
+                      onClick={() => handleRunBackup(m)}
+                      data-testid={`run-backup-btn-${m.resource_id}`}
+                    >
+                      {runningId === m.resource_id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+                      Run Backup
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
           {(!bs.machines || bs.machines.length === 0) && <p className="text-center text-muted-foreground py-8">No backup statuses available. Click "Sync Acronis" to pull data.</p>}
+          {bs.machines?.length > 0 && statusFilter !== "all" && bs.machines.filter(m => m.backup_health === statusFilter).length === 0 && (
+            <p className="text-center text-muted-foreground py-8">No machines match the "{statusFilter}" filter.</p>
+          )}
         </TabsContent>
 
         {/* Activities Tab */}
