@@ -340,6 +340,107 @@ async def apply_price_increase(contract_id: str, data: dict, current_user: dict 
     }
 
 
+@router.post("/contracts/{contract_id}/convert-to-recurring")
+async def convert_contract_to_recurring(contract_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Convert a contract's line items into a recurring invoice template.
+    Automatically links the contract ↔ recurring invoice.
+    Body (optional): {frequency, tax_rate, payment_terms, auto_send, include_acronis_usage}"""
+    data = data or {}
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+
+    # Gather line items for this contract
+    items = await db.line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(500)
+    if not items:
+        raise HTTPException(status_code=400, detail="Contract has no line items to convert")
+
+    # Build recurring invoice line items (normalized shape used by recurring_invoices router)
+    ri_items = []
+    for li in items:
+        qty = float(li.get("quantity", 1))
+        rate = float(li.get("unit_price", 0))
+        amount = round(qty * rate, 2)
+        ri_items.append({
+            "description": li.get("name", ""),
+            "details": li.get("description", ""),
+            "quantity": qty,
+            "rate": rate,
+            "amount": amount,
+            "source_line_item_id": li.get("id"),
+            "acronis_offering_code": li.get("acronis_offering_code"),
+            "acronis_synced": li.get("acronis_synced", False),
+        })
+
+    subtotal = round(sum(li["amount"] for li in ri_items), 2)
+    tax_rate = float(data.get("tax_rate", 10 if contract.get("country", "AU") == "AU" else 0))
+    tax_amount = round(subtotal * tax_rate / 100, 2)
+    total = round(subtotal + tax_amount, 2)
+
+    frequency = data.get("frequency", contract.get("billing_frequency", "monthly"))
+    now = datetime.now(timezone.utc)
+
+    # Determine next_generation via helper in recurring_invoices
+    def _next(start, freq):
+        try:
+            d = datetime.strptime(start, "%Y-%m-%d")
+        except Exception:
+            d = now
+        if freq == "monthly":
+            m = d.month + 1 if d.month < 12 else 1
+            y = d.year if d.month < 12 else d.year + 1
+            return datetime(y, m, min(d.day, 28)).strftime("%Y-%m-%d")
+        if freq == "quarterly":
+            return (d + timedelta(days=92)).strftime("%Y-%m-%d")
+        if freq == "annually":
+            return datetime(d.year + 1, d.month, min(d.day, 28)).strftime("%Y-%m-%d")
+        return (d + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    start_date = data.get("start_date") or now.strftime("%Y-%m-%d")
+    ri = {
+        "id": f"ri-{uuid.uuid4().hex[:8]}",
+        "client_id": contract.get("client_id", ""),
+        "client_name": contract.get("client_name", ""),
+        "description": f"Recurring — {contract.get('name', 'Contract')}",
+        "line_items": ri_items,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "amount": total,
+        "currency": data.get("currency", "AUD"),
+        "frequency": frequency,
+        "start_date": start_date,
+        "next_generation": _next(start_date, frequency),
+        "end_date": contract.get("end_date"),
+        "contract_id": contract_id,
+        "payment_terms": data.get("payment_terms", "net_30"),
+        "notes": data.get("notes", f"Auto-generated from contract {contract.get('name', '')}"),
+        "auto_send": bool(data.get("auto_send", False)),
+        "auto_send_email": data.get("auto_send_email", ""),
+        "include_pdf": True,
+        "include_acronis_usage": bool(data.get("include_acronis_usage", True)),
+        "status": "active",
+        "invoices_generated": 0,
+        "total_billed": 0,
+        "last_generated": None,
+        "generation_history": [],
+        "created_by": current_user.get("name", ""),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    await db.recurring_invoices.insert_one(ri)
+    await db.contracts.update_one({"id": contract_id}, {"$set": {"recurring_invoice_id": ri["id"]}})
+
+    return {
+        "message": f"Created recurring invoice with {len(ri_items)} line item(s). Next run: {ri['next_generation']}.",
+        "recurring_invoice_id": ri["id"],
+        "amount": total,
+        "currency": ri["currency"],
+        "line_items": len(ri_items),
+        "next_generation": ri["next_generation"],
+    }
+
+
 @router.get("/contracts/{contract_id}/price-history")
 async def get_price_history(contract_id: str, current_user: dict = Depends(get_current_user)):
     contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})

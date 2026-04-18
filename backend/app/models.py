@@ -303,7 +303,7 @@ class LineItemCreate(BaseModel):
     client_id: Optional[str] = None
     name: str
     description: Optional[str] = None
-    quantity: int = 1
+    quantity: float = 1
     unit_price: float = 0.0
     billing_frequency: str = "monthly"
     pax8_subscription_id: Optional[str] = None
@@ -317,7 +317,7 @@ class LineItem(BaseModel):
     client_name: Optional[str] = None
     name: str
     description: Optional[str] = None
-    quantity: int = 1
+    quantity: float = 1
     unit_price: float = 0.0
     total: float = 0.0
     billing_frequency: str = "monthly"

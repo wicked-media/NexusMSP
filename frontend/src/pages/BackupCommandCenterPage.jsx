@@ -30,7 +30,10 @@ export default function BackupCommandCenterPage() {
   const [statusFilter, setStatusFilter] = useState("all"); // all | failed | warning | ok
   const [runningId, setRunningId] = useState(null);
   const [pricing, setPricing] = useState({});
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("AUD");
+  const [fxRate, setFxRate] = useState(1.0);
+  const [fxUpdatedAt, setFxUpdatedAt] = useState(null);
+  const [refreshingFx, setRefreshingFx] = useState(false);
   const [billingPreview, setBillingPreview] = useState(null);
   const [billingLoading, setBillingLoading] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
@@ -139,12 +142,27 @@ export default function BackupCommandCenterPage() {
         axios.get(`${API}/acronis/billing/preview`, { headers }),
       ]);
       setPricing(priceRes.data?.pricing || {});
-      setCurrency(priceRes.data?.currency || "USD");
+      setCurrency(priceRes.data?.currency || "AUD");
+      setFxRate(priceRes.data?.fx_rate_from_usd || 1.0);
+      setFxUpdatedAt(priceRes.data?.fx_updated_at || null);
       setBillingPreview(previewRes.data);
     } catch (e) {
       toast.error("Failed to load billing data");
     } finally {
       setBillingLoading(false);
+    }
+  };
+
+  const refreshFx = async (targetCurrency) => {
+    setRefreshingFx(true);
+    try {
+      const res = await axios.post(`${API}/acronis/fx/refresh`, { currency: targetCurrency }, { headers });
+      toast.success(`FX updated: 1 USD = ${res.data.fx_rate_from_usd} ${res.data.currency}`);
+      await fetchBilling();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "FX refresh failed");
+    } finally {
+      setRefreshingFx(false);
     }
   };
 
@@ -431,8 +449,30 @@ export default function BackupCommandCenterPage() {
                 <div>
                   <h2 className="text-lg font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4" />Acronis Usage Billing</h2>
                   <p className="text-xs text-muted-foreground">Sync Acronis tenant usage into client contracts as billable line items — accurate, auditable, per-client.</p>
+                  {fxUpdatedAt && currency !== "USD" && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      FX: 1 USD = <span className="text-emerald-400 font-semibold">{fxRate} {currency}</span> · updated {new Date(fxUpdatedAt).toLocaleString()}
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Select value={currency} onValueChange={v => refreshFx(v)}>
+                    <SelectTrigger className="h-8 w-[120px] text-xs" data-testid="currency-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AUD">AUD ($)</SelectItem>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                      <SelectItem value="EUR">EUR (€)</SelectItem>
+                      <SelectItem value="GBP">GBP (£)</SelectItem>
+                      <SelectItem value="NZD">NZD ($)</SelectItem>
+                      <SelectItem value="CAD">CAD ($)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" variant="outline" onClick={() => refreshFx(currency)} disabled={refreshingFx} data-testid="refresh-fx-btn">
+                    {refreshingFx ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                    Refresh FX
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => fetchBilling()} disabled={billingLoading} data-testid="refresh-billing-btn">
                     <RefreshCw className="w-3 h-3 mr-1" />Refresh
                   </Button>

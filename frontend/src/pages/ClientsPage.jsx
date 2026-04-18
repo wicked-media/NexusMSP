@@ -82,6 +82,7 @@ export default function ClientsPage() {
   const [isRustdeskOpen, setIsRustdeskOpen] = useState(false);
   const [rustdeskForm, setRustdeskForm] = useState({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
   const [acronisSubs, setAcronisSubs] = useState([]);
+  const [acronisBilling, setAcronisBilling] = useState(null);
   const [formData, setFormData] = useState({
     name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
   });
@@ -121,8 +122,9 @@ export default function ClientsPage() {
     setClientReadiness(null);
     setClientLoyalty(null);
     setRustdeskDevices([]);
+    setAcronisBilling(null);
     try {
-      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes, acRes] = await Promise.all([
+      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes, acRes, acBillRes] = await Promise.all([
         axios.get(`${API}/clients/${client.id}/detail`, { headers }),
         axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
         axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
@@ -133,6 +135,7 @@ export default function ClientsPage() {
         axios.get(`${API}/clients/${client.id}/loyalty`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/rustdesk/clients/${client.id}/devices`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/acronis/subscriptions?client_id=${client.id}`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/acronis/billing/client/${client.id}`, { headers }).catch(() => ({ data: null })),
       ]);
       setClientDetail(detailRes.data);
       setM365Users(m365Res.data.users || []);
@@ -145,6 +148,7 @@ export default function ClientsPage() {
       setClientLoyalty(loyRes.data);
       setRustdeskDevices(rdRes.data || []);
       setAcronisSubs(acRes.data || []);
+      setAcronisBilling(acBillRes.data);
     } catch { toast.error("Failed to load client details"); }
   };
 
@@ -814,6 +818,54 @@ export default function ClientsPage() {
                         ))}
                         <div className="flex justify-end pt-1 text-sm font-medium">Total Acronis MRR: <span className="text-blue-400 ml-2">${acronisSubs.reduce((a, s) => a + (s.monthly_cost || 0), 0).toFixed(2)}/mo</span></div>
                       </div>
+                    </CardContent>
+                  </Card>
+                )}
+                {acronisBilling?.linked && (
+                  <Card data-testid="acronis-billing-widget" className="border-emerald-500/20">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-emerald-500" />
+                        Acronis Live Usage — {acronisBilling.period}
+                        <Badge variant="outline" className="ml-auto text-[10px] border-emerald-500/30 text-emerald-400">Live from API</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {acronisBilling.total === 0 ? (
+                        <p className="text-xs text-muted-foreground py-2">No billable usage this period</p>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between mb-3 p-3 rounded-md bg-emerald-500/5 border border-emerald-500/10">
+                            <div>
+                              <p className="text-[11px] text-muted-foreground">This month's Acronis cost</p>
+                              <p className="text-2xl font-bold text-emerald-400">{acronisBilling.currency} {acronisBilling.total.toFixed(2)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-muted-foreground">Last synced</p>
+                              <p className="text-[11px]">{acronisBilling.last_synced ? new Date(acronisBilling.last_synced).toLocaleDateString() : "Never"}</p>
+                              {acronisBilling.last_synced_total != null && Math.abs(acronisBilling.last_synced_total - acronisBilling.total) > 0.01 && (
+                                <p className="text-[10px] text-amber-400 mt-0.5">Δ {((acronisBilling.total - acronisBilling.last_synced_total)).toFixed(2)} since last sync</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            {acronisBilling.line_items.map((li, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs py-1.5 px-2 rounded hover:bg-muted/30">
+                                <div>
+                                  <span className="font-medium">{li.label}</span>
+                                  <span className="text-muted-foreground ml-2">{li.quantity} {li.unit} × {acronisBilling.currency} {li.unit_price.toFixed(4)}</span>
+                                </div>
+                                <span className="font-semibold">{acronisBilling.currency} {li.total.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="pt-2 mt-2 border-t flex items-center justify-end">
+                            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => window.open("/backup-compliance", "_self")} data-testid="view-billing-btn">
+                              View Full Billing →
+                            </Button>
+                          </div>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
                 )}

@@ -143,7 +143,9 @@ async def toggle_recurring(ri_id: str, current_user: dict = Depends(get_current_
 
 @router.post("/recurring-invoices/{ri_id}/generate-now")
 async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_current_user)):
-    """Manually generate an invoice from a recurring template right now."""
+    """Manually generate an invoice from a recurring template right now.
+    If the linked contract's client has an Acronis tenant and `include_acronis_usage=True`,
+    fresh Acronis usage line items are auto-attached for the current period."""
     ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
     if not ri:
         raise HTTPException(status_code=404, detail="Not found")
@@ -152,18 +154,48 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
     due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
+    # Start with the template's static line items (excluding any prior Acronis auto-attach)
+    line_items = [li for li in ri.get("line_items", []) if not li.get("acronis_auto")]
+
+    # Auto-attach Acronis usage if enabled and client is linked
+    acronis_attached = []
+    if ri.get("include_acronis_usage", False) and ri.get("client_id"):
+        try:
+            from app.routers.acronis import get_client_acronis_billing
+            acr = await get_client_acronis_billing(ri["client_id"], current_user=current_user)
+            if acr.get("linked") and acr.get("total", 0) > 0:
+                for li in acr.get("line_items", []):
+                    acronis_attached.append({
+                        "description": f"Acronis — {li['label']} ({acr['period']})",
+                        "details": f"{li['quantity']} {li['unit']} × {acr['currency']} {li['unit_price']:.4f}",
+                        "quantity": li["quantity"],
+                        "rate": li["unit_price"],
+                        "amount": li["total"],
+                        "acronis_auto": True,
+                        "acronis_period": acr["period"],
+                    })
+                line_items.extend(acronis_attached)
+        except Exception:
+            pass  # Don't block invoice generation on Acronis failure
+
+    # Recompute totals
+    subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
+    tax_rate = float(ri.get("tax_rate", 0))
+    tax_amount = round(subtotal * tax_rate / 100, 2)
+    total = round(subtotal + tax_amount, 2)
+
     invoice = {
         "id": f"inv-{uuid.uuid4().hex[:8]}",
         "invoice_number": inv_number,
         "client_id": ri.get("client_id", ""),
         "client_name": ri.get("client_name", ""),
         "description": ri.get("description", ""),
-        "line_items": ri.get("line_items", []),
-        "subtotal": ri.get("subtotal", ri.get("amount", 0)),
-        "tax_rate": ri.get("tax_rate", 0),
-        "tax_amount": ri.get("tax_amount", 0),
-        "total": ri.get("amount", 0),
-        "amount_due": ri.get("amount", 0),
+        "line_items": line_items,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "total": total,
+        "amount_due": total,
         "amount_paid": 0,
         "currency": ri.get("currency", "AUD"),
         "status": "sent",
@@ -171,21 +203,28 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         "due_date": due_date,
         "recurring_invoice_id": ri_id,
         "notes": ri.get("notes", ""),
+        "acronis_auto_attached": len(acronis_attached),
         "created_at": now.isoformat(),
         "created_by": current_user.get("name", ""),
     }
     await db.invoices.insert_one(invoice)
 
     # Update recurring invoice stats
-    gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": ri.get("amount", 0), "generated_at": now.isoformat(), "generated_by": current_user.get("name", "")}
+    gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total,
+                 "generated_at": now.isoformat(), "generated_by": current_user.get("name", ""),
+                 "acronis_items": len(acronis_attached)}
     next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
     await db.recurring_invoices.update_one({"id": ri_id}, {
-        "$inc": {"invoices_generated": 1, "total_billed": ri.get("amount", 0)},
+        "$inc": {"invoices_generated": 1, "total_billed": total},
         "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
         "$push": {"generation_history": gen_entry},
     })
 
-    return {"message": f"Invoice {inv_number} generated", "invoice_id": invoice["id"], "invoice_number": inv_number, "amount": ri.get("amount", 0)}
+    msg = f"Invoice {inv_number} generated"
+    if acronis_attached:
+        msg += f" (+{len(acronis_attached)} Acronis line items auto-attached)"
+    return {"message": msg, "invoice_id": invoice["id"], "invoice_number": inv_number,
+            "amount": total, "acronis_items": len(acronis_attached)}
 
 
 @router.post("/recurring-invoices/{ri_id}/duplicate")

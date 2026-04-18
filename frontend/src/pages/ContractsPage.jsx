@@ -25,7 +25,8 @@ import {
   RefreshCw,
   Shield,
   Eye,
-  Download
+  Download,
+  Repeat
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -227,6 +228,28 @@ export default function ContractsPage() {
       client_id: contract.client_id
     });
     setIsLineItemDialogOpen(true);
+  };
+
+  const [convertDialog, setConvertDialog] = useState(null); // holds contract
+  const [convertForm, setConvertForm] = useState({ frequency: "monthly", tax_rate: 10, include_acronis_usage: true });
+  const [converting, setConverting] = useState(false);
+
+  const handleConvertToRecurring = async () => {
+    if (!convertDialog) return;
+    setConverting(true);
+    try {
+      const res = await axios.post(
+        `${API}/contracts/${convertDialog.id}/convert-to-recurring`,
+        convertForm,
+        { headers }
+      );
+      toast.success(res.data.message);
+      setConvertDialog(null);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Convert failed");
+    } finally {
+      setConverting(false);
+    }
   };
 
   const filteredContracts = contracts.filter(contract => {
@@ -619,6 +642,22 @@ export default function ContractsPage() {
                               <DropdownMenuItem onClick={() => openAddLineItem(contract)}>
                                 Add Line Item
                               </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => { setConvertDialog(contract); setConvertForm({ frequency: contract.billing_frequency || "monthly", tax_rate: 10, include_acronis_usage: true }); }}
+                                data-testid={`convert-recurring-${contract.id}`}
+                                disabled={contractLineItems.length === 0}
+                              >
+                                <Repeat className="w-3.5 h-3.5 mr-2" />
+                                Convert to Recurring Invoice
+                              </DropdownMenuItem>
+                              {contract.recurring_invoice_id && (
+                                <DropdownMenuItem
+                                  onClick={() => window.open(`/recurring-invoices?id=${contract.recurring_invoice_id}`, "_self")}
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5 mr-2 text-emerald-400" />
+                                  View Linked Recurring
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem 
                                 className="text-destructive"
                                 onClick={() => handleDelete(contract.id)}
@@ -652,6 +691,60 @@ export default function ContractsPage() {
         title={pdfViewer.title}
         downloadUrl={pdfViewer.downloadUrl}
       />
+
+      {/* Convert to Recurring Dialog */}
+      <Dialog open={!!convertDialog} onOpenChange={v => !v && setConvertDialog(null)}>
+        <DialogContent className="sm:max-w-[500px]" aria-describedby="convert-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Repeat className="w-5 h-5 text-emerald-400" />Convert to Recurring Invoice</DialogTitle>
+            <p id="convert-desc" className="text-xs text-muted-foreground">
+              Creates a linked recurring invoice template from this contract's {lineItems.filter(li => li.contract_id === convertDialog?.id).length} line item(s).
+              Each generation will auto-attach current Acronis usage (if linked).
+            </p>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Billing Frequency</Label>
+              <Select value={convertForm.frequency} onValueChange={v => setConvertForm({ ...convertForm, frequency: v })}>
+                <SelectTrigger data-testid="convert-frequency-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="quarterly">Quarterly</SelectItem>
+                  <SelectItem value="annually">Annually</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Tax Rate (%)</Label>
+              <Input
+                type="number"
+                value={convertForm.tax_rate}
+                onChange={e => setConvertForm({ ...convertForm, tax_rate: parseFloat(e.target.value) || 0 })}
+                className="h-9"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">Default 10% (Australian GST)</p>
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
+              <div>
+                <Label className="text-xs">Auto-attach Acronis usage</Label>
+                <p className="text-[10px] text-muted-foreground">Each generated invoice will include fresh Acronis billing for the period</p>
+              </div>
+              <Switch
+                checked={convertForm.include_acronis_usage}
+                onCheckedChange={v => setConvertForm({ ...convertForm, include_acronis_usage: v })}
+                data-testid="include-acronis-switch"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConvertDialog(null)}>Cancel</Button>
+            <Button onClick={handleConvertToRecurring} disabled={converting} data-testid="confirm-convert-btn">
+              {converting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Repeat className="w-4 h-4 mr-1" />}
+              Create Recurring Invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

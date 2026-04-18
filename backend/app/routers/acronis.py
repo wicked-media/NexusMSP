@@ -584,19 +584,29 @@ def _normalize_usage_value(raw_value: float, measurement_unit: str) -> tuple[flo
 
 @router.get("/acronis/pricing")
 async def get_acronis_pricing(current_user: dict = Depends(get_current_user)):
-    """Get current pricing config merged with defaults."""
+    """Get current pricing config merged with defaults. Values are in the configured currency.
+    Defaults are seeded in USD; if user switches currency, pricing is auto-converted on save."""
     doc = await db.settings.find_one({"key": "acronis_pricing"}, {"_id": 0}) or {}
     overrides = doc.get("value", {})
+    currency = doc.get("currency", "AUD")
+    fx_rate = float(doc.get("fx_rate_from_usd", 1.0))  # rate to convert USD defaults → target currency
+    fx_updated_at = doc.get("fx_updated_at")
+
     merged = {}
     for code, default in DEFAULT_ACRONIS_PRICING.items():
         o = overrides.get(code, {})
+        # If user has an override, use it verbatim (it's in target currency).
+        # Otherwise take USD default × FX rate.
+        if "unit_price" in o:
+            unit_price = float(o["unit_price"])
+        else:
+            unit_price = round(default["unit_price"] * fx_rate, 4)
         merged[code] = {
             **default,
-            "unit_price": float(o.get("unit_price", default["unit_price"])),
+            "unit_price": unit_price,
             "enabled": bool(o.get("enabled", True)),
             "markup_pct": float(o.get("markup_pct", 0)),
         }
-    # Include any custom codes user has added
     for code, o in overrides.items():
         if code not in merged:
             merged[code] = {
@@ -607,7 +617,44 @@ async def get_acronis_pricing(current_user: dict = Depends(get_current_user)):
                 "enabled": bool(o.get("enabled", True)),
                 "markup_pct": float(o.get("markup_pct", 0)),
             }
-    return {"pricing": merged, "currency": doc.get("currency", "USD")}
+    return {
+        "pricing": merged,
+        "currency": currency,
+        "fx_rate_from_usd": fx_rate,
+        "fx_updated_at": fx_updated_at,
+    }
+
+
+@router.post("/acronis/fx/refresh")
+async def refresh_acronis_fx(data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Fetch live USD→target FX rate from exchangerate.host (free, no auth)."""
+    data = data or {}
+    target = (data.get("currency") or "AUD").upper()
+    if target == "USD":
+        rate = 1.0
+    else:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as c:
+                resp = await c.get("https://api.exchangerate-api.com/v4/latest/USD")
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"FX API returned {resp.status_code}")
+                data_fx = resp.json()
+                rate = float(data_fx.get("rates", {}).get(target, 0))
+                if not rate:
+                    raise HTTPException(status_code=400, detail=f"Unsupported currency: {target}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"FX fetch failed: {e}")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one(
+        {"key": "acronis_pricing"},
+        {"$set": {"currency": target, "fx_rate_from_usd": rate, "fx_updated_at": now_iso}},
+        upsert=True
+    )
+    return {"currency": target, "fx_rate_from_usd": rate, "fx_updated_at": now_iso}
 
 
 @router.post("/acronis/pricing")
@@ -626,15 +673,21 @@ async def save_acronis_pricing(data: dict, current_user: dict = Depends(get_curr
 
 
 async def _get_pricing_map():
-    """Helper to get merged pricing map for internal use."""
+    """Helper to get merged pricing map for internal use (in target currency)."""
     doc = await db.settings.find_one({"key": "acronis_pricing"}, {"_id": 0}) or {}
     overrides = doc.get("value", {})
+    currency = doc.get("currency", "AUD")
+    fx_rate = float(doc.get("fx_rate_from_usd", 1.0))
     out = {}
     for code, default in DEFAULT_ACRONIS_PRICING.items():
         o = overrides.get(code, {})
+        if "unit_price" in o:
+            unit_price = float(o["unit_price"])
+        else:
+            unit_price = round(default["unit_price"] * fx_rate, 4)
         out[code] = {
             **default,
-            "unit_price": float(o.get("unit_price", default["unit_price"])),
+            "unit_price": unit_price,
             "enabled": bool(o.get("enabled", True)),
             "markup_pct": float(o.get("markup_pct", 0)),
         }
@@ -648,7 +701,7 @@ async def _get_pricing_map():
                 "enabled": bool(o.get("enabled", True)),
                 "markup_pct": float(o.get("markup_pct", 0)),
             }
-    return out, doc.get("currency", "USD")
+    return out, currency
 
 
 @router.get("/acronis/billing/preview")
@@ -854,6 +907,59 @@ async def get_acronis_billing_history(client_id: Optional[str] = None, current_u
         query["client_id"] = client_id
     snaps = await db.acronis_billing_snapshots.find(query, {"_id": 0}).sort("period", -1).to_list(200)
     return {"snapshots": snaps}
+
+
+@router.get("/acronis/billing/client/{client_id}")
+async def get_client_acronis_billing(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Compact billing view for a single client (used by the client-detail widget)."""
+    link = await db.acronis_customer_links.find_one({"client_id": client_id}, {"_id": 0})
+    if not link:
+        return {"linked": False, "message": "No Acronis tenant linked to this client"}
+
+    pricing_map, currency = await _get_pricing_map()
+    tenant_id = link.get("acronis_tenant_id")
+    try:
+        usage_resp = await acronis_service.get_tenant_usage(tenant_id)
+    except Exception as e:
+        return {"linked": True, "tenant_id": tenant_id, "error": str(e), "total": 0, "line_items": []}
+
+    agg = {}
+    for item in usage_resp.get("items", []):
+        code = item.get("name", "")
+        val = item.get("value", 0) or 0
+        if val <= 0:
+            continue
+        qty, unit = _normalize_usage_value(val, item.get("measurement_unit", ""))
+        if code not in agg:
+            agg[code] = {"quantity": 0, "unit": unit}
+        agg[code]["quantity"] += qty
+
+    line_items, total = [], 0.0
+    for code, u in agg.items():
+        cfg = pricing_map.get(code)
+        if not cfg or not cfg.get("enabled"):
+            continue
+        unit_price = cfg["unit_price"] * (1 + cfg.get("markup_pct", 0) / 100)
+        lt = round(u["quantity"] * unit_price, 2)
+        line_items.append({"label": cfg["label"], "quantity": round(u["quantity"], 2), "unit": cfg["unit"],
+                           "unit_price": round(unit_price, 4), "total": lt})
+        total += lt
+
+    latest_snapshot = await db.acronis_billing_snapshots.find_one(
+        {"client_id": client_id}, {"_id": 0}, sort=[("period", -1)]
+    )
+
+    return {
+        "linked": True,
+        "tenant_id": tenant_id,
+        "tenant_name": link.get("client_name", ""),
+        "period": datetime.now(timezone.utc).strftime("%Y-%m"),
+        "currency": currency,
+        "total": round(total, 2),
+        "line_items": sorted(line_items, key=lambda x: -x["total"]),
+        "last_synced": latest_snapshot.get("synced_at") if latest_snapshot else None,
+        "last_synced_total": latest_snapshot.get("total") if latest_snapshot else None,
+    }
 
 
 @router.post("/acronis/sync")
