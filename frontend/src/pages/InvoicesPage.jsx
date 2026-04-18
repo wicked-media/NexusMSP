@@ -21,7 +21,7 @@ import {
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
   Building2, Wallet, Printer, Download, Mail, Copy, BarChart3,
-  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart
+  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 
@@ -71,6 +71,12 @@ export default function InvoicesPage() {
   const [emailHistory, setEmailHistory] = useState([]);
   const [emailDialog, setEmailDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
+  // SMS reminder state
+  const [smsDialog, setSmsDialog] = useState(false);
+  const [smsTemplates, setSmsTemplates] = useState([]);
+  const [smsForm, setSmsForm] = useState({ to: "", template_key: "overdue_invoice", message: "" });
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsHistory, setSmsHistory] = useState([]);
   const [creditNoteDialog, setCreditNoteDialog] = useState(false);
   const [creditNoteForm, setCreditNoteForm] = useState({ reason: "", line_items: [], subtotal: 0, tax: 0, total: 0 });
   const [agingReport, setAgingReport] = useState(null);
@@ -252,6 +258,46 @@ export default function InvoicesPage() {
       const res = await axios.get(`${API}/invoices/${viewInvoice.id}/email-history`, { headers });
       setEmailHistory(res.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to email"); }
+  };
+
+  // --- SMS Reminder for Invoice ---
+  const openSmsDialog = async (inv) => {
+    const client = clients.find(c => c.id === inv.client_id);
+    const phone = client?.mobile || client?.phone || "";
+    setSmsForm({ to: phone, template_key: "overdue_invoice", message: "" });
+    setSmsDialog(true);
+    // Lazy-load templates + history
+    try {
+      const [tRes, hRes] = await Promise.all([
+        axios.get(`${API}/sms/templates?category=billing`, { headers }),
+        axios.get(`${API}/sms/messages?client_id=${inv.client_id}`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setSmsTemplates(tRes.data || []);
+      setSmsHistory((hRes.data || []).filter(m => (m.custom_ref || "") === `inv-${inv.id}`));
+    } catch { setSmsTemplates([]); }
+  };
+
+  const handleSendInvoiceSms = async () => {
+    if (!viewInvoice) return;
+    if (!smsForm.to.trim()) { toast.error("Mobile number required"); return; }
+    setSmsSending(true);
+    try {
+      const res = await axios.post(`${API}/invoices/${viewInvoice.id}/send-sms-reminder`, {
+        to: smsForm.to.trim(),
+        template_key: smsForm.template_key || "overdue_invoice",
+        message: smsForm.message || undefined,
+      }, { headers });
+      toast.success(`SMS reminder sent to ${res.data?.to || smsForm.to}`);
+      setSmsDialog(false);
+      // Refresh invoice to show last_sms_reminder_at
+      const updated = await axios.get(`${API}/invoices/${viewInvoice.id}`, { headers });
+      setViewInvoice(updated.data);
+      fetchAll();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to send SMS");
+    } finally {
+      setSmsSending(false);
+    }
   };
 
   // --- Clone Invoice ---
@@ -521,10 +567,65 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* SMS REMINDER */}
+      <Dialog open={smsDialog} onOpenChange={setSmsDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Smartphone className="w-5 h-5 text-emerald-400" />Send SMS Reminder</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {viewInvoice && (
+              <div className="p-3 rounded-lg bg-muted/30 border text-sm" data-testid="sms-invoice-summary">
+                <p className="font-mono">{viewInvoice.invoice_number}</p>
+                <p className="text-muted-foreground">{viewInvoice.client_name} · ${(viewInvoice.total || 0).toFixed(2)}</p>
+                {viewInvoice.due_date && <p className="text-xs text-muted-foreground">Due {format(parseISO(viewInvoice.due_date), "MMM d, yyyy")}</p>}
+                {viewInvoice.last_sms_reminder_at && (
+                  <p className="text-[11px] text-amber-400 mt-1">Last reminder sent {formatDistanceToNow(new Date(viewInvoice.last_sms_reminder_at), { addSuffix: true })} ({viewInvoice.sms_reminders_sent || 1} total)</p>
+                )}
+              </div>
+            )}
+            <div>
+              <Label>Mobile Number</Label>
+              <Input value={smsForm.to} onChange={e => setSmsForm({ ...smsForm, to: e.target.value })} placeholder="04xx xxx xxx" data-testid="sms-invoice-to-input" />
+            </div>
+            <div>
+              <Label>Template</Label>
+              <Select value={smsForm.template_key} onValueChange={v => setSmsForm({ ...smsForm, template_key: v })}>
+                <SelectTrigger data-testid="sms-invoice-template-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {smsTemplates.length === 0 && <SelectItem value="overdue_invoice">Overdue Invoice Reminder</SelectItem>}
+                  {smsTemplates.map(t => (
+                    <SelectItem key={t.key} value={t.key}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">Template placeholders (client_name, invoice_number, amount, days_overdue, payment_link) are auto-filled.</p>
+            </div>
+            <div>
+              <Label>Override message (optional)</Label>
+              <Textarea value={smsForm.message} onChange={e => setSmsForm({ ...smsForm, message: e.target.value })} rows={3} placeholder="Leave blank to use the selected template" data-testid="sms-invoice-override-input" />
+            </div>
+            {smsHistory.length > 0 && (
+              <div className="border rounded-lg p-2 bg-muted/20 max-h-32 overflow-y-auto space-y-1" data-testid="sms-invoice-history">
+                <p className="text-[11px] font-semibold text-muted-foreground">Recent SMS for this invoice</p>
+                {smsHistory.slice(0, 5).map(m => (
+                  <div key={m.id} className="text-[11px] border-l-2 border-emerald-500/40 pl-2">
+                    <span className="text-muted-foreground">{m.sent_at?.slice(0, 16).replace("T", " ")} · </span>
+                    <span className={m.direction === "inbound" ? "text-emerald-400 font-medium" : ""}>{m.direction === "inbound" ? "← " : "→ "}</span>
+                    <span>{(m.message || "").slice(0, 80)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSmsDialog(false)}>Cancel</Button>
+            <Button onClick={handleSendInvoiceSms} disabled={smsSending} className="bg-emerald-600 hover:bg-emerald-700" data-testid="send-invoice-sms-btn">
+              {smsSending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}Send SMS
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
-
-  // ========== DETAIL VIEW ==========
   if (viewInvoice) {
     const inv = viewInvoice;
     const pStatus = inv.payment_status || "unpaid";
@@ -725,6 +826,12 @@ export default function InvoicesPage() {
                 }} data-testid="email-invoice-btn">
                   <Mail className="w-4 h-4 mr-1" />Email Invoice
                 </Button>
+                {pStatus !== "paid" && (
+                  <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => openSmsDialog(inv)} data-testid="sms-reminder-btn">
+                    <Smartphone className="w-4 h-4 mr-1" />Send SMS Reminder
+                    {inv.sms_reminders_sent > 0 && <Badge variant="outline" className="ml-2 text-[10px] h-4 text-emerald-400 border-emerald-500/40">{inv.sms_reminders_sent}</Badge>}
+                  </Button>
+                )}
                 <Separator />
                 <Button variant="outline" className="w-full" onClick={() => handleCloneInvoice(inv)} data-testid="clone-invoice-btn">
                   <Copy className="w-4 h-4 mr-1" />Clone Invoice

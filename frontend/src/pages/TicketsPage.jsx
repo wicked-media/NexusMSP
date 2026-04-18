@@ -71,6 +71,11 @@ export default function TicketsPage() {
   const [ticketAttachments, setTicketAttachments] = useState([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [ticketProducts, setTicketProducts] = useState([]);
+  // SMS thread state
+  const [ticketSms, setTicketSms] = useState([]);
+  const [smsForm, setSmsForm] = useState({ to: "", message: "", template_key: "" });
+  const [smsTemplates, setSmsTemplates] = useState([]);
+  const [smsSending, setSmsSending] = useState(false);
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [addItemProduct, setAddItemProduct] = useState("");
   const [addItemQty, setAddItemQty] = useState(1);
@@ -238,7 +243,7 @@ export default function TicketsPage() {
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes, smsRes, smsTmplRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
@@ -248,6 +253,8 @@ export default function TicketsPage() {
         axios.get(`${API}/tickets/${ticket.id}/attachments`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/products`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/ticket-enrichment/${ticket.id}`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/tickets/${ticket.id}/sms`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTicketNotes(nRes.data);
       setTicketEmails(eRes.data);
@@ -258,6 +265,8 @@ export default function TicketsPage() {
       setTicketAttachments(attRes.data || []);
       setTicketProducts(prodRes.data || []);
       setEnrichment(enrichRes.data);
+      setTicketSms(smsRes.data || []);
+      setSmsTemplates(smsTmplRes.data || []);
       // Fetch client contacts for email auto-populate
       if (ticket.client_id) {
         axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(r.data || [])).catch(() => {});
@@ -270,6 +279,10 @@ export default function TicketsPage() {
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
       setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
+      // Auto-populate SMS recipient from the client's mobile/phone
+      const clientRec = clients.find(c => c.id === ticket.client_id);
+      const clientPhone = clientRec?.mobile || clientRec?.phone || "";
+      setSmsForm({ to: clientPhone, message: "", template_key: "" });
       // Fetch device status if device linked
       if (ticket.device_id) {
         try {
@@ -421,6 +434,51 @@ export default function TicketsPage() {
       setTicketEmails(eRes.data);
       toast.success("Email sent");
     } catch { toast.error("Failed to send email"); }
+  };
+
+  const handleSendSms = async () => {
+    const trimmedMsg = (smsForm.message || "").trim();
+    const trimmedTo = (smsForm.to || "").trim();
+    if (!trimmedTo) { toast.error("Phone number is required"); return; }
+    if (!trimmedMsg && !smsForm.template_key) { toast.error("Enter a message or pick a template"); return; }
+    setSmsSending(true);
+    try {
+      await axios.post(`${API}/tickets/${viewingTicket.id}/send-sms`, {
+        to: trimmedTo,
+        message: trimmedMsg,
+        template_key: smsForm.template_key || null,
+      }, { headers });
+      toast.success("SMS sent");
+      setSmsForm(prev => ({ ...prev, message: "", template_key: "" }));
+      const [smsRes, aRes] = await Promise.all([
+        axios.get(`${API}/tickets/${viewingTicket.id}/sms`, { headers }),
+        axios.get(`${API}/tickets/${viewingTicket.id}/audit-log`, { headers }).catch(() => ({ data: auditLog })),
+      ]);
+      setTicketSms(smsRes.data || []);
+      setAuditLog(aRes.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to send SMS");
+    } finally {
+      setSmsSending(false);
+    }
+  };
+
+  const applySmsTemplate = (key) => {
+    const tmpl = smsTemplates.find(t => t.key === key);
+    if (!tmpl) return;
+    const ctx = {
+      client_name: viewingTicket?.client_name || "",
+      ticket_number: viewingTicket?.ticket_number || (viewingTicket?.id || "").slice(-6),
+      ticket_title: viewingTicket?.title || "",
+      comment_preview: "",
+      portal_link: "",
+      company_phone: "",
+      company_name: "NexusOps",
+      technician_name: user?.name || "",
+      eta: "shortly",
+    };
+    const body = (tmpl.body || "").replace(/\{(\w+)\}/g, (_, k) => (ctx[k] ?? `{${k}}`));
+    setSmsForm(prev => ({ ...prev, message: body, template_key: key }));
   };
 
   const handleNotifyClient = async () => {
@@ -1376,7 +1434,7 @@ export default function TicketsPage() {
             {/* Tabs: Conversation first, then Suggestions, etc */}
             <Tabs defaultValue="conversation">
               <TabsList className="w-full grid grid-cols-8">
-                <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length})</TabsTrigger>
+                <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length + ticketSms.length})</TabsTrigger>
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
                 <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
@@ -1569,10 +1627,11 @@ export default function TicketsPage() {
                     <SelectContent>
                       <SelectItem value="note"><div className="flex items-center gap-2"><MessageSquare className="w-3 h-3" />Internal Note</div></SelectItem>
                       <SelectItem value="email"><div className="flex items-center gap-2"><Mail className="w-3 h-3" />Public Email</div></SelectItem>
+                      <SelectItem value="sms"><div className="flex items-center gap-2"><PhoneCall className="w-3 h-3" />SMS</div></SelectItem>
                     </SelectContent>
                   </Select>
                   <span className="text-xs text-muted-foreground">
-                    {conversationType === "note" ? "Internal notes are only visible to your team" : "Emails will be sent to the client"}
+                    {conversationType === "note" ? "Internal notes are only visible to your team" : conversationType === "email" ? "Emails will be sent to the client" : "SMS will be sent via MobileMessage to the client's mobile"}
                   </span>
                 </div>
 
@@ -1627,12 +1686,66 @@ export default function TicketsPage() {
                   </div>
                 )}
 
+                {/* Inline SMS Form */}
+                {conversationType === "sms" && (
+                  <div className="space-y-3 p-3 rounded-lg border bg-emerald-500/[0.03] border-emerald-500/20" data-testid="sms-form">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Mobile Number</Label>
+                        <Input
+                          value={smsForm.to}
+                          onChange={e => setSmsForm({ ...smsForm, to: e.target.value })}
+                          placeholder="04xx xxx xxx or +614xx..."
+                          data-testid="sms-to-input"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Template (optional)</Label>
+                        <Select value={smsForm.template_key || ""} onValueChange={applySmsTemplate}>
+                          <SelectTrigger data-testid="sms-template-picker">
+                            <SelectValue placeholder="Pick template..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {smsTemplates.map(t => (
+                              <SelectItem key={t.id || t.key} value={t.key}>{t.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs flex items-center justify-between">
+                        <span>Message</span>
+                        <span className={`text-[10px] ${smsForm.message.length > 160 ? "text-amber-400" : "text-muted-foreground"}`}>
+                          {smsForm.message.length} chars · {Math.max(1, Math.ceil(smsForm.message.length / 160))} segment{smsForm.message.length > 160 ? "s" : ""}
+                        </span>
+                      </Label>
+                      <Textarea
+                        value={smsForm.message}
+                        onChange={e => setSmsForm({ ...smsForm, message: e.target.value })}
+                        placeholder="Hi, update on your ticket..."
+                        rows={4}
+                        maxLength={1600}
+                        data-testid="sms-message-input"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] text-muted-foreground">Replies from this number will appear inline in this conversation.</span>
+                      <Button size="sm" onClick={handleSendSms} disabled={smsSending} data-testid="send-sms-btn">
+                        {smsSending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
+                        Send SMS
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Unified Conversation Timeline */}
                 <div className="border rounded-lg overflow-hidden" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "200px" }}>
                   {(() => {
                     const allItems = [
                       ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
                       ...ticketEmails.map(e => ({ ...e, _type: "email", _sort: e.created_at })),
+                      ...ticketSms.map(s => ({ ...s, _type: "sms", _sort: s.sent_at || s.received_at })),
                     ].sort((a, b) => (b._sort || "").localeCompare(a._sort || ""));
 
                     if (allItems.length === 0) return <p className="text-center py-8 text-muted-foreground">No conversation items yet</p>;
@@ -1660,7 +1773,7 @@ export default function TicketsPage() {
                             )}
                           </div>
                         );
-                      } else {
+                      } else if (item._type === "email") {
                         return (
                           <div key={`email-${item.id}`} className="p-3 rounded-lg mb-2 border bg-blue-500/[0.03] border-blue-500/20" data-testid={`email-${item.id}`}>
                             <div className="flex justify-between mb-1">
@@ -1676,6 +1789,35 @@ export default function TicketsPage() {
                               <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.body) }} />
                             ) : (
                               <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        // SMS item — inbound or outbound
+                        const inbound = item.direction === "inbound";
+                        const ts = item.sent_at || item.received_at;
+                        const statusColor = item.status === "delivered" ? "text-emerald-400" : item.status === "failed" ? "text-red-400" : "text-muted-foreground";
+                        return (
+                          <div key={`sms-${item.id}`} className={`p-3 rounded-lg mb-2 border ${inbound ? "bg-emerald-500/[0.06] border-emerald-500/30 border-l-4 border-l-emerald-500/70" : "bg-emerald-500/[0.02] border-emerald-500/20"}`} data-testid={`sms-${item.id}`}>
+                            <div className="flex justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <PhoneCall className={`w-3 h-3 ${inbound ? "text-emerald-400" : "text-emerald-500/80"}`} />
+                                <Badge variant="outline" className="text-emerald-400 text-[10px] h-4">
+                                  {inbound ? "SMS Reply" : "SMS"}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {inbound ? `from ${item.sender || item.from}` : `to ${item.to}`}
+                                </span>
+                                {!inbound && item.user_name && <span className="text-[10px] text-muted-foreground">by {item.user_name}</span>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {!inbound && <span className={`text-[10px] uppercase ${statusColor}`}>{item.status || "sent"}</span>}
+                                <span className="text-xs text-muted-foreground">{ts && formatDistanceToNow(new Date(ts), { addSuffix: true })}</span>
+                              </div>
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap">{item.message}</p>
+                            {item.failed_reason && (
+                              <p className="text-[11px] text-red-400 mt-1">Failed: {item.failed_reason}</p>
                             )}
                           </div>
                         );
