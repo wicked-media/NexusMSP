@@ -21,7 +21,29 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Acronis Settings card in Settings > Integrations (Client ID, Secret, Data Centre URL, Test Connection)
 - Backup status shows: machine name, tenant, health (ok/failed/warning), applied plans, last/next backup times
 
-## Recent Updates (Apr 18, 2026 — Resend Settings UI + Settings page revamp)
+## Recent Updates (Apr 18, 2026 — SMS integration via MobileMessage.com.au)
+- **New SMS integration**: End-to-end MobileMessage.com.au SMS gateway with outbound send, inbound webhooks, delivery-status webhooks, balance checking, and audit log.
+- **Config UI** at Settings → Integrations → SMS Messaging:
+  - API Username + Password (masked, `clear` to remove), Default Sender with "Load Senders" to fetch approved IDs from MobileMessage, Enable toggle
+  - Auto-generated webhook URLs (status + inbound) with copy buttons — ready to paste into MobileMessage portal
+  - Test Recipient + Message with "Send Test SMS" button and last-test-result badge
+  - "Refresh Balance" button (pulls live from `/v1/account`)
+  - Status badge with credit balance + last test
+- **Backend endpoints**:
+  - `GET/PUT /api/settings/sms` — config storage (DB-override, password masked on read)
+  - `POST /api/sms/send` — outbound SMS with full audit trail in `sms_messages`
+  - `POST /api/sms/test` — test SMS with last-test-result persistence
+  - `GET /api/sms/balance` — live credit balance from `/v1/account`
+  - `GET /api/sms/senders` — approved sender IDs (shared/own/brand)
+  - `GET /api/sms/messages` — paginated message log (direction/client filters)
+  - `GET /api/sms/stats` — outbound/inbound/delivered/failed/unread/today counters
+  - `POST /api/sms/webhook/status` — public webhook; updates `sms_messages` by `message_id`
+  - `POST /api/sms/webhook/inbound` — public webhook; auto-links to client by phone match
+  - `POST /api/sms/messages/{id}/read` — mark inbound as read
+- **Phone normalisation**: `04xx` and `+614xx` both normalised to `614xxxxxxxx` for consistent dedup & matching
+- **Collections**: `sms_messages` (outbound+inbound audit), `sms_webhook_log` (raw payload archive), `settings.sms_config`
+- **Live verified**: Test SMS sent successfully to 0493892119 from sender 61485900170 — cost 2 credits, balance went from 50 → 48, Configured badge green, all flows working end-to-end
+
 - **Resend email settings** now fully configurable via UI at **Settings → Integrations → Resend Email Delivery**:
   - Editable API key (masked display, `clear` to remove custom key and revert to env), Sender Email (From), Reply-To, Test Email Recipient
   - Status badges: Configured/Not Configured + source (DB override vs. Environment .env)

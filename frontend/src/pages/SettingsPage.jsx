@@ -18,7 +18,8 @@ import {
   User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
   Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
-  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search
+  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
+  Smartphone, Copy
 } from "lucide-react";
 
 const TABS = [
@@ -54,6 +55,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
   { tab: "integrations", anchor: "resend-settings-card", label: "Resend Email Delivery", keywords: "resend email smtp api key transactional onboarding welcome email notifications" },
+  { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
@@ -98,6 +100,12 @@ export default function SettingsPage() {
   const [resendSaving, setResendSaving] = useState(false);
   const [resendTesting, setResendTesting] = useState(false);
   const [resendTestEmail, setResendTestEmail] = useState("");
+  const [sms, setSms] = useState({ username: "", password: "", default_sender: "", password_set: false, enabled: false, status_webhook_url: "", inbound_webhook_url: "", last_balance: null, last_balance_at: null, last_test_result: null, last_test_at: null, last_test_message: "", updated_at: null, updated_by: null });
+  const [smsSenders, setSmsSenders] = useState([]);
+  const [smsTestTo, setSmsTestTo] = useState("");
+  const [smsTestMessage, setSmsTestMessage] = useState("NexusOps SMS test — integration working correctly.");
+  const [smsSaving, setSmsSaving] = useState(false);
+  const [smsTesting, setSmsTesting] = useState(false);
   const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
@@ -133,7 +141,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -150,6 +158,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/settings/resend`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -157,6 +166,7 @@ export default function SettingsPage() {
         setStripe(stripeRes.data);
         if (acronisRes.data) setAcronis(prev => ({ ...prev, api_url: acronisRes.data.api_url || "", client_id: acronisRes.data.client_id || "", connected: acronisRes.data.connected || false }));
         if (resendRes?.data) setResend(prev => ({ ...prev, ...resendRes.data, api_key: "" }));
+        if (smsRes?.data) setSms(prev => ({ ...prev, ...smsRes.data, password: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1267,6 +1277,220 @@ export default function SettingsPage() {
             >
               {resendTesting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <TestTube className="w-4 h-4 mr-2" />}
               Send Test Email
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+
+      {/* SMS - MobileMessage Integration */}
+      <Card data-testid="sms-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-blue-500" />
+            <CardTitle>SMS Messaging (MobileMessage.com.au)</CardTitle>
+          </div>
+          <CardDescription>
+            Send SMS to clients, receive replies via webhook, and use email-to-SMS. Balance checked live against the provider.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className={sms.enabled && sms.password_set ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="sms-status-badge">
+              {sms.enabled && sms.password_set ? "Configured" : "Not Configured"}
+            </Badge>
+            {sms.last_balance != null && (
+              <Badge variant="outline" className="text-[10px]">Balance: {sms.last_balance} credits{sms.last_balance_at ? ` (${new Date(sms.last_balance_at).toLocaleString()})` : ""}</Badge>
+            )}
+            {sms.last_test_result && (
+              <Badge variant="outline" className={`text-[10px] ${sms.last_test_result === "sent" ? "text-emerald-400 border-emerald-500/30" : "text-red-400 border-red-500/30"}`}>
+                Last test: {sms.last_test_result}{sms.last_test_at ? ` (${new Date(sms.last_test_at).toLocaleString()})` : ""}
+              </Badge>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>API Username</Label>
+              <Input
+                value={sms.username}
+                onChange={e => setSms({ ...sms, username: e.target.value })}
+                placeholder="e.g. 5WCN7n"
+                data-testid="sms-username"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>API Password</Label>
+              <Input
+                type="password"
+                value={sms.password}
+                onChange={e => setSms({ ...sms, password: e.target.value })}
+                placeholder={sms.password_set ? "(saved — leave blank to keep)" : "Paste your API password"}
+                data-testid="sms-password"
+              />
+              <p className="text-[11px] text-muted-foreground">Type <span className="font-mono">clear</span> to remove the saved password.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Default Sender</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={sms.default_sender}
+                  onChange={e => setSms({ ...sms, default_sender: e.target.value })}
+                  placeholder="e.g. 61485900170 (shared number) or brand name"
+                  data-testid="sms-default-sender"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const r = await axios.get(`${API}/sms/senders`, { headers });
+                      setSmsSenders(r.data || []);
+                      if (r.data?.length) toast.success(`Found ${r.data.length} approved sender(s)`);
+                      else toast.info("No approved senders found");
+                    } catch (e) { toast.error(e.response?.data?.detail || "Failed to fetch senders"); }
+                  }}
+                  data-testid="sms-load-senders"
+                >Load Senders</Button>
+              </div>
+              {smsSenders.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {smsSenders.map((s, i) => (
+                    <Badge
+                      key={i}
+                      variant="outline"
+                      className={`cursor-pointer text-[10px] ${sms.default_sender === s.sender ? "bg-primary/10 border-primary" : ""}`}
+                      onClick={() => setSms({ ...sms, default_sender: s.sender })}
+                    >
+                      {s.sender} · {s.label}{s.is_default ? " (default)" : ""}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">Must be approved in your MobileMessage portal. Shared number or verified brand name.</p>
+            </div>
+            <div className="space-y-1.5 flex items-end gap-2">
+              <div className="flex-1 space-y-1.5">
+                <Label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={sms.enabled}
+                    onChange={e => setSms({ ...sms, enabled: e.target.checked })}
+                    data-testid="sms-enabled-toggle"
+                    className="rounded"
+                  />
+                  Enable SMS sending
+                </Label>
+                <p className="text-[11px] text-muted-foreground">When off, outbound SMS calls will return 400.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Webhook URLs */}
+          <div className="border rounded-md p-3 bg-muted/30 space-y-2" data-testid="sms-webhook-urls">
+            <p className="text-xs font-semibold flex items-center gap-2">
+              <Link2 className="w-3.5 h-3.5" />Webhook URLs
+              <span className="text-muted-foreground font-normal text-[11px]">Paste these into your MobileMessage portal</span>
+            </p>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] shrink-0">Delivery Status</Badge>
+                <code className="text-[11px] flex-1 truncate" data-testid="sms-status-webhook">{sms.status_webhook_url || "—"}</code>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { navigator.clipboard.writeText(sms.status_webhook_url); toast.success("Copied"); }} data-testid="copy-status-webhook"><Copy className="w-3 h-3" /></Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] shrink-0">Inbound Replies</Badge>
+                <code className="text-[11px] flex-1 truncate" data-testid="sms-inbound-webhook">{sms.inbound_webhook_url || "—"}</code>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { navigator.clipboard.writeText(sms.inbound_webhook_url); toast.success("Copied"); }} data-testid="copy-inbound-webhook"><Copy className="w-3 h-3" /></Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Test Block */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-md border bg-blue-500/5 border-blue-500/10">
+            <div className="space-y-1.5">
+              <Label>Test Recipient</Label>
+              <Input
+                value={smsTestTo}
+                onChange={e => setSmsTestTo(e.target.value)}
+                placeholder="0493892119"
+                data-testid="sms-test-to"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Test Message</Label>
+              <Input
+                value={smsTestMessage}
+                onChange={e => setSmsTestMessage(e.target.value)}
+                maxLength={160}
+                data-testid="sms-test-message"
+              />
+              <p className="text-[10px] text-muted-foreground">{smsTestMessage.length}/160 chars</p>
+            </div>
+          </div>
+
+          {sms.updated_at && (
+            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(sms.updated_at).toLocaleString()} by {sms.updated_by || "—"}</p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={async () => {
+                setSmsSaving(true);
+                try {
+                  await axios.put(`${API}/settings/sms`, {
+                    username: sms.username,
+                    password: sms.password,
+                    default_sender: sms.default_sender,
+                    enabled: sms.enabled,
+                  }, { headers });
+                  toast.success("SMS settings saved");
+                  const fresh = await axios.get(`${API}/settings/sms`, { headers });
+                  setSms({ ...fresh.data, password: "" });
+                } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); }
+                finally { setSmsSaving(false); }
+              }}
+              disabled={smsSaving}
+              data-testid="save-sms-btn"
+            >
+              {smsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Save SMS Settings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (!smsTestTo) { toast.error("Enter a test recipient number"); return; }
+                setSmsTesting(true);
+                try {
+                  const res = await axios.post(`${API}/sms/test`, { to: smsTestTo, message: smsTestMessage }, { headers });
+                  if (res.data.status === "sent") toast.success(res.data.detail);
+                  else toast.error(res.data.detail);
+                  const fresh = await axios.get(`${API}/settings/sms`, { headers });
+                  setSms({ ...fresh.data, password: "" });
+                } catch (e) { toast.error(e.response?.data?.detail || "Test failed"); }
+                finally { setSmsTesting(false); }
+              }}
+              disabled={smsTesting || !sms.password_set}
+              data-testid="test-sms-btn"
+            >
+              {smsTesting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Smartphone className="w-4 h-4 mr-2" />}
+              Send Test SMS
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const r = await axios.get(`${API}/sms/balance`, { headers });
+                  toast.success(`Balance: ${r.data.balance} credits`);
+                  const fresh = await axios.get(`${API}/settings/sms`, { headers });
+                  setSms({ ...fresh.data, password: "" });
+                } catch (e) { toast.error(e.response?.data?.detail || "Balance check failed"); }
+              }}
+              disabled={!sms.password_set}
+              data-testid="check-sms-balance-btn"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />Refresh Balance
             </Button>
           </div>
         </CardContent>
