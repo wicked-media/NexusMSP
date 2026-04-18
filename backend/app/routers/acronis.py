@@ -153,6 +153,130 @@ async def link_acronis_customer(customer_id: str, data: dict, current_user: dict
     return {"message": f"Linked to {client.get('name', '')}"}
 
 
+
+@router.get("/acronis/backup-statuses")
+async def get_acronis_backup_statuses(current_user: dict = Depends(get_current_user)):
+    """Get backup status per machine from Acronis — grouped by tenant.
+    Includes last backup time, status, applied plans, next run."""
+    try:
+        resp = await acronis_service.get_resource_statuses()
+        items = resp.get("items", [])
+        machines = []
+        for item in items:
+            ctx = item.get("context", {})
+            if ctx.get("type") != "resource.machine":
+                continue
+            agg = item.get("aggregate", {})
+            policies = item.get("policies", [])
+            backup_policies = [p for p in policies if "backup" in (p.get("type", "") or "")]
+
+            last_run = None
+            last_success = None
+            next_run = None
+            plan_names = agg.get("names", "")
+
+            for bp in backup_policies:
+                lr = bp.get("last_run")
+                ls = bp.get("last_success_run")
+                nr = bp.get("next_run")
+                if lr and (not last_run or lr > last_run):
+                    last_run = lr
+                if ls and (not last_success or ls > last_success):
+                    last_success = ls
+                if nr and (not next_run or nr < next_run):
+                    next_run = nr
+
+            # Determine backup health
+            status = agg.get("status", "unknown")
+            if status == "idle" and last_success:
+                backup_health = "ok"
+            elif status in ("ok", "idle"):
+                backup_health = "ok"
+            elif status in ("error", "critical"):
+                backup_health = "failed"
+            elif status == "warning":
+                backup_health = "warning"
+            else:
+                backup_health = status
+
+            machines.append({
+                "resource_id": ctx.get("id", ""),
+                "machine_name": ctx.get("name") or ctx.get("user_defined_name", "Unknown"),
+                "tenant_id": ctx.get("tenant_id", ""),
+                "tenant_name": ctx.get("tenant_name", ""),
+                "agent_id": ctx.get("agent_id", ""),
+                "backup_health": backup_health,
+                "aggregate_status": status,
+                "plan_names": plan_names,
+                "last_backup": last_run,
+                "last_success": last_success,
+                "next_backup": next_run,
+                "policy_count": len(backup_policies),
+                "all_policies": [{"type": p.get("type", ""), "last_run": p.get("last_run"), "next_run": p.get("next_run")} for p in policies],
+                "licensing": item.get("licensing", {}).get("current_offering_item", ""),
+            })
+
+        machines.sort(key=lambda x: x["tenant_name"])
+
+        # Group by tenant for summary
+        tenant_summary = {}
+        for m in machines:
+            tn = m["tenant_name"]
+            if tn not in tenant_summary:
+                tenant_summary[tn] = {"total": 0, "ok": 0, "failed": 0, "warning": 0}
+            tenant_summary[tn]["total"] += 1
+            if m["backup_health"] == "ok":
+                tenant_summary[tn]["ok"] += 1
+            elif m["backup_health"] == "failed":
+                tenant_summary[tn]["failed"] += 1
+            elif m["backup_health"] == "warning":
+                tenant_summary[tn]["warning"] += 1
+
+        return {
+            "machines": machines,
+            "tenant_summary": tenant_summary,
+            "total_machines": len(machines),
+            "healthy": len([m for m in machines if m["backup_health"] == "ok"]),
+            "failed": len([m for m in machines if m["backup_health"] == "failed"]),
+            "warning": len([m for m in machines if m["backup_health"] == "warning"]),
+        }
+    except Exception as e:
+        return {"machines": [], "tenant_summary": {}, "total_machines": 0, "error": str(e)}
+
+
+@router.get("/acronis/activities")
+async def get_acronis_activities(limit: int = 50, current_user: dict = Depends(get_current_user)):
+    """Get recent backup activities/tasks from Acronis."""
+    try:
+        resp = await acronis_service._get(f"/api/task_manager/v2/activities?limit={limit}&order=desc(startedAt)")
+        if resp.status_code != 200:
+            return {"items": []}
+        data = resp.json()
+        items = data.get("items", [])
+        activities = []
+        for a in items:
+            ctx = a.get("context", {})
+            tenant = a.get("tenant", {})
+            policy = a.get("policy", {})
+            activities.append({
+                "id": a.get("idString", a.get("uuid", "")),
+                "state": a.get("state", ""),
+                "resource_name": ctx.get("resourceName", ""),
+                "resource_type": ctx.get("resourceKind", ""),
+                "activity_type": ctx.get("activityType", ""),
+                "plan_name": policy.get("name", ctx.get("policyName", "")),
+                "tenant_name": tenant.get("name", ""),
+                "started_at": a.get("startedAt", ""),
+                "completed_at": a.get("completedAt", ""),
+                "started_by": a.get("startedByUser", ""),
+                "progress": a.get("progress", {}).get("current", 0) if isinstance(a.get("progress"), dict) else 0,
+            })
+        return {"items": activities, "total": len(activities)}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
+
 @router.get("/acronis/resources")
 async def get_acronis_resources(tenant_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """Get protected resources/agents from Acronis."""

@@ -58,6 +58,7 @@ export default function SettingsPage() {
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
+  const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
@@ -92,7 +93,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -107,11 +108,13 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/o365-mailbox`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
+          axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
         setXero(xeroRes.data);
         setStripe(stripeRes.data);
+        if (acronisRes.data) setAcronis(prev => ({ ...prev, api_url: acronisRes.data.api_url || "", client_id: acronisRes.data.client_id || "", connected: acronisRes.data.connected || false }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1023,6 +1026,50 @@ export default function SettingsPage() {
           }} data-testid="save-stripe-btn">
             <Save className="w-4 h-4 mr-2" />Save Stripe Settings
           </Button>
+        </CardContent>
+      </Card>
+
+
+      {/* Acronis Cyber Cloud Integration */}
+      <Card data-testid="acronis-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-cyan-500" />
+            <CardTitle>Acronis Cyber Cloud</CardTitle>
+          </div>
+          <CardDescription>Connect to Acronis for backup monitoring, protection plans, and cyber security across all tenants</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge className={acronis.connected ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+              {acronis.connected ? "Connected" : "Not Configured"}
+            </Badge>
+          </div>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Data Centre URL</Label><Input value={acronis.api_url} onChange={e => setAcronis({ ...acronis, api_url: e.target.value })} placeholder="https://au1-cloud.acronis.com" data-testid="acronis-api-url" /></div>
+            <div><Label className="text-xs">API Client ID</Label><Input value={acronis.client_id} onChange={e => setAcronis({ ...acronis, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="acronis-client-id" /></div>
+            <div><Label className="text-xs">API Client Secret</Label><Input type="password" value={acronis.client_secret} onChange={e => setAcronis({ ...acronis, client_secret: e.target.value })} placeholder="Enter client secret" data-testid="acronis-client-secret" /></div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={async () => {
+              setAcronis(prev => ({ ...prev, testing: true }));
+              try {
+                const r = await axios.get(`${API}/acronis/test-connection`, { headers });
+                if (r.data.status === "connected") { toast.success("Acronis connected successfully!"); setAcronis(prev => ({ ...prev, connected: true })); }
+                else toast.error(r.data.message || "Connection failed");
+              } catch { toast.error("Connection failed"); }
+              finally { setAcronis(prev => ({ ...prev, testing: false })); }
+            }} disabled={acronis.testing} data-testid="test-acronis-btn">
+              {acronis.testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}Test Connection
+            </Button>
+            <Button onClick={async () => {
+              try {
+                await axios.post(`${API}/acronis/config`, { api_url: acronis.api_url, client_id: acronis.client_id, client_secret: acronis.client_secret }, { headers });
+                toast.success("Acronis settings saved");
+              } catch { toast.error("Failed to save"); }
+            }} data-testid="save-acronis-btn"><Save className="w-4 h-4 mr-2" />Save Acronis Settings</Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">Generate API credentials from Acronis Management Console: Settings &gt; API Clients &gt; Create API Client</p>
         </CardContent>
       </Card>
 
