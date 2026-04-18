@@ -52,6 +52,7 @@ export default function DevicesPage() {
   const [selectedDiscovered, setSelectedDiscovered] = useState([]);
   const [importLoading, setImportLoading] = useState(false);
   const [deviceViewers, setDeviceViewers] = useState({});
+  const [rdStatusMap, setRdStatusMap] = useState({});
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -70,19 +71,28 @@ export default function DevicesPage() {
         const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
         setDeviceViewers(vRes.data);
       } catch { setDeviceViewers({}); }
+      // Fetch RustDesk live status
+      try {
+        const rdRes = await axios.get(`${API}/rustdesk/live/status-map`, { headers });
+        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
+      } catch {}
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Poll for active remote viewers every 10 seconds
+  // Poll for active remote viewers and RustDesk status every 15 seconds
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
-        const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
+        const [vRes, rdRes] = await Promise.all([
+          axios.get(`${API}/devices/active-remote-viewers`, { headers }).catch(() => ({ data: {} })),
+          axios.get(`${API}/rustdesk/live/status-map`, { headers }).catch(() => ({ data: {} })),
+        ]);
         setDeviceViewers(vRes.data);
+        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
       } catch {}
-    }, 10000);
+    }, 15000);
     return () => clearInterval(poll);
   }, []);
 
@@ -423,7 +433,18 @@ export default function DevicesPage() {
                         <div>
                           <div className="font-medium flex items-center gap-2">
                             {d.name}
-                            <Badge className={STATUS_COLORS[d.status] + " border text-[9px] capitalize px-1.5"}>{d.status}</Badge>
+                            {(() => {
+                              const rdLive = d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null;
+                              const effectiveStatus = rdLive || d.status;
+                              return (
+                                <>
+                                  <Badge className={STATUS_COLORS[effectiveStatus] + " border text-[9px] capitalize px-1.5"}>{effectiveStatus}</Badge>
+                                  {rdLive && rdLive !== d.status && (
+                                    <span className="text-[9px] px-1 rounded bg-blue-500/10 text-blue-400">RD</span>
+                                  )}
+                                </>
+                              );
+                            })()}
                             {isRemoted && (
                               <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
                                 style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}
@@ -480,7 +501,7 @@ export default function DevicesPage() {
                 <CardContent className="pt-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className={`relative w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[d.status]}`}>
+                      <div className={`relative w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status]}`}>
                         <DevIcon className="w-5 h-5" />
                         {isRemoted && (
                           <div className="absolute -top-2 -right-2">
@@ -498,7 +519,9 @@ export default function DevicesPage() {
                         <p className="text-xs text-muted-foreground">{d.client_name}</p>
                       </div>
                     </div>
-                    <Badge className={STATUS_COLORS[d.status] + " border text-[9px] capitalize"}>{d.status}</Badge>
+                    <Badge className={STATUS_COLORS[d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status] + " border text-[9px] capitalize"}>
+                      {d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status}
+                    </Badge>
                   </div>
                   {isRemoted && (
                     <div className="mb-3 px-2 py-1.5 rounded-md border border-cyan-500/20"

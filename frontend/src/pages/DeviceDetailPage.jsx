@@ -50,6 +50,7 @@ export default function DeviceDetailPage() {
   const [showPassword, setShowPassword] = useState({});
   const [connectLoading, setConnectLoading] = useState(false);
   const [diskHealth, setDiskHealth] = useState([]);
+  const [rdLiveStatus, setRdLiveStatus] = useState(null);
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -68,6 +69,21 @@ export default function DeviceDetailPage() {
   }, [deviceId, token]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  // Poll RustDesk live status for this device
+  useEffect(() => {
+    const fetchRdStatus = async () => {
+      try {
+        const res = await axios.get(`${API}/rustdesk/live/status-map`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.data?.status_map && data?.device?.rustdesk_id) {
+          setRdLiveStatus(res.data.status_map[data.device.rustdesk_id] || null);
+        }
+      } catch {}
+    };
+    fetchRdStatus();
+    const interval = setInterval(fetchRdStatus, 15000);
+    return () => clearInterval(interval);
+  }, [token, data?.device?.rustdesk_id]);
 
   // Launch RustDesk via hidden anchor (no blank tab)
   const launchRustDesk = (rdId, relayServer) => {
@@ -151,13 +167,16 @@ export default function DeviceDetailPage() {
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate("/devices")} data-testid="back-to-devices"><ArrowLeft className="w-5 h-5" /></Button>
-          <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${STATUS_COLORS[dev.status]}`}>
+          <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
             <DevIcon className="w-7 h-7" />
           </div>
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight" data-testid="device-name">{dev.name}</h1>
-              <Badge className={STATUS_COLORS[dev.status] + " border capitalize"} data-testid="device-status">{dev.status}</Badge>
+              <Badge className={STATUS_COLORS[rdLiveStatus || dev.status] + " border capitalize"} data-testid="device-status">{rdLiveStatus || dev.status}</Badge>
+              {rdLiveStatus && rdLiveStatus !== dev.status && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">LIVE</span>
+              )}
               {dev.compliance_score != null && (
                 <Badge variant="outline" className={complianceColor + " border-current/20"}>
                   <SecurityIcon className="w-3 h-3 mr-1" />{dev.compliance_score}% Compliant
@@ -173,17 +192,17 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {dev.status === "online" && (
+          {(rdLiveStatus || dev.status) === "online" && (
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
               {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
             </Button>
           )}
-          {dev.status === "offline" && (
+          {(rdLiveStatus || dev.status) === "offline" && (
             <Button size="sm" variant="outline" disabled data-testid="remote-access-btn-disabled">
               <XCircle className="w-4 h-4 mr-1" />Offline
             </Button>
           )}
-          {dev.status === "warning" && (
+          {(rdLiveStatus || dev.status) === "warning" && (
             <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
               {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
             </Button>

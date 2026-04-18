@@ -1,0 +1,66 @@
+{
+  "summary": "Iteration 95 - RustDesk Live Status Polling & Bug Fixes Testing. All backend tests passed (12/12). Frontend UI verified: Devices page shows status badges (Online/Offline/Warning), Device Detail page shows status badge with LIVE indicator and Remote Access button, invoice download uses hidden anchor (not window.open).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration95_rustdesk_status.py",
+    "/app/test_reports/pytest/pytest_results_iter95.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration95_rustdesk_status.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "Admin: aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 95 tested RustDesk live status polling system. All features working: (1) GET /api/rustdesk/live/status-map returns {status_map, server_configured, peer_count}, (2) POST /api/rustdesk/quick-connect returns connection_url in format rustdesk://ID@server_host, (3) Devices page shows status badges with 15s polling, (4) Device Detail page shows LIVE indicator when RustDesk status differs from DB, (5) Invoice download uses hidden anchor element (not window.open). Backend tests in /app/backend/tests/test_iteration95_rustdesk_status.py.",
+  "features_tested": {
+    "rustdesk_status_map_api": {
+      "endpoint": "GET /api/rustdesk/live/status-map",
+      "status": "PASS",
+      "response_structure": "{status_map: {}, server_configured: bool, peer_count: int}"
+    },
+    "rustdesk_quick_connect_uri": {
+      "endpoint": "POST /api/rustdesk/quick-connect",
+      "status": "PASS",
+      "uri_format": "rustdesk://ID@server_host (correct format, not rustdesk://connection/new/ID)"
+    },
+    "devices_page_status_badges": {
+      "status": "PASS",
+      "details": "Shows Online (green), Offline (red), Warning (amber) badges. Stats: Total 135, Online 116, Offline 12, Warning 7"
+    },
+    "device_detail_live_indicator": {
+      "status": "PASS",
+      "details": "LIVE indicator found when RustDesk status differs from DB status"
+    },
+    "device_detail_remote_access_button": {
+      "status": "PASS",
+      "details": "Remote Access button enabled for online/warning devices"
+    },
+    "invoice_download_popup_fix": {
+      "status": "PASS",
+      "details": "Uses hidden anchor element (document.createElement('a')) instead of window.open"
+    },
+    "contract_pdf_preview": {
+      "status": "PASS",
+      "details": "Returns PDF with correct content-type"
+    },
+    "po_pdf_preview": {
+      "status": "PASS",
+      "details": "Returns PDF with correct content-type"
+    }
+  }
+}

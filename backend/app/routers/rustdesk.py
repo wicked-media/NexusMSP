@@ -574,6 +574,46 @@ async def get_live_peers(current_user: dict = Depends(get_current_user)):
     return {"peers": normalized, "count": len(normalized), "source": source, "server_url": server_url}
 
 
+@router.get("/rustdesk/live/status-map")
+async def get_live_status_map(current_user: dict = Depends(get_current_user)):
+    """Lightweight endpoint: returns {rd_id: online/offline} map for all known peers.
+    Used for polling connection status indicators on Devices pages."""
+    config = await _get_rustdesk_config()
+    server_url = config.get("server_url", "").rstrip("/")
+    api_key = config.get("api_key", "")
+    
+    if not server_url:
+        return {"status_map": {}, "server_configured": False}
+    
+    headers_dict = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+    
+    status_map = {}
+    try:
+        async with httpx.AsyncClient(timeout=8.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
+            for path in ["/ab/peers", "/peers", "/v1/peers"]:
+                try:
+                    resp = await client.get(f"{server_url}/api{path}", headers=headers_dict)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        peers = data if isinstance(data, list) else data.get("data", data.get("peers", []))
+                        if isinstance(peers, list):
+                            for p in peers:
+                                rd_id = str(p.get("id") or p.get("Id") or p.get("peer_id") or "")
+                                if rd_id:
+                                    is_online = p.get("online", False) if isinstance(p.get("online"), bool) else str(p.get("online", "")).lower() in ["true", "1", "yes"]
+                                    status_map[rd_id] = "online" if is_online else "offline"
+                            break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    return {"status_map": status_map, "server_configured": True, "peer_count": len(status_map)}
+
+
+
 @router.post("/rustdesk/live/sync")
 async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
     """Sync live RustDesk peers into the NexusOps device/rustdesk_devices collections.
