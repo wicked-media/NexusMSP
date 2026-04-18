@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX } from "lucide-react";
+import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX, DollarSign, Save, Download, Eye, FileText } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 export default function BackupCommandCenterPage() {
   const { token } = useAuth();
@@ -28,6 +29,12 @@ export default function BackupCommandCenterPage() {
   const [linkClientId, setLinkClientId] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // all | failed | warning | ok
   const [runningId, setRunningId] = useState(null);
+  const [pricing, setPricing] = useState({});
+  const [currency, setCurrency] = useState("USD");
+  const [billingPreview, setBillingPreview] = useState(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [savingPricing, setSavingPricing] = useState(false);
+  const [syncingBilling, setSyncingBilling] = useState(false);
 
   const fetchAll = async () => {
     try {
@@ -93,9 +100,93 @@ export default function BackupCommandCenterPage() {
     }
   };
 
+  const handleBulkRunBackup = async () => {
+    const machines = (bs.machines || []).filter(m =>
+      (statusFilter === "all" || m.backup_health === statusFilter) &&
+      m.agent_online === true &&
+      (m.backup_application_ids?.length || 0) > 0
+    );
+    if (!machines.length) {
+      toast.error("No eligible machines (must be online with applied backup plans)");
+      return;
+    }
+    if (!window.confirm(`Trigger backup for ${machines.length} online machine(s)?`)) return;
+
+    setRunningId("__bulk__");
+    // Combine all application_ids across machines into one request
+    const allAppIds = [...new Set(machines.flatMap(m => m.backup_application_ids || []))];
+    try {
+      const res = await axios.post(`${API}/acronis/backup/run`, { application_ids: allAppIds }, { headers });
+      toast.success(res.data?.message || `Bulk backup triggered for ${machines.length} machines`);
+      setTimeout(fetchAll, 3000);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Bulk backup failed");
+    } finally {
+      setRunningId(null);
+    }
+  };
+
   const openStatusTab = (filter) => {
     setStatusFilter(filter);
     setTab("statuses");
+  };
+
+  const fetchBilling = async () => {
+    setBillingLoading(true);
+    try {
+      const [priceRes, previewRes] = await Promise.all([
+        axios.get(`${API}/acronis/pricing`, { headers }),
+        axios.get(`${API}/acronis/billing/preview`, { headers }),
+      ]);
+      setPricing(priceRes.data?.pricing || {});
+      setCurrency(priceRes.data?.currency || "USD");
+      setBillingPreview(previewRes.data);
+    } catch (e) {
+      toast.error("Failed to load billing data");
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "billing" && !billingPreview) fetchBilling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const handlePriceChange = (code, field, value) => {
+    setPricing(prev => ({
+      ...prev,
+      [code]: { ...prev[code], [field]: field === "enabled" ? value : parseFloat(value) || 0 }
+    }));
+  };
+
+  const savePricing = async () => {
+    setSavingPricing(true);
+    try {
+      await axios.post(`${API}/acronis/pricing`, { pricing, currency }, { headers });
+      toast.success("Pricing saved — refreshing preview");
+      await fetchBilling();
+    } catch { toast.error("Failed to save pricing"); }
+    finally { setSavingPricing(false); }
+  };
+
+  const syncBillingToLineItems = async (dryRun = false) => {
+    setSyncingBilling(true);
+    try {
+      const res = await axios.post(`${API}/acronis/billing/sync`, { dry_run: dryRun }, { headers });
+      const msg = dryRun
+        ? `Preview: ${res.data.synced_count} clients would be billed ${currency} ${res.data.total_billed.toFixed(2)}`
+        : `Synced ${res.data.synced_count} clients — ${currency} ${res.data.total_billed.toFixed(2)} billed`;
+      toast.success(msg);
+      if (res.data.skipped?.length) {
+        toast.warning(`Skipped ${res.data.skipped.length} client(s): ${res.data.skipped.map(s => s.reason).slice(0, 3).join(", ")}`);
+      }
+      if (!dryRun) fetchBilling();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Billing sync failed");
+    } finally {
+      setSyncingBilling(false);
+    }
   };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -135,6 +226,7 @@ export default function BackupCommandCenterPage() {
           <TabsTrigger value="statuses"><HardDrive className="w-3 h-3 mr-1" />Backup Status ({bs.total_machines || 0})</TabsTrigger>
           <TabsTrigger value="activities"><Activity className="w-3 h-3 mr-1" />Activities ({activities.length})</TabsTrigger>
           <TabsTrigger value="alerts"><Bell className="w-3 h-3 mr-1" />Alerts ({alerts.length})</TabsTrigger>
+          <TabsTrigger value="billing" data-testid="tab-billing"><DollarSign className="w-3 h-3 mr-1" />Billing</TabsTrigger>
         </TabsList>
 
         {/* Tenants Tab */}
@@ -188,9 +280,23 @@ export default function BackupCommandCenterPage() {
                 Filtering by status: <span className={`font-semibold capitalize ${statusFilter === "failed" ? "text-red-400" : statusFilter === "warning" ? "text-amber-400" : "text-emerald-400"}`}>{statusFilter}</span>
                 {" "}— showing {(bs.machines || []).filter(m => m.backup_health === statusFilter).length} of {(bs.machines || []).length} machines
               </p>
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => setStatusFilter("all")} data-testid="clear-status-filter-btn">
-                <FilterX className="w-3 h-3 mr-1" />Clear filter
-              </Button>
+              <div className="flex items-center gap-2">
+                {(statusFilter === "failed" || statusFilter === "warning") && (
+                  <Button
+                    size="sm"
+                    className="h-7 px-3 text-[11px] bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30"
+                    disabled={runningId === "__bulk__"}
+                    onClick={handleBulkRunBackup}
+                    data-testid="bulk-run-backup-btn"
+                  >
+                    {runningId === "__bulk__" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+                    Run Backup on All Online
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => setStatusFilter("all")} data-testid="clear-status-filter-btn">
+                  <FilterX className="w-3 h-3 mr-1" />Clear filter
+                </Button>
+              </div>
             </div>
           )}
           <Table>
@@ -313,6 +419,166 @@ export default function BackupCommandCenterPage() {
               })}
             </div>
           ) : <p className="text-center text-muted-foreground py-8">No active alerts</p>}
+        </TabsContent>
+
+        {/* Billing Tab */}
+        <TabsContent value="billing" className="space-y-5">
+          {billingLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin" /></div>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <h2 className="text-lg font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4" />Acronis Usage Billing</h2>
+                  <p className="text-xs text-muted-foreground">Sync Acronis tenant usage into client contracts as billable line items — accurate, auditable, per-client.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => fetchBilling()} disabled={billingLoading} data-testid="refresh-billing-btn">
+                    <RefreshCw className="w-3 h-3 mr-1" />Refresh
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => syncBillingToLineItems(true)} disabled={syncingBilling} data-testid="dry-run-billing-btn">
+                    <Eye className="w-3 h-3 mr-1" />Dry Run
+                  </Button>
+                  <Button size="sm" onClick={() => syncBillingToLineItems(false)} disabled={syncingBilling || !(billingPreview?.linked_clients)} data-testid="sync-billing-btn">
+                    {syncingBilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <FileText className="w-3 h-3 mr-1" />}
+                    Sync to Line Items
+                  </Button>
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-3">
+                <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold">{billingPreview?.linked_clients || 0}</p><p className="text-[11px] text-muted-foreground">Linked Clients</p></CardContent></Card>
+                <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold">{billingPreview?.period || "—"}</p><p className="text-[11px] text-muted-foreground">Billing Period</p></CardContent></Card>
+                <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold text-emerald-400">{currency} {(billingPreview?.grand_total || 0).toFixed(2)}</p><p className="text-[11px] text-muted-foreground">Total This Period</p></CardContent></Card>
+                <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold text-amber-400">{(billingPreview?.results || []).reduce((n, r) => n + (r.unknown_count || 0), 0)}</p><p className="text-[11px] text-muted-foreground">Unknown Offerings</p></CardContent></Card>
+              </div>
+
+              {/* Pricing Config */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <DollarSign className="w-4 h-4" />Pricing Configuration
+                    <Badge variant="outline" className="text-[10px] ml-auto">{Object.keys(pricing).length} offering items</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Offering</TableHead><TableHead>Code</TableHead><TableHead>Unit</TableHead>
+                        <TableHead className="text-right">Unit Price ({currency})</TableHead>
+                        <TableHead className="text-right">Markup %</TableHead>
+                        <TableHead className="text-center">Enabled</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Object.entries(pricing).sort((a, b) => (a[1].category || "").localeCompare(b[1].category || "")).map(([code, cfg]) => (
+                        <TableRow key={code}>
+                          <TableCell className="font-medium text-sm">{cfg.label}</TableCell>
+                          <TableCell className="text-[11px] text-muted-foreground font-mono">{code}</TableCell>
+                          <TableCell className="text-xs">{cfg.unit}</TableCell>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number" step="0.01"
+                              value={cfg.unit_price}
+                              onChange={e => handlePriceChange(code, "unit_price", e.target.value)}
+                              className="h-7 w-24 text-right text-sm ml-auto"
+                              data-testid={`price-input-${code}`}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number" step="1"
+                              value={cfg.markup_pct || 0}
+                              onChange={e => handlePriceChange(code, "markup_pct", e.target.value)}
+                              className="h-7 w-20 text-right text-sm ml-auto"
+                            />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <input
+                              type="checkbox"
+                              checked={cfg.enabled !== false}
+                              onChange={e => handlePriceChange(code, "enabled", e.target.checked)}
+                              className="h-4 w-4"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <div className="flex justify-end mt-3">
+                    <Button size="sm" onClick={savePricing} disabled={savingPricing} data-testid="save-pricing-btn">
+                      {savingPricing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                      Save Pricing
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Per-client preview */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Per-Client Billing Preview ({billingPreview?.period || "—"})</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {(billingPreview?.results || []).length === 0 ? (
+                    <p className="text-center text-sm text-muted-foreground py-6">
+                      No linked Acronis tenants. Go to the <button className="underline" onClick={() => setTab("overview")}>Tenants tab</button> and link tenants to NexusOps clients first.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {billingPreview.results.map(r => (
+                        <div key={r.client_id} className="border rounded-md p-3 space-y-2" data-testid={`billing-client-${r.client_id}`}>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-semibold">{r.client_name}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {r.contract_id ? (
+                                  <span className="text-emerald-400">✓ Contract: {r.contract_name}</span>
+                                ) : (
+                                  <span className="text-amber-400">⚠ No active contract — will skip on sync</span>
+                                )}
+                                {r.unknown_count > 0 && <span className="ml-2 text-amber-400">· {r.unknown_count} unknown offerings</span>}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xl font-bold text-emerald-400">{currency} {r.total.toFixed(2)}</p>
+                              <p className="text-[10px] text-muted-foreground">{r.line_items.filter(l => !l.unknown).length} billable items</p>
+                            </div>
+                          </div>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-xs">Offering</TableHead>
+                                <TableHead className="text-xs text-right">Quantity</TableHead>
+                                <TableHead className="text-xs text-right">Unit Price</TableHead>
+                                <TableHead className="text-xs text-right">Line Total</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {r.line_items.map((li, idx) => (
+                                <TableRow key={idx} className={li.unknown ? "opacity-50" : ""}>
+                                  <TableCell className="text-xs">
+                                    {li.label}
+                                    {li.unknown && <Badge variant="outline" className="ml-2 text-[9px] text-amber-400 border-amber-500/30">unknown — no price set</Badge>}
+                                    {li.markup_pct > 0 && <Badge variant="outline" className="ml-2 text-[9px]">+{li.markup_pct}% markup</Badge>}
+                                  </TableCell>
+                                  <TableCell className="text-xs text-right">{li.quantity} {li.unit}</TableCell>
+                                  <TableCell className="text-xs text-right">{currency} {li.unit_price.toFixed(4)}</TableCell>
+                                  <TableCell className="text-xs text-right font-semibold">{currency} {li.total.toFixed(2)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
 

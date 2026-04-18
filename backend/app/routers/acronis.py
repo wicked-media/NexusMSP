@@ -544,6 +544,318 @@ async def get_acronis_subscriptions(customer_id: Optional[str] = None, client_id
         return []
 
 
+# ============== ACRONIS BILLING / USAGE-TO-INVOICE ==============
+
+# Default pricing per offering-item code (USD/AUD). Admin can override via /acronis/pricing.
+# Prices are per-unit (bytes→GB for storage items; count for seats/workloads).
+DEFAULT_ACRONIS_PRICING = {
+    # Storage (per GB/month)
+    "pw_base_storage":       {"label": "Cloud Backup Storage",      "unit": "GB",       "unit_price": 0.12, "category": "storage"},
+    "pw_base_c2c_storage":   {"label": "Cloud-to-Cloud Storage",    "unit": "GB",       "unit_price": 0.12, "category": "storage"},
+    "pw_base_dr_storage":    {"label": "Disaster Recovery Storage", "unit": "GB",       "unit_price": 0.18, "category": "storage"},
+    # Workloads (per unit/month)
+    "pw_base_workstations":  {"label": "Workstations",              "unit": "device",   "unit_price": 2.50, "category": "workload"},
+    "pw_base_servers":       {"label": "Servers",                   "unit": "device",   "unit_price": 8.00, "category": "workload"},
+    "pw_base_virtual_hosts": {"label": "Virtual Hosts",             "unit": "host",     "unit_price": 15.00, "category": "workload"},
+    "pw_base_mobile":        {"label": "Mobile Devices",            "unit": "device",   "unit_price": 1.50, "category": "workload"},
+    "pw_base_m365_seats":    {"label": "M365 Seats",                "unit": "seat",     "unit_price": 3.00, "category": "seats"},
+    "pw_base_gsuite_seats":  {"label": "Google Workspace Seats",    "unit": "seat",     "unit_price": 3.00, "category": "seats"},
+    "pw_base_websites":      {"label": "Websites",                  "unit": "site",     "unit_price": 1.00, "category": "workload"},
+    # Advanced packs
+    "pw_pack_adv_security":  {"label": "Advanced Security",         "unit": "device",   "unit_price": 3.00, "category": "addon"},
+    "pw_pack_adv_backup":    {"label": "Advanced Backup",           "unit": "device",   "unit_price": 2.50, "category": "addon"},
+    "pw_pack_adv_management":{"label": "Advanced Management",       "unit": "device",   "unit_price": 2.00, "category": "addon"},
+    "pw_pack_adv_edr":       {"label": "EDR / XDR",                 "unit": "device",   "unit_price": 5.00, "category": "addon"},
+    "pw_pack_adv_dlp":       {"label": "Advanced DLP",              "unit": "device",   "unit_price": 4.00, "category": "addon"},
+    "pw_pack_adv_dr":        {"label": "Disaster Recovery",         "unit": "device",   "unit_price": 15.00, "category": "addon"},
+    "pw_pack_adv_email":     {"label": "Advanced Email Security",   "unit": "seat",     "unit_price": 1.50, "category": "addon"},
+    "pw_pack_adv_filesync":  {"label": "Advanced File Sync",        "unit": "seat",     "unit_price": 2.00, "category": "addon"},
+}
+
+
+def _normalize_usage_value(raw_value: float, measurement_unit: str) -> tuple[float, str]:
+    """Convert raw Acronis usage to billable quantity + display unit.
+    Bytes are normalized to GB. Counts stay as-is."""
+    mu = (measurement_unit or "").lower()
+    if mu == "bytes":
+        return round(raw_value / (1024 ** 3), 3), "GB"
+    return raw_value, measurement_unit or "unit"
+
+
+@router.get("/acronis/pricing")
+async def get_acronis_pricing(current_user: dict = Depends(get_current_user)):
+    """Get current pricing config merged with defaults."""
+    doc = await db.settings.find_one({"key": "acronis_pricing"}, {"_id": 0}) or {}
+    overrides = doc.get("value", {})
+    merged = {}
+    for code, default in DEFAULT_ACRONIS_PRICING.items():
+        o = overrides.get(code, {})
+        merged[code] = {
+            **default,
+            "unit_price": float(o.get("unit_price", default["unit_price"])),
+            "enabled": bool(o.get("enabled", True)),
+            "markup_pct": float(o.get("markup_pct", 0)),
+        }
+    # Include any custom codes user has added
+    for code, o in overrides.items():
+        if code not in merged:
+            merged[code] = {
+                "label": o.get("label", code),
+                "unit": o.get("unit", "unit"),
+                "unit_price": float(o.get("unit_price", 0)),
+                "category": o.get("category", "custom"),
+                "enabled": bool(o.get("enabled", True)),
+                "markup_pct": float(o.get("markup_pct", 0)),
+            }
+    return {"pricing": merged, "currency": doc.get("currency", "USD")}
+
+
+@router.post("/acronis/pricing")
+async def save_acronis_pricing(data: dict, current_user: dict = Depends(get_current_user)):
+    """Save pricing overrides. Body: {pricing: {code: {unit_price, markup_pct, enabled}}, currency}"""
+    pricing = data.get("pricing", {})
+    currency = data.get("currency", "USD")
+    await db.settings.update_one(
+        {"key": "acronis_pricing"},
+        {"$set": {"key": "acronis_pricing", "value": pricing, "currency": currency,
+                  "updated_at": datetime.now(timezone.utc).isoformat(),
+                  "updated_by": current_user.get("name", "")}},
+        upsert=True
+    )
+    return {"message": "Pricing saved", "items": len(pricing)}
+
+
+async def _get_pricing_map():
+    """Helper to get merged pricing map for internal use."""
+    doc = await db.settings.find_one({"key": "acronis_pricing"}, {"_id": 0}) or {}
+    overrides = doc.get("value", {})
+    out = {}
+    for code, default in DEFAULT_ACRONIS_PRICING.items():
+        o = overrides.get(code, {})
+        out[code] = {
+            **default,
+            "unit_price": float(o.get("unit_price", default["unit_price"])),
+            "enabled": bool(o.get("enabled", True)),
+            "markup_pct": float(o.get("markup_pct", 0)),
+        }
+    for code, o in overrides.items():
+        if code not in out:
+            out[code] = {
+                "label": o.get("label", code),
+                "unit": o.get("unit", "unit"),
+                "unit_price": float(o.get("unit_price", 0)),
+                "category": o.get("category", "custom"),
+                "enabled": bool(o.get("enabled", True)),
+                "markup_pct": float(o.get("markup_pct", 0)),
+            }
+    return out, doc.get("currency", "USD")
+
+
+@router.get("/acronis/billing/preview")
+async def preview_acronis_billing(current_user: dict = Depends(get_current_user)):
+    """Preview per-client Acronis usage → billing line items for the current month.
+    Only includes tenants linked to NexusOps clients."""
+    pricing_map, currency = await _get_pricing_map()
+    links = await db.acronis_customer_links.find({}, {"_id": 0}).to_list(500)
+
+    results = []
+    for link in links:
+        tenant_id = link.get("acronis_tenant_id")
+        client_id = link.get("client_id")
+        if not (tenant_id and client_id):
+            continue
+        try:
+            usage_resp = await acronis_service.get_tenant_usage(tenant_id)
+        except Exception as e:
+            results.append({
+                "client_id": client_id,
+                "client_name": link.get("client_name", ""),
+                "tenant_id": tenant_id,
+                "error": str(e),
+                "line_items": [],
+                "total": 0.0,
+            })
+            continue
+
+        # Aggregate by offering code (a tenant can have multiple infra entries per code)
+        agg = {}
+        for item in usage_resp.get("items", []):
+            code = item.get("name", "")
+            val = item.get("value", 0) or 0
+            if val <= 0:
+                continue
+            mu = item.get("measurement_unit", "")
+            qty, display_unit = _normalize_usage_value(val, mu)
+            if code not in agg:
+                agg[code] = {"quantity": 0, "unit": display_unit, "edition": item.get("edition", "")}
+            agg[code]["quantity"] += qty
+
+        # Build line items from pricing
+        line_items = []
+        total = 0.0
+        for code, u in agg.items():
+            price_cfg = pricing_map.get(code)
+            if not price_cfg or not price_cfg.get("enabled"):
+                # Unknown/disabled — still surface with 0 price so admin can add pricing
+                line_items.append({
+                    "code": code, "label": code, "unit": u["unit"],
+                    "quantity": round(u["quantity"], 2),
+                    "unit_price": 0.0, "markup_pct": 0.0,
+                    "total": 0.0, "unknown": True,
+                })
+                continue
+            unit_price = price_cfg["unit_price"] * (1 + price_cfg.get("markup_pct", 0) / 100)
+            line_total = round(u["quantity"] * unit_price, 2)
+            line_items.append({
+                "code": code,
+                "label": price_cfg["label"],
+                "unit": price_cfg["unit"],
+                "quantity": round(u["quantity"], 2),
+                "unit_price": round(unit_price, 4),
+                "markup_pct": price_cfg.get("markup_pct", 0),
+                "total": line_total,
+                "category": price_cfg.get("category", ""),
+                "unknown": False,
+            })
+            total += line_total
+
+        # Find existing contract for this client (any active)
+        contract = await db.contracts.find_one(
+            {"client_id": client_id, "status": {"$ne": "cancelled"}},
+            {"_id": 0, "id": 1, "name": 1}
+        )
+
+        results.append({
+            "client_id": client_id,
+            "client_name": link.get("client_name", ""),
+            "tenant_id": tenant_id,
+            "contract_id": contract.get("id") if contract else None,
+            "contract_name": contract.get("name") if contract else None,
+            "line_items": line_items,
+            "total": round(total, 2),
+            "unknown_count": sum(1 for li in line_items if li.get("unknown")),
+        })
+
+    grand_total = sum(r["total"] for r in results)
+    return {
+        "period": datetime.now(timezone.utc).strftime("%Y-%m"),
+        "currency": currency,
+        "results": results,
+        "grand_total": round(grand_total, 2),
+        "linked_clients": len(results),
+    }
+
+
+@router.post("/acronis/billing/sync")
+async def sync_acronis_billing(data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Materialize Acronis usage as LineItems on each linked client's default contract.
+    Replaces any existing Acronis-synced line items for that contract/period.
+    Body (optional): {"client_ids": [...], "dry_run": bool}"""
+    data = data or {}
+    dry_run = bool(data.get("dry_run", False))
+    client_filter = set(data.get("client_ids") or [])
+
+    preview = await preview_acronis_billing(current_user=current_user)
+    now = datetime.now(timezone.utc)
+    period = now.strftime("%Y-%m")
+
+    synced = []
+    skipped = []
+    for r in preview["results"]:
+        cid = r["client_id"]
+        if client_filter and cid not in client_filter:
+            continue
+        if not r.get("contract_id"):
+            skipped.append({"client_id": cid, "client_name": r["client_name"], "reason": "No active contract"})
+            continue
+        if not r["line_items"] or r["total"] == 0:
+            skipped.append({"client_id": cid, "client_name": r["client_name"], "reason": "No billable usage"})
+            continue
+
+        if dry_run:
+            synced.append({"client_id": cid, "client_name": r["client_name"],
+                           "contract_id": r["contract_id"], "total": r["total"],
+                           "items": len(r["line_items"]), "dry_run": True})
+            continue
+
+        # Remove existing Acronis-synced line items for this contract + period
+        await db.line_items.delete_many({
+            "contract_id": r["contract_id"],
+            "acronis_synced": True,
+            "acronis_period": period,
+        })
+
+        # Insert fresh line items
+        for li in r["line_items"]:
+            if li.get("unknown") or li.get("total", 0) <= 0:
+                continue
+            doc = {
+                "id": str(uuid.uuid4()),
+                "contract_id": r["contract_id"],
+                "client_id": cid,
+                "client_name": r["client_name"],
+                "name": f"Acronis — {li['label']} ({period})",
+                "description": f"Acronis Cyber Cloud usage billing for {period}. "
+                               f"{li['quantity']} {li['unit']} × ${li['unit_price']:.4f}"
+                               + (f" (+{li['markup_pct']:.0f}% markup)" if li.get("markup_pct") else ""),
+                "quantity": li["quantity"],
+                "unit_price": li["unit_price"],
+                "total": li["total"],
+                "billing_frequency": "monthly",
+                "acronis_synced": True,
+                "acronis_tenant_id": r["tenant_id"],
+                "acronis_offering_code": li["code"],
+                "acronis_period": period,
+                "synced_at": now.isoformat(),
+                "created_at": now.isoformat(),
+            }
+            await db.line_items.insert_one(doc)
+
+        # Also store a snapshot for audit/history
+        await db.acronis_billing_snapshots.update_one(
+            {"client_id": cid, "period": period},
+            {"$set": {
+                "client_id": cid,
+                "client_name": r["client_name"],
+                "tenant_id": r["tenant_id"],
+                "contract_id": r["contract_id"],
+                "period": period,
+                "total": r["total"],
+                "line_items": r["line_items"],
+                "synced_at": now.isoformat(),
+                "synced_by": current_user.get("name", ""),
+            }},
+            upsert=True
+        )
+
+        synced.append({
+            "client_id": cid,
+            "client_name": r["client_name"],
+            "contract_id": r["contract_id"],
+            "total": r["total"],
+            "items": len(r["line_items"]),
+        })
+
+    return {
+        "period": period,
+        "dry_run": dry_run,
+        "synced": synced,
+        "skipped": skipped,
+        "total_billed": round(sum(s["total"] for s in synced), 2),
+        "synced_count": len(synced),
+    }
+
+
+@router.get("/acronis/billing/history")
+async def get_acronis_billing_history(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    """Return historical billing snapshots."""
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    snaps = await db.acronis_billing_snapshots.find(query, {"_id": 0}).sort("period", -1).to_list(200)
+    return {"snapshots": snaps}
+
+
 @router.post("/acronis/sync")
 async def sync_acronis_data(current_user: dict = Depends(get_current_user)):
     """Full sync: Pull tenants, resources, and statuses from Acronis API into local DB."""
@@ -606,4 +918,33 @@ async def sync_acronis_data(current_user: dict = Depends(get_current_user)):
 
     results["synced_at"] = now
     results["status"] = "completed" if not results["errors"] else "partial"
+
+    # Also snapshot billing usage for all linked clients (read-only — does NOT push to line_items yet)
+    try:
+        preview = await preview_acronis_billing(current_user=current_user)
+        period = datetime.now(timezone.utc).strftime("%Y-%m")
+        for r in preview.get("results", []):
+            if r.get("total", 0) <= 0:
+                continue
+            await db.acronis_billing_snapshots.update_one(
+                {"client_id": r["client_id"], "period": period, "auto_sync": True},
+                {"$set": {
+                    "client_id": r["client_id"],
+                    "client_name": r["client_name"],
+                    "tenant_id": r["tenant_id"],
+                    "contract_id": r.get("contract_id"),
+                    "period": period,
+                    "total": r["total"],
+                    "line_items": r["line_items"],
+                    "auto_sync": True,
+                    "synced_at": now,
+                    "synced_by": "sync-acronis-job",
+                }},
+                upsert=True
+            )
+        results["billing_snapshots"] = len(preview.get("results", []))
+        results["billing_total"] = preview.get("grand_total", 0)
+    except Exception as e:
+        results["errors"].append(f"Billing snapshot: {str(e)}")
+
     return results
