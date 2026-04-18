@@ -8,13 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Globe, Plus, Loader2, Shield, Settings, Users, Copy, Trash2, ExternalLink,
-  Eye, Key, Link2, Ticket, Monitor, FileText, CheckCircle, XCircle
+  Eye, Key, Link2, Ticket, Monitor, FileText, CheckCircle, XCircle, Mail,
+  UserPlus, Lock, RotateCw
 } from "lucide-react";
 
 export default function ClientPortalPage() {
@@ -28,6 +29,15 @@ export default function ClientPortalPage() {
   const [showGenToken, setShowGenToken] = useState(false);
   const [tokenForm, setTokenForm] = useState({ contact_name: "", contact_email: "", expiry_days: 90 });
   const [newTokenUrl, setNewTokenUrl] = useState(null);
+
+  // Portal Users
+  const [portalUsers, setPortalUsers] = useState([]);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [userForm, setUserForm] = useState({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false });
+  const [addingUser, setAddingUser] = useState(false);
+  const [showEditUser, setShowEditUser] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({});
+  const [showTempPassword, setShowTempPassword] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -46,8 +56,12 @@ export default function ClientPortalPage() {
   const selectClient = async (clientId) => {
     setSelectedClient(clientId);
     try {
-      const res = await axios.get(`${API}/client-portal/config/${clientId}`, { headers });
-      setConfig(res.data);
+      const [configRes, usersRes] = await Promise.all([
+        axios.get(`${API}/client-portal/config/${clientId}`, { headers }),
+        axios.get(`${API}/client-portal/users/${clientId}`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setConfig(configRes.data);
+      setPortalUsers(usersRes.data || []);
     } catch { toast.error("Failed to load config"); }
   };
 
@@ -73,6 +87,48 @@ export default function ClientPortalPage() {
       await axios.delete(`${API}/client-portal/tokens/${selectedClient}/${tokenId}`, { headers });
       toast.success("Token revoked");
       selectClient(selectedClient);
+    } catch { toast.error("Failed"); }
+  };
+
+  const addPortalUser = async () => {
+    if (!userForm.email.trim()) { toast.error("Email required"); return; }
+    setAddingUser(true);
+    try {
+      const res = await axios.post(`${API}/client-portal/users/${selectedClient}`, userForm, { headers });
+      toast.success(`Portal user created: ${res.data.email}`);
+      setShowTempPassword({ email: res.data.email, password: res.data.temp_password });
+      setShowAddUser(false);
+      setUserForm({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false });
+      const usersRes = await axios.get(`${API}/client-portal/users/${selectedClient}`, { headers });
+      setPortalUsers(usersRes.data || []);
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to create user"); }
+    finally { setAddingUser(false); }
+  };
+
+  const updatePortalUser = async () => {
+    if (!showEditUser) return;
+    try {
+      await axios.put(`${API}/client-portal/users/${selectedClient}/${showEditUser.id}`, editUserForm, { headers });
+      toast.success("User updated");
+      setShowEditUser(null);
+      const usersRes = await axios.get(`${API}/client-portal/users/${selectedClient}`, { headers });
+      setPortalUsers(usersRes.data || []);
+    } catch { toast.error("Failed"); }
+  };
+
+  const deletePortalUser = async (userId) => {
+    try {
+      await axios.delete(`${API}/client-portal/users/${selectedClient}/${userId}`, { headers });
+      toast.success("User deleted");
+      setPortalUsers(prev => prev.filter(u => u.id !== userId));
+    } catch { toast.error("Failed"); }
+  };
+
+  const resetPassword = async (userId) => {
+    try {
+      const res = await axios.post(`${API}/client-portal/users/${selectedClient}/${userId}/reset-password`, {}, { headers });
+      setShowTempPassword({ email: res.data.email, password: res.data.temp_password });
+      toast.success("Password reset");
     } catch { toast.error("Failed"); }
   };
 
@@ -208,6 +264,77 @@ export default function ClientPortalPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Portal Users */}
+              <Card data-testid="portal-users-panel">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2"><Users className="w-5 h-5" />Portal Users ({portalUsers.length})</CardTitle>
+                    <Button size="sm" onClick={() => setShowAddUser(true)} data-testid="add-portal-user-btn"><UserPlus className="w-3 h-3 mr-1" />Add User</Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Temp password notification */}
+                  {showTempPassword && (
+                    <div className="p-4 rounded-lg border border-amber-500/20 bg-amber-500/5 mb-4" data-testid="temp-password-box">
+                      <p className="text-sm font-medium text-amber-400 mb-1">Temporary Password for {showTempPassword.email}:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-muted px-3 py-2 rounded font-mono text-sm">{showTempPassword.password}</code>
+                        <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(showTempPassword.password); toast.success("Password copied"); }}><Copy className="w-3 h-3" /></Button>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">Share this password with the user. They can change it after logging in. Portal login: <code className="text-xs">{window.location.origin}/portal-login</code></p>
+                      <Button variant="ghost" size="sm" className="mt-2 text-xs" onClick={() => setShowTempPassword(null)}>Dismiss</Button>
+                    </div>
+                  )}
+
+                  {portalUsers.length > 0 ? (
+                    <Table>
+                      <TableHeader><TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Permissions</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {portalUsers.map(u => (
+                          <TableRow key={u.id} data-testid={`portal-user-${u.id}`}>
+                            <TableCell className="font-medium text-sm">{u.name || "—"}</TableCell>
+                            <TableCell className="text-sm">{u.email}</TableCell>
+                            <TableCell><Badge variant="outline" className="text-[10px] capitalize">{u.role}</Badge></TableCell>
+                            <TableCell>
+                              <div className="flex gap-1 flex-wrap">
+                                {u.can_create_tickets && <Badge variant="secondary" className="text-[9px]">Tickets</Badge>}
+                                {u.can_view_assets && <Badge variant="secondary" className="text-[9px]">Devices</Badge>}
+                                {u.can_view_invoices && <Badge variant="secondary" className="text-[9px]">Invoices</Badge>}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={u.is_active !== false ? "bg-emerald-500/10 text-emerald-500 text-[9px]" : "bg-red-500/10 text-red-500 text-[9px]"}>
+                                {u.is_active !== false ? "Active" : "Disabled"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => { setShowEditUser(u); setEditUserForm({ name: u.name, role: u.role, can_view_all_tickets: u.can_view_all_tickets, can_create_tickets: u.can_create_tickets, can_view_assets: u.can_view_assets, can_view_invoices: u.can_view_invoices, is_active: u.is_active !== false }); }}><Settings className="w-3 h-3" /></Button>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Reset Password" onClick={() => resetPassword(u.id)}><RotateCw className="w-3 h-3 text-amber-400" /></Button>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete" onClick={() => deletePortalUser(u.id)}><Trash2 className="w-3 h-3" /></Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Users className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
+                      <p className="text-sm text-muted-foreground">No portal users for this client</p>
+                      <p className="text-xs text-muted-foreground mt-1">Add users to give them login-based access to the V2 portal</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </>
           ) : (
             <Card className="border-dashed">
@@ -223,8 +350,8 @@ export default function ClientPortalPage() {
 
       {/* Generate Token Dialog */}
       <Dialog open={showGenToken} onOpenChange={setShowGenToken}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Generate Portal Access Token</DialogTitle></DialogHeader>
+        <DialogContent aria-describedby="gen-token-desc">
+          <DialogHeader><DialogTitle>Generate Portal Access Token</DialogTitle><DialogDescription id="gen-token-desc">Create a unique access link for a client contact.</DialogDescription></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Create a unique access link for a client contact. They'll use this to access the self-service portal.</p>
             <div><Label>Contact Name</Label><Input value={tokenForm.contact_name} onChange={e => setTokenForm({ ...tokenForm, contact_name: e.target.value })} placeholder="e.g., John Smith" data-testid="token-contact-name" /></div>
@@ -237,6 +364,95 @@ export default function ClientPortalPage() {
             </div>
           </div>
           <DialogFooter><Button onClick={generateToken} data-testid="confirm-generate-token"><Key className="w-4 h-4 mr-1" />Generate</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Portal User Dialog */}
+      <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
+        <DialogContent className="max-w-lg" aria-describedby="add-user-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><UserPlus className="w-5 h-5" />Add Portal User</DialogTitle>
+            <DialogDescription id="add-user-desc">Create a login account for a client contact to access the V2 portal.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Full Name</Label><Input value={userForm.name} onChange={e => setUserForm({ ...userForm, name: e.target.value })} placeholder="John Smith" data-testid="new-user-name" /></div>
+              <div><Label className="text-xs">Email</Label><Input type="email" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} placeholder="john@company.com" data-testid="new-user-email" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Password (leave blank for auto-generated)</Label><Input type="text" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder="Auto-generated if empty" data-testid="new-user-password" /></div>
+              <div><Label className="text-xs">Role</Label>
+                <Select value={userForm.role} onValueChange={v => setUserForm({ ...userForm, role: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="admin">Admin (Full Access)</SelectItem><SelectItem value="user">User</SelectItem><SelectItem value="viewer">Viewer (Read Only)</SelectItem></SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Separator />
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Permissions</p>
+            <div className="space-y-2">
+              {[
+                { key: "can_view_all_tickets", label: "View All Tickets", desc: "See all client tickets (not just their own)" },
+                { key: "can_create_tickets", label: "Create Tickets", desc: "Submit new support tickets" },
+                { key: "can_view_assets", label: "View Devices", desc: "See device status and health" },
+                { key: "can_view_invoices", label: "View Invoices", desc: "Access billing information" },
+              ].map(p => (
+                <div key={p.key} className="flex items-center justify-between p-2 rounded border">
+                  <div><p className="text-sm">{p.label}</p><p className="text-[10px] text-muted-foreground">{p.desc}</p></div>
+                  <Switch checked={!!userForm[p.key]} onCheckedChange={v => setUserForm({ ...userForm, [p.key]: v })} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowAddUser(false)}>Cancel</Button>
+            <Button onClick={addPortalUser} disabled={addingUser} data-testid="confirm-add-user">
+              {addingUser ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1" />}Create User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Portal User Dialog */}
+      <Dialog open={!!showEditUser} onOpenChange={v => !v && setShowEditUser(null)}>
+        <DialogContent className="max-w-lg" aria-describedby="edit-user-desc">
+          <DialogHeader>
+            <DialogTitle>Edit Portal User — {showEditUser?.name || showEditUser?.email}</DialogTitle>
+            <DialogDescription id="edit-user-desc">Update permissions and settings for this portal user.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Name</Label><Input value={editUserForm.name || ""} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} /></div>
+              <div><Label className="text-xs">Role</Label>
+                <Select value={editUserForm.role || "user"} onValueChange={v => setEditUserForm({ ...editUserForm, role: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="user">User</SelectItem><SelectItem value="viewer">Viewer</SelectItem></SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div><Label className="text-xs">New Password (leave blank to keep current)</Label><Input type="text" value={editUserForm.password || ""} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} placeholder="Leave blank to keep current" /></div>
+            <div className="flex items-center justify-between p-2 rounded border">
+              <div><p className="text-sm">Account Active</p><p className="text-[10px] text-muted-foreground">Disable to block login without deleting</p></div>
+              <Switch checked={editUserForm.is_active !== false} onCheckedChange={v => setEditUserForm({ ...editUserForm, is_active: v })} />
+            </div>
+            <Separator />
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Permissions</p>
+            {[
+              { key: "can_view_all_tickets", label: "View All Tickets" },
+              { key: "can_create_tickets", label: "Create Tickets" },
+              { key: "can_view_assets", label: "View Devices" },
+              { key: "can_view_invoices", label: "View Invoices" },
+            ].map(p => (
+              <div key={p.key} className="flex items-center justify-between p-2 rounded border">
+                <p className="text-sm">{p.label}</p>
+                <Switch checked={!!editUserForm[p.key]} onCheckedChange={v => setEditUserForm({ ...editUserForm, [p.key]: v })} />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowEditUser(null)}>Cancel</Button>
+            <Button onClick={updatePortalUser} data-testid="confirm-edit-user"><CheckCircle className="w-4 h-4 mr-1" />Save Changes</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -139,6 +139,104 @@ async def get_all_portal_configs(current_user: dict = Depends(get_current_user))
     return configs
 
 
+
+# ============== PORTAL USER MANAGEMENT ==============
+
+@router.get("/client-portal/users/{client_id}")
+async def get_portal_users(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all portal users for a client."""
+    users = await db.portal_users.find({"client_id": client_id}, {"_id": 0, "password_hash": 0, "totp_secret": 0}).sort("created_at", -1).to_list(100)
+    return users
+
+
+@router.post("/client-portal/users/{client_id}")
+async def create_portal_user(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Create a new portal user for a client (admin action)."""
+    from app.auth import hash_password
+
+    email = (data.get("email") or "").lower().strip()
+    name = data.get("name", "")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    # Check if user already exists
+    existing = await db.portal_users.find_one({"email": email}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail="A portal user with this email already exists")
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    password = data.get("password") or secrets.token_urlsafe(10)
+
+    user = {
+        "id": str(uuid.uuid4()),
+        "client_id": client_id,
+        "client_name": client["name"] if client else "",
+        "email": email,
+        "name": name,
+        "phone": data.get("phone", ""),
+        "role": data.get("role", "user"),
+        "is_primary_contact": data.get("is_primary_contact", False),
+        "can_view_all_tickets": data.get("can_view_all_tickets", True),
+        "can_create_tickets": data.get("can_create_tickets", True),
+        "can_view_assets": data.get("can_view_assets", True),
+        "can_view_invoices": data.get("can_view_invoices", False),
+        "password_hash": hash_password(password),
+        "is_active": True,
+        "totp_enabled": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "invited_by": current_user.get("name", ""),
+    }
+    await db.portal_users.insert_one(user)
+    user.pop("_id", None)
+    safe = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")}
+    safe["temp_password"] = password
+    return safe
+
+
+@router.put("/client-portal/users/{client_id}/{user_id}")
+async def update_portal_user(client_id: str, user_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Update a portal user's permissions and details."""
+    from app.auth import hash_password
+
+    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Portal user not found")
+
+    allowed_fields = {"name", "phone", "role", "is_primary_contact", "can_view_all_tickets",
+                      "can_create_tickets", "can_view_assets", "can_view_invoices", "is_active"}
+    updates = {k: v for k, v in data.items() if k in allowed_fields}
+    if data.get("password"):
+        updates["password_hash"] = hash_password(data["password"])
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.portal_users.update_one({"id": user_id}, {"$set": updates})
+    return {"message": "Portal user updated"}
+
+
+@router.delete("/client-portal/users/{client_id}/{user_id}")
+async def delete_portal_user(client_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a portal user."""
+    result = await db.portal_users.delete_one({"id": user_id, "client_id": client_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Portal user not found")
+    return {"message": "Portal user deleted"}
+
+
+@router.post("/client-portal/users/{client_id}/{user_id}/reset-password")
+async def reset_portal_user_password(client_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
+    """Reset a portal user's password to a random one."""
+    from app.auth import hash_password
+
+    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0, "email": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="Portal user not found")
+
+    new_password = secrets.token_urlsafe(10)
+    await db.portal_users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(new_password), "totp_enabled": False}})
+    return {"message": "Password reset", "temp_password": new_password, "email": user["email"]}
+
+
+
 # ============== ENHANCED PORTAL API ENDPOINTS ==============
 
 @router.get("/portal-api/{token}/invoices")
