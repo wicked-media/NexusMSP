@@ -17,7 +17,8 @@ import { toast } from "sonner";
 import {
   Loader2, LogOut, Ticket, Monitor, FileText, DollarSign, BookOpen, User,
   Plus, Send, ArrowLeft, Wifi, WifiOff, Shield, Clock, Search, CheckCircle,
-  AlertTriangle, XCircle, Activity, ChevronRight
+  AlertTriangle, XCircle, Activity, ChevronRight, CreditCard, Eye, Download,
+  ExternalLink
 } from "lucide-react";
 
 const STATUS_COLORS = {
@@ -56,6 +57,10 @@ export default function PortalDashboardPage() {
   // KB search
   const [kbSearch, setKbSearch] = useState("");
   const [selectedArticle, setSelectedArticle] = useState(null);
+
+  // Invoice detail + payment
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [payingInvoice, setPayingInvoice] = useState(false);
 
   const logout = () => {
     sessionStorage.removeItem("portal_token");
@@ -119,6 +124,30 @@ export default function PortalDashboardPage() {
       setTickets(tkts.data || []);
     } catch { toast.error("Failed to create ticket"); }
     finally { setCreatingTicket(false); }
+  };
+
+  const openInvoiceDetail = async (inv) => {
+    try {
+      const res = await axios.get(`${API}/portal/v2/invoices/${inv.id}`, { headers });
+      setSelectedInvoice(res.data);
+    } catch { setSelectedInvoice(inv); }
+  };
+
+  const payInvoice = async () => {
+    if (!selectedInvoice) return;
+    setPayingInvoice(true);
+    try {
+      const res = await axios.post(`${API}/portal/v2/invoices/${selectedInvoice.id}/pay`, {
+        origin_url: window.location.origin,
+        currency: selectedInvoice.currency || "aud",
+      }, { headers });
+      if (res.data.status === "checkout" && res.data.url) {
+        window.location.href = res.data.url;
+      } else {
+        toast.success(res.data.message || "Payment initiated");
+      }
+    } catch (err) { toast.error(err.response?.data?.detail || "Payment failed"); }
+    finally { setPayingInvoice(false); }
   };
 
   if (loading) return (
@@ -315,23 +344,115 @@ export default function PortalDashboardPage() {
 
           {/* Invoices */}
           <TabsContent value="invoices" className="space-y-4">
-            <h2 className="text-lg font-bold">Invoices</h2>
-            <Table>
-              <TableHeader><TableRow>
-                <TableHead>Invoice #</TableHead><TableHead>Status</TableHead><TableHead>Due Date</TableHead><TableHead className="text-right">Total</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                {invoices.map(inv => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-mono text-sm">{inv.invoice_number}</TableCell>
-                    <TableCell><Badge variant="outline" className="text-[10px] capitalize">{inv.status}</Badge></TableCell>
-                    <TableCell className="text-sm">{inv.due_date || "N/A"}</TableCell>
-                    <TableCell className="text-right font-mono">${(inv.total || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
-                  </TableRow>
-                ))}
-                {invoices.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">No invoices found.</TableCell></TableRow>}
-              </TableBody>
-            </Table>
+            {selectedInvoice ? (
+              <div data-testid="portal-invoice-detail">
+                <Button variant="ghost" size="sm" onClick={() => setSelectedInvoice(null)} className="mb-3"><ArrowLeft className="w-4 h-4 mr-1" />Back to Invoices</Button>
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-bold">Invoice {selectedInvoice.invoice_number}</h2>
+                    <p className="text-sm text-muted-foreground">{selectedInvoice.client_name} &middot; {selectedInvoice.created_at?.slice(0, 10)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="capitalize">{(selectedInvoice.payment_status || selectedInvoice.status || "").replace("_", " ")}</Badge>
+                    {(() => {
+                      const balance = (selectedInvoice.total || 0) - (selectedInvoice.amount_paid || 0);
+                      return balance > 0.01 ? (
+                        <Button onClick={payInvoice} disabled={payingInvoice} data-testid="pay-invoice-btn" className="bg-emerald-600 hover:bg-emerald-700">
+                          {payingInvoice ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CreditCard className="w-4 h-4 mr-1" />}
+                          Pay ${balance.toLocaleString("en", { minimumFractionDigits: 2 })}
+                        </Button>
+                      ) : (
+                        <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border">Paid</Badge>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Line Items */}
+                {(selectedInvoice.line_items || []).length > 0 && (
+                  <Card className="mb-4">
+                    <CardContent className="py-3">
+                      <Table>
+                        <TableHeader><TableRow>
+                          <TableHead>Item</TableHead><TableHead>Description</TableHead><TableHead className="text-center">Qty</TableHead><TableHead className="text-right">Unit Price</TableHead><TableHead className="text-right">Total</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>
+                          {(selectedInvoice.line_items || []).map((li, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell className="font-medium text-sm">{li.name || li.description}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{li.description !== li.name ? li.description : ""}</TableCell>
+                              <TableCell className="text-center">{li.quantity}</TableCell>
+                              <TableCell className="text-right font-mono">${(li.unit_price || li.rate || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
+                              <TableCell className="text-right font-mono">${((li.quantity || 0) * (li.unit_price || li.rate || 0)).toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Totals */}
+                <Card>
+                  <CardContent className="py-3">
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="flex gap-8 text-sm"><span className="text-muted-foreground">Subtotal:</span><span className="font-mono">${(selectedInvoice.subtotal || selectedInvoice.total || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                      {(selectedInvoice.tax || selectedInvoice.tax_amount || 0) > 0 && (
+                        <div className="flex gap-8 text-sm"><span className="text-muted-foreground">Tax{selectedInvoice.tax_rate ? ` (${selectedInvoice.tax_rate}%)` : ""}:</span><span className="font-mono">${(selectedInvoice.tax || selectedInvoice.tax_amount || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                      )}
+                      {(selectedInvoice.discount || 0) > 0 && (
+                        <div className="flex gap-8 text-sm text-red-400"><span>Discount:</span><span className="font-mono">-${selectedInvoice.discount.toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                      )}
+                      <Separator className="my-1 w-48" />
+                      <div className="flex gap-8 text-lg font-bold"><span>Total:</span><span className="font-mono">${(selectedInvoice.total || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                      {(selectedInvoice.amount_paid || 0) > 0 && (
+                        <div className="flex gap-8 text-sm text-emerald-400"><span>Paid:</span><span className="font-mono">-${(selectedInvoice.amount_paid || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                      )}
+                      {(() => {
+                        const bal = (selectedInvoice.total || 0) - (selectedInvoice.amount_paid || 0);
+                        return bal > 0.01 ? (
+                          <div className="flex gap-8 text-base font-semibold text-amber-400"><span>Balance Due:</span><span className="font-mono">${bal.toLocaleString("en", { minimumFractionDigits: 2 })}</span></div>
+                        ) : null;
+                      })()}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {selectedInvoice.notes && (
+                  <Card className="mt-3"><CardContent className="py-3"><p className="text-xs text-muted-foreground font-semibold mb-1">Notes</p><p className="text-sm">{selectedInvoice.notes}</p></CardContent></Card>
+                )}
+              </div>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold">Invoices</h2>
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>Invoice #</TableHead><TableHead>Status</TableHead><TableHead>Due Date</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="text-right">Balance</TableHead><TableHead></TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {invoices.map(inv => {
+                      const balance = (inv.total || 0) - (inv.amount_paid || 0);
+                      return (
+                        <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/30" onClick={() => openInvoiceDetail(inv)}>
+                          <TableCell className="font-mono text-sm">{inv.invoice_number}</TableCell>
+                          <TableCell><Badge variant="outline" className={`text-[10px] capitalize ${inv.payment_status === "paid" ? "border-emerald-500/30 text-emerald-400" : inv.payment_status === "overdue" ? "border-red-500/30 text-red-400" : ""}`}>{(inv.payment_status || inv.status || "").replace("_", " ")}</Badge></TableCell>
+                          <TableCell className="text-sm">{inv.due_date || "N/A"}</TableCell>
+                          <TableCell className="text-right font-mono">${(inv.total || 0).toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className="text-right font-mono">{balance > 0.01 ? <span className="text-amber-400">${balance.toLocaleString("en", { minimumFractionDigits: 2 })}</span> : <span className="text-emerald-400">$0.00</span>}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1 justify-end">
+                              {balance > 0.01 && <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 border text-[9px] cursor-pointer hover:bg-emerald-500/20"><CreditCard className="w-3 h-3 mr-1" />Pay</Badge>}
+                              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {invoices.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No invoices found.</TableCell></TableRow>}
+                  </TableBody>
+                </Table>
+              </>
+            )}
           </TabsContent>
 
           {/* Knowledge Base */}

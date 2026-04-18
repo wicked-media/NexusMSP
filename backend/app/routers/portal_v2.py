@@ -40,6 +40,49 @@ def create_portal_token(user_id: str, client_id: str, email: str):
 
 # ==================== AUTH ====================
 
+@router.post("/token-auth")
+async def portal_token_auth(data: dict):
+    """Convert a legacy portal access token to a V2 portal session.
+    Used when users access /portal/:token links — auto-redirects to V2."""
+    token = data.get("token", "")
+    if not token:
+        raise HTTPException(status_code=400, detail="Token required")
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    if not config:
+        raise HTTPException(status_code=404, detail="Portal link expired or invalid")
+
+    cid = config["client_id"]
+    # Find or create a portal user for this token's contact
+    access_token = next((t for t in config.get("access_tokens", []) if t.get("token") == token), None)
+    contact_email = (access_token.get("contact_email", "") if access_token else "").lower().strip()
+
+    if contact_email:
+        portal_user = await db.portal_users.find_one({"email": contact_email, "client_id": cid}, {"_id": 0})
+    else:
+        portal_user = await db.portal_users.find_one({"client_id": cid, "is_primary_contact": True}, {"_id": 0})
+        if not portal_user:
+            portal_user = await db.portal_users.find_one({"client_id": cid}, {"_id": 0})
+
+    if not portal_user:
+        # No portal user exists — return info to show limited view
+        client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
+        return {"authenticated": False, "client_name": client.get("name", "") if client else "", "client_id": cid}
+
+    if not portal_user.get("is_active", True):
+        raise HTTPException(status_code=401, detail="Account disabled")
+
+    # Mark token as used
+    await db.portal_configs.update_one(
+        {"client_id": cid, "access_tokens.token": token},
+        {"$set": {"access_tokens.$.last_used": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    jwt_token = create_portal_token(portal_user["id"], cid, portal_user["email"])
+    safe_user = {k: v for k, v in portal_user.items() if k not in ("password_hash", "totp_secret")}
+    return {"authenticated": True, "token": jwt_token, "user": safe_user}
+
+
+
 @router.post("/login")
 async def portal_login(data: dict):
     email = data.get("email", "").lower().strip()
@@ -273,9 +316,94 @@ async def portal_invoices(user: dict = Depends(get_portal_user)):
         return []
     invoices = await db.invoices.find(
         {"client_id": user.get("client_id")},
-        {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "total": 1, "due_date": 1, "issued_date": 1, "paid_date": 1}
-    ).sort("issued_date", -1).to_list(200)
+        {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1,
+         "amount_due": 1, "amount_paid": 1, "due_date": 1, "issued_date": 1, "created_at": 1,
+         "paid_date": 1, "currency": 1}
+    ).sort("created_at", -1).to_list(200)
+    # Also check xero_invoices
+    xero_invoices = await db.xero_invoices.find(
+        {"client_id": user.get("client_id")},
+        {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1,
+         "amount_due": 1, "amount_paid": 1, "due_date": 1, "issued_date": 1, "created_at": 1,
+         "paid_date": 1, "currency": 1}
+    ).sort("created_at", -1).to_list(200)
+    seen = {i["id"] for i in invoices}
+    for xi in xero_invoices:
+        if xi["id"] not in seen:
+            invoices.append(xi)
     return invoices
+
+
+@router.get("/invoices/{invoice_id}")
+async def portal_invoice_detail(invoice_id: str, user: dict = Depends(get_portal_user)):
+    """Get full invoice detail for portal viewing."""
+    if not user.get("can_view_invoices", False):
+        raise HTTPException(status_code=403, detail="Invoice access not permitted")
+    cid = user.get("client_id")
+    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice
+
+
+@router.post("/invoices/{invoice_id}/pay")
+async def portal_pay_invoice(invoice_id: str, data: dict, user: dict = Depends(get_portal_user)):
+    """Create a Stripe checkout session for portal invoice payment."""
+    import os
+    if not user.get("can_view_invoices", False):
+        raise HTTPException(status_code=403, detail="Invoice access not permitted")
+
+    cid = user.get("client_id")
+    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    total = float(invoice.get("total", 0))
+    amount_paid = float(invoice.get("amount_paid", 0))
+    balance = round(total - amount_paid, 2)
+    if balance <= 0:
+        raise HTTPException(status_code=400, detail="Invoice already fully paid")
+
+    stripe_key = os.environ.get("STRIPE_API_KEY", "")
+    if not stripe_key or stripe_key == "sk_test_emergent":
+        # Mock payment for demo — record as pending
+        payment = {
+            "id": str(uuid.uuid4()),
+            "method": "portal_payment",
+            "amount": balance,
+            "status": "pending",
+            "initiated_at": datetime.now(timezone.utc).isoformat(),
+            "portal_user": user.get("email"),
+        }
+        return {"status": "demo", "message": f"Payment of ${balance:.2f} initiated (Stripe test mode)", "balance": balance, "payment": payment}
+
+    origin_url = data.get("origin_url", "").rstrip("/")
+    success_url = f"{origin_url}/portal-dashboard?payment=success&invoice={invoice_id}"
+    cancel_url = f"{origin_url}/portal-dashboard?payment=cancelled"
+
+    try:
+        from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+        stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=f"{origin_url}/api/webhook/stripe")
+        checkout_req = CheckoutSessionRequest(
+            amount=balance,
+            currency=data.get("currency", "aud"),
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "invoice_id": invoice_id,
+                "invoice_number": invoice.get("invoice_number", ""),
+                "client_id": cid,
+                "portal_user": user.get("email"),
+            }
+        )
+        session = await stripe_checkout.create_checkout_session(checkout_req)
+        return {"status": "checkout", "url": session.url, "session_id": session.session_id, "balance": balance}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Payment failed: {str(e)}")
 
 
 # ==================== BACKUPS ====================
