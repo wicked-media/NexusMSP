@@ -33,7 +33,7 @@ export default function ClientPortalPage() {
   // Portal Users
   const [portalUsers, setPortalUsers] = useState([]);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [userForm, setUserForm] = useState({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false });
+  const [userForm, setUserForm] = useState({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, send_welcome_email: true });
   const [addingUser, setAddingUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState(null);
   const [editUserForm, setEditUserForm] = useState({});
@@ -94,11 +94,13 @@ export default function ClientPortalPage() {
     if (!userForm.email.trim()) { toast.error("Email required"); return; }
     setAddingUser(true);
     try {
-      const res = await axios.post(`${API}/client-portal/users/${selectedClient}`, userForm, { headers });
-      toast.success(`Portal user created: ${res.data.email}`);
+      const res = await axios.post(`${API}/client-portal/users/${selectedClient}`, { ...userForm, portal_url: `${window.location.origin}/portal-login` }, { headers });
+      const emailStatus = res.data.email_status;
+      if (emailStatus === "sent") toast.success(`Portal user created and welcome email sent to ${res.data.email}`);
+      else toast.success(`Portal user created: ${res.data.email}` + (emailStatus === "skipped" ? "" : " (email failed)"));
       setShowTempPassword({ email: res.data.email, password: res.data.temp_password });
       setShowAddUser(false);
-      setUserForm({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false });
+      setUserForm({ name: "", email: "", role: "user", password: "", can_view_all_tickets: true, can_create_tickets: true, can_view_assets: true, can_view_invoices: false, send_welcome_email: true });
       const usersRes = await axios.get(`${API}/client-portal/users/${selectedClient}`, { headers });
       setPortalUsers(usersRes.data || []);
     } catch (err) { toast.error(err.response?.data?.detail || "Failed to create user"); }
@@ -126,9 +128,10 @@ export default function ClientPortalPage() {
 
   const resetPassword = async (userId) => {
     try {
-      const res = await axios.post(`${API}/client-portal/users/${selectedClient}/${userId}/reset-password`, {}, { headers });
+      const res = await axios.post(`${API}/client-portal/users/${selectedClient}/${userId}/reset-password`, { portal_url: `${window.location.origin}/portal-login` }, { headers });
       setShowTempPassword({ email: res.data.email, password: res.data.temp_password });
-      toast.success("Password reset");
+      if (res.data.email_status === "sent") toast.success("Password reset and email sent");
+      else toast.success("Password reset");
     } catch { toast.error("Failed"); }
   };
 
@@ -402,6 +405,11 @@ export default function ClientPortalPage() {
                   <Switch checked={!!userForm[p.key]} onCheckedChange={v => setUserForm({ ...userForm, [p.key]: v })} />
                 </div>
               ))}
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between p-2 rounded border border-emerald-500/20 bg-emerald-500/5">
+              <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-emerald-400" /><div><p className="text-sm">Send Welcome Email</p><p className="text-[10px] text-muted-foreground">Email login credentials to the user automatically</p></div></div>
+              <Switch checked={userForm.send_welcome_email} onCheckedChange={v => setUserForm({ ...userForm, send_welcome_email: v })} data-testid="send-welcome-email-toggle" />
             </div>
           </div>
           <DialogFooter>

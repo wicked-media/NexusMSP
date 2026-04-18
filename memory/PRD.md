@@ -8,6 +8,7 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 - **Backend**: FastAPI (Python), Motor (async MongoDB)
 - **Database**: MongoDB
 - **Auth**: JWT-based admin + JWT portal auth with TOTP 2FA
+- **Email**: Resend (configured, sender: onboarding@resend.dev)
 - **PDF**: fpdf2 for invoice/contract/PO/estimate PDF generation
 
 ## Credentials
@@ -16,40 +17,29 @@ NexusOps is an enterprise-grade RMM/PSA platform — the "ultimate MSP Swiss Arm
 
 ## Recent Features (Apr 18, 2026)
 
-### Phase 15-16: P2+P3 Batch
-- Estimate PDF Generation with theme support
-- Email from PDF Preview Dialog (onEmail prop)
-- Client Portal V2: Login/2FA, Dashboard, Ticket Messaging, KB, Devices, Invoices, Profile
-- Recharts console warnings fixed (10 instances)
-- Accessibility: DialogContent aria-describedby fix (116 dialogs)
-- TicketsPage/TechniciansPage config extraction refactor
+### Portal User Management + Welcome Emails
+- Full CRUD for portal users per client (create, edit, delete, reset password)
+- Auto-generated passwords with copy-to-clipboard
+- Granular permissions (tickets, devices, invoices)
+- **Welcome email** — branded HTML email with login credentials + portal URL sent via Resend on user creation
+- **Password reset email** — branded HTML email sent on admin password reset
+- "Send Welcome Email" toggle in Add User dialog
+- Sender: `onboarding@resend.dev` (Resend default — user should verify their own domain on resend.com for custom sender)
 
-### Phase 17: Portal User Management
-- **Admin CRUD for portal users per client** — Create, Edit, Delete, Reset Password
-- **Auto-generated passwords** — Temp password shown on create/reset with copy button
-- **Granular permissions** — can_create_tickets, can_view_all_tickets, can_view_assets, can_view_invoices
-- **Account enable/disable** — Block login without deleting
-- **Duplicate email check** — 409 on existing email
-- **Role management** — Admin, User, Viewer roles
-- **Full flow**: Admin creates user → temp password generated → share with client → client logs in at /portal-login → changes password in portal
-- Backend endpoints: GET/POST/PUT/DELETE `/api/client-portal/users/{client_id}` + `/reset-password`
-- Frontend: Portal Users panel in Client Portal admin with table, Add User dialog, Edit User dialog
+### Previous: P2+P3 Batch
+- Estimate PDF Generation, Email from PDF Preview, Client Portal V2, Recharts fix, Accessibility fix, Config refactoring
 
 ## Test Reports
 - iteration_93-95: Previous features (all 100%)
 - iteration_96: P2+P3 Batch — 100% (18 features)
 - iteration_97: Portal User Management — 100% (14 tests)
+- Welcome email: Tested live — Resend ID 47e614ea confirmed delivery
+
+## Important Notes
+- **Resend sender domain**: Currently using `onboarding@resend.dev`. To send from a custom domain (e.g., `noreply@stech.com.au`), verify the domain at https://resend.com/domains and update SENDER_EMAIL in backend/.env
+- **Resend test mode**: In test mode, emails can only be delivered to the Resend account owner's email
 
 ## Remaining Backlog
-- Multi-provider remote status (Splashtop/ScreenConnect) — requires user API keys
-- Decompose seed.py (687 lines, low priority)
+- Verify custom sender domain on Resend for production emails
+- Multi-provider remote status (Splashtop/ScreenConnect)
 - Mobile-responsive optimization (deferred)
-
-## Key API Endpoints
-- `/api/client-portal/users/{client_id}` — GET list, POST create portal user
-- `/api/client-portal/users/{client_id}/{user_id}` — PUT update, DELETE remove
-- `/api/client-portal/users/{client_id}/{user_id}/reset-password` — POST reset
-- `/api/portal/v2/login` — Portal login with 2FA
-- `/api/portal/v2/tickets/{id}/messages` — Ticket messaging
-- `/api/portal/v2/kb` — Knowledge base
-- `/api/estimates/{id}/pdf?token=JWT` — Estimate PDF

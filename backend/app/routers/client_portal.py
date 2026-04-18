@@ -4,8 +4,69 @@ import uuid
 import secrets
 from app.database import db
 from app.auth import get_current_user
+from app.routers.email_utils import send_email, is_resend_configured
 
 router = APIRouter()
+
+
+def _portal_welcome_email_html(name, email, password, company_name, portal_url, msp_name, primary_color):
+    """Generate branded HTML welcome email for portal users."""
+    return f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 12px; overflow: hidden;">
+      <div style="background: {primary_color}; padding: 24px 32px;">
+        <h1 style="margin: 0; font-size: 20px; color: #fff;">{msp_name}</h1>
+        <p style="margin: 4px 0 0; font-size: 13px; color: rgba(255,255,255,0.8);">Client Portal Access</p>
+      </div>
+      <div style="padding: 32px;">
+        <h2 style="margin: 0 0 8px; font-size: 18px; color: #f8fafc;">Welcome, {name or 'there'}!</h2>
+        <p style="color: #94a3b8; font-size: 14px; line-height: 1.6;">
+          Your IT portal account for <strong style="color: #f8fafc;">{company_name}</strong> has been created.
+          You can now log in to view your tickets, devices, invoices, and more.
+        </p>
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <p style="margin: 0 0 12px; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Your Login Credentials</p>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 6px 0; color: #94a3b8; font-size: 13px;">Email:</td><td style="padding: 6px 0; color: #f8fafc; font-size: 14px; font-weight: 600;">{email}</td></tr>
+            <tr><td style="padding: 6px 0; color: #94a3b8; font-size: 13px;">Password:</td><td style="padding: 6px 0; color: {primary_color}; font-size: 14px; font-family: monospace; font-weight: 600;">{password}</td></tr>
+          </table>
+        </div>
+        <a href="{portal_url}" style="display: inline-block; background: {primary_color}; color: #fff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">Log In to Portal</a>
+        <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #1e293b;">
+          <p style="color: #64748b; font-size: 12px; margin: 0;">For security, we recommend changing your password after your first login.</p>
+          <p style="color: #64748b; font-size: 12px; margin: 8px 0 0;">If you didn't expect this email, please contact your IT provider.</p>
+        </div>
+      </div>
+      <div style="background: #0c1222; padding: 16px 32px; text-align: center;">
+        <p style="color: #475569; font-size: 11px; margin: 0;">Powered by {msp_name}</p>
+      </div>
+    </div>
+    """
+
+
+def _password_reset_email_html(name, email, password, msp_name, portal_url, primary_color):
+    """Generate branded HTML password reset email."""
+    return f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 12px; overflow: hidden;">
+      <div style="background: {primary_color}; padding: 24px 32px;">
+        <h1 style="margin: 0; font-size: 20px; color: #fff;">{msp_name}</h1>
+        <p style="margin: 4px 0 0; font-size: 13px; color: rgba(255,255,255,0.8);">Password Reset</p>
+      </div>
+      <div style="padding: 32px;">
+        <h2 style="margin: 0 0 8px; font-size: 18px; color: #f8fafc;">Password Reset</h2>
+        <p style="color: #94a3b8; font-size: 14px; line-height: 1.6;">
+          Hi {name or 'there'}, your portal password has been reset by your IT administrator.
+        </p>
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 6px 0; color: #94a3b8; font-size: 13px;">Email:</td><td style="padding: 6px 0; color: #f8fafc; font-size: 14px;">{email}</td></tr>
+            <tr><td style="padding: 6px 0; color: #94a3b8; font-size: 13px;">New Password:</td><td style="padding: 6px 0; color: {primary_color}; font-size: 14px; font-family: monospace; font-weight: 600;">{password}</td></tr>
+          </table>
+        </div>
+        <a href="{portal_url}" style="display: inline-block; background: {primary_color}; color: #fff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">Log In Now</a>
+        <p style="color: #64748b; font-size: 12px; margin-top: 20px;">Please change your password after logging in.</p>
+      </div>
+    </div>
+    """
 
 # ============== PORTAL CONFIGURATION ==============
 
@@ -190,6 +251,20 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
     user.pop("_id", None)
     safe = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")}
     safe["temp_password"] = password
+
+    # Send welcome email
+    send_welcome = data.get("send_welcome_email", True)
+    if send_welcome and is_resend_configured():
+        branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+        msp_name = branding.get("company_name", "NexusOps")
+        primary_color = branding.get("primary_color", "#10b981")
+        portal_url = data.get("portal_url", "")
+        html = _portal_welcome_email_html(name, email, password, client["name"] if client else "", portal_url, msp_name, primary_color)
+        result = await send_email(email, f"Welcome to {msp_name} Portal", html)
+        safe["email_status"] = result.get("status", "unknown")
+    else:
+        safe["email_status"] = "skipped"
+
     return safe
 
 
@@ -223,17 +298,31 @@ async def delete_portal_user(client_id: str, user_id: str, current_user: dict = 
 
 
 @router.post("/client-portal/users/{client_id}/{user_id}/reset-password")
-async def reset_portal_user_password(client_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
-    """Reset a portal user's password to a random one."""
+async def reset_portal_user_password(client_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Reset a portal user's password to a random one and optionally send email."""
     from app.auth import hash_password
+    data = data or {}
 
-    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0, "email": 1})
+    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0, "email": 1, "name": 1})
     if not user:
         raise HTTPException(status_code=404, detail="Portal user not found")
 
     new_password = secrets.token_urlsafe(10)
     await db.portal_users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(new_password), "totp_enabled": False}})
-    return {"message": "Password reset", "temp_password": new_password, "email": user["email"]}
+
+    result = {"message": "Password reset", "temp_password": new_password, "email": user["email"]}
+
+    # Send reset email
+    if is_resend_configured():
+        branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+        msp_name = branding.get("company_name", "NexusOps")
+        primary_color = branding.get("primary_color", "#10b981")
+        portal_url = data.get("portal_url", "")
+        html = _password_reset_email_html(user.get("name", ""), user["email"], new_password, msp_name, portal_url, primary_color)
+        email_result = await send_email(user["email"], f"{msp_name} - Password Reset", html)
+        result["email_status"] = email_result.get("status", "unknown")
+
+    return result
 
 
 
