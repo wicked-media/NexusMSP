@@ -7,25 +7,29 @@ NexusOps is an enterprise-grade RMM/PSA platform with 200+ backend routers and 7
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
-## Recent Features (Apr 18, 2026)
+## Module Consolidation (Apr 18, 2026) — 8 Merges
 
-### High-Impact Revenue & Client-Facing (5 modules overhauled)
-1. **Payment Confirmation Emails** — Branded HTML email to client + team when invoice paid
-2. **Late Payment Manager** — Risk predictions from real data, overdue dashboard, send branded reminder emails, reminder history log
-3. **Usage-Based Billing** — Metered service plans, device-count billing, overage tracking, MRR per plan
-4. **Client IT Budget Tracker** — Annual budgets with YTD spend, category breakdowns (HW/SW/Labor/Projects), forecast EOY, over-budget alerts
-5. **Revenue Forecaster** — MRR/ARR projections with area chart, 12-month forecast table, churn risk scoring
+| Merged Into | Replaced | Tabs |
+|---|---|---|
+| **Revenue Command Center** | RevenueTracker, RevenueTracking, RevenueAnalytics, RevenueForecast | Forecast, Analytics, Tracking, Churn |
+| **Backup Command Center** | BackupCenter, BackupDashboard, BackupCompliance, BackupVerify | Dashboard, Compliance, Verification |
+| **SLA Manager** | SlaCenter, SlaTimer, SlaReportGen, SlaPenalties | Timers, Predictions, Penalties, Reports |
+| **Compliance Hub** | ComplianceCenter, Compliance, ComplianceFrameworks, ComplianceReportGen | Frameworks, Client Status, Reports |
+| **Dispatch Center** | Scheduling, SmartSchedule, DispatchBoard | Board, Calendar, Availability |
+| **Reports Hub** | Reports, ExecutiveReports, ClientReports, FinancialReports, RoiReports | Operational, Executive, Client, Financial, ROI |
+| **AI Triage** (backend) | ai_ticket_triage, ai_triage, ticket_triage → one router | GPT + Keyword + Auto-route |
+| **Portal** (backend) | portal.py → stubbed, portal_v2 + client_portal active | — |
 
-### Portal Merge + Invoice Payments
-- Merged token-based + login-based portals into one unified V2
-- Invoice detail with line items, totals, pay button (Stripe checkout)
-- Portal user management with welcome emails
+## Result
+- **~23 separate pages eliminated** → 6 unified command centers
+- All old routes redirect to merged pages (no broken bookmarks)
+- Backend: 3 duplicate routers consolidated, 200 routers loading clean
 
 ## Test Reports
-- iteration_98: 5 High-Impact Features — 100% backend (9/9), 100% frontend (4/4 pages)
+- iteration_99: Module merge — 100% backend (25/25), 100% frontend (6/6 pages)
 
 ## Remaining Backlog
-- Connect live Stripe key for real payments
-- Verify Resend sender domain
-- Multi-provider remote status (Splashtop/ScreenConnect)
-- Mobile-responsive (deferred)
+- Connect live Stripe key, verify Resend sender domain
+- Operational modules: SLA Timer, Escalation Matrix, Change Management, Skills Matrix, Live Chat
+- Security modules: Vuln Scanner, Dark Web Monitoring, Phishing Sim, MFA Mgmt, Backup Compliance
+- Nice-to-have: QR Tags, Asset Depreciation, Maintenance Scheduler, Cost Per Ticket, Geo Map
