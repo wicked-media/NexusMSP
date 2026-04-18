@@ -247,10 +247,22 @@ class AcronisService:
         self.token_expiry = None
 
     async def get_credentials(self):
+        # First check env vars, then DB settings
+        import os
+        api_url = os.environ.get("ACRONIS_API_URL", "")
+        client_id = os.environ.get("ACRONIS_CLIENT_ID", "")
+        client_secret = os.environ.get("ACRONIS_CLIENT_SECRET", "")
+        if api_url and client_id and client_secret:
+            return api_url.rstrip("/"), client_id, client_secret
         settings = await db.settings.find_one({"type": "acronis"}, {"_id": 0})
         if not settings:
+            settings = await db.settings.find_one({"key": "acronis_config"}, {"_id": 0})
+            if settings:
+                settings = settings.get("value", settings)
+        if not settings:
             return None, None, None
-        return settings.get('api_url'), settings.get('client_id'), settings.get('client_secret')
+        return (settings.get('api_url', '').rstrip("/"), settings.get('client_id', ''),
+                settings.get('client_secret', ''))
 
     async def authenticate(self):
         api_url, client_id, client_secret = await self.get_credentials()
@@ -260,15 +272,15 @@ class AcronisService:
         import base64
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
 
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
             response = await http_client.post(
                 f"{api_url}/api/2/idp/token",
-                headers={"Authorization": f"Basic {credentials}"},
+                headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"},
                 data={"grant_type": "client_credentials"}
             )
             if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Acronis authentication failed")
-            
+                raise HTTPException(status_code=401, detail=f"Acronis authentication failed: {response.status_code}")
+
             data = response.json()
             self.access_token = data['access_token']
             self.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data.get('expires_in', 7200))
@@ -279,52 +291,112 @@ class AcronisService:
             await self.authenticate()
         return self.access_token
 
-    async def get_tenants(self):
+    async def _get(self, path):
+        """Helper for authenticated GET requests."""
         token = await self.get_token()
         api_url, _, _ = await self.get_credentials()
-        
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(
-                f"{api_url}/api/2/tenants",
+        async with httpx.AsyncClient(timeout=20.0) as http_client:
+            resp = await http_client.get(f"{api_url}{path}", headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code == 401:
+                # Token expired, re-auth
+                self.access_token = None
+                token = await self.get_token()
+                resp = await http_client.get(f"{api_url}{path}", headers={"Authorization": f"Bearer {token}"})
+            return resp
+
+    async def get_tenants(self):
+        # First get root tenant from JWT scope
+        token = await self.get_token()
+        import base64, json as jn
+        parts = token.split('.')
+        padding = '=' * (4 - len(parts[1]) % 4)
+        payload = jn.loads(base64.urlsafe_b64decode(parts[1] + padding))
+        scopes = payload.get("scope", [])
+        root_tid = ""
+        for s in scopes:
+            if isinstance(s, dict) and s.get("tid"):
+                root_tid = s["tid"]
+                break
+
+        if not root_tid:
+            return {"items": []}
+
+        # Get children of root tenant (these are the customer tenants)
+        api_url, _, _ = await self.get_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as http_client:
+            resp = await http_client.get(
+                f"{api_url}/api/2/tenants?parent_id={root_tid}",
                 headers={"Authorization": f"Bearer {token}"}
             )
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="Failed to fetch tenants")
-            return response.json()
+            if resp.status_code != 200:
+                return {"items": []}
+            data = resp.json()
+            # Also store root tenant ID for later use
+            data["root_tenant_id"] = root_tid
+            return data
+
+    async def get_tenant_children(self, tenant_id):
+        resp = await self._get(f"/api/2/tenants/{tenant_id}/children")
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
 
     async def get_clients(self, tenant_id: str = None):
         token = await self.get_token()
         api_url, _, _ = await self.get_credentials()
-        
+
         url = f"{api_url}/api/2/clients"
         if tenant_id:
             url += f"?tenant_id={tenant_id}"
-        
-        async with httpx.AsyncClient() as http_client:
+
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
             response = await http_client.get(url, headers={"Authorization": f"Bearer {token}"})
             if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="Failed to fetch clients")
+                return {"items": []}
             return response.json()
 
-    async def get_resources(self, client_id: str = None):
-        token = await self.get_token()
-        api_url, _, _ = await self.get_credentials()
-        
-        url = f"{api_url}/api/resource_management/v4/resources"
-        if client_id:
-            url += f"?client_id={client_id}"
-        
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(url, headers={"Authorization": f"Bearer {token}"})
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="Failed to fetch resources")
-            return response.json()
+    async def get_resources(self, tenant_id: str = None):
+        """Get protected resources/agents for a tenant."""
+        path = "/api/resource_management/v4/resources?limit=500"
+        if tenant_id:
+            path += f"&context_tenant_id={tenant_id}"
+        resp = await self._get(path)
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
+
+    async def get_resource_statuses(self, tenant_id: str = None):
+        """Get backup/protection statuses for resources."""
+        path = "/api/resource_management/v4/resource_statuses?limit=500"
+        if tenant_id:
+            path += f"&context_tenant_id={tenant_id}"
+        resp = await self._get(path)
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
+
+    async def get_alerts(self, tenant_id: str = None):
+        """Get active alerts."""
+        path = "/api/alert_manager/v1/alerts?limit=200"
+        if tenant_id:
+            path += f"&tenant_id={tenant_id}"
+        resp = await self._get(path)
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
+
+    async def get_tenant_usage(self, tenant_id: str):
+        """Get usage/quota for a tenant."""
+        resp = await self._get(f"/api/2/tenants/{tenant_id}/usages")
+        if resp.status_code != 200:
+            return {"items": []}
+        return resp.json()
 
     async def get_backup_status(self, resource_id: str):
         token = await self.get_token()
         api_url, _, _ = await self.get_credentials()
-        
-        async with httpx.AsyncClient() as http_client:
+
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
             response = await http_client.get(
                 f"{api_url}/api/resource_management/v4/resources/{resource_id}/status",
                 headers={"Authorization": f"Bearer {token}"}
