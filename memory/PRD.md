@@ -7,6 +7,22 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — P1 Wave A: AI Differentiators)
+- **LLM**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) via Emergent LLM key using `emergentintegrations`.
+- **New backend router**: `/app/backend/app/routers/ai_wave_a.py`
+  - `POST /api/tickets/{id}/copilot` — `summarize` / `next_step` (structured JSON) / `draft_reply` (tone-aware).
+  - `POST /api/ai/explain-error` — plain-English diagnosis + `severity` + `remediation_steps[]` + `references[]`.
+  - `GET /api/ai/standup-digest?hours=12` — AI brief over overnight events (new tickets, criticals, SLA breaches, offline devices, failed backups, alerts, overdue AR).
+  - `GET /api/ai/standup-digest/history` · `GET/PUT /api/ai/standup-digest/settings` — per-admin delivery prefs (banner/email/SMS).
+  - All AI calls audit-logged in `db.ai_copilot_events`.
+- **New frontend components**:
+  - `/app/frontend/src/components/ai/CopilotWidgets.jsx` — `<TicketCopilotButton />`, `<ExplainErrorButton />`.
+  - `/app/frontend/src/components/ai/StandupDigestBanner.jsx` — urgency-toned (rose/amber/emerald) 7am banner with refresh + collapse.
+- **Wiring**:
+  - TicketsPage detail header → Copilot dropdown + Explain Error button (adjacent to existing AI Diagnose).
+  - DashboardPage → Standup Digest banner above Attention banner.
+- **Testing**: `/app/test_reports/iteration_107.json` — backend 16/16 pass, frontend 100%. Regression on existing AI Diagnose, Timer, Log Time, Email, PDF buttons all pass.
+
 ## Recent Updates (Apr 20, 2026 — Swiss Tactical Dark UI Wave 2)
 - **Goal**: Extend the new design system to the remaining high-traffic cockpit pages.
 - **Wave 2 migrated pages** (headers + metric strips wrapped in `<PageShell>` / `<MetricStrip>` / `<MetricTile>`; inner tables & dialogs untouched):
