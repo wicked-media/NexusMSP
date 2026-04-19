@@ -163,6 +163,7 @@ export default function ClientsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [healthDetail, setHealthDetail] = useState(null);
   const [detailTab, setDetailTab] = useState("overview");
   const [detailLoading, setDetailLoading] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
@@ -190,12 +191,14 @@ export default function ClientsPage() {
     if (!id) return;
     setDetailLoading(true);
     try {
-      const [cRes, aRes] = await Promise.all([
+      const [cRes, aRes, hRes] = await Promise.all([
         axios.get(`${API}/clients/${id}`, { headers }),
         axios.get(`${API}/clients/${id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/clients/${id}/health`, { headers }).catch(() => ({ data: null })),
       ]);
       setDetail(cRes.data);
       setActivity(aRes.data || []);
+      setHealthDetail(hRes.data);
     } catch {
       toast.error("Failed to load client");
     } finally {
@@ -349,6 +352,7 @@ export default function ClientsPage() {
                 client={selectedClient}
                 detail={detail}
                 activity={activity}
+                healthDetail={healthDetail}
                 tab={detailTab}
                 setTab={setDetailTab}
                 loading={detailLoading}
@@ -402,7 +406,7 @@ export default function ClientsPage() {
   );
 }
 
-function ClientDetailPane({ client, detail, activity, tab, setTab, loading }) {
+function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab, loading }) {
   const mrrData = client.mrr_trend || [];
   const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
 
@@ -506,17 +510,35 @@ function ClientDetailPane({ client, detail, activity, tab, setTab, loading }) {
             </div>
 
             <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3">Health Score Breakdown</div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center justify-between">
+                <span>Health Score Breakdown</span>
+                {healthDetail && <span className="text-zinc-400 font-mono">{healthDetail.health_score}/100</span>}
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {detail && ["tickets", "sla", "devices", "payments", "contracts"].map(k => {
-                  const breakdownVal = 0; // placeholder — breakdown fetched separately
+                {healthDetail?.breakdown ? [
+                  { k: "tickets", max: 30, label: "Tickets" },
+                  { k: "sla", max: 20, label: "SLA" },
+                  { k: "devices", max: 20, label: "Devices" },
+                  { k: "payments", max: 20, label: "Payments" },
+                  { k: "contracts", max: 10, label: "Contracts" },
+                ].map(({ k, max, label }) => {
+                  const v = healthDetail.breakdown[k] ?? 0;
+                  const pct = (v / max) * 100;
+                  const color = pct >= 85 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-rose-500";
                   return (
-                    <div key={k} className="text-xs">
-                      <div className="text-zinc-500 uppercase tracking-wider text-[10px]">{k}</div>
-                      <div className="font-mono text-zinc-300">{breakdownVal}</div>
+                    <div key={k} className="text-xs" data-testid={`health-breakdown-${k}`}>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500 uppercase tracking-wider text-[10px]">{label}</span>
+                        <span className="font-mono text-zinc-400 text-[10px]">{v}/{max}</span>
+                      </div>
+                      <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
+                        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, pct)}%`, transition: "width 600ms" }} />
+                      </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <div className="col-span-5 text-xs text-zinc-500">Calculating…</div>
+                )}
               </div>
               <p className="text-[11px] text-zinc-500 mt-3">Composite score derived from ticket velocity, SLA adherence, device uptime, payment timeliness, and contract status.</p>
             </div>

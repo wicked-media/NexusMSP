@@ -65,6 +65,8 @@ class ClientCreate(BaseModel):
     contract_type: str = "monthly"
     mrr: float = 0.0
     contacts: List[Dict[str, Any]] = []
+    tier: Optional[str] = "standard"
+    lifecycle: Optional[str] = "active"
 
 class Client(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -80,6 +82,8 @@ class Client(BaseModel):
     ticket_count: int = 0
     pax8_company_id: Optional[str] = None
     contacts: List[Dict[str, Any]] = []
+    tier: Optional[str] = "standard"
+    lifecycle: Optional[str] = "active"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TicketCreate(BaseModel):
