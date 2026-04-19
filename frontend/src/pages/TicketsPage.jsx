@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { TicketCopilotButton, ExplainErrorButton } from "@/components/ai/CopilotWidgets";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
@@ -1225,6 +1226,8 @@ export default function TicketsPage() {
               {aiAnalyzing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
               AI Diagnose
             </Button>
+            <TicketCopilotButton ticketId={viewingTicket.id} />
+            <ExplainErrorButton contextHint="app trace" />
             {/* Timer */}
             <Button variant={isTimerRunning ? "destructive" : "outline"} size="sm" onClick={toggleTimer} data-testid="timer-btn">
               {isTimerRunning ? <><Square className="w-3 h-3 mr-1" />{fmtTime(timerElapsed)}</> : <><Play className="w-3 h-3 mr-1" />Timer</>}

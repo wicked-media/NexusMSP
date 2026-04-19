@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -201,6 +202,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Morning Standup Digest */}
+      <StandupDigestBanner />
 
       {/* Attention Banner */}
       {attentionItems.length > 0 && (
