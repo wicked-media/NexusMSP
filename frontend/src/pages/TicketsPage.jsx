@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { TicketCopilotButton, ExplainErrorButton } from "@/components/ai/CopilotWidgets";
+import { VoiceJournalButton } from "@/components/ai/VoiceJournalButton";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
@@ -1228,6 +1229,7 @@ export default function TicketsPage() {
             </Button>
             <TicketCopilotButton ticketId={viewingTicket.id} />
             <ExplainErrorButton contextHint="app trace" />
+            <VoiceJournalButton ticketId={viewingTicket.id} onLogged={() => fetchTimeEntries?.(viewingTicket.id)} />
             {/* Timer */}
             <Button variant={isTimerRunning ? "destructive" : "outline"} size="sm" onClick={toggleTimer} data-testid="timer-btn">
               {isTimerRunning ? <><Square className="w-3 h-3 mr-1" />{fmtTime(timerElapsed)}</> : <><Play className="w-3 h-3 mr-1" />Timer</>}

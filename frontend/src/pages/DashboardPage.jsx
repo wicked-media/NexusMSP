@@ -21,6 +21,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
+import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -194,6 +195,7 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <CoffeeBreakToggle />
             <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)} className="gap-2 backdrop-blur-md border-border/40" data-testid="quick-search-btn">
               <Search className="w-4 h-4" /><span className="hidden md:inline">Search</span><kbd className="text-[9px] text-muted-foreground bg-muted/80 px-1 rounded ml-1">Ctrl+K</kbd>
             </Button>

@@ -118,6 +118,8 @@ async def startup_event():
     asyncio.create_task(_rustdesk_auto_sync_loop())
     # Start recurring invoice auto-generation scheduler
     asyncio.create_task(_recurring_invoice_scheduler())
+    # Start 7am morning standup-digest delivery scheduler
+    asyncio.create_task(_standup_digest_scheduler())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 async def _rustdesk_auto_sync_loop():
@@ -278,6 +280,120 @@ async def _recurring_invoice_scheduler():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+async def _standup_digest_scheduler():
+    """Background loop: once per minute check if digest is due for any admin; deliver via configured channels."""
+    import asyncio
+    # Small grace period after boot so DB + routers settle
+    await asyncio.sleep(30)
+    while True:
+        try:
+            cfg_doc = await db.settings.find_one({"key": "standup_digest"}, {"_id": 0}) or {}
+            val = cfg_doc.get("value", {})
+            if not val.get("enabled", False):
+                await asyncio.sleep(60)
+                continue
+
+            send_hour = int(val.get("send_hour_local", 7))
+            tz_name = val.get("timezone", "Australia/Sydney")
+            window_hours = int(val.get("window_hours", 12))
+            channels = val.get("channels", {"banner": True, "email": False, "sms": False})
+            email_to = val.get("email_to", []) or []
+            sms_to = val.get("sms_to", []) or []
+
+            try:
+                from zoneinfo import ZoneInfo
+                now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+            except Exception:
+                now_local = datetime.now(timezone.utc)
+
+            today_tag = now_local.strftime("%Y-%m-%d")
+            last_tag = val.get("last_sent_tag")
+            # Only deliver once per day, at or after the configured hour
+            if now_local.hour == send_hour and last_tag != today_tag:
+                from app.routers.ai_wave_a import _build_overnight_snapshot, _format_digest_prompt, _llm_complete
+                snap = await _build_overnight_snapshot(hours=window_hours)
+                prompt_body = _format_digest_prompt(snap)
+                system = (
+                    "You are the 7am MSP standup briefer. Produce a 4-6 bullet briefing for the service-desk "
+                    "team. Lead with what requires IMMEDIATE action, then note SLA risk, then ops health. "
+                    "Be concrete (use numbers and client names). Plain text, no markdown headers, no preamble."
+                )
+                ai_brief = await _llm_complete(system, prompt_body, session_prefix="digest-sched")
+                if ai_brief.startswith("__AI_"):
+                    ai_brief = "AI briefing unavailable today."
+
+                # Persist as a digest record
+                digest_doc = {
+                    "id": f"digest-{now_local.strftime('%Y%m%d-%H%M')}",
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "window_hours": window_hours,
+                    "ai_brief": ai_brief,
+                    "stats": {
+                        "new_tickets": snap["new_ticket_count"],
+                        "critical_open": len(snap["critical_open"]),
+                        "sla_breaches": len(snap["sla_breaches"]),
+                        "offline_devices": snap["offline_devices"],
+                        "warning_devices": snap["warning_devices"],
+                        "failed_backups": snap["failed_backups"],
+                        "active_alerts": snap["active_alerts"],
+                        "overdue_invoices_count": snap["overdue_invoices_count"],
+                        "overdue_total": snap["overdue_total"],
+                    },
+                    "delivery": {"scheduled": True},
+                }
+                try:
+                    await db.standup_digests.insert_one(digest_doc)
+                except Exception:
+                    pass
+
+                # Email delivery
+                if channels.get("email") and email_to:
+                    try:
+                        from app.routers.email_utils import send_email, is_resend_configured
+                        if is_resend_configured():
+                            html = (
+                                f"<h2>NexusOps Morning Standup · {today_tag}</h2>"
+                                f"<pre style='font-family:inherit;white-space:pre-wrap'>{ai_brief}</pre>"
+                                f"<hr><small>Window: last {window_hours}h · {snap['new_ticket_count']} new tickets · "
+                                f"{len(snap['critical_open'])} critical · {snap['offline_devices']} offline devices.</small>"
+                            )
+                            for addr in email_to:
+                                try:
+                                    await send_email(addr, f"Morning Standup Digest — {today_tag}", html)
+                                except Exception as _e:
+                                    logger.warning(f"Digest email to {addr} failed: {_e}")
+                    except Exception as e:
+                        logger.warning(f"Digest email delivery error: {e}")
+
+                # SMS delivery
+                if channels.get("sms") and sms_to:
+                    try:
+                        from app.routers.sms import _send_via_provider
+                        # First line only, keep under 160 chars
+                        first_line = (ai_brief.split("\n")[0] or "")[:140]
+                        sms_body = f"NexusOps AM: {first_line}"
+                        for num in sms_to:
+                            try:
+                                await _send_via_provider(num, sms_body)
+                            except Exception as _e:
+                                logger.warning(f"Digest SMS to {num} failed: {_e}")
+                    except Exception as e:
+                        logger.warning(f"Digest SMS delivery error: {e}")
+
+                # Mark sent
+                await db.settings.update_one(
+                    {"key": "standup_digest"},
+                    {"$set": {"value.last_sent_tag": today_tag, "value.last_run_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True,
+                )
+                logger.info(f"Morning Standup Digest delivered for {today_tag} (email={bool(channels.get('email'))}, sms={bool(channels.get('sms'))})")
+
+            await asyncio.sleep(60)
+        except Exception as e:
+            logger.debug(f"Digest scheduler error: {e}")
+            import asyncio as _a
+            await _a.sleep(120)
 
 # CORS middleware
 app.add_middleware(
