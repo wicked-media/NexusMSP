@@ -68,6 +68,131 @@ async def get_all_client_health(current_user: dict = Depends(get_current_user)):
         results.append(h)
     return results
 
+@router.get("/clients-enriched")
+async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
+    """Rich one-shot dataset powering the revamped Clients page."""
+    now = datetime.now(timezone.utc)
+    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    client_ids = [c["id"] for c in clients]
+
+    open_tix_map = {}
+    async for row in db.tickets.aggregate([
+        {"$match": {"client_id": {"$in": client_ids}, "status": {"$in": ["open", "in_progress", "pending"]}}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
+    ]):
+        open_tix_map[row["_id"]] = row["count"]
+
+    asset_map = {}
+    async for row in db.devices.aggregate([
+        {"$match": {"client_id": {"$in": client_ids}}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "online": {"$sum": {"$cond": [{"$eq": ["$status", "online"]}, 1, 0]}}}},
+    ]):
+        asset_map[row["_id"]] = {"total": row["count"], "online": row["online"]}
+
+    contact_map = {}
+    async for row in db.contacts.aggregate([
+        {"$match": {"client_id": {"$in": client_ids}}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
+    ]):
+        contact_map[row["_id"]] = row["count"]
+
+    overdue_map = {}
+    async for row in db.invoices.aggregate([
+        {"$match": {"client_id": {"$in": client_ids}, "payment_status": {"$ne": "paid"}, "due_date": {"$lt": now.isoformat()}}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "amount": {"$sum": "$total"}}},
+    ]):
+        overdue_map[row["_id"]] = {"count": row["count"], "amount": row["amount"]}
+
+    month_keys = []
+    for i in range(11, -1, -1):
+        dt = (now.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m")
+        month_keys.append(dt)
+    mrr_trend_map = {cid: {k: 0.0 for k in month_keys} for cid in client_ids}
+    async for inv in db.invoices.find(
+        {"client_id": {"$in": client_ids}, "created_at": {"$gte": (now - timedelta(days=366)).isoformat()}},
+        {"_id": 0, "client_id": 1, "created_at": 1, "total": 1}
+    ):
+        try:
+            key = (inv.get("created_at") or "")[:7]
+            if key in mrr_trend_map.get(inv["client_id"], {}):
+                mrr_trend_map[inv["client_id"]][key] += float(inv.get("total", 0))
+        except Exception:
+            continue
+
+    active_contract_map = {}
+    async for row in db.contracts.aggregate([
+        {"$match": {"client_id": {"$in": client_ids}, "status": "active"}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "mrr": {"$sum": "$monthly_value"}}},
+    ]):
+        active_contract_map[row["_id"]] = row
+
+    acronis_links = {l["client_id"] async for l in db.acronis_customer_links.find({}, {"_id": 0, "client_id": 1})}
+    pax8_links = {l["client_id"] async for l in db.pax8_company_links.find({}, {"_id": 0, "client_id": 1})}
+
+    last_activity_map = {}
+    async for t in db.tickets.find({"client_id": {"$in": client_ids}}, {"_id": 0, "client_id": 1, "updated_at": 1, "created_at": 1}).sort("updated_at", -1):
+        cid = t["client_id"]
+        if cid not in last_activity_map:
+            last_activity_map[cid] = t.get("updated_at") or t.get("created_at")
+
+    results = []
+    for c in clients:
+        cid = c["id"]
+        health = await _calc_health(c)
+        amap = asset_map.get(cid, {"total": 0, "online": 0})
+        omap = overdue_map.get(cid, {"count": 0, "amount": 0})
+        contract = active_contract_map.get(cid, {})
+        mrr = float(contract.get("mrr") or c.get("mrr") or 0)
+        trend = [{"month": k, "value": round(mrr_trend_map[cid].get(k, 0), 2)} for k in month_keys]
+
+        results.append({
+            "id": cid,
+            "name": c.get("name"),
+            "industry": c.get("industry"),
+            "tier": c.get("tier", "standard"),
+            "lifecycle": c.get("lifecycle", "active"),
+            "logo_url": c.get("logo_url"),
+            "primary_color": c.get("primary_color"),
+            "primary_contact": c.get("primary_contact") or c.get("contact_name"),
+            "email": c.get("email"),
+            "phone": c.get("phone"),
+            "address": c.get("address"),
+            "health_score": health["health_score"],
+            "risk_level": health["risk_level"],
+            "open_tickets": open_tix_map.get(cid, 0),
+            "asset_count": amap["total"],
+            "assets_online": amap["online"],
+            "contact_count": contact_map.get(cid, 0),
+            "overdue_count": omap["count"],
+            "overdue_amount": round(omap.get("amount", 0), 2),
+            "mrr": mrr,
+            "mrr_trend": trend,
+            "active_contracts": int(contract.get("count", 0)),
+            "integrations": {
+                "acronis": cid in acronis_links,
+                "pax8": cid in pax8_links,
+                "m365": bool(c.get("m365_tenant_id") or c.get("office365_tenant_id")),
+                "rmm": amap["total"] > 0,
+            },
+            "last_activity": last_activity_map.get(cid),
+            "last_qbr": c.get("last_qbr"),
+            "next_qbr": c.get("next_qbr"),
+            "created_at": c.get("created_at") if isinstance(c.get("created_at"), str) else (c["created_at"].isoformat() if c.get("created_at") else None),
+        })
+
+    summary = {
+        "client_count": len(results),
+        "total_mrr": round(sum(r["mrr"] for r in results), 2),
+        "avg_health": round(sum(r["health_score"] for r in results) / max(len(results), 1), 1),
+        "at_risk": sum(1 for r in results if r["risk_level"] in ("at_risk", "critical")),
+        "churned": sum(1 for r in results if r["lifecycle"] == "churned"),
+        "prospects": sum(1 for r in results if r["lifecycle"] == "prospect"),
+        "with_acronis": sum(1 for r in results if r["integrations"]["acronis"]),
+        "with_pax8": sum(1 for r in results if r["integrations"]["pax8"]),
+    }
+
+    return {"summary": summary, "clients": results}
+
 @router.get("/clients/{client_id}/activity-timeline")
 async def get_client_activity_timeline(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get combined activity timeline for a client"""

@@ -1,1469 +1,615 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
-  Plus, Search, Building2, Loader2, DollarSign, Monitor, Ticket, Mail, Phone,
-  ArrowLeft, User, Edit, Trash2, MapPin, Star, FileText, UserPlus, Cloud, Shield, RefreshCw,
-  ShieldCheck, ShieldX, AlertCircle, CheckCircle, XCircle, Globe, Lock, MailCheck,
-  Wifi, WifiOff, Zap, CreditCard, AlertTriangle, ExternalLink, Trophy, Award, Laptop, Link2,
-  TrendingUp, Activity, Heart, ArrowUpRight, ChevronRight, Clock, Users
+  Search, Building2, Users, HardDrive, Ticket, DollarSign, AlertTriangle,
+  Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles, Timer, Zap,
+  Activity, ChevronRight, Send, RefreshCw, Filter, X, TrendingUp, TrendingDown
 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AreaChart, Area, ResponsiveContainer } from "recharts";
 
-const roleColors = {
-  primary: "bg-blue-500", billing: "bg-green-500", technical: "bg-purple-500", general: "bg-gray-500"
+const LIFECYCLE_COLORS = {
+  prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
+  onboarding: "text-sky-400 border-sky-500/30 bg-sky-500/5",
+  active: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5",
+  at_risk: "text-amber-400 border-amber-500/30 bg-amber-500/5",
+  churned: "text-rose-400 border-rose-500/30 bg-rose-500/5",
 };
 
-const priorityConfig = {
-  critical: { label: "Critical", class: "bg-red-500 text-white" },
-  high: { label: "High", class: "bg-orange-500 text-white" },
-  medium: { label: "Medium", class: "bg-yellow-500 text-white" },
-  low: { label: "Low", class: "bg-green-600 text-white" }
+const TIER_COLORS = {
+  platinum: "from-fuchsia-500 to-indigo-500",
+  gold: "from-amber-400 to-orange-500",
+  silver: "from-zinc-300 to-zinc-500",
+  standard: "from-zinc-500 to-zinc-700",
 };
 
-const statusConfig = {
-  open: { label: "Open", class: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
-  in_progress: { label: "In Progress", class: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
-  resolved: { label: "Resolved", class: "bg-green-500/10 text-green-500 border-green-500/20" },
-  closed: { label: "Closed", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" }
-};
+function HealthDial({ score, size = 44 }) {
+  const s = Math.max(0, Math.min(100, score || 0));
+  const color = s >= 85 ? "#34d399" : s >= 70 ? "#fbbf24" : s >= 50 ? "#fb923c" : "#fb7185";
+  const stroke = 4, r = (size / 2) - stroke;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - s / 100);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        strokeDasharray={c} strokeDashoffset={offset}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 600ms ease-out" }}
+      />
+      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fontSize={size * 0.32} fontWeight="600" fill={color} fontFamily="monospace">{s}</text>
+    </svg>
+  );
+}
 
-const healthRiskColor = (risk) => {
-  if (risk === "healthy") return { bg: "bg-emerald-500/10", text: "text-emerald-500", border: "border-emerald-500/30", ring: "ring-emerald-500/20" };
-  if (risk === "attention") return { bg: "bg-amber-500/10", text: "text-amber-500", border: "border-amber-500/30", ring: "ring-amber-500/20" };
-  return { bg: "bg-red-500/10", text: "text-red-500", border: "border-red-500/30", ring: "ring-red-500/20" };
-};
+function IntegrationChip({ type, active }) {
+  const map = {
+    acronis: { label: "ACR", color: "text-sky-400 border-sky-500/40", tip: "Acronis Cyber Cloud" },
+    pax8: { label: "PX8", color: "text-indigo-400 border-indigo-500/40", tip: "Pax8 / Microsoft CSP" },
+    m365: { label: "365", color: "text-blue-400 border-blue-500/40", tip: "Microsoft 365" },
+    rmm: { label: "RMM", color: "text-emerald-400 border-emerald-500/40", tip: "RMM agent installed" },
+  };
+  const cfg = map[type];
+  if (!cfg) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`font-mono text-[10px] h-5 px-1.5 rounded border flex items-center ${active ? cfg.color : "text-zinc-600 border-zinc-800 opacity-60"}`}>{cfg.label}</span>
+      </TooltipTrigger>
+      <TooltipContent><span className="text-xs">{cfg.tip} {active ? "· linked" : "· not linked"}</span></TooltipContent>
+    </Tooltip>
+  );
+}
+
+function Sparkline({ data, color = "#818cf8" }) {
+  if (!data || data.every(d => !d.value)) return <div className="h-7 w-20 opacity-30 flex items-end"><div className="h-0.5 w-full bg-zinc-700" /></div>;
+  return (
+    <div className="h-7 w-20">
+      <ResponsiveContainer width="100%" height="100%" minWidth={60} minHeight={20}>
+        <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+          <defs>
+            <linearGradient id="sp" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.4} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} fill="url(#sp)" dot={false} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ClientListItem({ client, selected, onClick }) {
+  const mrrSeries = client.mrr_trend || [];
+  const firstVal = mrrSeries.find(m => m.value > 0)?.value || 0;
+  const lastVal = mrrSeries[mrrSeries.length - 1]?.value || 0;
+  const delta = firstVal > 0 ? ((lastVal - firstVal) / firstVal) * 100 : 0;
+
+  return (
+    <button
+      onClick={onClick}
+      data-testid={`client-list-item-${client.id}`}
+      className={`w-full text-left flex items-center gap-3 px-4 py-3 border-b border-zinc-800/80 transition-colors
+        ${selected ? "bg-zinc-900 border-l-2 border-l-indigo-500 pl-[14px]" : "hover:bg-zinc-900/50 border-l-2 border-l-transparent pl-[14px]"}`}
+    >
+      <HealthDial score={client.health_score} size={36} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm text-zinc-100 truncate">{client.name}</span>
+          {client.lifecycle && client.lifecycle !== "active" && (
+            <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-500 font-mono">
+          {client.industry && <span className="truncate max-w-[80px]">{client.industry}</span>}
+          {client.open_tickets > 0 && <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="w-2.5 h-2.5 inline mr-0.5" />{client.open_tickets}</span>}
+          <span><HardDrive className="w-2.5 h-2.5 inline mr-0.5" />{client.asset_count}</span>
+          {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />{client.overdue_count}</span>}
+        </div>
+        <div className="flex items-center gap-1 mt-1.5">
+          <IntegrationChip type="rmm" active={client.integrations.rmm} />
+          <IntegrationChip type="acronis" active={client.integrations.acronis} />
+          <IntegrationChip type="pax8" active={client.integrations.pax8} />
+          <IntegrationChip type="m365" active={client.integrations.m365} />
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-0.5 shrink-0">
+        <div className="font-mono text-xs text-zinc-200">${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+        <div className="flex items-center gap-1">
+          {delta !== 0 && (
+            <span className={`text-[9px] font-mono ${delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {delta >= 0 ? "▲" : "▼"}{Math.abs(delta).toFixed(0)}%
+            </span>
+          )}
+          <Sparkline data={mrrSeries} color={delta >= 0 ? "#34d399" : "#fb7185"} />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function TopMetric({ label, value, trend, color = "indigo" }) {
+  return (
+    <div className={`border-l-2 pl-4 border-${color}-500`}>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">{label}</div>
+      <div className="flex items-baseline gap-2">
+        <div className="text-2xl font-light tracking-tighter text-zinc-100 mt-0.5">{value}</div>
+        {trend && <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-400" : trend.startsWith("-") ? "text-rose-400" : "text-zinc-500"}`}>{trend}</span>}
+      </div>
+    </div>
+  );
+}
 
 export default function ClientsPage() {
   const { token } = useAuth();
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [healthFilter, setHealthFilter] = useState("all");
-  const [contractFilter, setContractFilter] = useState("all");
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingClient, setEditingClient] = useState(null);
-  const [viewingClient, setViewingClient] = useState(null);
-  const [clientDetail, setClientDetail] = useState(null);
-  const [isContactOpen, setIsContactOpen] = useState(false);
-  const [editingContact, setEditingContact] = useState(null);
-  const [contactForm, setContactForm] = useState({ name: "", email: "", phone: "", role: "general", is_primary: false });
-  const [m365Users, setM365Users] = useState([]);
-  const [m365Config, setM365Config] = useState(null);
-  const [m365SyncDialog, setM365SyncDialog] = useState(false);
-  const [m365TenantId, setM365TenantId] = useState("");
-  const [m365Domain, setM365Domain] = useState("");
-  const [subscriptions, setSubscriptions] = useState(null);
-  const [supedServices, setSupedServices] = useState([]);
-  const [dmarcRecords, setDmarcRecords] = useState(null);
-  const [dmarcLoading, setDmarcLoading] = useState(false);
-  const [subsSummary, setSubsSummary] = useState({});
-  const [splynxLink, setSplynxLink] = useState(null);
-  const [splynxServices, setSplynxServices] = useState(null);
-  const [splynxLoading, setSplynxLoading] = useState(false);
-  const [healthScores, setHealthScores] = useState({});
-  const [clientTimeline, setClientTimeline] = useState([]);
-  const [clientAchievements, setClientAchievements] = useState(null);
-  const [clientReadiness, setClientReadiness] = useState(null);
-  const [clientLoyalty, setClientLoyalty] = useState(null);
-  const [rustdeskDevices, setRustdeskDevices] = useState([]);
-  const [isRustdeskOpen, setIsRustdeskOpen] = useState(false);
-  const [rustdeskForm, setRustdeskForm] = useState({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
-  const [acronisSubs, setAcronisSubs] = useState([]);
-  const [acronisBilling, setAcronisBilling] = useState(null);
-  const [formData, setFormData] = useState({
-    name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: ""
-  });
-
   const headers = { Authorization: `Bearer ${token}` };
+  const [data, setData] = useState({ summary: null, clients: [] });
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [lifecycleFilter, setLifecycleFilter] = useState("all");
+  const [riskFilter, setRiskFilter] = useState("all");
+  const [integrationFilter, setIntegrationFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [detailTab, setDetailTab] = useState("overview");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [createDialog, setCreateDialog] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
+  const searchRef = useRef(null);
 
-  const fetchClients = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const [res, subsRes, servicesRes] = await Promise.all([
-        axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/clients/subscriptions/summary`, { headers }).catch(() => ({ data: {} })),
-        axios.get(`${API}/suped/services`, { headers }).catch(() => ({ data: [] })),
-      ]);
-      setClients(res.data);
-      setSubsSummary(subsRes.data);
-      setSupedServices(servicesRes.data);
-      axios.get(`${API}/clients/health/all`, { headers }).then(hRes => {
-        const map = {};
-        (hRes.data || []).forEach(h => { map[h.client_id] = h; });
-        setHealthScores(map);
-      }).catch(() => {});
-    } catch { toast.error("Failed to fetch clients"); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchClients(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fetchClientDetail = async (client) => {
-    setViewingClient(client);
-    setSubscriptions(null);
-    setDmarcRecords(null);
-    setSplynxLink(null);
-    setSplynxServices(null);
-    setClientTimeline([]);
-    setClientAchievements(null);
-    setClientReadiness(null);
-    setClientLoyalty(null);
-    setRustdeskDevices([]);
-    setAcronisBilling(null);
-    try {
-      const [detailRes, m365Res, subsRes, splynxRes, timelineRes, achRes, readRes, loyRes, rdRes, acRes, acBillRes] = await Promise.all([
-        axios.get(`${API}/clients/${client.id}/detail`, { headers }),
-        axios.get(`${API}/clients/${client.id}/m365-users`, { headers }).catch(() => ({ data: { users: [], config: null } })),
-        axios.get(`${API}/clients/${client.id}/subscriptions`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/clients/${client.id}/splynx`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/clients/${client.id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/clients/${client.id}/achievements`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/clients/${client.id}/portal-readiness`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/clients/${client.id}/loyalty`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/rustdesk/clients/${client.id}/devices`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/acronis/subscriptions?client_id=${client.id}`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/acronis/billing/client/${client.id}`, { headers }).catch(() => ({ data: null })),
-      ]);
-      setClientDetail(detailRes.data);
-      setM365Users(m365Res.data.users || []);
-      setM365Config(m365Res.data.config || null);
-      setSubscriptions(subsRes.data);
-      setSplynxLink(splynxRes.data);
-      setClientTimeline(timelineRes.data || []);
-      setClientAchievements(achRes.data);
-      setClientReadiness(readRes.data);
-      setClientLoyalty(loyRes.data);
-      setRustdeskDevices(rdRes.data || []);
-      setAcronisSubs(acRes.data || []);
-      setAcronisBilling(acBillRes.data);
-    } catch { toast.error("Failed to load client details"); }
-  };
-
-  const syncM365 = async () => {
-    if (!viewingClient) return;
-    try {
-      const res = await axios.post(`${API}/clients/${viewingClient.id}/m365-sync`, { tenant_id: m365TenantId, domain: m365Domain, users: [] }, { headers });
-      toast.success(res.data.message);
-      setM365SyncDialog(false);
-      fetchClientDetail(viewingClient);
-    } catch { toast.error("Failed to sync M365"); }
-  };
-
-  const handleSaveSubscriptions = async () => {
-    if (!viewingClient || !subscriptions) return;
-    try {
-      await axios.put(`${API}/clients/${viewingClient.id}/subscriptions`, subscriptions, { headers });
-      toast.success("Subscriptions updated");
-      fetchClients();
-    } catch { toast.error("Failed to save subscriptions"); }
-  };
-
-  const toggleService = (key) => {
-    if (!subscriptions) return;
-    setSubscriptions({ ...subscriptions, services: { ...subscriptions.services, [key]: !subscriptions.services[key] } });
-  };
-
-  const fetchDmarcRecords = async (days = 30) => {
-    if (!viewingClient) return;
-    setDmarcLoading(true);
-    try {
-      const res = await axios.get(`${API}/clients/${viewingClient.id}/dmarc-records?days=${days}`, { headers });
-      setDmarcRecords(res.data);
-    } catch { toast.error("Failed to fetch DMARC records"); }
-    finally { setDmarcLoading(false); }
-  };
-
-  const handleSaveSplynxLink = async () => {
-    if (!viewingClient || !splynxLink) return;
-    try {
-      await axios.put(`${API}/clients/${viewingClient.id}/splynx`, { splynx_customer_id: splynxLink.splynx_customer_id }, { headers });
-      toast.success("Splynx link saved");
-      if (splynxLink.splynx_customer_id) fetchSplynxServices();
-    } catch { toast.error("Failed to save Splynx link"); }
-  };
-
-  const fetchSplynxServices = async () => {
-    if (!viewingClient) return;
-    setSplynxLoading(true);
-    try {
-      const [svcRes, invRes, custRes] = await Promise.all([
-        axios.get(`${API}/clients/${viewingClient.id}/splynx/services`, { headers }),
-        axios.get(`${API}/clients/${viewingClient.id}/splynx/invoices`, { headers }).catch(() => ({ data: { invoices: [] } })),
-        axios.get(`${API}/clients/${viewingClient.id}/splynx/customer`, { headers }).catch(() => ({ data: {} })),
-      ]);
-      setSplynxServices({ services: svcRes.data.services || [], invoices: invRes.data.invoices || [], customer: custRes.data.customer || null, billing: custRes.data.billing || null, error: svcRes.data.error || invRes.data.error || custRes.data.error });
-    } catch { toast.error("Failed to fetch Splynx data"); }
-    finally { setSplynxLoading(false); }
-  };
-
-  const handleCreateClient = async () => {
-    try {
-      const data = { ...formData, mrr: parseFloat(formData.mrr) || 0 };
-      if (editingClient) {
-        await axios.put(`${API}/clients/${editingClient.id}`, data, { headers });
-        toast.success("Client updated");
-      } else {
-        await axios.post(`${API}/clients`, data, { headers });
-        toast.success("Client created");
+      const res = await axios.get(`${API}/clients-enriched`, { headers });
+      setData(res.data || { summary: null, clients: [] });
+      if (!selectedId && res.data?.clients?.length) {
+        setSelectedId(res.data.clients[0].id);
       }
-      setIsCreateOpen(false);
-      setEditingClient(null);
-      setFormData({ name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: "" });
-      fetchClients();
-    } catch { toast.error("Failed to save client"); }
+    } catch {
+      toast.error("Failed to load clients");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteClient = async (id) => {
+  useEffect(() => { fetchData(); /* eslint-disable-line */ }, []);
+
+  const fetchDetail = async (id) => {
+    if (!id) return;
+    setDetailLoading(true);
     try {
-      await axios.delete(`${API}/clients/${id}`, { headers });
-      toast.success("Client deleted");
-      fetchClients();
-    } catch { toast.error("Failed to delete"); }
+      const [cRes, aRes] = await Promise.all([
+        axios.get(`${API}/clients/${id}`, { headers }),
+        axios.get(`${API}/clients/${id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setDetail(cRes.data);
+      setActivity(aRes.data || []);
+    } catch {
+      toast.error("Failed to load client");
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
-  const handleAddContact = async () => {
-    try {
-      if (editingContact) {
-        await axios.put(`${API}/clients/${viewingClient.id}/contacts/${editingContact.id}`, contactForm, { headers });
-        toast.success("Contact updated");
-      } else {
-        await axios.post(`${API}/clients/${viewingClient.id}/contacts`, contactForm, { headers });
-        toast.success("Contact added");
+  useEffect(() => { if (selectedId) fetchDetail(selectedId); /* eslint-disable-line */ }, [selectedId]);
+
+  // Keyboard shortcut: / focuses search; j/k navigate; Esc clears selection
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
+      else if (e.key === "j" || e.key === "k") {
+        const idx = filtered.findIndex(c => c.id === selectedId);
+        const next = e.key === "j" ? Math.min(idx + 1, filtered.length - 1) : Math.max(idx - 1, 0);
+        if (filtered[next]) setSelectedId(filtered[next].id);
+      } else if (e.key === "n" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setCreateDialog(true);
       }
-      setIsContactOpen(false);
-      setEditingContact(null);
-      setContactForm({ name: "", email: "", phone: "", role: "general", is_primary: false });
-      fetchClientDetail(viewingClient);
-      fetchClients();
-    } catch { toast.error("Failed to save contact"); }
-  };
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line
+  }, [selectedId, data]);
 
-  const handleDeleteContact = async (contactId) => {
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return (data.clients || []).filter(c => {
+      if (q && !(`${c.name} ${c.industry || ""} ${c.email || ""}`.toLowerCase().includes(q))) return false;
+      if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
+      if (riskFilter !== "all" && c.risk_level !== riskFilter) return false;
+      if (integrationFilter !== "all" && !c.integrations[integrationFilter]) return false;
+      return true;
+    });
+  }, [data, search, lifecycleFilter, riskFilter, integrationFilter]);
+
+  const selectedClient = useMemo(() => data.clients?.find(c => c.id === selectedId), [data, selectedId]);
+
+  const createClient = async () => {
+    if (!createForm.name) { toast.error("Name required"); return; }
     try {
-      await axios.delete(`${API}/clients/${viewingClient.id}/contacts/${contactId}`, { headers });
-      toast.success("Contact removed");
-      fetchClientDetail(viewingClient);
-    } catch { toast.error("Failed to delete contact"); }
+      await axios.post(`${API}/clients`, createForm, { headers });
+      toast.success("Client created");
+      setCreateDialog(false);
+      setCreateForm({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const handleAddRustdeskDevice = async () => {
-    try {
-      await axios.post(`${API}/rustdesk/clients/${viewingClient.id}/devices`, rustdeskForm, { headers });
-      toast.success("RustDesk device added");
-      setIsRustdeskOpen(false);
-      setRustdeskForm({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" });
-      const res = await axios.get(`${API}/rustdesk/clients/${viewingClient.id}/devices`, { headers });
-      setRustdeskDevices(res.data || []);
-    } catch { toast.error("Failed to add RustDesk device"); }
-  };
+  if (loading) return <div className="p-8 flex items-center gap-2 text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" />Loading portfolio...</div>;
 
-  const handleDeleteRustdeskDevice = async (id) => {
-    try {
-      await axios.delete(`${API}/rustdesk/devices/${id}`, { headers });
-      toast.success("RustDesk device removed");
-      setRustdeskDevices(prev => prev.filter(d => d.id !== id));
-    } catch { toast.error("Failed to delete"); }
-  };
+  const s = data.summary || {};
 
-  const handleConnectRustdesk = async (id) => {
-    try {
-      const res = await axios.post(`${API}/rustdesk/devices/${id}/connect`, {}, { headers });
-      if (res.data.connection_url) window.open(res.data.connection_url, "_blank");
-      toast.success("Connection initiated");
-    } catch { toast.error("Failed to connect"); }
-  };
-
-  const openEditClient = (client) => {
-    setEditingClient(client);
-    setFormData({ name: client.name, email: client.email || "", phone: client.phone || "", address: client.address || "", industry: client.industry || "", contract_type: client.contract_type || "monthly", mrr: String(client.mrr || "") });
-    setIsCreateOpen(true);
-  };
-
-  const openEditContact = (contact) => {
-    setEditingContact(contact);
-    setContactForm({ name: contact.name, email: contact.email, phone: contact.phone, role: contact.role, is_primary: contact.is_primary });
-    setIsContactOpen(true);
-  };
-
-  const filtered = clients.filter(c => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (!c.name?.toLowerCase().includes(q) && !c.email?.toLowerCase().includes(q) && !c.industry?.toLowerCase().includes(q)) return false;
-    }
-    if (healthFilter !== "all") {
-      const h = healthScores[c.id];
-      if (!h) return healthFilter === "unknown";
-      if (h.risk_level !== healthFilter) return false;
-    }
-    if (contractFilter !== "all" && c.contract_type !== contractFilter) return false;
-    return true;
-  });
-
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
-
-  // Compute summary stats
-  const totalMRR = clients.reduce((sum, c) => sum + (c.mrr || 0), 0);
-  const healthyCount = clients.filter(c => healthScores[c.id]?.risk_level === "healthy").length;
-  const attentionCount = clients.filter(c => healthScores[c.id]?.risk_level === "attention").length;
-  const criticalCount = clients.filter(c => healthScores[c.id]?.risk_level === "critical").length;
-  const avgHealth = Object.values(healthScores).length > 0 ? Math.round(Object.values(healthScores).reduce((s, h) => s + (h.health_score || 0), 0) / Object.values(healthScores).length) : 0;
-
-  const clientFormDialog = (
-    <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingClient(null); }}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>{editingClient ? "Edit Client" : "New Client"}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div><Label>Company Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="client-name" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} /></div>
-            <div><Label>Phone</Label><Input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
-          </div>
-          <div><Label>Address</Label><Input value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>Industry</Label><Input value={formData.industry} onChange={e => setFormData({ ...formData, industry: e.target.value })} /></div>
-            <div><Label>Contract</Label>
-              <Select value={formData.contract_type} onValueChange={v => setFormData({ ...formData, contract_type: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="annual">Annual</SelectItem><SelectItem value="per_incident">Per Incident</SelectItem></SelectContent>
-              </Select>
-            </div>
-            <div><Label>MRR ($)</Label><Input type="number" value={formData.mrr} onChange={e => setFormData({ ...formData, mrr: e.target.value })} /></div>
-          </div>
-        </div>
-        <DialogFooter><Button onClick={handleCreateClient} data-testid="save-client-btn">{editingClient ? "Update" : "Create"}</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-
-  // ========== DETAIL VIEW ==========
-  if (viewingClient && clientDetail) {
-    const { client, tickets, devices, contracts } = clientDetail;
-    const contacts = client.contacts || [];
-    const health = healthScores[client.id];
-    const hc = health ? healthRiskColor(health.risk_level) : null;
-    const openTickets = tickets.filter(t => t.status === "open" || t.status === "in_progress");
-    const onlineDevices = devices.filter(d => d.status === "online");
-
-    return (
-      <div className="space-y-5" data-testid="client-detail-view">
-        {/* Header */}
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="sm" onClick={() => { setViewingClient(null); setClientDetail(null); }} data-testid="back-to-clients" className="mt-1">
-            <ArrowLeft className="w-4 h-4 mr-1" />Back
-          </Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-3">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold ${hc ? `${hc.bg} ${hc.text} border ${hc.border}` : "bg-primary/10 text-primary border border-primary/20"}`}>
-                {client.name?.charAt(0)?.toUpperCase()}
-              </div>
-              <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold tracking-tight">{client.name}</h1>
-                  <Badge variant="outline" className="capitalize text-xs">{client.contract_type}</Badge>
-                  {health && (
-                    <Badge className={`${hc.bg} ${hc.text} border ${hc.border} text-xs`} data-testid="client-health-badge">
-                      <Heart className="w-3 h-3 mr-1" />{health.health_score}/100
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                  {client.industry && <span className="flex items-center gap-1"><Building2 className="w-3 h-3" />{client.industry}</span>}
-                  {client.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{client.email}</span>}
-                  {client.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{client.phone}</span>}
-                </div>
-              </div>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => openEditClient(client)} data-testid="edit-client-btn">
-            <Edit className="w-4 h-4 mr-1" />Edit
-          </Button>
-        </div>
-
-        {/* Summary Stat Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          {health && (
-            <Card className={`border ${hc.border} ${hc.bg}`} data-testid="health-score-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Health</p>
-                    <p className={`text-2xl font-bold ${hc.text}`}>{health.health_score}</p>
-                    <p className="text-[10px] text-muted-foreground capitalize">{health.risk_level}</p>
-                  </div>
-                  <Heart className={`w-5 h-5 ${hc.text}`} />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">MRR</p>
-                  <p className="text-2xl font-bold text-emerald-500">${client.mrr?.toLocaleString()}</p>
-                </div>
-                <DollarSign className="w-5 h-5 text-emerald-500/50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className={openTickets.length > 0 ? "border-blue-500/20" : ""}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Open Tickets</p>
-                  <p className="text-2xl font-bold">{openTickets.length}<span className="text-sm text-muted-foreground font-normal">/{tickets.length}</span></p>
-                </div>
-                <Ticket className="w-5 h-5 text-blue-500/50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Devices</p>
-                  <p className="text-2xl font-bold">{onlineDevices.length}<span className="text-sm text-muted-foreground font-normal">/{devices.length}</span></p>
-                  <p className="text-[10px] text-muted-foreground">online</p>
-                </div>
-                <Monitor className="w-5 h-5 text-purple-500/50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Contacts</p>
-                  <p className="text-2xl font-bold">{contacts.length}</p>
-                </div>
-                <Users className="w-5 h-5 text-cyan-500/50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Contracts</p>
-                  <p className="text-2xl font-bold">{contracts.length}</p>
-                </div>
-                <FileText className="w-5 h-5 text-amber-500/50" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Tabs defaultValue="contacts">
-              <TabsList className="grid grid-cols-11 w-full">
-                <TabsTrigger value="contacts"><User className="w-3 h-3 mr-1" />Contacts</TabsTrigger>
-                <TabsTrigger value="tickets"><Ticket className="w-3 h-3 mr-1" />Tickets</TabsTrigger>
-                <TabsTrigger value="devices"><Monitor className="w-3 h-3 mr-1" />Devices</TabsTrigger>
-                <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts</TabsTrigger>
-                <TabsTrigger value="remote" data-testid="client-remote-tab"><Laptop className="w-3 h-3 mr-1" />Remote</TabsTrigger>
-                <TabsTrigger value="achievements" data-testid="client-achievements-tab"><Trophy className="w-3 h-3 mr-1" />Awards</TabsTrigger>
-                <TabsTrigger value="readiness" data-testid="client-readiness-tab"><CheckCircle className="w-3 h-3 mr-1" />Ready</TabsTrigger>
-                <TabsTrigger value="timeline" data-testid="client-timeline-tab">Timeline</TabsTrigger>
-                <TabsTrigger value="subscriptions" data-testid="client-subscriptions-tab"><ShieldCheck className="w-3 h-3 mr-1" />Subs</TabsTrigger>
-                <TabsTrigger value="splynx" data-testid="client-splynx-tab"><Wifi className="w-3 h-3 mr-1" />Splynx</TabsTrigger>
-                <TabsTrigger value="m365" data-testid="client-m365-tab"><Cloud className="w-3 h-3 mr-1" />M365</TabsTrigger>
-              </TabsList>
-
-              {/* CONTACTS TAB */}
-              <TabsContent value="contacts" className="space-y-3">
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={() => { setEditingContact(null); setContactForm({ name: "", email: "", phone: "", role: "general", is_primary: false }); setIsContactOpen(true); }} data-testid="add-contact-btn">
-                    <UserPlus className="w-4 h-4 mr-1" />Add Contact
-                  </Button>
-                </div>
-                {contacts.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {contacts.map(contact => (
-                      <Card key={contact.id} className="relative hover:border-primary/20 transition-colors" data-testid={`contact-${contact.id}`}>
-                        <CardContent className="pt-4">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold ${roleColors[contact.role] || roleColors.general}`}>
-                                {contact.name?.charAt(0)?.toUpperCase()}
-                              </div>
-                              <div>
-                                <p className="font-medium flex items-center gap-1">
-                                  {contact.name}
-                                  {contact.is_primary && <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />}
-                                </p>
-                                <Badge variant="outline" className="text-[10px] capitalize">{contact.role}</Badge>
-                              </div>
-                            </div>
-                            <div className="flex gap-1">
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditContact(contact)}><Edit className="w-3 h-3" /></Button>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteContact(contact.id)}><Trash2 className="w-3 h-3" /></Button>
-                            </div>
-                          </div>
-                          <div className="mt-3 space-y-1">
-                            {contact.email && <div className="flex items-center gap-2 text-sm"><Mail className="w-3 h-3 text-muted-foreground" />{contact.email}</div>}
-                            {contact.phone && <div className="flex items-center gap-2 text-sm"><Phone className="w-3 h-3 text-muted-foreground" />{contact.phone}</div>}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-10"><UserPlus className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-muted-foreground">No contacts added yet</p></div>
-                )}
-              </TabsContent>
-
-              {/* TICKETS TAB - Matches main TicketsPage styling */}
-              <TabsContent value="tickets" className="space-y-4" data-testid="client-tickets-tab">
-                {(() => {
-                  const activeTickets = tickets.filter(t => t.status !== "closed" && t.status !== "resolved");
-                  const closedTickets = tickets.filter(t => t.status === "closed" || t.status === "resolved");
-                  const renderTicket = (t) => {
-                    const pc = priorityConfig[t.priority] || priorityConfig.medium;
-                    const sc = statusConfig[t.status] || statusConfig.open;
-                    const isClosed = t.status === "closed" || t.status === "resolved";
-                    const priorityBorder = t.priority === "critical" ? "border-l-red-500" : t.priority === "high" ? "border-l-orange-500" : t.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
-                    return (
-                      <Card
-                        key={t.id}
-                        className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${isClosed ? "opacity-60" : ""}`}
-                        data-testid={`client-ticket-${t.id}`}
-                      >
-                        <CardContent className="py-3 px-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
-                              <Ticket className="w-4 h-4 text-blue-400" />
-                            </div>
-                            <div className="flex flex-col items-center w-20 flex-shrink-0">
-                              <div className={`w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider ${isClosed ? "bg-muted/20 border border-border/30 text-muted-foreground/50" : "bg-muted/40 border border-border/50 text-muted-foreground"}`}>
-                                {t.ticket_number}
-                              </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <p className="font-medium text-sm truncate">{t.title}</p>
-                                {!t.assigned_to && !isClosed && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">UNASSIGNED</Badge>}
-                              </div>
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                {t.category && <span className="capitalize">{t.category}</span>}
-                                {t.assigned_name && <><span className="text-muted-foreground/30">|</span><span>{t.assigned_name}</span></>}
-                                {t.created_at && <><span className="text-muted-foreground/30">|</span><span>{formatDistanceToNow(new Date(t.created_at), { addSuffix: true })}</span></>}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3 flex-shrink-0">
-                              <div className="text-right">
-                                <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
-                                <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  };
-                  return tickets.length > 0 ? (
-                    <>
-                      {activeTickets.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Active Tickets</h4>
-                            <Badge variant="outline" className="text-[10px]">{activeTickets.length}</Badge>
-                          </div>
-                          {activeTickets.map(renderTicket)}
-                        </div>
-                      )}
-                      {closedTickets.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Resolved / Closed</h4>
-                            <Badge variant="outline" className="text-[10px]">{closedTickets.length}</Badge>
-                          </div>
-                          {closedTickets.map(renderTicket)}
-                        </div>
-                      )}
-                      {activeTickets.length === 0 && closedTickets.length > 0 && (
-                        <Card className="bg-emerald-500/5 border-emerald-500/20"><CardContent className="py-3 px-4 text-sm text-emerald-400 flex items-center gap-2"><CheckCircle className="w-4 h-4" />All tickets resolved</CardContent></Card>
-                      )}
-                    </>
-                  ) : (
-                    <Card className="border-dashed">
-                      <CardContent className="py-12 text-center">
-                        <Ticket className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
-                        <p className="text-muted-foreground">No tickets for this client</p>
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-              </TabsContent>
-
-              {/* DEVICES TAB */}
-              <TabsContent value="devices" className="space-y-2" data-testid="client-devices-tab">
-                {devices.length > 0 ? (
-                  <div className="space-y-2">
-                    {devices.map(d => {
-                      const isOnline = d.status === "online";
-                      return (
-                        <Card key={d.id} className={`border-l-4 ${isOnline ? "border-l-emerald-500" : "border-l-red-500"} hover:bg-muted/30 transition-all`} data-testid={`client-device-${d.id}`}>
-                          <CardContent className="py-3 px-4">
-                            <div className="flex items-center gap-4">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isOnline ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
-                                <Monitor className={`w-4 h-4 ${isOnline ? "text-emerald-400" : "text-red-400"}`} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium text-sm">{d.name}</p>
-                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                  {d.device_type && <span className="capitalize">{d.device_type}</span>}
-                                  {d.os && <><span className="text-muted-foreground/30">|</span><span>{d.os}</span></>}
-                                  {d.ip_address && <><span className="text-muted-foreground/30">|</span><span className="font-mono">{d.ip_address}</span></>}
-                                </div>
-                              </div>
-                              <Badge variant="outline" className={isOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px]" : "bg-red-500/10 text-red-500 border-red-500/20 text-[10px]"}>
-                                {isOnline ? "Online" : "Offline"}
-                              </Badge>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Card className="border-dashed"><CardContent className="py-12 text-center"><Monitor className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" /><p className="text-muted-foreground">No devices</p></CardContent></Card>
-                )}
-              </TabsContent>
-
-              {/* CONTRACTS TAB */}
-              <TabsContent value="contracts" className="space-y-2" data-testid="client-contracts-tab">
-                {contracts.length > 0 ? (
-                  <div className="space-y-2">
-                    {contracts.map(c => {
-                      const isActive = c.status === "active";
-                      return (
-                        <Card key={c.id} className={`border-l-4 ${isActive ? "border-l-emerald-500" : "border-l-amber-500"} hover:bg-muted/30 transition-all`} data-testid={`client-contract-${c.id}`}>
-                          <CardContent className="py-3 px-4">
-                            <div className="flex items-center gap-4">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isActive ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
-                                <FileText className={`w-4 h-4 ${isActive ? "text-emerald-400" : "text-amber-400"}`} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium text-sm">{c.name}</p>
-                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                  <span className="capitalize">{c.contract_type}</span>
-                                  {c.start_date && <><span className="text-muted-foreground/30">|</span><span>Start: {c.start_date?.split("T")[0]}</span></>}
-                                  {c.end_date && <><span className="text-muted-foreground/30">|</span><span>End: {c.end_date?.split("T")[0]}</span></>}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <span className="font-mono text-sm font-bold text-emerald-400">${c.monthly_value?.toLocaleString()}/mo</span>
-                                <Badge variant="outline" className={isActive ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px]" : "bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px]"}>
-                                  {c.status?.toUpperCase() || "ACTIVE"}
-                                </Badge>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Card className="border-dashed"><CardContent className="py-12 text-center"><FileText className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" /><p className="text-muted-foreground">No contracts</p></CardContent></Card>
-                )}
-              </TabsContent>
-
-              {/* REMOTE ACCESS TAB */}
-              <TabsContent value="remote" className="space-y-4" data-testid="client-remote-tab-content">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Laptop className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm font-medium">RustDesk Remote Access</span>
-                    <Badge variant="outline" className="text-[10px]">{rustdeskDevices.length} configured</Badge>
-                  </div>
-                  <Button size="sm" onClick={() => { setRustdeskForm({ device_name: "", rustdesk_id: "", rustdesk_password: "", os: "", notes: "", linked_device_id: "" }); setIsRustdeskOpen(true); }} data-testid="add-rustdesk-btn">
-                    <Plus className="w-3 h-3 mr-1" />Add Device
-                  </Button>
-                </div>
-                {rustdeskDevices.length > 0 ? (
-                  <div className="space-y-2">
-                    {rustdeskDevices.map(rd => (
-                      <div key={rd.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors" data-testid={`rustdesk-device-${rd.id}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Laptop className="w-5 h-5 text-blue-500" /></div>
-                          <div>
-                            <p className="text-sm font-medium">{rd.device_name}</p>
-                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                              <span className="font-mono">ID: {rd.rustdesk_id}</span>
-                              {rd.os && <Badge variant="outline" className="text-[9px] h-4">{rd.os}</Badge>}
-                              {rd.last_connected && <span>Last: {new Date(rd.last_connected).toLocaleDateString()}</span>}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700" onClick={() => handleConnectRustdesk(rd.id)} data-testid={`connect-rustdesk-${rd.id}`}>
-                            <ExternalLink className="w-3 h-3 mr-1" />Connect
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteRustdeskDevice(rd.id)}><Trash2 className="w-3 h-3" /></Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <Card className="border-dashed">
-                    <CardContent className="py-8 text-center">
-                      <Laptop className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-30" />
-                      <p className="text-sm text-muted-foreground mb-1">No RustDesk devices configured</p>
-                      <p className="text-xs text-muted-foreground">Add a RustDesk device to enable remote access for this client's systems</p>
-                    </CardContent>
-                  </Card>
-                )}
-                <Card className="bg-blue-500/[0.02] border-blue-500/20">
-                  <CardContent className="py-3 px-4">
-                    <div className="flex items-start gap-2">
-                      <Shield className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-blue-400">How it works</p>
-                        <p className="text-[11px] text-muted-foreground">Install the RustDesk client on the remote machine, note the Device ID and password, then add them here. You can then initiate remote sessions directly from NexusOps.</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* ACTIVITY TIMELINE TAB */}
-              <TabsContent value="timeline" className="space-y-2" data-testid="client-timeline">
-                {clientTimeline.length > 0 ? (
-                  <ScrollArea className="h-[400px]">
-                    <div className="space-y-2">
-                      {clientTimeline.map((item, i) => {
-                        const typeColors = { ticket: "bg-blue-500/10 text-blue-500", invoice: "bg-green-500/10 text-green-500", time_entry: "bg-purple-500/10 text-purple-500" };
-                        const typeLabels = { ticket: "Ticket", invoice: "Invoice", time_entry: "Time" };
-                        return (
-                          <div key={`${item.type}-${item.id || i}`} className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50">
-                            <Badge className={`text-[9px] ${typeColors[item.type] || "bg-muted"}`}>{typeLabels[item.type] || item.type}</Badge>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">{item.title}</p>
-                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                                {item.ticket_number && <span>#{item.ticket_number}</span>}
-                                {item.status && <Badge variant="outline" className="text-[9px]">{item.status}</Badge>}
-                                {item.amount != null && <span className="font-mono">${item.amount.toLocaleString()}</span>}
-                                {item.minutes != null && <span>{item.minutes} min {item.billable ? "(billable)" : ""}</span>}
-                              </div>
-                            </div>
-                            {item.timestamp && <span className="text-[10px] text-muted-foreground">{item.timestamp.split("T")[0]}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                ) : (
-                  <div className="text-center py-12 text-muted-foreground"><p>No activity recorded yet</p></div>
-                )}
-              </TabsContent>
-
-              {/* SUBSCRIPTIONS TAB */}
-              <TabsContent value="subscriptions" className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground">Suped Organization ID</Label>
-                    <Input value={subscriptions?.suped_org_id || ""} onChange={e => setSubscriptions({ ...subscriptions, suped_org_id: e.target.value })} placeholder="Enter Suped Org ID to enable DMARC reporting" data-testid="suped-org-id-input" className="font-mono text-sm" />
-                  </div>
-                  <Button size="sm" className="mt-5" onClick={handleSaveSubscriptions} data-testid="save-subscriptions-btn">Save</Button>
-                  {subscriptions?.suped_org_id && (
-                    <Button size="sm" variant="outline" className="mt-5" onClick={() => fetchDmarcRecords()} data-testid="fetch-dmarc-btn"><MailCheck className="w-3 h-3 mr-1" />Fetch DMARC</Button>
-                  )}
-                </div>
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4" />Email Security Subscriptions</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {supedServices.map(svc => {
-                      const isActive = subscriptions?.services?.[svc.key] || false;
-                      return (
-                        <div key={svc.key} className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${isActive ? "bg-emerald-500/10 border-emerald-500/40 hover:bg-emerald-500/15" : "bg-red-500/8 border-red-500/30 hover:bg-red-500/12"}`} onClick={() => toggleService(svc.key)} data-testid={`subscription-${svc.key}`}>
-                          <div className="flex items-center gap-3">
-                            {isActive ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <XCircle className="w-5 h-5 text-red-400" />}
-                            <div>
-                              <p className={`text-sm font-medium ${isActive ? "text-emerald-300" : "text-red-300"}`}>{svc.name}</p>
-                              <p className="text-[11px] text-muted-foreground">{svc.description}</p>
-                            </div>
-                          </div>
-                          <Badge className={`text-[10px] ${isActive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : "bg-red-500/20 text-red-400 border-red-500/40"}`}>{isActive ? "ACTIVE" : "NOT ACTIVE"}</Badge>
-                        </div>
-                      );
-                    })}
-                    <div className="pt-2 flex justify-end"><Button size="sm" onClick={handleSaveSubscriptions} data-testid="save-subs-bottom-btn">Save Changes</Button></div>
-                  </CardContent>
-                </Card>
-                {dmarcLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
-                {acronisSubs.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-blue-500" />Acronis Cyber Protect Subscriptions</CardTitle></CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {acronisSubs.map((s, i) => (
-                          <div key={`k-${i}`} className="flex items-center justify-between p-2.5 rounded-lg border bg-blue-500/[0.02] border-blue-500/10">
-                            <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" /><div><p className="text-sm font-medium">{s.service_name}</p><p className="text-[10px] text-muted-foreground">{s.quantity} {s.unit} @ ${s.price_per_unit}/{s.unit}</p></div></div>
-                            <div className="text-right"><p className="text-sm font-bold">${s.monthly_cost}/mo</p><Badge className={s.usage_percent > 90 ? "bg-red-500/10 text-red-500 text-[9px]" : "bg-emerald-500/10 text-emerald-500 text-[9px]"}>{s.usage_percent}%</Badge></div>
-                          </div>
-                        ))}
-                        <div className="flex justify-end pt-1 text-sm font-medium">Total Acronis MRR: <span className="text-blue-400 ml-2">${acronisSubs.reduce((a, s) => a + (s.monthly_cost || 0), 0).toFixed(2)}/mo</span></div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-                {acronisBilling?.linked && (
-                  <Card data-testid="acronis-billing-widget" className="border-emerald-500/20">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-emerald-500" />
-                        Acronis Live Usage — {acronisBilling.period}
-                        <Badge variant="outline" className="ml-auto text-[10px] border-emerald-500/30 text-emerald-400">Live from API</Badge>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {acronisBilling.total === 0 ? (
-                        <p className="text-xs text-muted-foreground py-2">No billable usage this period</p>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between mb-3 p-3 rounded-md bg-emerald-500/5 border border-emerald-500/10">
-                            <div>
-                              <p className="text-[11px] text-muted-foreground">This month's Acronis cost</p>
-                              <p className="text-2xl font-bold text-emerald-400">{acronisBilling.currency} {acronisBilling.total.toFixed(2)}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-[10px] text-muted-foreground">Last synced</p>
-                              <p className="text-[11px]">{acronisBilling.last_synced ? new Date(acronisBilling.last_synced).toLocaleDateString() : "Never"}</p>
-                              {acronisBilling.last_synced_total != null && Math.abs(acronisBilling.last_synced_total - acronisBilling.total) > 0.01 && (
-                                <p className="text-[10px] text-amber-400 mt-0.5">Δ {((acronisBilling.total - acronisBilling.last_synced_total)).toFixed(2)} since last sync</p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            {acronisBilling.line_items.map((li, i) => (
-                              <div key={i} className="flex items-center justify-between text-xs py-1.5 px-2 rounded hover:bg-muted/30">
-                                <div>
-                                  <span className="font-medium">{li.label}</span>
-                                  <span className="text-muted-foreground ml-2">{li.quantity} {li.unit} × {acronisBilling.currency} {li.unit_price.toFixed(4)}</span>
-                                </div>
-                                <span className="font-semibold">{acronisBilling.currency} {li.total.toFixed(2)}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="pt-2 mt-2 border-t flex items-center justify-end">
-                            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => window.open("/backup-compliance", "_self")} data-testid="view-billing-btn">
-                              View Full Billing →
-                            </Button>
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-                {dmarcLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
-                {dmarcRecords && !dmarcLoading && (
-                  <Card data-testid="dmarc-report-card">
-                    <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><MailCheck className="w-4 h-4 text-blue-500" />DMARC Report ({dmarcRecords.summary?.period_days || 30} days)</CardTitle></CardHeader>
-                    <CardContent>
-                      {dmarcRecords.message ? (
-                        <div className="flex items-center gap-2 text-sm text-amber-400 py-4"><AlertCircle className="w-4 h-4" />{dmarcRecords.message}</div>
-                      ) : dmarcRecords.summary ? (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            <div className="bg-muted/30 rounded-lg p-3"><p className="text-xs text-muted-foreground">Total Emails</p><p className="text-xl font-bold">{dmarcRecords.summary.total_emails?.toLocaleString()}</p></div>
-                            <div className="bg-emerald-500/10 rounded-lg p-3"><p className="text-xs text-emerald-400">Authorized</p><p className="text-xl font-bold text-emerald-400">{dmarcRecords.summary.authorized?.toLocaleString()}</p></div>
-                            <div className="bg-red-500/10 rounded-lg p-3"><p className="text-xs text-red-400">Rejected</p><p className="text-xl font-bold text-red-400">{dmarcRecords.summary.rejected?.toLocaleString()}</p></div>
-                            <div className="bg-amber-500/10 rounded-lg p-3"><p className="text-xs text-amber-400">Compliance</p><p className="text-xl font-bold text-amber-400">{dmarcRecords.summary.compliance_rate}%</p></div>
-                          </div>
-                          {dmarcRecords.summary.top_sources?.length > 0 && (
-                            <div>
-                              <p className="text-xs font-semibold text-muted-foreground mb-2">Top Sending Sources</p>
-                              {dmarcRecords.summary.top_sources.map((s, i) => (
-                                <div key={`k-${i}`} className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">{s.source}</span><span className="font-mono">{s.count.toLocaleString()}</span></div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-center py-6 text-sm text-muted-foreground">No DMARC records found for the selected period</p>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-
-              {/* SPLYNX TAB */}
-              <TabsContent value="splynx" className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground">Splynx Customer ID</Label>
-                    <Input value={splynxLink?.splynx_customer_id || ""} onChange={e => setSplynxLink({ ...splynxLink, splynx_customer_id: e.target.value })} placeholder="Enter Splynx Customer ID" data-testid="splynx-customer-id-input" className="font-mono text-sm" />
-                  </div>
-                  <Button size="sm" className="mt-5" onClick={handleSaveSplynxLink} data-testid="save-splynx-link-btn">Link</Button>
-                  {splynxLink?.linked && (
-                    <Button size="sm" variant="outline" className="mt-5" onClick={fetchSplynxServices} data-testid="fetch-splynx-btn"><RefreshCw className="w-3 h-3 mr-1" />Fetch Services</Button>
-                  )}
-                </div>
-                {splynxLoading && <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>}
-                {splynxServices && !splynxLoading && (
-                  <>
-                    {splynxServices.error && (
-                      <div className="flex items-center gap-2 text-sm text-amber-400 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20"><AlertTriangle className="w-4 h-4" />{splynxServices.error}</div>
-                    )}
-                    {splynxServices.customer && (
-                      <Card>
-                        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><User className="w-4 h-4" />Splynx Customer</CardTitle></CardHeader>
-                        <CardContent className="text-sm space-y-1">
-                          <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span>{splynxServices.customer.name}</span></div>
-                          <div className="flex justify-between"><span className="text-muted-foreground">Login</span><span className="font-mono">{splynxServices.customer.login}</span></div>
-                          {splynxServices.customer.email && <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span>{splynxServices.customer.email}</span></div>}
-                          <div className="flex justify-between"><span className="text-muted-foreground">Status</span>
-                            <Badge className={splynxServices.customer.status === "active" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}>{splynxServices.customer.status?.toUpperCase()}</Badge>
-                          </div>
-                          {splynxServices.billing && (
-                            <>
-                              <Separator className="my-2" />
-                              <div className="flex justify-between"><span className="text-muted-foreground">Billing Type</span><span className="capitalize">{splynxServices.billing.billing_type || "-"}</span></div>
-                              <div className="flex justify-between"><span className="text-muted-foreground">Payment Method</span><span className="capitalize">{splynxServices.billing.payment_method || "-"}</span></div>
-                              {splynxServices.billing.deposit !== undefined && <div className="flex justify-between"><span className="text-muted-foreground">Deposit</span><span>${splynxServices.billing.deposit}</span></div>}
-                            </>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
-                    <Card data-testid="splynx-services-card">
-                      <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Zap className="w-4 h-4 text-blue-500" />Services ({splynxServices.services.length})</CardTitle></CardHeader>
-                      <CardContent className="space-y-2">
-                        {splynxServices.services.length > 0 ? splynxServices.services.map((svc, i) => {
-                          const isActive = (svc.status || "active").toLowerCase() === "active";
-                          const isSuspended = ["disabled", "blocked", "stopped"].includes((svc.status || "").toLowerCase());
-                          return (
-                            <div key={svc.id || i} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isActive ? "bg-emerald-500/8 border-emerald-500/30" : isSuspended ? "bg-red-500/8 border-red-500/30" : "bg-amber-500/8 border-amber-500/30"}`} data-testid={`splynx-service-${svc.id || i}`}>
-                              <div className="flex items-center gap-3">
-                                {isActive ? <Wifi className="w-5 h-5 text-emerald-400" /> : <WifiOff className="w-5 h-5 text-red-400" />}
-                                <div>
-                                  <p className={`text-sm font-medium ${isActive ? "text-emerald-300" : isSuspended ? "text-red-300" : "text-amber-300"}`}>{svc.description || svc.tariff_name || svc.service_name || "Service"}</p>
-                                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                    <Badge variant="outline" className="text-[9px] h-4 capitalize">{svc.service_type}</Badge>
-                                    {svc.tariff_name && <span>Plan: {svc.tariff_name}</span>}
-                                    {svc.login && <span>Login: {svc.login}</span>}
-                                    {svc.router && <span>Router: {svc.router}</span>}
-                                    {svc.sector && <span>Sector: {svc.sector}</span>}
-                                  </div>
-                                  {(svc.taking_ipv4 || svc.ipv4) && <p className="text-[10px] font-mono text-muted-foreground mt-0.5">IP: {svc.taking_ipv4 || svc.ipv4}</p>}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                {svc.price && <span className="font-mono text-sm font-bold">${svc.price}</span>}
-                                <Badge className={`text-[10px] ${isActive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : isSuspended ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-amber-500/20 text-amber-400 border-amber-500/40"}`}>
-                                  {isActive ? "ACTIVE" : isSuspended ? "SUSPENDED - NON PAYMENT" : (svc.status || "UNKNOWN").toUpperCase()}
-                                </Badge>
-                              </div>
-                            </div>
-                          );
-                        }) : (
-                          <p className="text-center py-6 text-sm text-muted-foreground">No services found in Splynx for this customer</p>
-                        )}
-                      </CardContent>
-                    </Card>
-                    {splynxServices.invoices && splynxServices.invoices.length > 0 && (
-                      <Card data-testid="splynx-invoices-card">
-                        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><CreditCard className="w-4 h-4 text-indigo-500" />Recent Invoices ({splynxServices.invoices.length})</CardTitle></CardHeader>
-                        <CardContent className="p-0">
-                          <Table>
-                            <TableHeader><TableRow><TableHead>Invoice #</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Paid</TableHead></TableRow></TableHeader>
-                            <TableBody>
-                              {splynxServices.invoices.slice(0, 15).map((inv, i) => {
-                                const isPaid = inv.status === "paid" || parseFloat(inv.payment_amount || 0) >= parseFloat(inv.total || 0);
-                                return (
-                                  <TableRow key={inv.id || i}>
-                                    <TableCell className="font-mono text-xs">{inv.number || inv.id}</TableCell>
-                                    <TableCell className="text-xs">{inv.date_created || inv.date || "-"}</TableCell>
-                                    <TableCell className="font-mono">${parseFloat(inv.total || 0).toFixed(2)}</TableCell>
-                                    <TableCell><Badge className={isPaid ? "bg-emerald-500/20 text-emerald-400 text-[10px]" : "bg-red-500/20 text-red-400 text-[10px]"}>{isPaid ? "Paid" : inv.status || "Unpaid"}</Badge></TableCell>
-                                    <TableCell className="font-mono text-xs">${parseFloat(inv.payment_amount || 0).toFixed(2)}</TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </>
-                )}
-                {!splynxLink?.linked && !splynxLoading && (
-                  <Card className="border-dashed">
-                    <CardContent className="py-8 text-center">
-                      <Wifi className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-30" />
-                      <p className="text-sm text-muted-foreground mb-1">No Splynx customer linked</p>
-                      <p className="text-xs text-muted-foreground">Enter the Splynx Customer ID above to link this client and view their services & billing status</p>
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-
-              {/* MICROSOFT 365 TAB */}
-              <TabsContent value="m365" className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Cloud className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm font-medium">Microsoft 365 Integration</span>
-                    {m365Config?.sync_status === "synced" && <Badge className="bg-green-600 text-white text-xs">Synced</Badge>}
-                  </div>
-                  <Button size="sm" variant="outline" onClick={() => { setM365TenantId(m365Config?.tenant_id || ""); setM365Domain(m365Config?.domain || ""); setM365SyncDialog(true); }} data-testid="m365-sync-btn">
-                    <RefreshCw className="w-3.5 h-3.5 mr-1" />{m365Config ? "Re-sync" : "Connect M365"}
-                  </Button>
-                </div>
-                {m365Config ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-3 gap-3">
-                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Tenant ID</p><p className="text-sm font-mono truncate">{m365Config.tenant_id}</p></CardContent></Card>
-                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Domain</p><p className="text-sm">{m365Config.domain}</p></CardContent></Card>
-                      <Card><CardContent className="pt-3"><p className="text-xs text-muted-foreground">Last Synced</p><p className="text-sm">{m365Config.last_synced ? new Date(m365Config.last_synced).toLocaleDateString() : "Never"}</p></CardContent></Card>
-                    </div>
-                    {m365Users.length > 0 ? (
-                      <Table>
-                        <TableHeader><TableRow><TableHead>Display Name</TableHead><TableHead>UPN / Email</TableHead><TableHead>License Type</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                          {m365Users.map((u, i) => (
-                            <TableRow key={`k-${i}`}>
-                              <TableCell className="font-medium">{u.display_name || u.name}</TableCell>
-                              <TableCell className="text-sm">{u.upn || u.email}</TableCell>
-                              <TableCell><Badge variant="outline" className="text-xs">{u.license_type || "Unknown"}</Badge></TableCell>
-                              <TableCell><Badge className={u.status === "active" ? "bg-green-600 text-white text-xs" : "bg-zinc-600 text-white text-xs"}>{u.status || "active"}</Badge></TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    ) : (
-                      <p className="text-center py-6 text-muted-foreground text-sm">No users synced yet. Configure CIPP integration in Settings to sync UPNs and licenses.</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 space-y-2">
-                    <Cloud className="w-12 h-12 mx-auto text-muted-foreground/30" />
-                    <p className="text-muted-foreground text-sm">No Microsoft 365 tenancy linked</p>
-                    <p className="text-xs text-muted-foreground">Click "Connect M365" to link this client's Microsoft 365 tenant for user & license sync via CIPP.</p>
-                  </div>
-                )}
-              </TabsContent>
-
-              {/* ACHIEVEMENTS TAB */}
-              <TabsContent value="achievements" className="space-y-4">
-                {clientAchievements ? (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">{clientAchievements.total_earned} of {clientAchievements.total_available} achievements earned</p>
-                      {clientLoyalty && (
-                        <Badge className={`text-xs ${clientLoyalty.tier === "platinum" ? "bg-slate-300/20 text-slate-300 border-slate-400/30" : clientLoyalty.tier === "gold" ? "bg-yellow-400/20 text-yellow-400 border-yellow-500/30" : clientLoyalty.tier === "silver" ? "bg-slate-400/20 text-slate-400 border-slate-500/30" : "bg-amber-600/20 text-amber-600 border-amber-600/30"}`}>
-                          <Trophy className="w-3 h-3 mr-1" />{clientLoyalty.tier?.toUpperCase()} - {clientLoyalty.loyalty_points} pts
-                        </Badge>
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">SLA Shields</h4>
-                      <div className="grid grid-cols-5 gap-2">
-                        {clientAchievements.achievements.filter(a => a.type === "sla").map(ach => (
-                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current opacity-100" : "opacity-30 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
-                            <svg className="w-10 h-10 mx-auto mb-1" viewBox="0 0 24 24" fill="none">
-                              <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill={ach.color} opacity={ach.earned ? "0.2" : "0.05"} />
-                              <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" stroke={ach.color} strokeWidth="1.5" fill="none" />
-                              {ach.earned && <path d="M9 12l2 2 4-4" stroke={ach.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
-                            </svg>
-                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
-                            <p className="text-[8px] text-muted-foreground">{ach.description}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Tenure Milestones</h4>
-                      <div className="grid grid-cols-4 gap-2">
-                        {clientAchievements.achievements.filter(a => a.type === "tenure").map(ach => (
-                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current" : "opacity-40 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
-                            <div className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-1 ${ach.earned ? "" : "bg-muted/30"}`} style={ach.earned ? { background: ach.color + "20" } : {}}>
-                              <Award className="w-6 h-6" style={{ color: ach.earned ? ach.color : undefined }} />
-                            </div>
-                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
-                            {!ach.earned && ach.progress !== undefined && (
-                              <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full rounded-full" style={{ width: `${ach.progress}%`, background: ach.color }} /></div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Loyalty Badges</h4>
-                      <div className="grid grid-cols-4 gap-2">
-                        {clientAchievements.achievements.filter(a => a.type === "loyalty").map(ach => (
-                          <div key={ach.id} className={`rounded-lg p-3 text-center border transition-all ${ach.earned ? "border-current" : "opacity-40 border-muted"}`} style={ach.earned ? { borderColor: ach.color + "60" } : {}}>
-                            <Star className="w-8 h-8 mx-auto mb-1" style={{ color: ach.earned ? ach.color : undefined }} />
-                            <p className="text-[10px] font-semibold" style={{ color: ach.earned ? ach.color : undefined }}>{ach.label}</p>
-                            <p className="text-[8px] text-muted-foreground">{ach.description}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                ) : <div className="text-center py-12 text-muted-foreground"><Trophy className="w-12 h-12 mx-auto opacity-30 mb-2" /><p className="text-sm">Loading achievements...</p></div>}
-              </TabsContent>
-
-              {/* READINESS TAB */}
-              <TabsContent value="readiness" className="space-y-4">
-                {clientReadiness ? (
-                  <>
-                    <div className="flex items-center gap-4">
-                      <div className="relative w-20 h-20">
-                        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
-                          <path d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted/30" />
-                          <path d="M18 2.0845a 15.9155 15.9155 0 0 1 0 31.831a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${clientReadiness.readiness_score}, 100`} className={clientReadiness.readiness_score >= 80 ? "text-emerald-400" : clientReadiness.readiness_score >= 50 ? "text-amber-400" : "text-red-400"} />
-                        </svg>
-                        <span className={`absolute inset-0 flex items-center justify-center text-xl font-black ${clientReadiness.readiness_score >= 80 ? "text-emerald-400" : clientReadiness.readiness_score >= 50 ? "text-amber-400" : "text-red-400"}`}>{clientReadiness.readiness_score}%</span>
-                      </div>
-                      <div>
-                        <p className="font-semibold">Portal Readiness Score</p>
-                        <p className="text-sm text-muted-foreground">{clientReadiness.completed} of {clientReadiness.total} checks completed</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      {clientReadiness.checks.map((check, i) => (
-                        <div key={`k-${i}`} className={`flex items-center gap-3 p-2.5 rounded-lg border ${check.done ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/20 bg-red-500/5"}`}>
-                          {check.done ? <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" /> : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
-                          <div>
-                            <p className="text-sm font-medium">{check.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{check.description}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-12 h-12 mx-auto opacity-30 mb-2" /><p className="text-sm">Loading readiness...</p></div>}
-              </TabsContent>
-
-            </Tabs>
-          </div>
-
-          {/* Right sidebar - Client info */}
-          <Card className="h-fit">
-            <CardContent className="pt-4 space-y-3">
-              <h3 className="font-semibold text-sm flex items-center gap-2"><Building2 className="w-4 h-4 text-primary" />Client Info</h3>
-              <Separator />
-              {client.email && <div className="flex items-center gap-2 text-sm"><Mail className="w-4 h-4 text-muted-foreground" />{client.email}</div>}
-              {client.phone && <div className="flex items-center gap-2 text-sm"><Phone className="w-4 h-4 text-muted-foreground" />{client.phone}</div>}
-              {client.address && <div className="flex items-center gap-2 text-sm"><MapPin className="w-4 h-4 text-muted-foreground" />{client.address}</div>}
-              {client.industry && <div className="flex items-center gap-2 text-sm"><Building2 className="w-4 h-4 text-muted-foreground" />{client.industry}</div>}
-              <Separator />
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Contract</span><Badge variant="outline" className="capitalize text-[10px]">{client.contract_type}</Badge></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">MRR</span><span className="font-bold text-emerald-500">${client.mrr?.toLocaleString()}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Open Tickets</span><span className={openTickets.length > 0 ? "text-blue-400 font-medium" : ""}>{openTickets.length}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Online Devices</span><span className={`font-medium ${onlineDevices.length === devices.length && devices.length > 0 ? "text-emerald-400" : onlineDevices.length === 0 && devices.length > 0 ? "text-red-400" : ""}`}>{onlineDevices.length}/{devices.length}</span></div>
-              {health && (
-                <>
-                  <Separator />
-                  <h3 className="font-semibold text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-primary" />Health Breakdown</h3>
-                  {Object.entries(health.breakdown || {}).map(([key, val]) => {
-                    const maxVal = key === "tickets" ? 30 : key === "sla" || key === "devices" || key === "payments" ? 20 : 10;
-                    const pct = Math.round((val / maxVal) * 100);
-                    return (
-                      <div key={key} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground capitalize">{key}</span>
-                          <span className="font-mono">{val}/{maxVal}</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ADD/EDIT CONTACT DIALOG */}
-        <Dialog open={isContactOpen} onOpenChange={setIsContactOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>{editingContact ? "Edit Contact" : "Add Contact"}</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Name</Label><Input value={contactForm.name} onChange={e => setContactForm({ ...contactForm, name: e.target.value })} data-testid="contact-name" /></div>
-              <div><Label>Email</Label><Input value={contactForm.email} onChange={e => setContactForm({ ...contactForm, email: e.target.value })} data-testid="contact-email" /></div>
-              <div><Label>Phone</Label><Input value={contactForm.phone} onChange={e => setContactForm({ ...contactForm, phone: e.target.value })} data-testid="contact-phone" /></div>
-              <div><Label>Role</Label>
-                <Select value={contactForm.role} onValueChange={v => setContactForm({ ...contactForm, role: v })}>
-                  <SelectTrigger data-testid="contact-role"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="primary">Primary</SelectItem>
-                    <SelectItem value="billing">Billing</SelectItem>
-                    <SelectItem value="technical">Technical</SelectItem>
-                    <SelectItem value="general">General</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter><Button onClick={handleAddContact} data-testid="save-contact-btn">{editingContact ? "Update" : "Add"} Contact</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* M365 SYNC DIALOG */}
-        <Dialog open={m365SyncDialog} onOpenChange={setM365SyncDialog}>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>Connect Microsoft 365 Tenancy</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Link this client's Microsoft 365 tenant to sync user accounts, licenses, and UPNs via CIPP integration.</p>
-              <div><Label>Tenant ID</Label><Input value={m365TenantId} onChange={e => setM365TenantId(e.target.value)} placeholder="e.g., 12345678-1234-1234-1234-123456789abc" data-testid="m365-tenant-id" /></div>
-              <div><Label>Primary Domain</Label><Input value={m365Domain} onChange={e => setM365Domain(e.target.value)} placeholder="e.g., contoso.onmicrosoft.com" data-testid="m365-domain" /></div>
-              <div className="p-3 rounded-lg border bg-muted/30">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground"><Shield className="w-3.5 h-3.5" /><span>Requires CIPP integration to be configured in Settings for full user/license sync.</span></div>
-              </div>
-            </div>
-            <DialogFooter><Button onClick={syncM365} data-testid="confirm-m365-sync"><Cloud className="w-4 h-4 mr-1" />Connect & Sync</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {clientFormDialog}
-
-        {/* RUSTDESK DEVICE DIALOG */}
-        <Dialog open={isRustdeskOpen} onOpenChange={setIsRustdeskOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Add RustDesk Device</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Device Name</Label><Input value={rustdeskForm.device_name} onChange={e => setRustdeskForm({ ...rustdeskForm, device_name: e.target.value })} placeholder="e.g., Reception PC" data-testid="rustdesk-device-name" /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>RustDesk ID</Label><Input value={rustdeskForm.rustdesk_id} onChange={e => setRustdeskForm({ ...rustdeskForm, rustdesk_id: e.target.value })} placeholder="e.g., 123456789" data-testid="rustdesk-id" /></div>
-                <div><Label>Password</Label><Input value={rustdeskForm.rustdesk_password} onChange={e => setRustdeskForm({ ...rustdeskForm, rustdesk_password: e.target.value })} placeholder="RustDesk password" data-testid="rustdesk-password" /></div>
-              </div>
-              <div><Label>Operating System</Label><Input value={rustdeskForm.os} onChange={e => setRustdeskForm({ ...rustdeskForm, os: e.target.value })} placeholder="e.g., Windows 11" /></div>
-              <div><Label>Link to Existing Device (optional)</Label>
-                <Select value={rustdeskForm.linked_device_id || "none"} onValueChange={v => setRustdeskForm({ ...rustdeskForm, linked_device_id: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="Select device" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">-- No linked device --</SelectItem>
-                    {clientDetail?.devices?.map(d => <SelectItem key={d.id} value={d.id}>{d.name} ({d.ip_address || d.os})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Notes</Label><Input value={rustdeskForm.notes} onChange={e => setRustdeskForm({ ...rustdeskForm, notes: e.target.value })} placeholder="Additional notes" /></div>
-            </div>
-            <DialogFooter><Button onClick={handleAddRustdeskDevice} data-testid="save-rustdesk-btn"><Laptop className="w-4 h-4 mr-1" />Add Device</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    );
-  }
-
-  // ========== LIST VIEW ==========
   return (
-    <div className="space-y-5" data-testid="clients-page">
+    <TooltipProvider delayDuration={200}>
+      <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 flex flex-col" data-testid="clients-page">
+        {/* Portfolio metric strip */}
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-10">
+          <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : null} color="indigo" />
+          <TopMetric label="Portfolio MRR" value={`$${(s.total_mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="emerald" />
+          <TopMetric label="Avg Health" value={`${s.avg_health || 0}`} color={s.avg_health >= 80 ? "emerald" : s.avg_health >= 60 ? "amber" : "rose"} />
+          <TopMetric label="At Risk" value={s.at_risk || 0} trend={s.at_risk ? "requires attention" : "healthy"} color={s.at_risk ? "amber" : "emerald"} />
+          <TopMetric label="Acronis Linked" value={`${s.with_acronis || 0}/${s.client_count || 0}`} color="sky" />
+          <TopMetric label="Pax8 Linked" value={`${s.with_pax8 || 0}/${s.client_count || 0}`} color="indigo" />
+        </div>
+
+        <div className="flex flex-1 min-h-0">
+          {/* Master list */}
+          <aside className="w-full md:w-[40%] lg:w-[32%] border-r border-zinc-800 flex flex-col bg-zinc-950">
+            <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-zinc-500 shrink-0" />
+                <Input
+                  ref={searchRef}
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search clients (press /)..."
+                  className="h-8 bg-transparent border-0 focus-visible:ring-0 focus-visible:border-0 px-1 text-sm"
+                  data-testid="clients-search-input"
+                />
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setCreateDialog(true)} data-testid="new-client-btn">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Select value={lifecycleFilter} onValueChange={setLifecycleFilter}>
+                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-lifecycle"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All stages</SelectItem>
+                    <SelectItem value="prospect">Prospect</SelectItem>
+                    <SelectItem value="onboarding">Onboarding</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="at_risk">At Risk</SelectItem>
+                    <SelectItem value="churned">Churned</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={riskFilter} onValueChange={setRiskFilter}>
+                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-risk"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All health</SelectItem>
+                    <SelectItem value="healthy">Healthy 85+</SelectItem>
+                    <SelectItem value="attention">Needs attention</SelectItem>
+                    <SelectItem value="at_risk">At risk</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={integrationFilter} onValueChange={setIntegrationFilter}>
+                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-integration"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All integrations</SelectItem>
+                    <SelectItem value="acronis">Acronis linked</SelectItem>
+                    <SelectItem value="pax8">Pax8 linked</SelectItem>
+                    <SelectItem value="m365">M365 linked</SelectItem>
+                    <SelectItem value="rmm">RMM active</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(search || lifecycleFilter !== "all" || riskFilter !== "all" || integrationFilter !== "all") && (
+                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={() => { setSearch(""); setLifecycleFilter("all"); setRiskFilter("all"); setIntegrationFilter("all"); }}>
+                    <X className="w-2.5 h-2.5 mr-1" />Clear
+                  </Button>
+                )}
+              </div>
+              <div className="text-[10px] text-zinc-500 font-mono flex justify-between px-1">
+                <span>{filtered.length} of {data.clients?.length || 0}</span>
+                <span>press j/k to navigate · / search · ⌘N new</span>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="p-8 text-center text-sm text-zinc-500">
+                  <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                  No clients match these filters.
+                </div>
+              ) : (
+                filtered.map(c => (
+                  <ClientListItem key={c.id} client={c} selected={selectedId === c.id} onClick={() => setSelectedId(c.id)} />
+                ))
+              )}
+            </div>
+          </aside>
+
+          {/* Detail pane */}
+          <main className="flex-1 bg-zinc-900/30 overflow-y-auto relative">
+            {!selectedClient ? (
+              <div className="h-full flex items-center justify-center text-zinc-500 text-sm">Select a client to view details</div>
+            ) : (
+              <ClientDetailPane
+                client={selectedClient}
+                detail={detail}
+                activity={activity}
+                tab={detailTab}
+                setTab={setDetailTab}
+                loading={detailLoading}
+              />
+            )}
+          </main>
+        </div>
+
+        {/* Create dialog */}
+        <Dialog open={createDialog} onOpenChange={setCreateDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New Client</DialogTitle>
+              <DialogDescription>Add a new client to your portfolio.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input placeholder="Client name" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} data-testid="new-client-name" />
+              <Input placeholder="Industry (e.g. Legal, Healthcare)" value={createForm.industry} onChange={e => setCreateForm({ ...createForm, industry: e.target.value })} />
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Primary email" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} />
+                <Input placeholder="Phone" value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={createForm.lifecycle} onValueChange={v => setCreateForm({ ...createForm, lifecycle: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prospect">Prospect</SelectItem>
+                    <SelectItem value="onboarding">Onboarding</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={createForm.tier} onValueChange={v => setCreateForm({ ...createForm, tier: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="silver">Silver</SelectItem>
+                    <SelectItem value="gold">Gold</SelectItem>
+                    <SelectItem value="platinum">Platinum</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setCreateDialog(false)}>Cancel</Button>
+              <Button onClick={createClient} data-testid="create-client-btn"><Plus className="w-4 h-4 mr-1" />Create</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function ClientDetailPane({ client, detail, activity, tab, setTab, loading }) {
+  const mrrData = client.mrr_trend || [];
+  const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
+
+  return (
+    <div className="flex flex-col h-full" data-testid="client-detail-pane">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Clients</h1>
-          <p className="text-sm text-muted-foreground">{clients.length} managed clients</p>
+      <div className="px-6 py-4 border-b border-zinc-800 flex items-start gap-4 bg-gradient-to-br from-zinc-900/40 to-transparent">
+        <div className={`w-14 h-14 rounded-md bg-gradient-to-br ${tierGrad} flex items-center justify-center text-xl font-bold text-white shrink-0`}>
+          {client.name?.slice(0, 2).toUpperCase()}
         </div>
-        <Button onClick={() => { setEditingClient(null); setFormData({ name: "", email: "", phone: "", address: "", industry: "", contract_type: "monthly", mrr: "" }); setIsCreateOpen(true); }} data-testid="create-client-btn">
-          <Plus className="w-4 h-4 mr-1" />New Client
-        </Button>
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Total Clients</p>
-                <p className="text-2xl font-bold">{clients.length}</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><Building2 className="w-5 h-5 text-primary" /></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Total MRR</p>
-                <p className="text-2xl font-bold text-emerald-500">${totalMRR.toLocaleString()}</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-emerald-500" /></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Avg Health</p>
-                <p className={`text-2xl font-bold ${avgHealth >= 70 ? "text-emerald-500" : avgHealth >= 50 ? "text-amber-500" : "text-red-500"}`}>{avgHealth}</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Heart className="w-5 h-5 text-blue-500" /></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={criticalCount > 0 ? "border-red-500/30" : ""}>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Health Status</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-emerald-500 font-medium">{healthyCount}</span>
-                  <span className="text-[10px] text-muted-foreground/40">/</span>
-                  <span className="text-xs text-amber-500 font-medium">{attentionCount}</span>
-                  <span className="text-[10px] text-muted-foreground/40">/</span>
-                  <span className="text-xs text-red-500 font-medium">{criticalCount}</span>
-                </div>
-                <p className="text-[9px] text-muted-foreground">healthy / attention / critical</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Activity className="w-5 h-5 text-amber-500" /></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">ARR</p>
-                <p className="text-2xl font-bold text-emerald-500">${(totalMRR * 12).toLocaleString()}</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-emerald-500" /></div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search clients, emails, industries..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="client-search" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold tracking-tight">{client.name}</h1>
+            <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{(client.lifecycle || "active").replace("_", " ")}</span>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 font-mono">{client.tier}</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-zinc-500 font-mono mt-1">
+            {client.industry && <span>{client.industry}</span>}
+            {client.email && <span className="flex items-center gap-1"><Mail className="w-2.5 h-2.5" />{client.email}</span>}
+            {client.phone && <span className="flex items-center gap-1"><Phone className="w-2.5 h-2.5" />{client.phone}</span>}
+            {client.address && <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" />{client.address}</span>}
+          </div>
+          <div className="flex items-center gap-1 mt-2">
+            <IntegrationChip type="rmm" active={client.integrations.rmm} />
+            <IntegrationChip type="acronis" active={client.integrations.acronis} />
+            <IntegrationChip type="pax8" active={client.integrations.pax8} />
+            <IntegrationChip type="m365" active={client.integrations.m365} />
+            {client.last_activity && <span className="text-[10px] text-zinc-500 ml-2 font-mono">last activity {formatDistanceToNow(new Date(client.last_activity), { addSuffix: true })}</span>}
+          </div>
         </div>
-        <Select value={healthFilter} onValueChange={setHealthFilter}>
-          <SelectTrigger className="w-[140px]" data-testid="health-filter"><SelectValue placeholder="All Health" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Health</SelectItem>
-            <SelectItem value="healthy">Healthy</SelectItem>
-            <SelectItem value="attention">Attention</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={contractFilter} onValueChange={setContractFilter}>
-          <SelectTrigger className="w-[140px]" data-testid="contract-filter"><SelectValue placeholder="All Contracts" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Contracts</SelectItem>
-            <SelectItem value="monthly">Monthly</SelectItem>
-            <SelectItem value="annual">Annual</SelectItem>
-            <SelectItem value="per_incident">Per Incident</SelectItem>
-          </SelectContent>
-        </Select>
-        {(healthFilter !== "all" || contractFilter !== "all") && (
-          <Button variant="ghost" size="sm" onClick={() => { setHealthFilter("all"); setContractFilter("all"); }} className="text-xs text-muted-foreground">
-            <XCircle className="w-3 h-3 mr-1" />Clear
-          </Button>
-        )}
-        <p className="text-sm text-muted-foreground ml-auto">{filtered.length} of {clients.length} clients</p>
+        <HealthDial score={client.health_score} size={56} />
       </div>
 
-      {/* Client Cards */}
-      <div className="space-y-2">
-        {filtered.map(client => {
-          const h = healthScores[client.id];
-          const hColor = h ? healthRiskColor(h.risk_level) : null;
-          const borderColor = h ? (h.risk_level === "healthy" ? "border-l-emerald-500" : h.risk_level === "attention" ? "border-l-amber-500" : "border-l-red-500") : "border-l-slate-500";
-          const sub = subsSummary[client.id];
+      {/* Quick metrics strip */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-0 border-b border-zinc-800">
+        <div className="px-4 py-3 border-r border-zinc-800">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Monthly Recurring</div>
+          <div className="text-lg font-light mt-0.5">${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+          <div className="mt-1"><Sparkline data={mrrData} color="#818cf8" /></div>
+        </div>
+        <div className="px-4 py-3 border-r border-zinc-800">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Open Tickets</div>
+          <div className={`text-lg font-light mt-0.5 ${client.open_tickets > 10 ? "text-amber-400" : ""}`}>{client.open_tickets}</div>
+          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.open_tickets > 10 ? "⚠ high volume" : "within range"}</div>
+        </div>
+        <div className="px-4 py-3 border-r border-zinc-800">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Assets</div>
+          <div className="text-lg font-light mt-0.5">{client.asset_count}</div>
+          <div className="text-[10px] text-emerald-400 font-mono mt-1">{client.assets_online}/{client.asset_count} online</div>
+        </div>
+        <div className="px-4 py-3 border-r border-zinc-800">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Contacts</div>
+          <div className="text-lg font-light mt-0.5">{client.contact_count}</div>
+          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.active_contracts} active contracts</div>
+        </div>
+        <div className="px-4 py-3">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">AR Overdue</div>
+          <div className={`text-lg font-light mt-0.5 ${client.overdue_count > 0 ? "text-rose-400" : "text-emerald-400"}`}>${client.overdue_amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.overdue_count} invoice{client.overdue_count !== 1 ? "s" : ""}</div>
+        </div>
+      </div>
 
-          return (
-            <Card
-              key={client.id}
-              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${borderColor}`}
-              onClick={() => fetchClientDetail(client)}
-              data-testid={`client-row-${client.id}`}
-            >
-              <CardContent className="py-3 px-4">
-                <div className="flex items-center gap-4">
-                  {/* Avatar */}
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0 ${hColor ? `${hColor.bg} ${hColor.text} border ${hColor.border}` : "bg-primary/10 text-primary border border-primary/20"}`}>
-                    {client.name?.charAt(0)?.toUpperCase()}
-                  </div>
+      {/* Tabs */}
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
+        <TabsList className="h-auto rounded-none border-b border-zinc-800 bg-transparent p-0 justify-start gap-1 px-6">
+          {[
+            { v: "overview", l: "Overview" },
+            { v: "tickets", l: "Tickets" },
+            { v: "assets", l: "Assets" },
+            { v: "contacts", l: "Contacts" },
+            { v: "billing", l: "Billing" },
+            { v: "integrations", l: "Integrations" },
+            { v: "activity", l: "Activity" },
+          ].map(t => (
+            <TabsTrigger key={t.v} value={t.v} className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs tracking-wide uppercase font-medium shadow-none" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
+          ))}
+        </TabsList>
 
-                  {/* Main Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium text-sm truncate">{client.name}</p>
-                      <Badge variant="outline" className="capitalize text-[9px] h-4">{client.contract_type}</Badge>
-                      {client.industry && <Badge variant="outline" className="text-[9px] h-4 text-muted-foreground">{client.industry}</Badge>}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      {client.email && <span>{client.email}</span>}
-                      {(client.contacts || []).length > 0 && <><span className="text-muted-foreground/30">|</span><span>{(client.contacts || []).length} contacts</span></>}
-                      {client.phone && <><span className="text-muted-foreground/30">|</span><span>{client.phone}</span></>}
-                    </div>
-                  </div>
-
-                  {/* Stats */}
-                  <div className="flex items-center gap-4 flex-shrink-0">
-                    {/* Health */}
-                    {h && (
-                      <div className="text-center w-14" data-testid={`health-${client.id}`}>
-                        <p className={`text-sm font-bold ${hColor.text}`}>{h.health_score}</p>
-                        <p className="text-[9px] text-muted-foreground capitalize">{h.risk_level}</p>
-                      </div>
-                    )}
-                    {/* Subs */}
-                    {sub && (
-                      <div className="flex items-center gap-1.5 w-12" data-testid={`subs-status-${client.id}`}>
-                        {sub.active_count > 0 ? <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> : <ShieldX className="w-3.5 h-3.5 text-red-400" />}
-                        <span className={`text-xs font-medium ${sub.active_count > 0 ? "text-emerald-400" : "text-red-400"}`}>{sub.active_count}/{sub.total}</span>
-                      </div>
-                    )}
-                    {/* Devices & Tickets */}
-                    <div className="text-center w-14">
-                      <p className="text-xs font-medium">{client.device_count || 0}</p>
-                      <p className="text-[9px] text-muted-foreground">devices</p>
-                    </div>
-                    <div className="text-center w-14">
-                      <p className="text-xs font-medium">{client.ticket_count || 0}</p>
-                      <p className="text-[9px] text-muted-foreground">tickets</p>
-                    </div>
-                    {/* MRR */}
-                    <div className="text-right w-20">
-                      <p className="font-mono text-sm font-bold text-emerald-400">${client.mrr?.toLocaleString()}</p>
-                      <p className="text-[9px] text-muted-foreground">MRR</p>
-                    </div>
-                    {/* Actions */}
-                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditClient(client)} data-testid={`edit-client-${client.id}`}><Edit className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteClient(client.id)} data-testid={`delete-client-${client.id}`}><Trash2 className="w-3 h-3" /></Button>
-                    </div>
-                  </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <TabsContent value="overview" className="mt-0 space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+                <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1"><Sparkles className="w-3 h-3 text-indigo-400" />Next Best Action</div>
+                <p className="text-sm text-zinc-300">
+                  {client.overdue_count > 0 ? <>Client has <strong className="text-rose-400">${client.overdue_amount.toLocaleString()} overdue</strong>. Send SMS reminder or start a dunning chase.</> :
+                    client.open_tickets > 10 ? <>Ticket volume is <strong className="text-amber-400">{client.open_tickets}</strong> — book a QBR to understand what's causing the pressure.</> :
+                    client.health_score < 70 ? <>Health score <strong className="text-amber-400">{client.health_score}</strong> — review breakdown and mitigate.</> :
+                    <>All green. Consider scheduling the next QBR or proposing an upsell.</>}
+                </p>
+              </div>
+              <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+                <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1"><Zap className="w-3 h-3 text-amber-400" />Quick Actions</div>
+                <div className="flex flex-wrap gap-2">
+                  <Link to={`/tickets?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs" data-testid="qa-new-ticket"><Ticket className="w-3 h-3 mr-1" />New Ticket</Button></Link>
+                  <Link to={`/invoices?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs"><DollarSign className="w-3 h-3 mr-1" />New Invoice</Button></Link>
+                  <Button size="sm" variant="outline" className="h-7 text-xs"><Send className="w-3 h-3 mr-1" />Send SMS</Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs"><Mail className="w-3 h-3 mr-1" />Email</Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs"><Timer className="w-3 h-3 mr-1" />Start Timer</Button>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-        {filtered.length === 0 && (
-          <Card className="border-dashed">
-            <CardContent className="py-12 text-center">
-              <Building2 className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
-              <p className="text-muted-foreground mb-3">No clients match your filters</p>
-              <Button onClick={() => { setSearchQuery(""); setHealthFilter("all"); setContractFilter("all"); }}>Clear Filters</Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+              </div>
+            </div>
 
-      {clientFormDialog}
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3">Health Score Breakdown</div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {detail && ["tickets", "sla", "devices", "payments", "contracts"].map(k => {
+                  const breakdownVal = 0; // placeholder — breakdown fetched separately
+                  return (
+                    <div key={k} className="text-xs">
+                      <div className="text-zinc-500 uppercase tracking-wider text-[10px]">{k}</div>
+                      <div className="font-mono text-zinc-300">{breakdownVal}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-zinc-500 mt-3">Composite score derived from ticket velocity, SLA adherence, device uptime, payment timeliness, and contract status.</p>
+            </div>
+
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1"><Activity className="w-3 h-3" />Recent Activity</div>
+              {activity.length === 0 ? (
+                <p className="text-sm text-zinc-500">No recent activity.</p>
+              ) : (
+                <div className="space-y-2">
+                  {activity.slice(0, 8).map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                      <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
+                      {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
+                      <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="tickets" className="mt-0">
+            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
+              <Ticket className="w-8 h-8 mx-auto mb-3 opacity-40" />
+              Deep ticket view — <Link className="text-indigo-400 hover:underline" to={`/tickets?clientId=${client.id}`}>open full Tickets page</Link>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="assets" className="mt-0">
+            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
+              <HardDrive className="w-8 h-8 mx-auto mb-3 opacity-40" />
+              <Link className="text-indigo-400 hover:underline" to={`/devices?clientId=${client.id}`}>Open {client.asset_count} devices</Link>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="contacts" className="mt-0">
+            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
+              <Users className="w-8 h-8 mx-auto mb-3 opacity-40" />
+              <Link className="text-indigo-400 hover:underline" to={`/contacts?clientId=${client.id}`}>Open {client.contact_count} contacts</Link>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="billing" className="mt-0 space-y-2">
+            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
+              <DollarSign className="w-8 h-8 mx-auto mb-3 opacity-40" />
+              <Link className="text-indigo-400 hover:underline" to={`/invoices?clientId=${client.id}`}>Open invoices & recurring</Link>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="integrations" className="mt-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-sky-400" /><span className="font-medium">Acronis</span>
+                <Badge variant="outline" className={client.integrations.acronis ? "text-emerald-400 border-emerald-500/30" : "text-zinc-500"}>{client.integrations.acronis ? "Linked" : "Not linked"}</Badge>
+              </div>
+              <Link to="/backup-compliance" className="text-xs text-indigo-400 hover:underline">Manage in Backup Command Center →</Link>
+            </div>
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-indigo-400" /><span className="font-medium">Pax8 / Microsoft CSP</span>
+                <Badge variant="outline" className={client.integrations.pax8 ? "text-emerald-400 border-emerald-500/30" : "text-zinc-500"}>{client.integrations.pax8 ? "Linked" : "Not linked"}</Badge>
+              </div>
+              <Link to="/pax8" className="text-xs text-indigo-400 hover:underline">Manage in Pax8 Command Center →</Link>
+            </div>
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="flex items-center gap-2 mb-2"><Shield className="w-4 h-4 text-blue-400" /><span className="font-medium">Microsoft 365</span>
+                <Badge variant="outline" className={client.integrations.m365 ? "text-emerald-400 border-emerald-500/30" : "text-zinc-500"}>{client.integrations.m365 ? "Linked" : "Not linked"}</Badge>
+              </div>
+            </div>
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+              <div className="flex items-center gap-2 mb-2"><HardDrive className="w-4 h-4 text-emerald-400" /><span className="font-medium">RMM Agent</span>
+                <Badge variant="outline" className={client.integrations.rmm ? "text-emerald-400 border-emerald-500/30" : "text-zinc-500"}>{client.integrations.rmm ? "Active" : "Inactive"}</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-500">{client.asset_count} agents ({client.assets_online} online)</p>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="activity" className="mt-0">
+            <div className="space-y-1">
+              {activity.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs py-2 border-b border-zinc-900">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                  <span className="uppercase tracking-wider text-[10px] text-zinc-500 w-16 font-mono">{a.type.replace("_", " ")}</span>
+                  <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
+                  {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
+                  <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
+                </div>
+              ))}
+              {activity.length === 0 && <p className="text-sm text-zinc-500 text-center py-12">No activity yet.</p>}
+            </div>
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 }
