@@ -7,6 +7,21 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — P1 Wave B: Voice Journal + Coffee Break + Digest Scheduler)
+- **Voice Journal** — `/app/backend/app/routers/voice_journal.py`. OpenAI Whisper (`whisper-1`) via Emergent key.
+  - `POST /api/voice-journal/transcribe` — multipart audio → transcript.
+  - `POST /api/voice-journal/log-entry` — one-shot: audio → transcript → ticket comment + `time_entries` row (billable flag, duration minutes, $150/hr default).
+  - `GET /api/voice-journal/history` — tech's recent voice entries.
+  - Frontend: `<VoiceJournalButton />` in ticket detail header uses `MediaRecorder` (WebM), shows big record button + live timer, asks for duration/billable, then logs.
+- **Coffee Break Mode** — `/app/backend/app/routers/coffee_break.py`.
+  - `GET /api/coffee-break/status`, `POST /api/coffee-break/start`, `POST /api/coffee-break/end`, `GET /api/coffee-break/active-users`, `GET /api/coffee-break/history`.
+  - Stamps the tech's assigned open/in_progress tickets with `sla_paused=true`, auto-resumes on break end. Auto-expiration after `duration_minutes`.
+  - Frontend: `<CoffeeBreakToggle />` in Dashboard hero header. Popover with presets (☕ coffee 15m, 🥪 lunch 45m, 👥 meeting 30m, 🧘 focus 60m, ⏸ break 10m) + custom minutes. When active, shows live countdown + "resume" single-click.
+- **Morning Standup Digest Scheduler** — `server.py` startup adds `_standup_digest_scheduler()` background task.
+  - Once-per-minute check: if enabled and `now.hour == send_hour_local` and not already sent today, generates digest via Claude Sonnet 4.5 and delivers via Resend (email) and/or MobileMessage (SMS) per `standup_digest.value.channels`.
+  - `last_sent_tag` guards against duplicate sends within a day. Timezone-aware via `zoneinfo`.
+- **Testing**: `/app/test_reports/iteration_108.json` — backend 20/20 pass, frontend Dashboard 100%.
+
 ## Recent Updates (Apr 20, 2026 — P1 Wave A: AI Differentiators)
 - **LLM**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) via Emergent LLM key using `emergentintegrations`.
 - **New backend router**: `/app/backend/app/routers/ai_wave_a.py`
