@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Loader2, HardDrive, Shield, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Users, Bell, Link2, Activity, Server, Play, Wifi, WifiOff, FilterX, DollarSign, Save, Download, Eye, FileText, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 export default function BackupCommandCenterPage() {
   const { token } = useAuth();
@@ -262,11 +263,20 @@ export default function BackupCommandCenterPage() {
   const critAlerts = alerts.filter(a => ["critical", "error"].includes(a.severity));
 
   return (
-    <div className="space-y-5" data-testid="backup-command-center">
+    <PageShell data-testid="backup-command-center">
+      <MetricStrip columns={6}>
+        <MetricTile label="Tenants" value={s.total_tenants || customers.length || 0} accent="sky" icon={<Users className="w-2.5 h-2.5 text-sky-400" />} testid="bcc-metric-tenants" />
+        <MetricTile label="Machines" value={bs.total_machines || s.total_resources || 0} accent="violet" icon={<Server className="w-2.5 h-2.5 text-violet-400" />} testid="bcc-metric-machines" />
+        <MetricTile label="Healthy" value={bs.healthy || s.protected_resources || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="bcc-metric-healthy" />
+        <MetricTile label="Failed" value={bs.failed || 0} accent="rose" icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="bcc-metric-failed" />
+        <MetricTile label="Warning" value={bs.warning || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="bcc-metric-warning" />
+        <MetricTile label="Alerts" value={alerts.length} accent="amber" icon={<Bell className="w-2.5 h-2.5 text-amber-400" />} testid="bcc-metric-alerts" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Backup Command Center</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-2xl font-bold tracking-tight">Backup Command Center</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">
             Acronis Cyber Cloud — {connected ?
               <span className="text-emerald-400">Connected ({s.data_source === "live" ? "Live" : "Cached"})</span> :
               <span className="text-red-400">Not Connected — Configure in Settings &gt; Integrations</span>}
@@ -275,15 +285,6 @@ export default function BackupCommandCenterPage() {
         <Button onClick={handleSync} disabled={syncing} data-testid="sync-acronis-btn">
           {syncing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}Sync Acronis
         </Button>
-      </div>
-
-      <div className="grid grid-cols-6 gap-3">
-        <Card><CardContent className="pt-4 pb-3"><Users className="w-5 h-5 text-blue-400 mb-1" /><p className="text-2xl font-bold">{s.total_tenants || customers.length || 0}</p><p className="text-[11px] text-muted-foreground">Tenants</p></CardContent></Card>
-        <Card className="cursor-pointer hover:border-violet-500/40 transition-colors" onClick={() => openStatusTab("all")} data-testid="card-total-machines"><CardContent className="pt-4 pb-3"><Server className="w-5 h-5 text-violet-400 mb-1" /><p className="text-2xl font-bold">{bs.total_machines || s.total_resources || 0}</p><p className="text-[11px] text-muted-foreground">Machines</p></CardContent></Card>
-        <Card className="cursor-pointer hover:border-emerald-500/40 transition-colors" onClick={() => openStatusTab("ok")} data-testid="card-healthy"><CardContent className="pt-4 pb-3"><CheckCircle className="w-5 h-5 text-emerald-400 mb-1" /><p className="text-2xl font-bold text-emerald-400">{bs.healthy || s.protected_resources || 0}</p><p className="text-[11px] text-muted-foreground">Healthy</p></CardContent></Card>
-        <Card className={`cursor-pointer hover:border-red-500/60 transition-colors ${bs.failed > 0 ? "border-red-500/20" : ""}`} onClick={() => openStatusTab("failed")} data-testid="card-failed"><CardContent className="pt-4 pb-3"><XCircle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{bs.failed || 0}</p><p className="text-[11px] text-muted-foreground">Failed</p></CardContent></Card>
-        <Card className={`cursor-pointer hover:border-amber-500/60 transition-colors ${bs.warning > 0 ? "border-amber-500/20" : ""}`} onClick={() => openStatusTab("warning")} data-testid="card-warning"><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold text-amber-400">{bs.warning || 0}</p><p className="text-[11px] text-muted-foreground">Warning</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><Bell className="w-5 h-5 text-orange-400 mb-1" /><p className="text-2xl font-bold">{alerts.length}</p><p className="text-[11px] text-muted-foreground">Alerts</p></CardContent></Card>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -762,6 +763,7 @@ export default function BackupCommandCenterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

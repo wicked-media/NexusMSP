@@ -14,6 +14,7 @@ import {
   Loader2, Cloud, CheckCircle, XCircle, RefreshCw, Users, Link2, Play,
   DollarSign, Plus, Search, Package, Building2, Save
 } from "lucide-react";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 export default function Pax8CommandCenterPage() {
   const { token } = useAuth();
@@ -178,12 +179,19 @@ export default function Pax8CommandCenterPage() {
   }
 
   return (
-    <div className="p-6 space-y-4" data-testid="pax8-command-center">
+    <PageShell data-testid="pax8-command-center">
+      <MetricStrip columns={4}>
+        <MetricTile label="Companies" value={companies.length} accent="indigo" icon={<Building2 className="w-2.5 h-2.5 text-indigo-400" />} testid="pax8-metric-companies" />
+        <MetricTile label="Linked to Clients" value={linkedCount} accent="emerald" icon={<Link2 className="w-2.5 h-2.5 text-emerald-400" />} testid="pax8-metric-linked" />
+        <MetricTile label="Billable MRR" value={`AUD ${(billing?.grand_total || 0).toFixed(2)}`} accent="sky" icon={<DollarSign className="w-2.5 h-2.5 text-sky-400" />} testid="pax8-metric-mrr" />
+        <MetricTile label="Auto-Billed" value={(billing?.results || []).filter(r => r.auto_bill_recurring).length} accent="amber" icon={<RefreshCw className="w-2.5 h-2.5 text-amber-400" />} testid="pax8-metric-autobilled" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Cloud className="w-6 h-6 text-indigo-400" />Pax8 Command Center</h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-zinc-500 mt-0.5">
             {companies.length} companies · {linkedCount} linked · {unlinkedCount} unlinked ·
             {settings?.last_sync_at && <> last synced {new Date(settings.last_sync_at).toLocaleString()}</>}
           </p>
@@ -194,26 +202,6 @@ export default function Pax8CommandCenterPage() {
             Sync Now
           </Button>
         </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
-        <Card><CardContent className="p-4">
-          <div className="flex items-center gap-2"><Building2 className="w-4 h-4 text-indigo-400" /><span className="text-xs text-muted-foreground">Companies</span></div>
-          <p className="text-2xl font-bold mt-1">{companies.length}</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="flex items-center gap-2"><Link2 className="w-4 h-4 text-emerald-400" /><span className="text-xs text-muted-foreground">Linked to Clients</span></div>
-          <p className="text-2xl font-bold mt-1 text-emerald-400">{linkedCount}</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="flex items-center gap-2"><DollarSign className="w-4 h-4 text-sky-400" /><span className="text-xs text-muted-foreground">Billable MRR</span></div>
-          <p className="text-2xl font-bold mt-1 text-sky-400">AUD {(billing?.grand_total || 0).toFixed(2)}</p>
-        </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="flex items-center gap-2"><RefreshCw className="w-4 h-4 text-amber-400" /><span className="text-xs text-muted-foreground">Auto-Billed</span></div>
-          <p className="text-2xl font-bold mt-1 text-amber-400">{(billing?.results || []).filter(r => r.auto_bill_recurring).length}</p>
-        </CardContent></Card>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -453,6 +441,7 @@ export default function Pax8CommandCenterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

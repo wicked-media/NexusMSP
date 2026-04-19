@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
@@ -280,40 +281,27 @@ export default function DevicesPage() {
   );
 
   return (
-    <div className="space-y-6" data-testid="devices-page">
+    <PageShell data-testid="devices-page">
+      <MetricStrip columns={6}>
+        <MetricTile label="Total" value={stats.total || 0} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="devices-metric-total" />
+        <MetricTile label="Online" value={stats.online || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="devices-metric-online" />
+        <MetricTile label="Offline" value={stats.offline || 0} accent="rose" icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="devices-metric-offline" />
+        <MetricTile label="Warning" value={stats.warning || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="devices-metric-warning" />
+        <MetricTile label="Avg CPU" value={`${stats.avg_cpu || 0}%`} accent="violet" icon={<Cpu className="w-2.5 h-2.5 text-violet-400" />} testid="devices-metric-cpu" />
+        <MetricTile label="Need Patching" value={stats.needs_patching || 0} accent="amber" icon={<Download className="w-2.5 h-2.5 text-amber-400" />} testid="devices-metric-patching" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
-          <p className="text-muted-foreground">{devices.length} managed endpoints</p>
+          <h1 className="text-2xl font-bold tracking-tight">Devices</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">{devices.length} managed endpoints</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn"><Radar className="w-4 h-4 mr-1" />Discover</Button>
           <Button onClick={openCreate} data-testid="add-device-btn"><Plus className="w-4 h-4 mr-1" />Add Device</Button>
         </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Monitor className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-emerald-500" /></div><div><p className="text-xs text-muted-foreground">Online</p><p className="text-xl font-bold text-emerald-500">{stats.online || 0}</p></div></div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Offline</p><p className="text-xl font-bold text-red-500">{stats.offline || 0}</p></div></div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-amber-500" /></div><div><p className="text-xs text-muted-foreground">Warning</p><p className="text-xl font-bold text-amber-500">{stats.warning || 0}</p></div></div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Shield className="w-5 h-5 text-purple-500" /></div><div><p className="text-xs text-muted-foreground">Avg CPU</p><p className="text-xl font-bold">{stats.avg_cpu || 0}%</p></div></div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><Download className="w-5 h-5 text-orange-500" /></div><div><p className="text-xs text-muted-foreground">Need Patching</p><p className="text-xl font-bold text-orange-500">{stats.needs_patching || 0}</p></div></div>
-        </CardContent></Card>
       </div>
 
       {/* Bulk Actions Toolbar */}
@@ -650,6 +638,7 @@ export default function DevicesPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

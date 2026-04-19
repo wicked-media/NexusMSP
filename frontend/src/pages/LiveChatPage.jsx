@@ -17,6 +17,7 @@ import {
   UserCheck, Clock, AlertTriangle, Plus, Trash2, Building2, HardDrive, ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 export default function LiveChatPage() {
   const { token, user } = useAuth();
@@ -169,26 +170,25 @@ export default function LiveChatPage() {
   }[p] || "bg-muted");
 
   return (
-    <div className="space-y-4" data-testid="live-chat-page">
+    <PageShell data-testid="live-chat-page">
+      <MetricStrip columns={5}>
+        <MetricTile label="Active" value={stats.active || 0} accent="sky" icon={<Inbox className="w-2.5 h-2.5 text-sky-400" />} testid="livechat-metric-active" />
+        <MetricTile label="Assigned to Me" value={stats.mine || 0} accent="emerald" icon={<UserCheck className="w-2.5 h-2.5 text-emerald-400" />} testid="livechat-metric-mine" />
+        <MetricTile label="Unassigned" value={stats.unassigned || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="livechat-metric-unassigned" />
+        <MetricTile label="Messages Today" value={stats.messages_today || 0} accent="violet" icon={<MessageSquare className="w-2.5 h-2.5 text-violet-400" />} testid="livechat-metric-today" />
+        <MetricTile label="Closed (total)" value={stats.closed || 0} accent="indigo" icon={<Clock className="w-2.5 h-2.5 text-zinc-400" />} testid="livechat-metric-closed" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Live Chat</h1>
-          <p className="text-muted-foreground text-sm mt-1">Real-time chat with clients · queue · transfer · canned responses</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Real-time chat with clients · queue · transfer · canned responses</p>
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setManageCanned(true)} data-testid="manage-canned-btn">
             <Zap className="w-3 h-3 mr-1" />Canned Responses ({canned.length})
           </Button>
         </div>
-      </div>
-
-      {/* Stats strip */}
-      <div className="grid grid-cols-5 gap-3">
-        <Card><CardContent className="pt-4 pb-3"><Inbox className="w-4 h-4 text-blue-400 mb-1" /><p className="text-2xl font-bold">{stats.active || 0}</p><p className="text-[11px] text-muted-foreground">Active</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><UserCheck className="w-4 h-4 text-emerald-400 mb-1" /><p className="text-2xl font-bold">{stats.mine || 0}</p><p className="text-[11px] text-muted-foreground">Assigned to Me</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><AlertTriangle className="w-4 h-4 text-amber-400 mb-1" /><p className="text-2xl font-bold">{stats.unassigned || 0}</p><p className="text-[11px] text-muted-foreground">Unassigned</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><MessageSquare className="w-4 h-4 text-violet-400 mb-1" /><p className="text-2xl font-bold">{stats.messages_today || 0}</p><p className="text-[11px] text-muted-foreground">Messages Today</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><Clock className="w-4 h-4 text-slate-400 mb-1" /><p className="text-2xl font-bold">{stats.closed || 0}</p><p className="text-[11px] text-muted-foreground">Closed (total)</p></CardContent></Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[640px]">
@@ -487,6 +487,7 @@ export default function LiveChatPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

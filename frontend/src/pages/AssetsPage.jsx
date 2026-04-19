@@ -19,6 +19,7 @@ import {
   Building, Tag, MapPin, ArrowUpDown
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO, differenceInDays } from "date-fns";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 const ASSET_TYPES = ["hardware", "software", "license", "peripheral", "network", "server", "mobile", "other"];
 const ASSET_ICONS = { hardware: Laptop, software: HardDrive, license: Tag, peripheral: Wifi, network: Wifi, server: Server, mobile: Monitor, other: Monitor };
@@ -224,18 +225,18 @@ export default function AssetsPage() {
   }
 
   return (
-    <div className="space-y-6" data-testid="assets-page">
+    <PageShell data-testid="assets-page">
+      <MetricStrip columns={5}>
+        <MetricTile label="Total Assets" value={stats.total || 0} accent="sky" icon={<HardDrive className="w-2.5 h-2.5 text-sky-400" />} testid="assets-metric-total" />
+        <MetricTile label="Active" value={stats.active || 0} accent="emerald" icon={<Shield className="w-2.5 h-2.5 text-emerald-400" />} testid="assets-metric-active" />
+        <MetricTile label="Total Value" value={`$${(stats.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}`} accent="cyan" icon={<DollarSign className="w-2.5 h-2.5 text-cyan-400" />} testid="assets-metric-value" />
+        <MetricTile label="Warranty Expiring" value={stats.warranty_expiring_soon || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="assets-metric-expiring" />
+        <MetricTile label="Warranty Expired" value={stats.warranty_expired || 0} accent="rose" icon={<Calendar className="w-2.5 h-2.5 text-rose-400" />} testid="assets-metric-expired" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Assets</h1><p className="text-muted-foreground">{assets.length} tracked assets</p></div>
+        <div><h1 className="text-2xl font-bold tracking-tight">Assets</h1><p className="text-xs text-zinc-500 mt-0.5">{assets.length} tracked assets</p></div>
         <Button onClick={openCreate} data-testid="add-asset-btn"><Plus className="w-4 h-4 mr-1" />Add Asset</Button>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><HardDrive className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total Assets</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><Shield className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Active</p><p className="text-xl font-bold text-green-500">{stats.active || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-cyan-500" /></div><div><p className="text-xs text-muted-foreground">Total Value</p><p className="text-xl font-bold">${(stats.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-yellow-500" /></div><div><p className="text-xs text-muted-foreground">Warranty Expiring</p><p className="text-xl font-bold text-yellow-500">{stats.warranty_expiring_soon || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><Calendar className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Warranty Expired</p><p className="text-xl font-bold text-red-500">{stats.warranty_expired || 0}</p></div></div></CardContent></Card>
       </div>
 
       <Tabs defaultValue="all">
@@ -298,6 +299,7 @@ export default function AssetsPage() {
       </Tabs>
 
       {formDialog}
-    </div>
+      </div>
+    </PageShell>
   );
 }

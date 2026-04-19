@@ -216,35 +216,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Clients", value: stats.total_clients, sub: `$${stats.total_mrr?.toLocaleString() || 0} MRR`, icon: Users, color: "text-blue-400", gradient: "from-blue-500/15 to-blue-600/5", border: "hover:border-blue-500/30", path: "/clients" },
-          { label: "Devices", value: devices.length, sub: <><span className="text-emerald-400">{onlineDevices.length} online</span>{offlineDevices.length > 0 && <span className="text-red-400 ml-2">{offlineDevices.length} offline</span>}</>, icon: Monitor, color: "text-emerald-400", gradient: "from-emerald-500/15 to-emerald-600/5", border: "hover:border-emerald-500/30", path: "/devices" },
-          { label: "Open Tickets", value: stats.open_tickets, sub: `${stats.in_progress_tickets} in progress`, icon: Ticket, color: stats.open_tickets > 20 ? "text-amber-400" : "text-cyan-400", gradient: stats.open_tickets > 20 ? "from-amber-500/15 to-amber-600/5" : "from-cyan-500/15 to-cyan-600/5", border: "hover:border-cyan-500/30", path: "/tickets" },
-          { label: "Revenue", value: `$${stats.total_mrr?.toLocaleString() || 0}`, sub: <span className="flex items-center gap-1"><ArrowUpRight className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">+12% MRR</span></span>, icon: DollarSign, color: "text-green-400", gradient: "from-green-500/15 to-green-600/5", border: "hover:border-green-500/30", path: "/invoices" },
-        ].map((m, i) => {
-          const Icon = m.icon;
-          return (
-            <Card key={`m-${i}`} className={`cursor-pointer transition-all duration-300 group overflow-hidden ${m.border}`} onClick={() => navigate(m.path)} data-testid={`metric-${m.label.toLowerCase().replace(/\s/g, "-")}`}>
-              <div className={`absolute inset-0 bg-gradient-to-br ${m.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
-              <CardContent className="p-5 relative">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{m.label}</p>
-                    <p className="text-3xl font-black mt-1 tracking-tight">{m.value}</p>
-                    <div className="text-xs text-muted-foreground mt-1">{m.sub}</div>
-                  </div>
-                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${m.gradient} flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-300`}>
-                    <Icon className={`w-7 h-7 ${m.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
       {/* Charts Row */}
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-8 overflow-hidden" data-testid="ticket-trend-chart">

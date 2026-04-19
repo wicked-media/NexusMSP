@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 const slaShieldConfig = {
   platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
@@ -260,12 +261,20 @@ export default function ContractsPage() {
   const totalValue = contracts.filter(c => c.status === 'active').reduce((sum, c) => sum + (c.value || 0), 0);
 
   return (
-    <div className="space-y-6" data-testid="contracts-page">
+    <PageShell data-testid="contracts-page">
+      <MetricStrip columns={5}>
+        <MetricTile label="Total Contracts" value={contracts.length} accent="indigo" icon={<FileText className="w-2.5 h-2.5 text-indigo-400" />} testid="contracts-metric-total" />
+        <MetricTile label="Monthly Value" value={`$${totalValue.toLocaleString()}`} accent="emerald" icon={<DollarSign className="w-2.5 h-2.5 text-emerald-400" />} testid="contracts-metric-value" />
+        <MetricTile label="Active" value={contracts.filter(c => c.status === 'active').length} accent="sky" icon={<Calendar className="w-2.5 h-2.5 text-sky-400" />} testid="contracts-metric-active" />
+        <MetricTile label="Expiring (90d)" value={renewalAlerts.length} accent={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} icon={<Calendar className="w-2.5 h-2.5 text-amber-400" />} testid="contracts-metric-expiring" />
+        <MetricTile label="Line Items" value={lineItems.length} accent="violet" icon={<FileText className="w-2.5 h-2.5 text-violet-400" />} testid="contracts-metric-lineitems" />
+      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Contracts</h1>
-          <p className="text-muted-foreground">Manage service agreements and recurring billing</p>
+          <h1 className="text-2xl font-bold tracking-tight">Contracts</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">Manage service agreements and recurring billing</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
@@ -410,65 +419,6 @@ export default function ContractsPage() {
             </form>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{contracts.length}</p>
-              <p className="text-xs text-muted-foreground">Total Contracts</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-green-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">${totalValue.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Monthly Value</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{contracts.filter(c => c.status === 'active').length}</p>
-              <p className="text-xs text-muted-foreground">Active</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "border-red-500/30" : ""}>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "bg-red-500/10" : "bg-amber-500/10"}`}>
-              <Calendar className={`w-5 h-5 ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "text-red-500" : "text-amber-500"}`} />
-            </div>
-            <div>
-              <p className={`text-2xl font-bold ${renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "text-red-500" : ""}`}>{renewalAlerts.length}</p>
-              <p className="text-xs text-muted-foreground">Expiring (90d)</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-purple-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{lineItems.length}</p>
-              <p className="text-xs text-muted-foreground">Line Items</p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Renewal Alerts */}
@@ -745,6 +695,7 @@ export default function ContractsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }
