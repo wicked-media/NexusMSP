@@ -18,6 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { RichTextEditor } from "@/components/RichTextEditor";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
@@ -1183,14 +1184,15 @@ export default function TicketsPage() {
     } catch { toast.error("Failed to run script"); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <PageShell><div className="flex items-center justify-center h-64 text-zinc-500"><Loader2 className="w-8 h-8 animate-spin" /></div></PageShell>;
 
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
     const parent = viewingTicket.parent_id ? tickets.find(t => t.id === viewingTicket.parent_id) : null;
     const slaHours = viewingTicket.sla_due ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
     return (
-      <div className="space-y-4" data-testid="ticket-detail-view">
+      <PageShell>
+        <div className="p-6 space-y-4" data-testid="ticket-detail-view">
         {/* Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => { if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {}); setViewingTicket(null); }} data-testid="back-to-list"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
@@ -2418,7 +2420,8 @@ export default function TicketsPage() {
 
         {/* Technician Co-Pilot */}
         <CoPilotPanel ticket={viewingTicket} device={deviceStatus} />
-      </div>
+        </div>
+      </PageShell>
     );
   }
 
@@ -3525,11 +3528,61 @@ export default function TicketsPage() {
   const avgResTime = tickets.length > 0 ? Math.round(tickets.reduce((a, t) => a + (t.total_time_minutes || 0), 0) / Math.max(1, tickets.filter(t => t.total_time_minutes > 0).length)) : 0;
 
   return (
-    <div className="space-y-5" data-testid="tickets-page">
+    <PageShell data-testid="tickets-page">
+      {/* Portfolio metric strip */}
+      <MetricStrip columns={6}>
+        <MetricTile
+          label="Open"
+          value={openCount}
+          trend={openCount > 0 ? "click to filter" : null}
+          trendColor="text-zinc-500"
+          accent="sky"
+          icon={<Circle className="w-2.5 h-2.5 text-sky-400" />}
+          testid="stat-open"
+        />
+        <MetricTile
+          label="In Progress"
+          value={inProgressCount}
+          accent="amber"
+          icon={<Clock className="w-2.5 h-2.5 text-amber-400" />}
+          testid="stat-progress"
+        />
+        <MetricTile
+          label="Resolved"
+          value={resolvedCount}
+          accent="emerald"
+          icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />}
+          testid="stat-resolved"
+        />
+        <MetricTile
+          label="Critical"
+          value={criticalCount}
+          trend={criticalCount > 0 ? "needs attention" : "none"}
+          accent={criticalCount > 0 ? "rose" : "emerald"}
+          icon={<AlertCircle className={`w-2.5 h-2.5 ${criticalCount > 0 ? "text-rose-400" : "text-zinc-600"}`} />}
+          testid="stat-critical"
+        />
+        <MetricTile
+          label="No Response"
+          value={noNotesCount}
+          accent={noNotesCount > 0 ? "amber" : "emerald"}
+          icon={<MessageSquare className="w-2.5 h-2.5 text-amber-400" />}
+          testid="stat-no-notes"
+        />
+        <MetricTile
+          label="Avg Resolve"
+          value={`${avgResTime}m`}
+          accent="cyan"
+          icon={<Timer className="w-2.5 h-2.5 text-cyan-400" />}
+          testid="stat-avg-time"
+        />
+      </MetricStrip>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Tickets & Jobs</h1>
-          <p className="text-muted-foreground">{tickets.length} SLA, {workshopJobs.length} workshop, {fieldJobs.length} cabling/WISP</p>
+          <h1 className="text-xl font-semibold tracking-tight">Tickets & Jobs</h1>
+          <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{tickets.length} SLA · {workshopJobs.length} workshop · {fieldJobs.length} cabling/WISP</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
@@ -3560,28 +3613,6 @@ export default function TicketsPage() {
             {t.label} <span className="text-xs opacity-70">({t.count})</span>
           </Button>
         ))}
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-6 gap-3">
-        <Card className="cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => setStatusFilter("open")} data-testid="stat-open">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-blue-400">{openCount}</p><p className="text-[11px] text-muted-foreground">Open</p></div><div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center"><Circle className="w-5 h-5 text-blue-400" /></div></div></CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-yellow-500/40 transition-colors" onClick={() => setStatusFilter("in_progress")} data-testid="stat-progress">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-yellow-400">{inProgressCount}</p><p className="text-[11px] text-muted-foreground">In Progress</p></div><div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-yellow-400" /></div></div></CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-green-500/40 transition-colors" onClick={() => setStatusFilter("resolved")} data-testid="stat-resolved">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-green-400">{resolvedCount}</p><p className="text-[11px] text-muted-foreground">Resolved</p></div><div className="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-400" /></div></div></CardContent>
-        </Card>
-        <Card className={`${criticalCount > 0 ? "border-red-500/40" : ""}`} data-testid="stat-critical">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className={`text-2xl font-black ${criticalCount > 0 ? "text-red-400" : "text-muted-foreground"}`}>{criticalCount}</p><p className="text-[11px] text-muted-foreground">Critical</p></div><div className={`w-10 h-10 rounded-xl ${criticalCount > 0 ? "bg-red-500/10" : "bg-muted/30"} flex items-center justify-center`}><AlertCircle className={`w-5 h-5 ${criticalCount > 0 ? "text-red-400" : "text-muted-foreground"}`} /></div></div></CardContent>
-        </Card>
-        <Card className={`${noNotesCount > 0 ? "border-amber-500/40" : ""}`} data-testid="stat-no-notes">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className={`text-2xl font-black ${noNotesCount > 0 ? "text-amber-400" : "text-muted-foreground"}`}>{noNotesCount}</p><p className="text-[11px] text-muted-foreground">No Response</p></div><div className={`w-10 h-10 rounded-xl ${noNotesCount > 0 ? "bg-amber-500/10" : "bg-muted/30"} flex items-center justify-center`}><MessageSquare className={`w-5 h-5 ${noNotesCount > 0 ? "text-amber-400" : "text-muted-foreground"}`} /></div></div></CardContent>
-        </Card>
-        <Card data-testid="stat-avg-time">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black">{avgResTime}m</p><p className="text-[11px] text-muted-foreground">Avg Time</p></div><div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center"><Timer className="w-5 h-5 text-cyan-400" /></div></div></CardContent>
-        </Card>
       </div>
 
       {/* Filters */}
@@ -4156,6 +4187,7 @@ export default function TicketsPage() {
         </DialogContent>
       </Dialog>
 
-    </div>
+      </div>
+    </PageShell>
   );
 }

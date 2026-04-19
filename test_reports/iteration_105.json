@@ -1,0 +1,104 @@
+{
+  "summary": "Tested Swiss Tactical Dark design system migration for Tickets and Invoices pages. All design-system primitives (PageShell, MetricStrip, MetricTile) are working correctly with proper styling (zinc-950 background, left-border-accent MetricTiles, text-xl headers). Existing functionality preserved - ticket list, filters, detail view, invoice list, invoice detail all working. Clients page regression test passed. Other pages (Devices) unaffected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Clients page", "issues": ["Console warnings about chart dimensions (-1 width/height) - minor, doesn't affect functionality"]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_105.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PageShell component was missing ...props spread - fixed to pass through data-testid attributes",
+    "Tiptap editor has duplicate extension warnings (link, underline) - minor, doesn't affect functionality"
+  ],
+  "updated_files": ["/app/frontend/src/components/design-system/index.jsx"],
+  "success_rate": {"backend": "N/A - frontend only test", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Design system migration wave 1 complete. Tickets and Invoices pages now use PageShell + MetricStrip + MetricTile components. Clients page was already migrated in previous iteration. Other pages (Devices, Contacts, Backup Command Center, Pax8, Settings) still use old-style colored cards and were not affected by this change.",
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "design_system_verification": {
+    "PageShell": {
+      "background": "zinc-950 (rgb(9, 9, 11))",
+      "minHeight": "calc(100vh-64px)",
+      "status": "PASS"
+    },
+    "MetricTile": {
+      "borderLeftWidth": "2px",
+      "colors": {
+        "stat-open": "sky-500",
+        "stat-progress": "amber-500",
+        "stat-resolved": "emerald-500",
+        "stat-critical": "rose-500",
+        "stat-no-notes": "amber-500",
+        "stat-avg-time": "cyan-500"
+      },
+      "status": "PASS"
+    },
+    "header": {
+      "fontSize": "20px (text-xl)",
+      "status": "PASS"
+    }
+  },
+  "pages_tested": {
+    "Tickets": {
+      "list_view": "PASS - MetricStrip with 6 MetricTiles, PageShell wrapper, filters, search, bulk actions all working",
+      "detail_view": "PASS - Progress bar, tabs (Conversation, Suggestions, Worksheets, Files, Items, Children, Time, Audit), rich text editor, status/priority dropdowns, linked device, quick actions all working",
+      "data_testids": {
+        "stat-open": "FOUND",
+        "stat-progress": "FOUND",
+        "stat-resolved": "FOUND",
+        "stat-critical": "FOUND",
+        "stat-no-notes": "FOUND",
+        "stat-avg-time": "FOUND",
+        "ticket-detail-view": "FOUND",
+        "back-to-list": "FOUND",
+        "create-ticket-btn": "FOUND",
+        "voice-ticket-btn": "FOUND",
+        "create-ws-btn": "FOUND",
+        "create-fj-btn": "FOUND"
+      }
+    },
+    "Invoices": {
+      "list_view": "PASS - MetricStrip with 5 MetricTiles, PageShell wrapper, filters, search, Create Invoice button all working",
+      "detail_view": "PASS - Payment progress, tabs (Line Items, Payments, Emails, Audit), actions panel all working",
+      "data_testids": {
+        "invoices-page": "FOUND",
+        "stat-total": "FOUND",
+        "stat-paid": "FOUND",
+        "stat-unpaid": "FOUND",
+        "stat-collected": "FOUND",
+        "stat-outstanding": "FOUND",
+        "create-invoice-btn": "FOUND"
+      }
+    },
+    "Clients": {
+      "status": "PASS - Regression test passed, master-detail layout working",
+      "data_testids": {
+        "clients-page": "FOUND",
+        "clients-search-input": "FOUND",
+        "filter-lifecycle": "FOUND",
+        "filter-risk": "FOUND",
+        "filter-integration": "FOUND",
+        "new-client-btn": "FOUND",
+        "client-detail-pane": "FOUND"
+      }
+    },
+    "Devices": {
+      "status": "PASS - Not affected by design system changes, still uses old-style colored cards"
+    }
+  },
+  "lint_results": {
+    "TicketsPage.jsx": "PASS - No issues",
+    "InvoicesPage.jsx": "PASS - No issues",
+    "ClientsPage.jsx": "PASS - No issues",
+    "design-system/index.jsx": "PASS - No issues"
+  }
+}

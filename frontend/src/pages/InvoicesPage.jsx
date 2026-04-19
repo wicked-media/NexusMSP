@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -1007,9 +1008,21 @@ export default function InvoicesPage() {
 
   // ========== LIST VIEW ==========
   return (
-    <div className="space-y-6" data-testid="invoices-page">
+    <PageShell data-testid="invoices-page">
+      <MetricStrip columns={5}>
+        <MetricTile label="Total" value={stats.total || 0} accent="indigo" icon={<FileText className="w-2.5 h-2.5 text-indigo-400" />} testid="stat-total" />
+        <MetricTile label="Paid" value={stats.paid || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="stat-paid" />
+        <MetricTile label="Unpaid" value={stats.unpaid || 0} accent={stats.unpaid > 0 ? "rose" : "emerald"} icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="stat-unpaid" />
+        <MetricTile label="Collected" value={`$${(stats.total_collected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="emerald" icon={<TrendingUp className="w-2.5 h-2.5 text-emerald-400" />} testid="stat-collected" />
+        <MetricTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent={stats.total_outstanding > 0 ? "amber" : "emerald"} icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="stat-outstanding" />
+      </MetricStrip>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Invoices</h1><p className="text-muted-foreground">{invoices.length} invoices</p></div>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Invoices</h1>
+          <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{invoices.length} invoices</p>
+        </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { setTopView("aging"); setAgingReport(null); }} data-testid="aging-report-btn">
             <Timer className="w-4 h-4 mr-1" />Aging Report
@@ -1019,15 +1032,6 @@ export default function InvoicesPage() {
           </Button>
           <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
         </div>
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Paid</p><p className="text-xl font-bold text-green-500">{stats.paid || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-xs text-muted-foreground">Unpaid</p><p className="text-xl font-bold text-red-500">{stats.unpaid || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Collected</p><p className="text-xl font-bold">${(stats.total_collected || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-orange-500" /></div><div><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-orange-500">${(stats.total_outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p></div></div></CardContent></Card>
       </div>
 
       {/* Filters */}
@@ -1108,6 +1112,7 @@ export default function InvoicesPage() {
       </Card>
 
       {dialogs}
-    </div>
+      </div>
+    </PageShell>
   );
 }
