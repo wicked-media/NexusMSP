@@ -6,32 +6,33 @@
 
 @layer base {
     :root {
-        --background: 222 47% 11%;
-        --foreground: 210 40% 98%;
-        --card: 217 33% 17%;
-        --card-foreground: 210 40% 98%;
-        --popover: 217 33% 17%;
-        --popover-foreground: 210 40% 98%;
+        /* Swiss Tactical Dark — zinc-based palette (matches PageShell) */
+        --background: 240 10% 4%;          /* zinc-950 */
+        --foreground: 0 0% 98%;            /* zinc-50  */
+        --card: 240 4% 9%;                 /* zinc-900 */
+        --card-foreground: 0 0% 98%;
+        --popover: 240 4% 9%;
+        --popover-foreground: 0 0% 98%;
         --primary: 217 91% 60%;
-        --primary-foreground: 222 47% 11%;
-        --secondary: 217 33% 22%;
-        --secondary-foreground: 210 40% 98%;
-        --muted: 217 33% 22%;
-        --muted-foreground: 215 20% 65%;
-        --accent: 217 33% 22%;
-        --accent-foreground: 210 40% 98%;
+        --primary-foreground: 240 10% 4%;
+        --secondary: 240 4% 12%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 240 4% 12%;               /* near zinc-800 */
+        --muted-foreground: 240 5% 65%;    /* zinc-400 */
+        --accent: 240 4% 16%;              /* zinc-800 */
+        --accent-foreground: 0 0% 98%;
         --destructive: 0 84% 60%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 217 33% 25%;
-        --input: 217 33% 25%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 240 4% 16%;              /* zinc-800 */
+        --input: 240 4% 16%;
         --ring: 217 91% 60%;
         --radius: 0.5rem;
-        
+
         --success: 142 71% 45%;
         --warning: 48 96% 53%;
         --info: 217 91% 60%;
-        --offline: 215 16% 47%;
-        
+        --offline: 240 4% 46%;
+
         --chart-1: 217 91% 60%;
         --chart-2: 142 71% 45%;
         --chart-3: 48 96% 53%;
@@ -40,30 +41,30 @@
     }
 
     .light {
-        --background: 0 0% 98%;
-        --foreground: 222 47% 11%;
+        --background: 0 0% 100%;
+        --foreground: 240 10% 4%;
         --card: 0 0% 100%;
-        --card-foreground: 222 47% 11%;
+        --card-foreground: 240 10% 4%;
         --popover: 0 0% 100%;
-        --popover-foreground: 222 47% 11%;
+        --popover-foreground: 240 10% 4%;
         --primary: 217 91% 50%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 220 14% 96%;
-        --secondary-foreground: 222 47% 11%;
-        --muted: 220 14% 96%;
-        --muted-foreground: 220 9% 46%;
-        --accent: 220 14% 96%;
-        --accent-foreground: 222 47% 11%;
+        --secondary: 240 5% 96%;
+        --secondary-foreground: 240 10% 4%;
+        --muted: 240 5% 96%;               /* zinc-100 */
+        --muted-foreground: 240 4% 46%;    /* zinc-500 */
+        --accent: 240 5% 96%;
+        --accent-foreground: 240 10% 4%;
         --destructive: 0 84% 60%;
         --destructive-foreground: 0 0% 100%;
-        --border: 220 13% 91%;
-        --input: 220 13% 91%;
+        --border: 240 6% 90%;              /* zinc-200 */
+        --input: 240 6% 90%;
         --ring: 217 91% 50%;
 
         --success: 142 71% 40%;
         --warning: 38 92% 50%;
         --info: 217 91% 50%;
-        --offline: 215 16% 57%;
+        --offline: 240 4% 56%;
 
         --chart-1: 217 91% 50%;
         --chart-2: 142 71% 40%;
