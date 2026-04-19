@@ -7,6 +7,20 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — P1 Wave C Feature 1: Shadow IT Detector)
+- **Zero-LLM-cost** rule-based detector. New router `/app/backend/app/routers/shadow_it.py`:
+  - Curated `RISK_DB` (40+ regex patterns covering file_sharing, remote_access, unapproved_vpn, ai_tool, messaging, personal_cloud, password_manager_personal, crypto_mining, torrent_p2p, unapproved_backup, screen_recorder) with per-app risk level + reason.
+  - `GET/PUT /api/clients/{id}/shadow-it/baseline` — per-client approved app list (falls back to sensible default).
+  - `POST /api/devices/{id}/software-report` — RMM agent push endpoint for installed software inventory.
+  - `POST /api/shadow-it/scan` — fleet-wide or single-client scan; aggregates findings per app across devices.
+  - `GET /api/shadow-it/summary` — dashboard roll-up (by_risk, per_client, top_apps, last_scan).
+  - `GET /api/shadow-it/findings` — filterable by client/risk/category/status, sorted critical→low.
+  - `POST /api/shadow-it/findings/{id}/{approve|ignore|create_ticket}` — approve adds to baseline; create_ticket produces a security ticket with mapped priority.
+  - `POST /api/shadow-it/seed-demo` — idempotent demo populater for preview environments.
+- **Frontend**: `/app/frontend/src/pages/ShadowItPage.jsx` at `/shadow-it`. 6-tile MetricStrip (Total / Critical / High / Medium / Low / Clients Affected), master-detail layout (client list ↔ findings table), risk filter chips, search, row actions (Approve/Ticket/Ignore), Top-10 fleet-wide shadow apps grid, devices dialog. Wired into sidebar under **Security → Endpoint Security → Shadow IT**.
+- **Testing**: `/app/test_reports/iteration_109.json` — backend 18/18 pass, frontend 100%.
+- **Demo data**: 135 devices seeded, 20 clients scanned → 106 findings (40 high, 54 medium, 12 low, 17 clients affected). Ready for dev team review.
+
 ## Recent Updates (Apr 20, 2026 — P1 Wave B: Voice Journal + Coffee Break + Digest Scheduler)
 - **Voice Journal** — `/app/backend/app/routers/voice_journal.py`. OpenAI Whisper (`whisper-1`) via Emergent key.
   - `POST /api/voice-journal/transcribe` — multipart audio → transcript.
