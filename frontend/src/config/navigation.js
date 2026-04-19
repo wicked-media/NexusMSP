@@ -252,6 +252,7 @@ export const navGroups = [
         path: "/endpoint-security", icon: ShieldCheck, label: "Endpoint Security",
         children: [
           { path: "/endpoint-security", label: "Scores" },
+          { path: "/shadow-it", label: "Shadow IT" },
           { path: "/vulnerability-scanner", label: "Vuln Scanner" },
           { path: "/zero-trust", label: "Zero Trust" },
           { path: "/dark-web-monitor", label: "Dark Web Monitor" },
