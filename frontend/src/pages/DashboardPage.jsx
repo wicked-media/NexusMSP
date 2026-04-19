@@ -19,6 +19,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
+import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -133,7 +134,14 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="space-y-5" data-testid="dashboard-page">
+    <PageShell>
+    <MetricStrip columns={4}>
+      <MetricTile label="Clients" value={stats.total_clients} trend={`$${stats.total_mrr?.toLocaleString() || 0} MRR`} trendColor="text-zinc-500" accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} testid="metric-clients" />
+      <MetricTile label="Devices" value={devices.length} trend={`${onlineDevices.length} online${offlineDevices.length > 0 ? ` · ${offlineDevices.length} offline` : ""}`} trendColor={offlineDevices.length > 0 ? "text-rose-400" : "text-emerald-400"} accent="emerald" icon={<Monitor className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-devices" />
+      <MetricTile label="Open Tickets" value={stats.open_tickets} trend={`${stats.in_progress_tickets} in progress`} trendColor="text-zinc-500" accent={stats.open_tickets > 20 ? "amber" : "cyan"} icon={<Ticket className="w-2.5 h-2.5 text-cyan-400" />} testid="metric-open-tickets" />
+      <MetricTile label="Revenue" value={`$${stats.total_mrr?.toLocaleString() || 0}`} trend="+12% MRR" accent="emerald" icon={<DollarSign className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-revenue" />
+    </MetricStrip>
+    <div className="flex-1 overflow-y-auto p-6 space-y-5" data-testid="dashboard-page">
       {/* Quick Search Modal */}
       {searchOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]" onClick={() => setSearchOpen(false)}>
@@ -469,5 +477,6 @@ export default function DashboardPage() {
         </Card>
       </div>
     </div>
+    </PageShell>
   );
 }
