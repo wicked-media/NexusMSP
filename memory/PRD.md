@@ -7,6 +7,18 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Hudu Command Center Page)
+- **New `/hudu` route** — full Hudu Command Center page at `/app/frontend/src/pages/HuduCommandCenterPage.jsx`:
+  - 6-tile MetricStrip (Companies · Articles · Assets · Procedures · Websites · Passwords) fed by `/api/hudu/summary`.
+  - Filter bar with search + company dropdown + Apply/Clear.
+  - 6 Tabs: Articles, Procedures, Passwords, Assets, Websites, Companies — each with tailored table/list view.
+  - Article/Procedure list rows open a viewer dialog with rendered Hudu HTML content.
+  - Passwords tab renders with a Reveal button — opens a dialog with show/hide toggle, copy button, and audit-log warning. Every reveal writes to `db.hudu_password_reveals`.
+  - Not-configured state shows a Configure button deep-linking to Settings.
+- Registered route + sidebar link under **Platform → Integrations → Hudu**.
+- **Fix**: Rewrote `MetricStrip` to use concrete Tailwind class names (`lg:grid-cols-6` etc) instead of dynamic string interpolation — the previous version was silently broken by Tailwind JIT purge. All MetricStrip pages (Dashboard, Devices, Assets, Contracts, Huntress, Shadow IT, etc.) will now reliably show their intended columns at lg breakpoint.
+- **Testing**: `/app/test_reports/iteration_116.json` — 100% frontend pass, no regressions.
+
 ## Recent Updates (Apr 20, 2026 — Hudu Feature-Rich Revamp + AI KB Suggestions)
 - **Fully rewrote `/app/backend/app/routers/hudu.py`**:
   - New resource endpoints: `/api/hudu/{companies,articles,articles/{id},assets,asset-layouts,websites,procedures,passwords,passwords/{id}}` — read-through to Hudu API v1 with proper `search`/`name` query parameters.

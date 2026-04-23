@@ -72,8 +72,9 @@ export function MetricTile({ label, value, trend, trendColor, accent = "indigo",
 
 /** Grid wrapper for a top-of-page metric strip. */
 export function MetricStrip({ children, columns = 6 }) {
+  const gridClass = columns >= 6 ? "lg:grid-cols-6" : columns === 5 ? "lg:grid-cols-5" : columns === 4 ? "lg:grid-cols-4" : columns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-2";
   return (
-    <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-${columns} gap-4 px-6 py-4 border-b border-border bg-background/80 backdrop-blur-md`}>
+    <div className={`grid grid-cols-2 md:grid-cols-3 ${gridClass} gap-4 px-6 py-4 border-b border-border bg-background/80 backdrop-blur-md`}>
       {children}
     </div>
   );
