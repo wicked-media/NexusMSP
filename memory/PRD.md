@@ -7,6 +7,17 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Huntress Labs Integration)
+- **New backend router** `/app/backend/app/routers/huntress.py` — read-only Huntress REST API (https://api.huntress.io) integration via HTTP Basic auth (api_key:secret_key).
+  - `GET /api/huntress/status`, `POST /api/huntress/settings`, `DELETE /api/huntress/settings`
+  - `GET /api/huntress/test-connection` (probes /v1/account, stores `last_test_status`)
+  - `GET /api/huntress/summary` (aggregates agents + incidents + signals + orgs in parallel; graceful fallback when endpoint disabled)
+  - `GET /api/huntress/{agents,incident-reports,organizations,signals}` (read-through)
+  - Credentials stored in `db.settings` (`type: huntress`), 60 req/min friendly.
+- **Settings UI**: New Huntress integration card in Settings → Integrations (`huntress-settings-card`) with save / test / remove flows and masked key preview.
+- **Security Dashboard**: Added `<HuntressSummaryCard />` below the Threat Level Banner. Shows Orgs / Agents (online/total) / Offline / Critical / Open / Signals, plus top 5 recent incidents. When not configured, shows an orange CTA linking to Settings.
+- **Testing**: `/app/test_reports/iteration_111.json` — 14/14 backend pass, 100% frontend pass.
+
 ## Recent Updates (Apr 20, 2026 — Dark/Light Mode Palette Unification)
 - **Problem**: Dark `:root` used a slate-blue palette (`222 47% 11%`) while the Wave 2 refactored pages hardcoded zinc-950 (`240 10% 4%`) — legacy vs revamped pages clashed. And `PageShell` hardcoded `bg-zinc-950 text-zinc-100` meaning light-mode toggle left revamped pages stuck dark.
 - **Fix**:
