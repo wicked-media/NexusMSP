@@ -7,6 +7,18 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Huntress Incident Response + Live Wiring)
+- **Incident Response endpoints** (best-effort against Huntress write APIs; graceful fallback when plan doesn't expose them):
+  - `POST /api/huntress/incident-reports/{id}/action` (actions: close, resolve, assign, comment, acknowledge)
+  - `POST /api/huntress/agents/{id}/isolate`, `/release`
+  - `_try_paths` helper probes multiple candidate paths per action, returns first 2xx or structured rejection with `hint`.
+  - All attempts persisted to `db.huntress_actions` for audit.
+  - `GET /api/huntress/actions` — audit log.
+- **SOC Dashboard** — each Huntress incident row now has a `...` menu (Acknowledge · Add comment · Assign · Isolate agent · Release agent · Close incident) → opens a response dialog with note textarea + assignee field when relevant. Fallback toast when Huntress rejects the attempt.
+- **Endpoint Security page** — merges live Huntress agents with the SOC demo endpoints when configured. Isolate/Release actions on Huntress-source rows route through the Huntress API.
+- **SOC Feed page** — merges Huntress `incident_reports` into the alert feed when configured. Isolate button routes to Huntress for Huntress-source alerts.
+- **Testing**: `/app/test_reports/iteration_113.json` — 24/24 backend + 100% frontend pass. All graceful-rejection paths validated.
+
 ## Recent Updates (Apr 20, 2026 — SOC Dashboard Huntress-First Revamp)
 - Rewrote `/app/frontend/src/pages/SecurityDashboardPage.jsx` to be Huntress-led:
   - Top MetricStrip (Agents, Offline, Critical, Open, Signals, Orgs) driven by live `/api/huntress/summary` when configured, falls back to `/api/soc/dashboard` demo data when not.
