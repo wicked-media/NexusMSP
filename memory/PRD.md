@@ -8,6 +8,30 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Apr 23, 2026 — CIPP Hygiene → Client Health Score + Weekly M365 Hygiene Digest)
+- **Backend `/app/backend/app/routers/cipp_hygiene.py`** — 7-dimension hygiene scoring per M365 tenant:
+  - Dimensions: License efficiency (20), MFA coverage (25), Stale users (15), License waste (15), Admin sprawl (10), Guest posture (10), Modern auth CA (5). Each dimension gracefully degrades when CIPP source data is missing.
+  - `GET /api/cipp/tenants/{id}/hygiene?force=true` — live compute with 6h cache in `db.cipp_hygiene_cache`.
+  - `GET /api/clients/{id}/cipp-hygiene` — per-client hygiene via linked tenant.
+  - `GET /api/cipp/hygiene-digest` — aggregate across every linked client + upsell_candidates list (clients with license waste / unlicensed / weak MFA).
+  - `POST /api/cipp/hygiene-digest/send` — HTML email digest via Resend (if configured), falls back to admin email. Persisted to `db.cipp_digests`.
+  - `GET /api/cipp/digests` — digest history.
+- **Backend `client_health.py` + `clients.py`** — client Health Score now factors in M365 hygiene at **10% weight** when a CIPP tenant is linked AND hygiene is cached. Composite rebalances: security 10→5 + engagement 10→5 (or devices 20→15 + contracts 10→5 for the simple breakdown) to keep total at 100. Hygiene top risks merged into `risk_factors`.
+- **Frontend CIPP Command Center** — new **Hygiene Digest** tab:
+  - 4-tile metrics (Avg Score · Tenants · Critical &lt;50 · Upsell candidates).
+  - "Upsell opportunities" card highlighting tenants with license/MFA risks as Security Posture bundle candidates.
+  - All-tenants table with score/grade/active-users/MFA%/top-risks.
+  - "Send digest" + "Recompute" buttons. Digest history table.
+- **Frontend Client detail** — M365/CIPP tab now shows an **M365 Hygiene** card (only when linked):
+  - Large score dial + 7-dimension breakdown bars.
+  - Top risks list with impact scores.
+  - Amber upsell callout when score &lt;70.
+  - "Recompute" button for force refresh.
+- **Client Overview Health breakdown** — automatically adds a **M365** bar when the linked client has a cached hygiene score.
+- **Testing**: `/app/test_reports/iteration_119.json` — 18/18 backend tests PASS, 100% frontend. Zero issues.
+
+
+
 ## Recent Updates (Apr 23, 2026 — CIPP M365 Tenant Management + Suped Command Center)
 - **Backend `/app/backend/app/routers/cipp.py`** — full CIPP integration against hosted CIPP Azure Function URLs:
   - Settings: `GET/POST/DELETE /api/cipp/settings`, `GET /api/cipp/status`, `GET /api/cipp/test`.
