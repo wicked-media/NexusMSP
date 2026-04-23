@@ -13,7 +13,8 @@ import { formatDistanceToNow } from "date-fns";
 import {
   Search, Building2, Users, HardDrive, Ticket, DollarSign, AlertTriangle,
   Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles, Timer, Zap,
-  Activity, ChevronRight, Send, RefreshCw, Filter, X, TrendingUp, TrendingDown
+  Activity, ChevronRight, Send, RefreshCw, Filter, X, TrendingUp, TrendingDown,
+  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
@@ -481,6 +482,7 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             { v: "contacts", l: "Contacts" },
             { v: "billing", l: "Billing" },
             { v: "integrations", l: "Integrations" },
+            { v: "cipp", l: "M365 / CIPP" },
             { v: "activity", l: "Activity" },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v} className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs tracking-wide uppercase font-medium shadow-none" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
@@ -618,6 +620,10 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             </div>
           </TabsContent>
 
+          <TabsContent value="cipp" className="mt-0">
+            <CippTenantPanel client={client} />
+          </TabsContent>
+
           <TabsContent value="activity" className="mt-0">
             <div className="space-y-1">
               {activity.map((a, i) => (
@@ -634,6 +640,350 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
           </TabsContent>
         </div>
       </Tabs>
+    </div>
+  );
+}
+
+function CippTenantPanel({ client }) {
+  const { token } = useAuth();
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const [clientDoc, setClientDoc] = useState(null);
+  const [tenants, setTenants] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [licenses, setLicenses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [licenseDialog, setLicenseDialog] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [createForm, setCreateForm] = useState({ displayName: "", userPrincipalName: "", password: "", firstName: "", lastName: "", usageLocation: "AU", licenses: [], mustChangePassword: true });
+  const [licAdd, setLicAdd] = useState([]);
+  const [licRemove, setLicRemove] = useState([]);
+
+  const loadClient = async () => {
+    try {
+      const res = await axios.get(`${API}/clients/${client.id}`, { headers });
+      setClientDoc(res.data);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { loadClient(); }, [client.id]); // eslint-disable-line
+
+  const tenantId = clientDoc?.cipp_tenant_id;
+
+  useEffect(() => {
+    if (!tenantId) { setUsers([]); setLicenses([]); return; }
+    (async () => {
+      setLoading(true);
+      try {
+        const [u, l] = await Promise.all([
+          axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers }).catch(() => ({ data: [] })),
+          axios.get(`${API}/cipp/tenants/${tenantId}/licenses`, { headers }).catch(() => ({ data: [] })),
+        ]);
+        setUsers(u.data || []);
+        setLicenses(l.data || []);
+      } finally { setLoading(false); }
+    })();
+    // eslint-disable-next-line
+  }, [tenantId]);
+
+  const openLink = async () => {
+    setLinkOpen(true);
+    try {
+      const r = await axios.get(`${API}/cipp/tenants`, { headers });
+      setTenants(r.data || []);
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't load CIPP tenants"); }
+  };
+
+  const doLink = async () => {
+    if (!selectedTenantId) { toast.error("Pick a tenant"); return; }
+    const t = tenants.find(x => x.customerId === selectedTenantId);
+    setBusy(true);
+    try {
+      await axios.post(`${API}/clients/${client.id}/link-cipp-tenant`, {
+        tenant_id: t.customerId,
+        tenant_display: t.displayName,
+        tenant_domain: t.defaultDomainName,
+      }, { headers });
+      toast.success("Tenant linked");
+      setLinkOpen(false);
+      loadClient();
+    } catch (e) { toast.error(e.response?.data?.detail || "Link failed"); }
+    finally { setBusy(false); }
+  };
+
+  const doUnlink = async () => {
+    if (!window.confirm("Unlink this tenant from the client?")) return;
+    try {
+      await axios.delete(`${API}/clients/${client.id}/link-cipp-tenant`, { headers });
+      toast.success("Unlinked");
+      loadClient();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const doCreateUser = async () => {
+    if (!createForm.displayName || !createForm.userPrincipalName || !createForm.password) {
+      toast.error("Display name, UPN, and password are required"); return;
+    }
+    setBusy(true);
+    try {
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users`, createForm, { headers });
+      toast.success(`User ${createForm.userPrincipalName} created`);
+      setCreateOpen(false);
+      setCreateForm({ displayName: "", userPrincipalName: "", password: "", firstName: "", lastName: "", usageLocation: "AU", licenses: [], mustChangePassword: true });
+      const u = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
+      setUsers(u.data || []);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  const doAssignLicense = async () => {
+    setBusy(true);
+    try {
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${licenseDialog.id}/assign-license`,
+        { addLicenses: licAdd, removeLicenses: licRemove }, { headers });
+      toast.success("Licenses updated");
+      setLicenseDialog(null); setLicAdd([]); setLicRemove([]);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  const doReset = async (u) => {
+    const pw = window.prompt(`Reset password for ${u.userPrincipalName}. Leave blank for auto-generated:`, "");
+    if (pw === null) return;
+    try {
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/reset-password`, { password: pw, mustChange: true }, { headers });
+      toast.success("Password reset");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const doToggleSignin = async (u) => {
+    if (!window.confirm(`${u.accountEnabled ? "Block" : "Unblock"} sign-in for ${u.userPrincipalName}?`)) return;
+    try {
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/block-signin`, { enable: !u.accountEnabled }, { headers });
+      toast.success(`Sign-in ${u.accountEnabled ? "blocked" : "unblocked"}`);
+      const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
+      setUsers(res.data || []);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const doOffboard = async (u) => {
+    if (!window.confirm(`Offboard ${u.userPrincipalName}? Removes licenses, disables sign-in, converts mailbox to shared, resets password, hides from GAL.`)) return;
+    try {
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/offboard`, {
+        convertToShared: true, removeLicenses: true, resetPassword: true, revokeSessions: true, disableUser: true, removeGroups: true, hideFromGAL: true,
+      }, { headers });
+      toast.success(`${u.userPrincipalName} offboarded`);
+      const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
+      setUsers(res.data || []);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  if (!tenantId) {
+    return (
+      <div className="border border-zinc-800 rounded-md p-6 bg-zinc-950" data-testid="client-cipp-unlinked">
+        <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-orange-400" /><span className="font-medium">CIPP · M365 tenant</span></div>
+        <p className="text-sm text-zinc-400 mb-3">No CIPP tenant linked to this client. Link a tenant to manage users and licenses in M365.</p>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={openLink} data-testid="client-cipp-link-btn"><LinkIcon className="w-3 h-3 mr-1" />Link tenant</Button>
+          <Button size="sm" variant="outline" asChild><Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure CIPP</Link></Button>
+        </div>
+
+        <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+          <DialogContent data-testid="client-cipp-link-dialog">
+            <DialogHeader>
+              <DialogTitle>Link CIPP tenant</DialogTitle>
+              <DialogDescription>Map {client.name} to an M365 tenant managed by CIPP.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <select
+                value={selectedTenantId}
+                onChange={(e) => setSelectedTenantId(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
+                data-testid="client-cipp-link-tenant-select"
+              >
+                <option value="">Select a CIPP tenant…</option>
+                {tenants.map(t => <option key={t.customerId} value={t.customerId}>{t.displayName} ({t.defaultDomainName})</option>)}
+              </select>
+              {tenants.length === 0 && <p className="text-xs text-muted-foreground">No tenants returned — make sure CIPP is configured in Settings.</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setLinkOpen(false)}>Cancel</Button>
+              <Button onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4" data-testid="client-cipp-linked">
+      <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-orange-400" />
+              <span className="font-medium">{clientDoc?.cipp_tenant_display || tenantId}</span>
+              <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">Linked</Badge>
+            </div>
+            <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{clientDoc?.cipp_tenant_domain || ""}</div>
+            <div className="text-[10px] text-zinc-600 font-mono">tenant: {tenantId}</div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
+            <Button size="sm" variant="outline" asChild><Link to="/cipp"><ExternalLink className="w-3 h-3 mr-1" />CIPP Center</Link></Button>
+            <Button size="sm" variant="ghost" className="text-rose-400" onClick={doUnlink} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 pt-3">
+          <div className="rounded border border-zinc-800 p-2 bg-zinc-900/50">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Users</div>
+            <div className="text-lg font-semibold">{users.length}</div>
+          </div>
+          <div className="rounded border border-zinc-800 p-2 bg-zinc-900/50">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Licensed</div>
+            <div className="text-lg font-semibold">{users.filter(u => u.licenses_count > 0).length}</div>
+          </div>
+          <div className="rounded border border-zinc-800 p-2 bg-zinc-900/50">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Blocked</div>
+            <div className="text-lg font-semibold">{users.filter(u => !u.accountEnabled).length}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-zinc-800 rounded-md overflow-hidden bg-zinc-950">
+        {loading ? (
+          <div className="flex items-center justify-center py-8 text-zinc-500"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Loading users…</div>
+        ) : users.length === 0 ? (
+          <div className="text-center py-8 text-xs text-zinc-500">No users returned for this tenant.</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60">
+              <tr className="text-[10px] uppercase tracking-wider text-zinc-500">
+                <th className="text-left px-3 py-2">Display</th>
+                <th className="text-left px-3 py-2">UPN</th>
+                <th className="text-left px-3 py-2">Status</th>
+                <th className="text-left px-3 py-2">Licenses</th>
+                <th className="text-right px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-t border-zinc-900" data-testid={`client-cipp-user-${u.id}`}>
+                  <td className="px-3 py-2">{u.displayName || "—"}</td>
+                  <td className="px-3 py-2 font-mono text-zinc-400">{u.userPrincipalName}</td>
+                  <td className="px-3 py-2">
+                    <Badge variant="outline" className={u.accountEnabled ? "text-emerald-400 border-emerald-500/30" : "text-rose-400 border-rose-500/30"}>
+                      {u.accountEnabled ? "Enabled" : "Blocked"}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 font-mono">{u.licenses_count}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex gap-1 justify-end flex-wrap">
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setLicenseDialog(u); setLicAdd([]); setLicRemove([]); }} data-testid={`client-cipp-user-licenses-${u.id}`}><KeyRound className="w-3 h-3 mr-0.5" />Licenses</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => doReset(u)} data-testid={`client-cipp-user-reset-${u.id}`}><RefreshCw className="w-3 h-3 mr-0.5" />Reset</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => doToggleSignin(u)} data-testid={`client-cipp-user-block-${u.id}`}>
+                        {u.accountEnabled ? <><Lock className="w-3 h-3 mr-0.5" />Block</> : <><Unlock className="w-3 h-3 mr-0.5" />Unblock</>}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px] text-rose-400" onClick={() => doOffboard(u)} data-testid={`client-cipp-user-offboard-${u.id}`}><UserX className="w-3 h-3 mr-0.5" />Offboard</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Create user dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-xl" data-testid="client-cipp-create-dialog">
+          <DialogHeader>
+            <DialogTitle>Create M365 user</DialogTitle>
+            <DialogDescription>{clientDoc?.cipp_tenant_display}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Input placeholder="First name" value={createForm.firstName} onChange={e => setCreateForm({ ...createForm, firstName: e.target.value })} />
+              <Input placeholder="Last name" value={createForm.lastName} onChange={e => setCreateForm({ ...createForm, lastName: e.target.value })} />
+            </div>
+            <Input placeholder="Display name *" value={createForm.displayName} onChange={e => setCreateForm({ ...createForm, displayName: e.target.value })} data-testid="client-cipp-create-display" />
+            <Input placeholder={`user@${clientDoc?.cipp_tenant_domain || "domain.com"} *`} value={createForm.userPrincipalName} onChange={e => setCreateForm({ ...createForm, userPrincipalName: e.target.value })} data-testid="client-cipp-create-upn" />
+            <div className="grid grid-cols-2 gap-3">
+              <Input type="password" placeholder="Password *" value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })} data-testid="client-cipp-create-pw" />
+              <Input placeholder="Usage location (AU)" value={createForm.usageLocation} onChange={e => setCreateForm({ ...createForm, usageLocation: e.target.value.toUpperCase() })} maxLength={2} />
+            </div>
+            {licenses.length > 0 && (
+              <div>
+                <div className="text-xs mb-1">Assign licenses</div>
+                <div className="border border-zinc-800 rounded p-2 space-y-1 max-h-32 overflow-y-auto">
+                  {licenses.map(l => (
+                    <label key={l.skuId} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={createForm.licenses.includes(l.skuId)}
+                        onChange={(e) => setCreateForm(f => ({ ...f, licenses: e.target.checked ? [...f.licenses, l.skuId] : f.licenses.filter(x => x !== l.skuId) }))}
+                      />
+                      <span className="font-mono">{l.skuPartNumber || l.skuId}</span>
+                      <span className="text-zinc-500 ml-auto">{l.consumedUnits}/{l.consumedUnits + (l.available ?? 0)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={createForm.mustChangePassword} onChange={e => setCreateForm({ ...createForm, mustChangePassword: e.target.checked })} />
+              Force password change at next sign-in
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={doCreateUser} disabled={busy} data-testid="client-cipp-create-submit">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1" />}Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* License dialog */}
+      <Dialog open={!!licenseDialog} onOpenChange={() => setLicenseDialog(null)}>
+        <DialogContent data-testid="client-cipp-license-dialog">
+          <DialogHeader><DialogTitle>Manage licenses · {licenseDialog?.userPrincipalName}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs mb-1">Add</div>
+              <div className="border border-zinc-800 rounded p-2 space-y-1 max-h-40 overflow-y-auto">
+                {licenses.map(l => (
+                  <label key={`a${l.skuId}`} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={licAdd.includes(l.skuId)} onChange={(e) => setLicAdd(a => e.target.checked ? [...a, l.skuId] : a.filter(x => x !== l.skuId))} />
+                    <span className="font-mono">{l.skuPartNumber || l.skuId}</span>
+                    <span className="ml-auto text-zinc-500">avail: {l.available ?? 0}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs mb-1">Remove</div>
+              <div className="border border-zinc-800 rounded p-2 space-y-1 max-h-40 overflow-y-auto">
+                {licenses.map(l => (
+                  <label key={`r${l.skuId}`} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={licRemove.includes(l.skuId)} onChange={(e) => setLicRemove(a => e.target.checked ? [...a, l.skuId] : a.filter(x => x !== l.skuId))} />
+                    <span className="font-mono">{l.skuPartNumber || l.skuId}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setLicenseDialog(null)}>Cancel</Button>
+            <Button onClick={doAssignLicense} disabled={busy || (licAdd.length === 0 && licRemove.length === 0)} data-testid="client-cipp-license-submit">
+              {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

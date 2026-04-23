@@ -60,6 +60,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
+  { tab: "integrations", anchor: "cipp-settings-card", label: "CIPP (M365 management)", keywords: "cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
@@ -129,6 +130,8 @@ export default function SettingsPage() {
   const [huntressBusy, setHuntressBusy] = useState(false);
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
+  const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [cippBusy, setCippBusy] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -161,7 +164,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -181,6 +184,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -191,6 +195,7 @@ export default function SettingsPage() {
         if (smsRes?.data) setSms(prev => ({ ...prev, ...smsRes.data, password: "" }));
         if (pax8Res?.data) setPax8(prev => ({ ...prev, ...pax8Res.data, client_secret: "" }));
         if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
+        if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1851,6 +1856,128 @@ export default function SettingsPage() {
           }} data-testid="save-suped-btn" disabled={supedSaving}>
             {supedSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save Suped Settings
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* CIPP M365 Tenant Management */}
+      <Card id="cipp-settings-card" data-testid="cipp-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-orange-500" />
+            <CardTitle>CIPP · M365 Tenant Management</CardTitle>
+          </div>
+          <CardDescription>
+            Connect your hosted CIPP (CyberDrain Improved Partner Portal) Azure function URL to manage
+            Microsoft 365 tenants, users, licenses, and offboarding directly from NexusOps.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={cipp.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="cipp-status-badge">
+              {cipp.configured ? "Configured" : "Not Configured"}
+            </Badge>
+            {cipp.api_key_preview && (
+              <Badge variant="outline" className="font-mono text-[10px]">Key: {cipp.api_key_preview}</Badge>
+            )}
+            {cipp.last_test_status && (
+              <Badge variant="outline" className="text-[10px]">Last test: {cipp.last_test_status}</Badge>
+            )}
+            {cipp.last_synced_at && (
+              <Badge variant="outline" className="text-[10px]">Synced: {new Date(cipp.last_synced_at).toLocaleString()}</Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>CIPP Base URL</Label>
+              <Input
+                value={cipp.base_url}
+                onChange={(e) => setCipp({ ...cipp, base_url: e.target.value })}
+                placeholder="https://your-cipp.azurewebsites.net/api"
+                data-testid="cipp-base-url"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                The Azure Function URL for your CIPP instance. Usually ends in <code>/api</code>.
+              </p>
+            </div>
+            <div>
+              <Label>API Key (x-functions-key)</Label>
+              <Input
+                type="password"
+                value={cipp.api_key}
+                onChange={(e) => setCipp({ ...cipp, api_key: e.target.value })}
+                placeholder={cipp.configured ? "•••••• (enter to replace)" : "Enter CIPP function key"}
+                data-testid="cipp-api-key"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                In CIPP Azure Functions → App Keys → copy the <code>default</code> host key.
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Docs: <a href="https://docs.cipp.app/" target="_blank" rel="noreferrer" className="text-primary underline">docs.cipp.app</a>.
+            NexusOps calls <code>ListTenants</code>, <code>ListUsers</code>, <code>ListLicenses</code>,
+            <code>AddUser</code>, <code>ExecBulkUserLicense</code>, <code>ExecResetPass</code>,
+            <code>ExecDisableUser</code>, and <code>ExecOffboardUser</code>.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              onClick={async () => {
+                if (!cipp.base_url || !cipp.api_key) {
+                  if (!cipp.configured) { toast.error("Enter base URL and API key"); return; }
+                  toast.error("Enter new URL & API key to update");
+                  return;
+                }
+                setCippBusy(true);
+                try {
+                  await axios.post(`${API}/cipp/settings`, { base_url: cipp.base_url, api_key: cipp.api_key }, { headers });
+                  toast.success("CIPP credentials saved");
+                  const st = await axios.get(`${API}/cipp/status`, { headers });
+                  setCipp(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setCippBusy(false); }
+              }}
+              disabled={cippBusy}
+              data-testid="cipp-save-btn"
+            >
+              {cippBusy ? "Saving…" : "Save credentials"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setCippBusy(true);
+                try {
+                  const res = await axios.get(`${API}/cipp/test`, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message || "Connection failed");
+                  const st = await axios.get(`${API}/cipp/status`, { headers });
+                  setCipp(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setCippBusy(false); }
+              }}
+              disabled={cippBusy || !cipp.configured}
+              data-testid="cipp-test-btn"
+            >
+              Test connection
+            </Button>
+            {cipp.configured && (
+              <Button
+                variant="ghost" className="text-red-400 hover:bg-red-500/10"
+                onClick={async () => {
+                  if (!window.confirm("Remove CIPP credentials? Tenant management features will stop working.")) return;
+                  setCippBusy(true);
+                  try {
+                    await axios.delete(`${API}/cipp/settings`, { headers });
+                    setCipp({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    toast.success("CIPP credentials removed");
+                  } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                  finally { setCippBusy(false); }
+                }}
+                data-testid="cipp-clear-btn"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 

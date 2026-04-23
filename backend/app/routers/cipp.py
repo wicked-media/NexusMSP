@@ -252,6 +252,134 @@ async def assign_license(tenant_id: str, user_id: str, data: dict, current_user:
     return {"success": True, "result": result}
 
 
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/reset-password")
+async def reset_password(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """body: { password?, mustChange?: bool } — password auto-generated if missing."""
+    data = data or {}
+    payload = {
+        "tenantFilter": tenant_id,
+        "TenantFilter": tenant_id,
+        "userId": user_id,
+        "UserId": user_id,
+        "password": data.get("password", ""),
+        "MustChangePass": bool(data.get("mustChange", True)),
+    }
+    result = await _cipp_call("POST", "ExecResetPass", json_body=payload)
+    await db.cipp_actions.insert_one({
+        "action": "reset_password",
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "result_preview": str(result)[:400],
+        "by": current_user.get("name"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "result": result}
+
+
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/block-signin")
+async def block_signin(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """body: { enable?: bool } — default disables sign-in; set enable=true to unblock."""
+    data = data or {}
+    enable = bool(data.get("enable", False))
+    payload = {
+        "tenantFilter": tenant_id,
+        "TenantFilter": tenant_id,
+        "userId": user_id,
+        "UserId": user_id,
+        "Enable": enable,
+    }
+    result = await _cipp_call("POST", "ExecDisableUser", json_body=payload)
+    await db.cipp_actions.insert_one({
+        "action": "unblock_signin" if enable else "block_signin",
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "result_preview": str(result)[:400],
+        "by": current_user.get("name"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "result": result, "enabled": enable}
+
+
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/offboard")
+async def offboard_user(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """body: { convertToShared?: bool, removeLicenses?: bool, resetPassword?: bool, revokeSessions?: bool,
+               outOfOffice?: str, forwardTo?: str, disableUser?: bool }"""
+    data = data or {}
+    payload = {
+        "tenantFilter": tenant_id,
+        "TenantFilter": tenant_id,
+        "user": user_id,
+        "User": user_id,
+        "ConvertToShared": bool(data.get("convertToShared", True)),
+        "RemoveLicenses": bool(data.get("removeLicenses", True)),
+        "ResetPass": bool(data.get("resetPassword", True)),
+        "RevokeSessions": bool(data.get("revokeSessions", True)),
+        "DisableSignIn": bool(data.get("disableUser", True)),
+        "RemoveGroups": bool(data.get("removeGroups", True)),
+        "HideFromGAL": bool(data.get("hideFromGAL", True)),
+        "OOO": data.get("outOfOffice", ""),
+        "forward": data.get("forwardTo", ""),
+    }
+    result = await _cipp_call("POST", "ExecOffboardUser", json_body=payload)
+    await db.cipp_actions.insert_one({
+        "action": "offboard_user",
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "options": {k: v for k, v in payload.items() if k not in ("tenantFilter", "TenantFilter", "user", "User")},
+        "result_preview": str(result)[:400],
+        "by": current_user.get("name"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "result": result}
+
+
+@router.get("/cipp/summary")
+async def cipp_summary(current_user: dict = Depends(get_current_user)):
+    """Aggregated dashboard: tenant/user/license counts + linked-client coverage."""
+    cfg = await _get_config()
+    if not cfg:
+        return {"configured": False, "message": "CIPP not configured"}
+
+    tenants_raw = await _cipp_call("GET", "ListTenants")
+    tenants = _norm_tenants(tenants_raw)
+
+    linked = await db.clients.count_documents({"cipp_tenant_id": {"$exists": True, "$ne": ""}})
+    clients_total = await db.clients.count_documents({})
+    recent_actions = await db.cipp_actions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10)
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one(
+        {"type": SETTINGS_KEY},
+        {"$set": {"last_synced_at": now}},
+    )
+    return {
+        "configured": True,
+        "stats": {
+            "tenants": len(tenants),
+            "linked_clients": linked,
+            "total_clients": clients_total,
+            "coverage_pct": round((linked / clients_total) * 100, 1) if clients_total else 0,
+        },
+        "tenants": [{
+            "customerId": t.get("customerId") or t.get("CustomerId") or t.get("tenant_id") or t.get("id"),
+            "displayName": t.get("displayName") or t.get("DisplayName") or t.get("Name") or "",
+            "defaultDomainName": t.get("defaultDomainName") or t.get("DefaultDomainName") or "",
+        } for t in tenants[:100]],
+        "recent_actions": recent_actions,
+        "last_synced_at": now,
+    }
+
+
+@router.get("/cipp/linked-clients")
+async def list_linked_clients(current_user: dict = Depends(get_current_user)):
+    """Clients with a CIPP tenant link."""
+    cursor = db.clients.find(
+        {"cipp_tenant_id": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "id": 1, "name": 1, "cipp_tenant_id": 1, "cipp_tenant_display": 1, "cipp_tenant_domain": 1, "cipp_linked_at": 1},
+    )
+    return await cursor.to_list(1000)
+
+
 # --- client linking --------------------------------------------------------
 
 @router.post("/clients/{client_id}/link-cipp-tenant")
