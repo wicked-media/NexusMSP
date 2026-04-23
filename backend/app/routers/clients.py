@@ -173,6 +173,8 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
                 "pax8": cid in pax8_links,
                 "m365": bool(c.get("m365_tenant_id") or c.get("office365_tenant_id")),
                 "rmm": amap["total"] > 0,
+                "suped": bool(c.get("suped_tenant_id")),
+                "cipp": bool(c.get("cipp_tenant_id")),
             },
             "last_activity": last_activity_map.get(cid),
             "last_qbr": c.get("last_qbr"),

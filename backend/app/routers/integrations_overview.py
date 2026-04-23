@@ -40,6 +40,17 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
 
     tiles = [
         {
+            "key": "cipp",
+            "name": "CIPP (M365 Management)",
+            "category": "security",
+            "description": "Microsoft 365 tenant management via CIPP",
+            "configured": bool((await _get_settings("cipp")).get("base_url") and (await _get_settings("cipp")).get("api_key_full")),
+            "last_synced_at": (await _get_settings("cipp")).get("last_synced_at"),
+            "last_test_status": (await _get_settings("cipp")).get("last_test_status"),
+            "command_center": None,
+            "settings_anchor": "cipp-settings-card",
+        },
+        {
             "key": "huntress",
             "name": "Huntress",
             "category": "security",

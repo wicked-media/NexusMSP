@@ -58,6 +58,8 @@ function IntegrationChip({ type, active }) {
     pax8: { label: "PX8", color: "text-indigo-400 border-indigo-500/40", tip: "Pax8 / Microsoft CSP" },
     m365: { label: "365", color: "text-blue-400 border-blue-500/40", tip: "Microsoft 365" },
     rmm: { label: "RMM", color: "text-emerald-400 border-emerald-500/40", tip: "RMM agent installed" },
+    suped: { label: "SUP", color: "text-fuchsia-400 border-fuchsia-500/40", tip: "Suped DMARC" },
+    cipp: { label: "CIPP", color: "text-orange-400 border-orange-500/40", tip: "CIPP — M365 management" },
   };
   const cfg = map[type];
   if (!cfg) return null;
