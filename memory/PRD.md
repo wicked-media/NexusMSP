@@ -7,6 +7,13 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Dark/Light Mode Palette Unification)
+- **Problem**: Dark `:root` used a slate-blue palette (`222 47% 11%`) while the Wave 2 refactored pages hardcoded zinc-950 (`240 10% 4%`) — legacy vs revamped pages clashed. And `PageShell` hardcoded `bg-zinc-950 text-zinc-100` meaning light-mode toggle left revamped pages stuck dark.
+- **Fix**:
+  - `/app/frontend/src/index.css` — `:root` (dark) and `.light` palettes rewritten with zinc-based HSL tokens (dark: 240 10% 4% zinc-950 base, 240 5% 65% muted-foreground zinc-400, 240 4% 16% zinc-800 border).
+  - `/app/frontend/src/components/design-system/index.jsx` — `PageShell`, `MetricStrip`, `MetricTile`, `StatusPill`, `IntegrationChip`, `EmptyState`, `MicroLabel` now use semantic Tailwind tokens (`bg-background`, `text-foreground`, `text-muted-foreground`, `border-border`) instead of hardcoded zinc classes. Auto-switches with theme.
+- **Testing**: `/app/test_reports/iteration_110.json` — 100% pass across Dashboard, Devices, Tickets, Shadow IT, Assets, Contracts. Theme persists via `localStorage.nexusops_theme` and across page refreshes.
+
 ## Recent Updates (Apr 20, 2026 — P1 Wave C Feature 1: Shadow IT Detector)
 - **Zero-LLM-cost** rule-based detector. New router `/app/backend/app/routers/shadow_it.py`:
   - Curated `RISK_DB` (40+ regex patterns covering file_sharing, remote_access, unapproved_vpn, ai_tool, messaging, personal_cloud, password_manager_personal, crypto_mining, torrent_p2p, unapproved_backup, screen_recorder) with per-app risk level + reason.
