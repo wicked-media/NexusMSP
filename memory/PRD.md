@@ -7,6 +7,15 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Unified Integrations Overview)
+- **Backend**: `/app/backend/app/routers/integrations_overview.py` — new `/api/integrations-overview` endpoint aggregating status of 12 integrations (Huntress, Hudu, Acronis, Pax8, Domotz, Stripe, Xero, Resend, MobileMessage SMS, Splynx, Syncro, Suped DMARC). Returns `{total, configured_count, coverage_pct, tiles[]}`.
+- **Frontend**: `/app/frontend/src/pages/IntegrationsOverviewPage.jsx` at `/integrations`:
+  - 4-tile MetricStrip (Total · Connected · Unconfigured · Coverage %).
+  - Search + filter chips (All / Configured / Unconfigured).
+  - Responsive tile grid (1→2→3→4 cols). Each tile shows category-toned icon, connected/unconfigured badge, last-synced stamp (with amber "stale" marker when >24h old), last-test status, and `Open Command Center` + `Configure` CTAs deep-linking correctly.
+  - Linked in sidebar under **Platform → Integrations → Overview**.
+- **Testing**: `/app/test_reports/iteration_117.json` — 100% backend + frontend pass. Testing agent fixed missing `last_test_status` key on 8 tile shapes.
+
 ## Recent Updates (Apr 20, 2026 — Hudu Command Center Page)
 - **New `/hudu` route** — full Hudu Command Center page at `/app/frontend/src/pages/HuduCommandCenterPage.jsx`:
   - 6-tile MetricStrip (Companies · Articles · Assets · Procedures · Websites · Passwords) fed by `/api/hudu/summary`.
