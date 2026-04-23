@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import {
   Cloud, Users, KeyRound, RefreshCw, Loader2, ExternalLink,
   UserPlus, Lock, Unlock, UserX, Link as LinkIcon, Search, Shield,
+  Send, TrendingUp, AlertTriangle,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
@@ -215,6 +216,7 @@ export default function CippCommandCenterPage() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full md:w-auto" data-testid="cipp-tabs">
             <TabsTrigger value="tenants" data-testid="cipp-tab-tenants"><Cloud className="w-3 h-3 mr-1" />Tenants</TabsTrigger>
+            <TabsTrigger value="hygiene" data-testid="cipp-tab-hygiene"><Shield className="w-3 h-3 mr-1" />Hygiene Digest</TabsTrigger>
             <TabsTrigger value="linked" data-testid="cipp-tab-linked"><LinkIcon className="w-3 h-3 mr-1" />Linked Clients</TabsTrigger>
             <TabsTrigger value="audit" data-testid="cipp-tab-audit"><RefreshCw className="w-3 h-3 mr-1" />Audit</TabsTrigger>
           </TabsList>
@@ -367,6 +369,10 @@ export default function CippCommandCenterPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="hygiene" className="space-y-4">
+            <CippHygienePanel />
           </TabsContent>
 
           <TabsContent value="linked">
@@ -598,5 +604,159 @@ export default function CippCommandCenterPage() {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+function CippHygienePanel() {
+  const { token } = useAuth();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [digest, setDigest] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [d, h] = await Promise.all([
+        axios.get(`${API}/cipp/hygiene-digest`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/cipp/digests`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setDigest(d.data);
+      setHistory(h.data || []);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const sendDigest = async () => {
+    setSending(true);
+    try {
+      const res = await axios.post(`${API}/cipp/hygiene-digest/send`, {}, { headers });
+      if (res.data?.sent) toast.success(`Digest sent via ${res.data.sent_via}`);
+      else toast.warning(res.data?.reason || res.data?.error || "Digest saved but not emailed (Resend not configured)");
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setSending(false); }
+  };
+
+  if (loading) return <Card><CardContent className="p-8 text-center text-muted-foreground"><Loader2 className="w-4 h-4 mr-2 animate-spin inline" />Computing hygiene digest…</CardContent></Card>;
+  if (!digest?.configured) return <Card><CardContent className="p-8 text-center text-xs text-amber-400">CIPP not configured — add credentials in Settings first.</CardContent></Card>;
+
+  const rows = digest.clients || [];
+  const scored = rows.filter(r => typeof r.score === "number");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-xs text-muted-foreground">
+          Generated {new Date(digest.generated_at).toLocaleString()} · {digest.total_tenants} tenants analysed · avg {digest.avg_score}
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={load} data-testid="cipp-digest-refresh"><RefreshCw className="w-3 h-3 mr-1" />Recompute</Button>
+          <Button size="sm" onClick={sendDigest} disabled={sending} data-testid="cipp-digest-send">
+            {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}Send digest
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Avg score</div><div className="text-2xl font-semibold" data-testid="cipp-digest-avg">{digest.avg_score}</div></CardContent></Card>
+        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Tenants</div><div className="text-2xl font-semibold">{digest.total_tenants}</div></CardContent></Card>
+        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground text-rose-400">Critical (&lt;50)</div><div className="text-2xl font-semibold text-rose-400">{digest.critical_count}</div></CardContent></Card>
+        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground text-amber-400">Upsell candidates</div><div className="text-2xl font-semibold text-amber-400">{digest.upsell_candidates?.length || 0}</div></CardContent></Card>
+      </div>
+
+      {digest.upsell_candidates?.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 text-amber-400" />
+              <span className="font-medium text-sm">Upsell opportunities</span>
+              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">{digest.upsell_candidates.length}</Badge>
+            </div>
+            <div className="text-[11px] text-muted-foreground mb-3">Clients with license waste, unlicensed users, or weak MFA posture — ideal targets for a Security Posture bundle.</div>
+            <div className="space-y-2">
+              {digest.upsell_candidates.map((c) => (
+                <div key={c.client_id} className="flex items-start gap-3 p-2 rounded border border-amber-500/20 bg-amber-500/5" data-testid={`cipp-upsell-${c.client_id}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{c.client_name}</div>
+                    <div className="text-[11px] text-muted-foreground font-mono">{c.tenant_display || c.tenant_domain}</div>
+                    <ul className="text-[11px] text-amber-300 mt-1 space-y-0.5">
+                      {(c.top_risks || []).map((r, i) => <li key={i}>• {r}</li>)}
+                    </ul>
+                  </div>
+                  <Badge variant="outline" className="text-amber-400 border-amber-500/30">Score {c.score}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-4 py-2 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">All tenants ({scored.length})</div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[10px] uppercase">Client</TableHead>
+                <TableHead className="text-[10px] uppercase">Score</TableHead>
+                <TableHead className="text-[10px] uppercase">Grade</TableHead>
+                <TableHead className="text-[10px] uppercase">Active users</TableHead>
+                <TableHead className="text-[10px] uppercase">MFA</TableHead>
+                <TableHead className="text-[10px] uppercase">Top risks</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.client_id} data-testid={`cipp-digest-row-${r.client_id}`}>
+                  <TableCell>
+                    <div className="text-sm font-medium">{r.client_name}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">{r.tenant_display}</div>
+                  </TableCell>
+                  <TableCell>
+                    {r.score == null ? <span className="text-xs text-rose-400">err</span> : (
+                      <Badge variant="outline" className={r.score >= 75 ? "text-emerald-400 border-emerald-500/30" : r.score >= 50 ? "text-amber-400 border-amber-500/30" : "text-rose-400 border-rose-500/30"}>
+                        {r.score}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs font-mono">{r.grade || "—"}</TableCell>
+                  <TableCell className="text-xs font-mono">{r.counts?.enabled_users ?? "—"}</TableCell>
+                  <TableCell className="text-xs font-mono">{r.counts?.mfa_coverage_pct != null ? `${r.counts.mfa_coverage_pct}%` : "—"}</TableCell>
+                  <TableCell className="text-[11px] text-muted-foreground max-w-md">
+                    {(r.top_risks || []).slice(0, 2).map((x, i) => <div key={i}>• {x}</div>)}
+                    {!r.top_risks?.length && <span className="text-emerald-400">healthy</span>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {history.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-4 py-2 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Digest history</div>
+            <Table>
+              <TableHeader><TableRow><TableHead className="text-[10px] uppercase">When</TableHead><TableHead className="text-[10px] uppercase">Avg</TableHead><TableHead className="text-[10px] uppercase">Critical</TableHead><TableHead className="text-[10px] uppercase">Sent to</TableHead><TableHead className="text-[10px] uppercase">Via</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {history.map((h, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-[10px] font-mono">{new Date(h.generated_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs font-mono">{h.avg_score}</TableCell>
+                    <TableCell className="text-xs font-mono">{h.critical_count}</TableCell>
+                    <TableCell className="text-xs font-mono">{(h.to || []).join(", ") || "—"}</TableCell>
+                    <TableCell className="text-xs">{h.sent_via || <span className="text-amber-400">not sent</span>}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

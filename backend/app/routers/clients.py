@@ -270,6 +270,16 @@ async def _calc_health(client):
         scores["contracts"] = 10 if not expiring_soon else 5
     else:
         scores["contracts"] = 5
+
+    # 6. M365 hygiene (10 pts, only when CIPP tenant is linked; rebalance devices 20→15 and contracts 10→5)
+    if client.get("cipp_tenant_id"):
+        cached = await db.cipp_hygiene_cache.find_one({"tenant_id": client["cipp_tenant_id"]}, {"_id": 0})
+        hygiene_score_pct = ((cached or {}).get("hygiene") or {}).get("score")
+        if hygiene_score_pct is not None:
+            scores["m365_hygiene"] = round((hygiene_score_pct / 100) * 10)
+            # Pull 5 pts each from devices and contracts to keep total at 100
+            scores["devices"] = max(0, scores["devices"] - 5) if scores["devices"] >= 5 else scores["devices"]
+            scores["contracts"] = max(0, scores["contracts"] - 5) if scores["contracts"] >= 5 else scores["contracts"]
     
     total_score = sum(scores.values())
     risk = "healthy" if total_score >= 75 else "attention" if total_score >= 50 else "at_risk" if total_score >= 25 else "critical"

@@ -44,6 +44,16 @@ async def _compute_health(client):
     sentiment = await db.client_sentiments.find_one({"client_id": cid}, {"_id": 0, "score": 1})
     sentiment_score = (sentiment or {}).get("score", 65)
 
+    # M365 hygiene (CIPP) — only when linked; reads from cipp_hygiene_cache (6h TTL managed by cipp_hygiene router)
+    m365_score = None
+    m365_top_risks = []
+    if client.get("cipp_tenant_id"):
+        cached = await db.cipp_hygiene_cache.find_one({"tenant_id": client["cipp_tenant_id"]}, {"_id": 0})
+        if cached and cached.get("hygiene"):
+            h = cached["hygiene"]
+            m365_score = h.get("score")
+            m365_top_risks = [r["factor"] for r in (h.get("risks") or [])[:3]]
+
     # ===== SCORING =====
     # Ticket Health (25 pts)
     ticket_health = max(0, 100 - (open_tickets * 8) - (critical_tickets * 25))
@@ -63,14 +73,27 @@ async def _compute_health(client):
     # Engagement (10 pts)
     engagement = min(100, total_tickets * 3 + paid_invoices * 8)
 
-    composite = int(
-        ticket_health * 0.25 +
-        device_health * 0.20 +
-        payment_health * 0.20 +
-        backup_health * 0.15 +
-        security_health * 0.10 +
-        engagement * 0.10
-    )
+    # When we have an M365 hygiene score, rebalance the composite to give it 10% of weight
+    # (pulled from engagement 10→5 and security 10→5). Otherwise keep the legacy weights.
+    if m365_score is not None:
+        composite = int(
+            ticket_health * 0.25 +
+            device_health * 0.20 +
+            payment_health * 0.20 +
+            backup_health * 0.15 +
+            security_health * 0.05 +
+            engagement * 0.05 +
+            m365_score * 0.10
+        )
+    else:
+        composite = int(
+            ticket_health * 0.25 +
+            device_health * 0.20 +
+            payment_health * 0.20 +
+            backup_health * 0.15 +
+            security_health * 0.10 +
+            engagement * 0.10
+        )
     composite = max(0, min(100, composite))
 
     status = "thriving" if composite >= 85 else "healthy" if composite >= 70 else "needs_attention" if composite >= 50 else "at_risk" if composite >= 30 else "critical"
@@ -102,6 +125,14 @@ async def _compute_health(client):
         positive_factors.append({"factor": "No open tickets", "impact": "+5"})
     if security_alerts == 0:
         positive_factors.append({"factor": "Clean security posture", "impact": "+3"})
+    if m365_score is not None and m365_score >= 85:
+        positive_factors.append({"factor": f"M365 hygiene score {m365_score}", "impact": "+3"})
+
+    # M365 hygiene risks
+    if m365_score is not None and m365_score < 60:
+        risk_factors.append({"factor": f"M365 hygiene score low ({m365_score})", "severity": "warning", "impact": -(60 - m365_score) // 2})
+    for tr in m365_top_risks[:2]:
+        risk_factors.append({"factor": tr, "severity": "info", "impact": -2})
 
     return {
         "client_id": cid,
@@ -119,6 +150,7 @@ async def _compute_health(client):
             "security_health": security_health,
             "engagement": engagement,
             "sentiment": sentiment_score,
+            "m365_hygiene": m365_score,
         },
         "details": {
             "open_tickets": open_tickets,

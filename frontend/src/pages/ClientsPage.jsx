@@ -522,9 +522,10 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
                 {healthDetail?.breakdown ? [
                   { k: "tickets", max: 30, label: "Tickets" },
                   { k: "sla", max: 20, label: "SLA" },
-                  { k: "devices", max: 20, label: "Devices" },
+                  { k: "devices", max: healthDetail.breakdown.m365_hygiene != null ? 15 : 20, label: "Devices" },
                   { k: "payments", max: 20, label: "Payments" },
-                  { k: "contracts", max: 10, label: "Contracts" },
+                  { k: "contracts", max: healthDetail.breakdown.m365_hygiene != null ? 5 : 10, label: "Contracts" },
+                  ...(healthDetail.breakdown.m365_hygiene != null ? [{ k: "m365_hygiene", max: 10, label: "M365" }] : []),
                 ].map(({ k, max, label }) => {
                   const v = healthDetail.breakdown[k] ?? 0;
                   const pct = (v / max) * 100;
@@ -672,6 +673,25 @@ function CippTenantPanel({ client }) {
   useEffect(() => { loadClient(); }, [client.id]); // eslint-disable-line
 
   const tenantId = clientDoc?.cipp_tenant_id;
+
+  const [hygiene, setHygiene] = useState(null);
+  const [loadingHygiene, setLoadingHygiene] = useState(false);
+
+  const loadHygiene = async (force = false) => {
+    if (!tenantId) return;
+    setLoadingHygiene(true);
+    try {
+      const r = await axios.get(`${API}/cipp/tenants/${tenantId}/hygiene${force ? "?force=true" : ""}`, { headers });
+      setHygiene(r.data);
+    } catch (e) { /* ignore — keep previous */ }
+    finally { setLoadingHygiene(false); }
+  };
+
+  useEffect(() => {
+    if (!tenantId) { setHygiene(null); return; }
+    loadHygiene(false);
+    // eslint-disable-next-line
+  }, [tenantId]);
 
   useEffect(() => {
     if (!tenantId) { setUsers([]); setLicenses([]); return; }
@@ -853,6 +873,80 @@ function CippTenantPanel({ client }) {
             <div className="text-lg font-semibold">{users.filter(u => !u.accountEnabled).length}</div>
           </div>
         </div>
+      </div>
+
+      {/* M365 Hygiene card */}
+      <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950" data-testid="client-cipp-hygiene">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-amber-400" />
+            <span className="font-medium">M365 Hygiene</span>
+            {hygiene?.grade && (
+              <span className={`text-[10px] uppercase tracking-widest font-mono px-1.5 py-0.5 rounded border ${
+                hygiene.score >= 75 ? "text-emerald-400 border-emerald-500/30" :
+                hygiene.score >= 50 ? "text-amber-400 border-amber-500/30" :
+                "text-rose-400 border-rose-500/30"
+              }`}>Grade {hygiene.grade}</span>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => loadHygiene(true)} disabled={loadingHygiene} data-testid="client-cipp-hygiene-refresh">
+            {loadingHygiene ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Recompute
+          </Button>
+        </div>
+
+        {loadingHygiene && !hygiene ? (
+          <div className="flex items-center justify-center py-6 text-zinc-500"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Analysing tenant…</div>
+        ) : !hygiene ? (
+          <div className="text-xs text-zinc-500">Hygiene not yet computed. Click Recompute to analyse.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-4">
+            <div className="flex flex-col items-center justify-center">
+              <HealthDial score={hygiene.score || 0} size={120} />
+              <div className="text-[10px] text-zinc-500 font-mono mt-2">{hygiene.total_users} users · {hygiene.counts?.enabled_users || 0} active</div>
+            </div>
+            <div className="space-y-3">
+              {/* dim breakdown */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {hygiene.breakdown && Object.entries(hygiene.breakdown).map(([k, v]) => {
+                  const pct = v.max ? (v.earned / v.max) * 100 : 0;
+                  const color = pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500";
+                  return (
+                    <div key={k} className="text-xs" data-testid={`hygiene-dim-${k}`}>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500 uppercase tracking-wider text-[9px]">{k.replace(/_/g, " ")}</span>
+                        <span className="text-[9px] font-mono text-zinc-400">{v.earned}/{v.max}</span>
+                      </div>
+                      <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
+                        <div className={`h-full ${color}`} style={{ width: `${pct}%`, transition: "width 600ms" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* risks */}
+              {(hygiene.risks || []).length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Top risks</div>
+                  <div className="space-y-1">
+                    {hygiene.risks.slice(0, 5).map((r, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <span className={`w-1 h-1 rounded-full mt-1.5 shrink-0 ${r.severity === "critical" ? "bg-rose-400" : r.severity === "warning" ? "bg-amber-400" : "bg-zinc-500"}`} />
+                        <span className="text-zinc-300 flex-1">{r.factor}</span>
+                        <span className="text-[10px] text-zinc-500 font-mono shrink-0">{r.impact}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* upsell hint */}
+              {hygiene.score < 70 && (
+                <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+                  💡 Upsell opportunity: bundle MFA enforcement, license cleanup, and offboarding hygiene as a Security Posture Package.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="border border-zinc-800 rounded-md overflow-hidden bg-zinc-950">
