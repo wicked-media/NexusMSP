@@ -10,6 +10,7 @@ export const routeConfig = [
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
   { path: "/shadow-it", component: page("ShadowItPage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
+  { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },
   { path: "/morning-checks", component: page("MorningChecksPage"), auth: true, layout: true },
   { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
   { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },

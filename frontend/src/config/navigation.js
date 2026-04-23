@@ -359,6 +359,7 @@ export const navGroups = [
       {
         path: "/proxmox", icon: Server, label: "Integrations",
         children: [
+          { path: "/integrations", label: "Overview" },
           { path: "/proxmox", label: "Proxmox" },
           { path: "/domotz", label: "Domotz" },
           { path: "/acronis", label: "Acronis" },
