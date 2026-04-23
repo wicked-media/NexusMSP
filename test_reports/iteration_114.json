@@ -1,0 +1,74 @@
+{
+  "summary": "Iteration 114: Huntress UI Features - ResponseTimeline and IdentityThreatPage. All 16 backend tests PASSED. All frontend tests PASSED. Backend: GET /api/huntress/actions returns audit rows sorted desc by timestamp with action/timestamp/by/result.success fields. Frontend: ResponseTimeline component renders correctly on Security Dashboard with data-testid='response-timeline', refresh button works, shows 10 response rows with accepted/rejected badges. IdentityThreatPage merges Huntress identity incidents (123 rows with HNT badges), shows 'Huntress Live' badge when configured. Both dark and light mode work correctly with proper contrast.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration114_huntress_ui.py",
+    "/app/test_reports/pytest/pytest_results_iter114.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ResponseTimeline.jsx: Correctly uses semantic tokens (text-muted-foreground, border-border) for theme compatibility",
+    "ResponseTimeline.jsx: Proper data-testid attributes for testing (response-timeline, response-timeline-refresh, response-row-{idx})",
+    "ResponseTimeline.jsx: Shows empty state message 'No response actions yet' when no data",
+    "ResponseTimeline.jsx: Each row shows action icon, target, accepted/rejected badge, user+timestamp, and rejection message",
+    "SecurityDashboardPage.jsx: ResponseTimeline correctly placed in right-side column (lg:col-span-4)",
+    "IdentityThreatPage.jsx: _isHuntressIdentity filter correctly identifies identity-related incidents using keyword matching",
+    "IdentityThreatPage.jsx: _normaliseHuntressIdentity mapper correctly transforms Huntress incidents to existing row shape",
+    "IdentityThreatPage.jsx: HNT badge correctly shown on Huntress-sourced rows with orange styling",
+    "IdentityThreatPage.jsx: 'Huntress Live' badge shown when Huntress is configured and has identity incidents"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration114_huntress_ui.py"
+  ],
+  "success_rate": {"backend": "100% (16/16 tests passed)", "frontend": "100% - all UI tests passed"},
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "None required - existing huntress_actions data from iteration 113 used",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ResponseTimeline component fully working on Security Dashboard. Shows audit trail of Huntress actions with accepted/rejected badges. IdentityThreatPage merges Huntress identity incidents (filtered by keywords like 'identity', 'credential', 'impossible_travel', etc.) into SOC identity threats list with HNT badges. Both components work in dark and light mode. Huntress is currently configured with real credentials. Previous iteration 113 created test actions in db.huntress_actions which are displayed in the timeline.",
+  "features_tested": {
+    "backend_endpoints": {
+      "GET /api/huntress/actions": "PASS - returns audit rows sorted desc by timestamp",
+      "GET /api/huntress/actions?limit=N": "PASS - respects limit parameter",
+      "GET /api/huntress/actions row structure": "PASS - has action/timestamp/by/result.success",
+      "GET /api/huntress/actions auth": "PASS - requires authentication (401/403 without token)",
+      "GET /api/huntress/status": "PASS - returns configured status",
+      "GET /api/soc/identity-threats": "PASS - returns threats list and summary",
+      "GET /api/huntress/incident-reports": "PASS - returns 200 when configured",
+      "GET /api/huntress/summary": "PASS - regression test passed",
+      "GET /api/soc/dashboard": "PASS - regression test passed"
+    },
+    "frontend_response_timeline": {
+      "Component renders": "PASS - data-testid='response-timeline' found",
+      "Refresh button": "PASS - data-testid='response-timeline-refresh' found and clickable",
+      "Response rows": "PASS - 10 rows displayed with data-testid='response-row-{idx}'",
+      "Row content": "PASS - shows action type, target, accepted/rejected badge, user, timestamp, error message",
+      "Empty state": "PASS - shows 'No response actions yet' when empty",
+      "Dark mode": "PASS - renders correctly with proper contrast",
+      "Light mode": "PASS - renders correctly with proper contrast"
+    },
+    "frontend_identity_threats": {
+      "Page loads": "PASS - data-testid='identity-threat' found",
+      "Huntress Live badge": "PASS - shown when Huntress configured with identity incidents",
+      "HNT badges": "PASS - 118 HNT badges found on Huntress-sourced rows",
+      "Identity threat rows": "PASS - 123 rows displayed",
+      "Summary cards": "PASS - Total/Critical/MFA Gaps/Compromised Accounts shown",
+      "No errors": "PASS - page does not crash or show blank"
+    },
+    "regression_tests": {
+      "Main Dashboard Huntress card": "PASS - data-testid='huntress-summary-card' found",
+      "Endpoint Security page": "PASS - page loads correctly",
+      "SOC Feed page": "PASS - data-testid='soc-feed' found",
+      "Security Dashboard metric strip": "PASS - shows Agents/Offline/Critical/Open/Signals/Orgs",
+      "Incident action dropdown": "PASS - 10 action buttons found with data-testid='sec-incident-actions-{id}'"
+    }
+  }
+}

@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { ResponseTimeline } from "@/components/security/ResponseTimeline";
 
 const SEV_BADGE = {
   critical: "bg-rose-500/20 text-rose-400 border-rose-500/30",
@@ -428,6 +429,9 @@ export default function SecurityDashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Response Timeline — shown to everyone; empty state guides them */}
+            <ResponseTimeline limit={10} />
           </div>
         </div>
 
