@@ -7,6 +7,17 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — Hudu Feature-Rich Revamp + AI KB Suggestions)
+- **Fully rewrote `/app/backend/app/routers/hudu.py`**:
+  - New resource endpoints: `/api/hudu/{companies,articles,articles/{id},assets,asset-layouts,websites,procedures,passwords,passwords/{id}}` — read-through to Hudu API v1 with proper `search`/`name` query parameters.
+  - Passwords redacted in list, decrypted on-demand per-ID with audit log in `db.hudu_password_reveals`.
+  - `GET /api/hudu/search?q=` — fan-out across articles + assets + procedures + websites + passwords.
+  - `GET /api/hudu/summary` — dashboard roll-up with counts + recent articles.
+  - `POST /api/hudu/suggest-for-ticket` — derives 3-6 keywords from ticket title+description (stopword-filtered), queries Hudu, and ranks top picks via Claude Sonnet 4.5 with concrete fix steps. Audit log in `db.hudu_suggestions`.
+  - Graceful error handling: connection errors → 503, timeouts → 504, 403 from Hudu → returns empty list (plan-limited endpoints), zero 500s.
+- **Frontend**: New `<HuduSuggestionsPanel />` mounted in TicketsPage detail view below the description card. Auto-runs on open, shows hit count badge, AI picks with fix bullets + Copy button, full article viewer dialog.
+- **Testing**: `/app/test_reports/iteration_115.json` — 41/41 backend + 100% frontend pass. Testing agent fixed a minor 500 in `_hudu_get` (now returns 503/504 on connection/timeout errors).
+
 ## Recent Updates (Apr 20, 2026 — Huntress Response Timeline + Identity Threats Wiring)
 - **New `<ResponseTimeline />` component** (`/app/frontend/src/components/security/ResponseTimeline.jsx`) — reads `GET /api/huntress/actions`, renders a chronological audit trail of every incident action attempted (close, resolve, assign, comment, acknowledge, isolate, release) with accepted/rejected badges, rejection message, and user + timestamp. Mounted on the SOC Dashboard right column.
 - **IdentityThreatPage** (`/app/frontend/src/pages/IdentityThreatPage.jsx`) — now parallel-fetches `/api/soc/identity-threats` AND `/api/huntress/incident-reports`. Filters Huntress incidents by identity-category keywords (identity, credential, impossible_travel, brute_force, mfa_fatigue, token_theft, password_spray, privilege_escalation, etc), normalises them to the existing row shape, merges them in, and flags each with an orange `HNT` badge. Shows a `Huntress Live` badge in the header when merging real data.
