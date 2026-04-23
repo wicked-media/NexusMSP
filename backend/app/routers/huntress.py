@@ -176,6 +176,133 @@ async def list_signals(limit: int = 200, current_user: dict = Depends(get_curren
         raise
 
 
+# --- write actions (best-effort against Huntress response APIs) -----------
+
+async def _post(path: str, payload: Optional[dict] = None) -> dict:
+    creds = await _get_creds()
+    if not creds:
+        raise HTTPException(503, "Huntress not configured")
+    url = f"{HUNTRESS_BASE_URL}{path}"
+    async with httpx.AsyncClient(timeout=30.0, auth=_auth(creds)) as c:
+        r = await c.post(url, json=payload or {})
+        return {"status_code": r.status_code, "text": r.text, "json": (r.json() if r.content and r.headers.get("content-type","").startswith("application/json") else None)}
+
+
+async def _try_paths(paths: list, payload: Optional[dict] = None) -> dict:
+    """Try a list of candidate paths; return first 2xx or the last non-2xx response."""
+    last = None
+    for p in paths:
+        try:
+            res = await _post(p, payload)
+            last = res
+            if 200 <= res["status_code"] < 300:
+                return {"success": True, "path": p, "status_code": res["status_code"], "response": res.get("json") or res.get("text")}
+        except HTTPException:
+            raise
+        except Exception as e:
+            last = {"status_code": 0, "text": str(e)[:200]}
+    if last is None:
+        return {"success": False, "message": "No write path attempted"}
+    return {
+        "success": False,
+        "status_code": last.get("status_code"),
+        "message": (last.get("text") or "")[:500] or "Huntress rejected the action",
+        "hint": "Huntress may not expose this action on your plan/beta. Check feedback.huntress.com/changelog for response-API status.",
+    }
+
+
+@router.post("/huntress/incident-reports/{incident_id}/action")
+async def incident_action(
+    incident_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    action: close | resolve | assign | comment | acknowledge
+    body: { action, assignee, note }
+    """
+    action = (data or {}).get("action", "").lower()
+    note = (data or {}).get("note", "")
+    assignee = (data or {}).get("assignee", "")
+    if action not in ("close", "resolve", "assign", "comment", "acknowledge"):
+        raise HTTPException(400, "action must be close|resolve|assign|comment|acknowledge")
+
+    # Candidate path sets per action — we try each until one succeeds
+    path_map = {
+        "close":        [f"/v1/incident_reports/{incident_id}/close",
+                         f"/v1/incident_reports/{incident_id}/resolve",
+                         f"/v1/incident_reports/{incident_id}/responses"],
+        "resolve":      [f"/v1/incident_reports/{incident_id}/resolve",
+                         f"/v1/incident_reports/{incident_id}/close",
+                         f"/v1/incident_reports/{incident_id}/responses"],
+        "assign":       [f"/v1/incident_reports/{incident_id}/assign",
+                         f"/v1/incident_reports/{incident_id}/assignee"],
+        "comment":      [f"/v1/incident_reports/{incident_id}/comments",
+                         f"/v1/incident_reports/{incident_id}/notes"],
+        "acknowledge":  [f"/v1/incident_reports/{incident_id}/acknowledge",
+                         f"/v1/incident_reports/{incident_id}/ack"],
+    }
+    payload = {}
+    if action == "assign" and assignee:
+        payload = {"assignee": assignee}
+    if action in ("comment", "close", "resolve", "acknowledge") and note:
+        payload["note"] = note
+        payload["message"] = note
+
+    result = await _try_paths(path_map[action], payload=payload)
+
+    # Mirror the action locally so the dashboard reflects it even if Huntress silently rejects
+    now = datetime.now(timezone.utc).isoformat()
+    await db.huntress_actions.insert_one({
+        "incident_id": incident_id,
+        "action": action,
+        "payload": payload,
+        "result": result,
+        "by": current_user.get("name"),
+        "by_id": current_user.get("id"),
+        "timestamp": now,
+    })
+    return result
+
+
+@router.post("/huntress/agents/{agent_id}/isolate")
+async def agent_isolate(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
+    note = (data or {}).get("note", "") if data else ""
+    paths = [
+        f"/v1/agents/{agent_id}/isolate",
+        f"/v1/agents/{agent_id}/isolation",
+        f"/v1/agents/{agent_id}/contain",
+    ]
+    result = await _try_paths(paths, payload={"note": note} if note else {})
+    await db.huntress_actions.insert_one({
+        "agent_id": agent_id, "action": "isolate", "result": result,
+        "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return result
+
+
+@router.post("/huntress/agents/{agent_id}/release")
+async def agent_release(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
+    note = (data or {}).get("note", "") if data else ""
+    paths = [
+        f"/v1/agents/{agent_id}/release",
+        f"/v1/agents/{agent_id}/unisolate",
+        f"/v1/agents/{agent_id}/uncontain",
+    ]
+    result = await _try_paths(paths, payload={"note": note} if note else {})
+    await db.huntress_actions.insert_one({
+        "agent_id": agent_id, "action": "release", "result": result,
+        "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return result
+
+
+@router.get("/huntress/actions")
+async def list_actions(limit: int = 50, current_user: dict = Depends(get_current_user)):
+    rows = await db.huntress_actions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(max(1, min(200, limit)))
+    return rows
+
+
 # --- dashboard summary -----------------------------------------------------
 
 @router.get("/huntress/summary")

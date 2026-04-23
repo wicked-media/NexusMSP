@@ -51,8 +51,30 @@ export default function SocFeedPage() {
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/soc/alerts`, { headers });
-      setAlerts(res.data);
+      const [socRes, huntRes, huntStatusRes] = await Promise.all([
+        axios.get(`${API}/soc/alerts`, { headers }),
+        axios.get(`${API}/huntress/incident-reports?limit=500`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: { configured: false } })),
+      ]);
+      const socList = socRes.data || [];
+      if (huntStatusRes.data?.configured && Array.isArray(huntRes.data) && huntRes.data.length > 0) {
+        // Normalise Huntress incidents into the SOC alert shape
+        const huntAlerts = huntRes.data.map((i) => ({
+          id: `hunt-${i.id}`,
+          title: i.summary || i.title || "Huntress incident",
+          description: i.description || i.summary || "",
+          severity: (i.severity || "low").toLowerCase(),
+          status: ["resolved", "closed"].includes((i.status || "").toLowerCase()) ? "remediated" : "new",
+          hostname: i.agent_hostname || i.hostname || "—",
+          organization: i.organization_name || i.organization_id || "—",
+          created_at: i.detected_at || i.created_at,
+          source: "huntress",
+          _raw_id: i.id,
+        }));
+        setAlerts([...huntAlerts, ...socList]);
+      } else {
+        setAlerts(socList);
+      }
     } catch { toast.error("Failed to load alerts"); }
     finally { setLoading(false); }
   }, [token]);
@@ -82,10 +104,16 @@ export default function SocFeedPage() {
   const handleIsolate = async (alert) => {
     setActionLoading(alert.id);
     try {
-      await axios.post(`${API}/soc/alerts/${alert.id}/isolate`, { hostname: alert.hostname }, { headers });
-      toast.success(`${alert.hostname} isolated`);
+      if (alert.source === "huntress") {
+        const res = await axios.post(`${API}/huntress/agents/${alert._raw_id || alert.hostname}/isolate`, {}, { headers });
+        if (res.data?.success) toast.success(`${alert.hostname} isolated via Huntress`);
+        else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
+      } else {
+        await axios.post(`${API}/soc/alerts/${alert.id}/isolate`, { hostname: alert.hostname }, { headers });
+        toast.success(`${alert.hostname} isolated`);
+      }
       fetchAlerts();
-    } catch { toast.error("Failed"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setActionLoading(null); }
   };
 

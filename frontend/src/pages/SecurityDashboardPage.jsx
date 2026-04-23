@@ -11,9 +11,14 @@ import { useNavigate, Link } from "react-router-dom";
 import {
   Shield, ShieldAlert, ShieldCheck, Wifi, WifiOff, Bug, Skull, Radar,
   AlertTriangle, Activity, RefreshCw, Loader2, ExternalLink, ChevronRight,
-  Users, Eye, Zap, KeyRound, Flame, Monitor, Link2,
+  Users, Eye, Zap, KeyRound, Flame, Monitor, Link2, CheckCircle, Lock, Unlock,
+  MessageSquare, UserPlus, MoreHorizontal,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 
 const SEV_BADGE = {
   critical: "bg-rose-500/20 text-rose-400 border-rose-500/30",
@@ -41,6 +46,32 @@ export default function SecurityDashboardPage() {
   const [hunt, setHunt] = useState(null);
   const [soc, setSoc] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Incident response state
+  const [actionDialog, setActionDialog] = useState(null); // { incident, action }
+  const [actionNote, setActionNote] = useState("");
+  const [actionAssignee, setActionAssignee] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+
+  const runIncidentAction = async () => {
+    if (!actionDialog) return;
+    setActionBusy(true);
+    try {
+      const { incident, action } = actionDialog;
+      const body = { action, note: actionNote };
+      if (action === "assign") body.assignee = actionAssignee;
+      const res = await axios.post(`${API}/huntress/incident-reports/${incident.id}/action`, body, { headers });
+      if (res.data?.success) {
+        toast.success(`Incident ${action} — Huntress accepted`);
+      } else {
+        toast.error(`Huntress rejected: ${res.data?.message || "action not supported by your plan"}`, { duration: 6000 });
+      }
+      setActionDialog(null); setActionNote(""); setActionAssignee("");
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message);
+    } finally { setActionBusy(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,6 +219,7 @@ export default function SecurityDashboardPage() {
                       <TableHead className="text-[10px] uppercase tracking-widest">Severity</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-widest">Status</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-widest">Detected</TableHead>
+                      {configured && <TableHead className="text-[10px] uppercase tracking-widest">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -202,6 +234,47 @@ export default function SecurityDashboardPage() {
                             <TableCell><Badge className={`${SEV_BADGE[(i.severity || "").toLowerCase()] || SEV_BADGE.low} text-[10px]`}>{i.severity}</Badge></TableCell>
                             <TableCell><Badge variant="outline" className="text-[10px] capitalize">{i.status}</Badge></TableCell>
                             <TableCell className="text-[10px] font-mono text-muted-foreground">{i.detected_at ? new Date(i.detected_at).toLocaleDateString() : "—"}</TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" data-testid={`sec-incident-actions-${i.id}`}>
+                                    <MoreHorizontal className="w-3 h-3" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "acknowledge" }); }} data-testid={`sec-incident-ack-${i.id}`}>
+                                    <CheckCircle className="w-3 h-3 mr-2 text-sky-400" />Acknowledge
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "comment" }); }}>
+                                    <MessageSquare className="w-3 h-3 mr-2 text-violet-400" />Add comment
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "assign" }); }}>
+                                    <UserPlus className="w-3 h-3 mr-2 text-indigo-400" />Assign
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={async () => {
+                                    if (!i.hostname) { toast.error("No agent linked"); return; }
+                                    const res = await axios.post(`${API}/huntress/agents/${i.hostname}/isolate`, {}, { headers }).catch((err) => ({ data: { success: false, message: err.message } }));
+                                    if (res.data?.success) toast.success("Isolation requested");
+                                    else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
+                                  }} data-testid={`sec-incident-isolate-${i.id}`}>
+                                    <Lock className="w-3 h-3 mr-2 text-rose-400" />Isolate agent
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={async () => {
+                                    if (!i.hostname) { toast.error("No agent linked"); return; }
+                                    const res = await axios.post(`${API}/huntress/agents/${i.hostname}/release`, {}, { headers }).catch((err) => ({ data: { success: false, message: err.message } }));
+                                    if (res.data?.success) toast.success("Agent released");
+                                    else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
+                                  }}>
+                                    <Unlock className="w-3 h-3 mr-2 text-emerald-400" />Release agent
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "close" }); }} data-testid={`sec-incident-close-${i.id}`}>
+                                    <CheckCircle className="w-3 h-3 mr-2 text-emerald-400" />Close incident
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
                           </TableRow>
                         ))
                       : (soc?.incidents || []).slice(0, 8).map((inc) => (
@@ -374,6 +447,48 @@ export default function SecurityDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Incident response dialog */}
+      <Dialog open={!!actionDialog} onOpenChange={(v) => { if (!v) { setActionDialog(null); setActionNote(""); setActionAssignee(""); } }}>
+        <DialogContent className="max-w-md" data-testid="sec-incident-action-dialog">
+          <DialogHeader>
+            <DialogTitle className="capitalize flex items-center gap-2">
+              {actionDialog?.action === "isolate" && <Lock className="w-4 h-4 text-rose-400" />}
+              {actionDialog?.action === "close" && <CheckCircle className="w-4 h-4 text-emerald-400" />}
+              {actionDialog?.action === "comment" && <MessageSquare className="w-4 h-4 text-violet-400" />}
+              {actionDialog?.action === "assign" && <UserPlus className="w-4 h-4 text-indigo-400" />}
+              {actionDialog?.action === "acknowledge" && <CheckCircle className="w-4 h-4 text-sky-400" />}
+              {actionDialog?.action} incident
+            </DialogTitle>
+          </DialogHeader>
+          {actionDialog && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                {actionDialog.incident.summary || "(no summary)"}
+              </div>
+              {actionDialog.action === "assign" && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1">Assignee</div>
+                  <Input placeholder="name or email" value={actionAssignee} onChange={(e) => setActionAssignee(e.target.value)} data-testid="sec-action-assignee" />
+                </div>
+              )}
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1">Note (optional)</div>
+                <Textarea rows={3} placeholder="Context for the response log…" value={actionNote} onChange={(e) => setActionNote(e.target.value)} data-testid="sec-action-note" />
+              </div>
+              <div className="text-[10px] text-muted-foreground border-t border-border pt-2">
+                ⚠ Huntress response APIs are in public beta. If your account plan doesn't expose this action, the attempt is logged locally and a "not supported" toast is shown — no data is lost.
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setActionDialog(null)}>Cancel</Button>
+            <Button onClick={runIncidentAction} disabled={actionBusy} data-testid="sec-action-confirm">
+              {actionBusy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Sending…</> : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

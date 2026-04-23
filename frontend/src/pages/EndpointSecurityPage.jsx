@@ -33,7 +33,35 @@ export default function EndpointSecurityPage() {
 
   const fetchEndpoints = useCallback(async () => {
     setLoading(true);
-    try { const res = await axios.get(`${API}/soc/endpoints`, { headers }); setEndpoints(res.data); }
+    try {
+      // Pull both demo SOC endpoints and live Huntress agents — merge when Huntress is configured
+      const [socRes, huntAgentsRes, huntStatusRes] = await Promise.all([
+        axios.get(`${API}/soc/endpoints`, { headers }),
+        axios.get(`${API}/huntress/agents?limit=500`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: { configured: false } })),
+      ]);
+      const socList = socRes.data || [];
+      if (huntStatusRes.data?.configured && Array.isArray(huntAgentsRes.data) && huntAgentsRes.data.length > 0) {
+        // Map Huntress agents into the SOC row shape so the existing table renders them
+        const huntRows = huntAgentsRes.data.map((a) => ({
+          id: `hunt-${a.id || a.hostname}`,
+          hostname: a.hostname || a.host || "(unknown)",
+          os: a.os || a.platform || "—",
+          organization: a.organization_name || a.organization_id || "—",
+          status: (a.status || "").toLowerCase() === "online" ? "online" : (a.isolated || a.status === "isolated") ? "isolated" : "offline",
+          av_status: a.av_status || "active",
+          firewall: a.firewall || "enabled",
+          patch_status: a.patch_status || "up_to_date",
+          risk_score: a.risk_score ?? 0,
+          last_seen: a.last_survey_at || a.last_callback_at || null,
+          _source: "huntress",
+          _raw_id: a.id,
+        }));
+        setEndpoints([...huntRows, ...socList]);
+      } else {
+        setEndpoints(socList);
+      }
+    }
     catch { toast.error("Failed to load endpoints"); }
     finally { setLoading(false); }
   }, [token]);
@@ -49,15 +77,38 @@ export default function EndpointSecurityPage() {
 
   const handleIsolate = async (agentId) => {
     setActionLoading(agentId);
-    try { await axios.post(`${API}/soc/endpoints/${agentId}/isolate`, {}, { headers }); toast.success("Endpoint isolated"); fetchEndpoints(); }
-    catch { toast.error("Failed"); }
+    try {
+      // If this row is a Huntress agent, use Huntress API; else SOC demo
+      const ep = endpoints.find((e) => e.id === agentId);
+      if (ep?._source === "huntress") {
+        const res = await axios.post(`${API}/huntress/agents/${ep._raw_id}/isolate`, {}, { headers });
+        if (res.data?.success) { toast.success("Huntress isolation requested"); }
+        else { toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 }); }
+      } else {
+        await axios.post(`${API}/soc/endpoints/${agentId}/isolate`, {}, { headers });
+        toast.success("Endpoint isolated");
+      }
+      fetchEndpoints();
+    }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setActionLoading(null); }
   };
 
   const handleUnisolate = async (agentId) => {
     setActionLoading(agentId);
-    try { await axios.post(`${API}/soc/endpoints/${agentId}/unisolate`, {}, { headers }); toast.success("Endpoint restored"); fetchEndpoints(); }
-    catch { toast.error("Failed"); }
+    try {
+      const ep = endpoints.find((e) => e.id === agentId);
+      if (ep?._source === "huntress") {
+        const res = await axios.post(`${API}/huntress/agents/${ep._raw_id}/release`, {}, { headers });
+        if (res.data?.success) { toast.success("Huntress released agent"); }
+        else { toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 }); }
+      } else {
+        await axios.post(`${API}/soc/endpoints/${agentId}/unisolate`, {}, { headers });
+        toast.success("Endpoint restored");
+      }
+      fetchEndpoints();
+    }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setActionLoading(null); }
   };
 
