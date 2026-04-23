@@ -22,6 +22,7 @@ import { formatDistanceToNow } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
+import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -207,6 +208,9 @@ export default function DashboardPage() {
 
       {/* Morning Standup Digest */}
       <StandupDigestBanner />
+
+      {/* Huntress Security Snapshot */}
+      <HuntressSummaryCard compact />
 
       {/* Attention Banner */}
       {attentionItems.length > 0 && (
