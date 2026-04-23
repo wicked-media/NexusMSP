@@ -7,6 +7,29 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+
+## Recent Updates (Apr 23, 2026 — CIPP M365 Tenant Management + Suped Command Center)
+- **Backend `/app/backend/app/routers/cipp.py`** — full CIPP integration against hosted CIPP Azure Function URLs:
+  - Settings: `GET/POST/DELETE /api/cipp/settings`, `GET /api/cipp/status`, `GET /api/cipp/test`.
+  - Tenant ops: `GET /api/cipp/tenants`, `/tenants/{id}/users`, `/tenants/{id}/licenses`.
+  - User ops: `POST /api/cipp/tenants/{id}/users` (create), `/assign-license`, `/reset-password`, `/block-signin`, `/offboard`.
+  - Dashboard: `GET /api/cipp/summary` (tenant + linked-client + coverage stats), `GET /api/cipp/linked-clients`.
+  - Client linking: `POST/DELETE /api/clients/{id}/link-cipp-tenant` + `/link-suped-tenant`.
+  - Uses `x-functions-key` + `Authorization: Bearer` headers for compatibility. Every write audited to `db.cipp_actions`.
+- **Frontend `/app/frontend/src/pages/CippCommandCenterPage.jsx`** at `/cipp`:
+  - 4-tile MetricStrip (Tenants · Linked Clients · Coverage · Actions).
+  - 3 Tabs: Tenants (left list, right detail with users table + SKU chips), Linked Clients, Audit log.
+  - Full action dialogs: Create M365 user (with license picker), Manage licenses (add/remove), Reset password (prompt), Block/Unblock sign-in, Offboard (checkbox options + OOO/forward), Link tenant → client.
+- **Frontend `/app/frontend/src/pages/SupedCommandCenterPage.jsx`** at `/suped`:
+  - 5-tile MetricStrip (Overall Score · Fully Protected · Partial · Unprotected · Clients).
+  - 3 Tabs: Overview (service coverage grid + at-risk clients table), All clients (full matrix with service check columns), DMARC records (per-client record pull with summary stats).
+  - Manage subscriptions dialog per client (Suped Org ID + service toggles).
+- **Settings** — CIPP settings card (`cipp-settings-card`) with Base URL + API Key inputs, Save/Test/Remove flow, status badge, masked key preview. Mirrors Huntress pattern.
+- **Clients page** — new `M365 / CIPP` tab in client detail pane. When unlinked: `Link tenant` CTA opens dialog listing all CIPP tenants. When linked: tenant header + stats + users table with per-row actions (Licenses, Reset pw, Block/Unblock, Offboard).
+- **Navigation** — Sidebar Integrations group now includes CIPP + Suped entries.
+- **Testing**: `/app/test_reports/iteration_118.json` — 28/28 backend tests PASS, 100% frontend pass. Zero issues. All data-testids present.
+
+
 ## Recent Updates (Apr 20, 2026 — Unified Integrations Overview)
 - **Backend**: `/app/backend/app/routers/integrations_overview.py` — new `/api/integrations-overview` endpoint aggregating status of 12 integrations (Huntress, Hudu, Acronis, Pax8, Domotz, Stripe, Xero, Resend, MobileMessage SMS, Splynx, Syncro, Suped DMARC). Returns `{total, configured_count, coverage_pct, tiles[]}`.
 - **Frontend**: `/app/frontend/src/pages/IntegrationsOverviewPage.jsx` at `/integrations`:
