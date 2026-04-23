@@ -14,6 +14,7 @@ import {
   TrendingUp, Server, Zap, Target, BarChart3, Skull
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
 
 const SEV_BADGE = {
   critical: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -74,6 +75,9 @@ export default function SecurityDashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Huntress Live Summary */}
+      <HuntressSummaryCard />
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">

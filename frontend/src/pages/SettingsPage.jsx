@@ -58,6 +58,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
+  { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
@@ -110,6 +111,8 @@ export default function SettingsPage() {
   const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
   const [pax8, setPax8] = useState({ client_id: "", client_secret: "", client_secret_set: false, enabled: false, last_test_result: null, last_test_at: null, last_test_message: "", last_sync_at: null, last_sync_stats: null });
   const [pax8Busy, setPax8Busy] = useState(false);
+  const [huntress, setHuntress] = useState({ api_key: "", secret_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [huntressBusy, setHuntressBusy] = useState(false);
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
@@ -144,7 +147,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -163,6 +166,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/resend`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -172,6 +176,7 @@ export default function SettingsPage() {
         if (resendRes?.data) setResend(prev => ({ ...prev, ...resendRes.data, api_key: "" }));
         if (smsRes?.data) setSms(prev => ({ ...prev, ...smsRes.data, password: "" }));
         if (pax8Res?.data) setPax8(prev => ({ ...prev, ...pax8Res.data, client_secret: "" }));
+        if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1675,6 +1680,120 @@ export default function SettingsPage() {
           <p className="text-[10px] text-muted-foreground">
             Get your client ID + secret from the Pax8 Partner Portal → Integrations → API Credentials. Uses OAuth2 client_credentials against <code>https://api.pax8.com/v1/token</code>.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* Huntress (Security) Integration */}
+      <Card data-testid="huntress-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-orange-500" />
+            <CardTitle>Huntress (Security / MDR)</CardTitle>
+          </div>
+          <CardDescription>
+            Pull live agent, incident, and signal data from Huntress into the Security module. Read-only integration.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={huntress.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="huntress-status-badge">
+              {huntress.configured ? "Configured" : "Not Configured"}
+            </Badge>
+            {huntress.api_key_preview && (
+              <Badge variant="outline" className="font-mono text-[10px]">Key: {huntress.api_key_preview}</Badge>
+            )}
+            {huntress.last_test_status && (
+              <Badge variant="outline" className="text-[10px]">Last test: {huntress.last_test_status}</Badge>
+            )}
+            {huntress.last_synced_at && (
+              <Badge variant="outline" className="text-[10px]">Synced: {new Date(huntress.last_synced_at).toLocaleString()}</Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>API Key</Label>
+              <Input
+                value={huntress.api_key}
+                onChange={(e) => setHuntress({ ...huntress, api_key: e.target.value })}
+                placeholder={huntress.configured ? "•••••• (enter to replace)" : "Enter API key"}
+                data-testid="huntress-api-key"
+              />
+            </div>
+            <div>
+              <Label>Secret Key</Label>
+              <Input
+                type="password"
+                value={huntress.secret_key}
+                onChange={(e) => setHuntress({ ...huntress, secret_key: e.target.value })}
+                placeholder={huntress.configured ? "•••••• (enter to replace)" : "Enter secret key"}
+                data-testid="huntress-secret-key"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Generate keys from the Huntress dashboard → Account Settings → API Credentials
+            (<a href="https://support.huntress.io/hc/en-us/articles/4416826761235" target="_blank" rel="noreferrer" className="text-primary underline">docs</a>).
+            Uses HTTP Basic auth against <code>https://api.huntress.io</code>.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              onClick={async () => {
+                if (!huntress.api_key || !huntress.secret_key) {
+                  if (!huntress.configured) { toast.error("Enter both API key and secret key"); return; }
+                  toast.error("Enter new key & secret to update");
+                  return;
+                }
+                setHuntressBusy(true);
+                try {
+                  await axios.post(`${API}/huntress/settings`, { api_key: huntress.api_key, secret_key: huntress.secret_key }, { headers });
+                  toast.success("Huntress credentials saved");
+                  const st = await axios.get(`${API}/huntress/status`, { headers });
+                  setHuntress(prev => ({ ...prev, ...st.data, api_key: "", secret_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setHuntressBusy(false); }
+              }}
+              disabled={huntressBusy}
+              data-testid="huntress-save-btn"
+            >
+              {huntressBusy ? "Saving…" : "Save credentials"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setHuntressBusy(true);
+                try {
+                  const res = await axios.get(`${API}/huntress/test-connection`, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message || "Connection failed");
+                  const st = await axios.get(`${API}/huntress/status`, { headers });
+                  setHuntress(prev => ({ ...prev, ...st.data, api_key: "", secret_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setHuntressBusy(false); }
+              }}
+              disabled={huntressBusy || !huntress.configured}
+              data-testid="huntress-test-btn"
+            >
+              Test connection
+            </Button>
+            {huntress.configured && (
+              <Button
+                variant="ghost" className="text-red-400 hover:bg-red-500/10"
+                onClick={async () => {
+                  if (!window.confirm("Remove Huntress credentials? Security module panels will stop pulling data.")) return;
+                  setHuntressBusy(true);
+                  try {
+                    await axios.delete(`${API}/huntress/settings`, { headers });
+                    setHuntress({ api_key: "", secret_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    toast.success("Huntress credentials removed");
+                  } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                  finally { setHuntressBusy(false); }
+                }}
+                data-testid="huntress-clear-btn"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 
