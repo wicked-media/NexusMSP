@@ -241,19 +241,78 @@ async def huntress_summary(current_user: dict = Depends(get_current_user)):
 
     # Top 5 most recent incidents (by detected_at or created_at)
     def ts(i): return i.get("detected_at") or i.get("created_at") or ""
-    recent = sorted(incidents_list, key=ts, reverse=True)[:5]
+    recent = sorted(incidents_list, key=ts, reverse=True)[:10]
     recent_slim = [{
         "id": i.get("id"),
         "severity": i.get("severity"),
         "status": i.get("status"),
         "summary": i.get("summary") or i.get("title"),
         "organization": i.get("organization_name") or i.get("organization_id"),
+        "hostname": i.get("agent_hostname") or i.get("hostname"),
         "detected_at": ts(i),
     } for i in recent]
+
+    # Per-org breakdown: agents + incidents grouped by organization_id / name
+    org_map: dict = {}
+    for o in orgs_list:
+        oid = o.get("id") or o.get("organization_id")
+        if oid is None:
+            continue
+        org_map[oid] = {
+            "id": oid,
+            "name": o.get("name") or o.get("organization_name") or f"Org {oid}",
+            "agents_total": 0, "agents_online": 0, "agents_offline": 0,
+            "incidents_total": 0, "incidents_critical": 0, "incidents_open": 0,
+        }
+    for a in agents_list:
+        oid = a.get("organization_id")
+        if oid is None:
+            continue
+        row = org_map.setdefault(oid, {"id": oid, "name": f"Org {oid}", "agents_total": 0, "agents_online": 0, "agents_offline": 0, "incidents_total": 0, "incidents_critical": 0, "incidents_open": 0})
+        row["agents_total"] += 1
+        if norm(a.get("status")) == "online":
+            row["agents_online"] += 1
+        elif norm(a.get("status")) == "offline":
+            row["agents_offline"] += 1
+    for i in incidents_list:
+        oid = i.get("organization_id")
+        if oid is None:
+            continue
+        row = org_map.setdefault(oid, {"id": oid, "name": i.get("organization_name") or f"Org {oid}", "agents_total": 0, "agents_online": 0, "agents_offline": 0, "incidents_total": 0, "incidents_critical": 0, "incidents_open": 0})
+        row["incidents_total"] += 1
+        if norm(i.get("severity")) in ("critical", "high"):
+            row["incidents_critical"] += 1
+        if norm(i.get("status")) in ("sent", "open", "reviewing"):
+            row["incidents_open"] += 1
+
+    per_org = sorted(
+        org_map.values(),
+        key=lambda r: (-r["incidents_critical"], -r["incidents_open"], -r["agents_offline"], r["name"]),
+    )[:20]
+
+    # Severity mix for chart
+    sev_mix = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for i in incidents_list:
+        s = norm(i.get("severity"))
+        if s in sev_mix:
+            sev_mix[s] += 1
+
+    # Recent signals (up to 5)
+    recent_signals = sorted(signals_list, key=lambda s: s.get("created_at") or s.get("detected_at") or "", reverse=True)[:5]
+    recent_signals_slim = [{
+        "id": s.get("id"),
+        "kind": s.get("signal_type") or s.get("kind"),
+        "severity": s.get("severity"),
+        "summary": s.get("summary") or s.get("title"),
+        "detected_at": s.get("created_at") or s.get("detected_at"),
+    } for s in recent_signals]
 
     return {
         "configured": True,
         "stats": stats,
         "recent_incidents": recent_slim,
+        "per_org": per_org,
+        "severity_mix": sev_mix,
+        "recent_signals": recent_signals_slim,
         "last_synced_at": now,
     }
