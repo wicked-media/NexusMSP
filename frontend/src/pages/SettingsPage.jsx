@@ -75,6 +75,20 @@ export default function SettingsPage() {
   const [settingSearch, setSettingSearch] = useState("");
   const [highlightAnchor, setHighlightAnchor] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Honour deep-links: /settings?tab=integrations&anchor=huntress-settings-card
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const anchor = params.get("anchor");
+    if (tab) setActiveTab(tab);
+    if (anchor) {
+      setHighlightAnchor(anchor);
+      setTimeout(() => {
+        document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 400);
+    }
+  }, []);
   const [users, setUsers] = useState([]);
   const [branding, setBranding] = useState({
     company_name: "NexusOps", company_logo_url: "", company_icon_url: "",
@@ -1684,7 +1698,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Huntress (Security) Integration */}
-      <Card data-testid="huntress-settings-card">
+      <Card id="huntress-settings-card" data-testid="huntress-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-orange-500" />

@@ -7,6 +7,19 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## Recent Updates (Apr 20, 2026 — SOC Dashboard Huntress-First Revamp)
+- Rewrote `/app/frontend/src/pages/SecurityDashboardPage.jsx` to be Huntress-led:
+  - Top MetricStrip (Agents, Offline, Critical, Open, Signals, Orgs) driven by live `/api/huntress/summary` when configured, falls back to `/api/soc/dashboard` demo data when not.
+  - Threat Level Banner, Endpoint Health progress, Incidents table (live Huntress or demo).
+  - Side panels: Severity Mix chart, Top Organizations breakdown (per-org agents/incidents), Recent Signals.
+  - Secondary telemetry cards for Vulns, Dark Web, Identity, Compliance — unchanged.
+  - Quick-nav chips to all other security surfaces (Endpoint, Shadow IT, Vuln Scanner, Dark Web, Phishing Sim, Identity, Ransomware, MFA).
+  - Not-configured state: big orange CTA card deep-linking to Huntress settings.
+- Extended `/api/huntress/summary` to return `per_org`, `severity_mix`, `recent_signals` alongside existing stats + recent_incidents.
+- Fixed SettingsPage deep-link: `/settings?tab=integrations&anchor=huntress-settings-card` now auto-selects tab and scrolls to card.
+- Security section, Shadow IT, Compliance, Ransomware, and existing pages left intact per user request ("leave it").
+- **Testing**: `/app/test_reports/iteration_112.json` — 16/16 backend pass, 100% frontend pass.
+
 ## Recent Updates (Apr 20, 2026 — Huntress Labs Integration)
 - **New backend router** `/app/backend/app/routers/huntress.py` — read-only Huntress REST API (https://api.huntress.io) integration via HTTP Basic auth (api_key:secret_key).
   - `GET /api/huntress/status`, `POST /api/huntress/settings`, `DELETE /api/huntress/settings`
