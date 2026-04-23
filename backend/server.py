@@ -62,6 +62,14 @@ discover_and_register_routers()
 async def root():
     return {"message": "NexusOps API v3.0.0", "status": "operational"}
 
+# Health probes — MUST be lightweight + synchronous (no DB calls) so K8s readiness
+# checks pass immediately even while seed_data / background tasks are warming up.
+# Both /health (unprefixed, used by ingress/K8s) and /api/health are exposed.
+@app.get("/health")
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "nexusops-api", "version": "3.0.0"}
+
 # Stripe webhook
 @app.post("/api/webhook/stripe")
 async def stripe_webhook(request: FastAPIRequest):
@@ -102,25 +110,38 @@ async def stripe_webhook(request: FastAPIRequest):
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    await seed_data()
-    from app.routers.ticket_suggestions import generate_ticket_number
-    tickets_without_number = await db.tickets.find(
-        {"$or": [{"ticket_number": None}, {"ticket_number": {"$exists": False}}, {"ticket_number": ""}]},
-        {"_id": 0, "id": 1, "ticket_type": 1}
-    ).to_list(1000)
-    for t in tickets_without_number:
-        tn = await generate_ticket_number(t.get("ticket_type", "incident"))
-        await db.tickets.update_one({"id": t["id"]}, {"$set": {"ticket_number": tn}})
-    if tickets_without_number:
-        logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
-    # Start RustDesk auto-sync background task
+    # Kick heavy DB seeding + ticket backfill off to a background task so uvicorn
+    # completes startup fast and production readiness probes (/health) pass on time.
     import asyncio
+    asyncio.create_task(_boot_warmup())
+    # Start RustDesk auto-sync background task
     asyncio.create_task(_rustdesk_auto_sync_loop())
     # Start recurring invoice auto-generation scheduler
     asyncio.create_task(_recurring_invoice_scheduler())
     # Start 7am morning standup-digest delivery scheduler
     asyncio.create_task(_standup_digest_scheduler())
     logger.info("NexusOps API v3.0.0 started successfully")
+
+
+async def _boot_warmup():
+    """Run seed + ticket-number backfill without blocking app startup."""
+    try:
+        await seed_data()
+    except Exception as e:
+        logger.error(f"seed_data failed: {e}")
+    try:
+        from app.routers.ticket_suggestions import generate_ticket_number
+        tickets_without_number = await db.tickets.find(
+            {"$or": [{"ticket_number": None}, {"ticket_number": {"$exists": False}}, {"ticket_number": ""}]},
+            {"_id": 0, "id": 1, "ticket_type": 1}
+        ).to_list(1000)
+        for t in tickets_without_number:
+            tn = await generate_ticket_number(t.get("ticket_type", "incident"))
+            await db.tickets.update_one({"id": t["id"]}, {"$set": {"ticket_number": tn}})
+        if tickets_without_number:
+            logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
+    except Exception as e:
+        logger.error(f"Ticket number backfill failed: {e}")
 
 async def _rustdesk_auto_sync_loop():
     """Background loop that syncs RustDesk peers every 5 minutes if enabled."""
