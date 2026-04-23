@@ -21,6 +21,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { TicketCopilotButton, ExplainErrorButton } from "@/components/ai/CopilotWidgets";
 import { VoiceJournalButton } from "@/components/ai/VoiceJournalButton";
+import { HuduSuggestionsPanel } from "@/components/ai/HuduSuggestionsPanel";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
@@ -1376,6 +1377,9 @@ export default function TicketsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Hudu KB Suggestions (AI-distilled fix steps) */}
+            <HuduSuggestionsPanel ticket={viewingTicket} />
 
             {/* AI ANALYSIS PANEL */}
             {aiAnalysis && (
