@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import DOMPurify from "dompurify";
@@ -23,7 +24,7 @@ import { TicketCopilotButton, ExplainErrorButton } from "@/components/ai/Copilot
 import { VoiceJournalButton } from "@/components/ai/VoiceJournalButton";
 import { HuduSuggestionsPanel } from "@/components/ai/HuduSuggestionsPanel";
 import {
-  Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2,
+  Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
   Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
   Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
@@ -227,6 +228,28 @@ export default function TicketsPage() {
   }, [token]);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  // Deep-link: ?ticket=INC-1234 auto-opens that ticket once tickets are loaded
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const ref = searchParams.get("ticket");
+    if (!ref || tickets.length === 0 || viewingTicket) return;
+    const wanted = decodeURIComponent(ref).replace(/^#/, "").toUpperCase();
+    const match = tickets.find(t => (t.ticket_number || "").toUpperCase() === wanted);
+    if (match) {
+      fetchTicketDetail(match);
+      // Clear the param so back-navigation doesn't trap us
+      const np = new URLSearchParams(searchParams);
+      np.delete("ticket");
+      setSearchParams(np, { replace: true });
+    } else {
+      toast.error(`Ticket #${wanted} not found`);
+      const np = new URLSearchParams(searchParams);
+      np.delete("ticket");
+      setSearchParams(np, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, searchParams]);
 
   // Timer effect
   useEffect(() => {
@@ -3593,16 +3616,26 @@ export default function TicketsPage() {
           <h1 className="text-xl font-semibold tracking-tight">Tickets & Jobs</h1>
           <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{tickets.length} SLA · {workshopJobs.length} workshop · {fieldJobs.length} cabling/WISP</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchTickets}><Search className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Plus className="w-4 h-4 mr-1" />New SLA Job</Button>
-          <Button onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
-            className={isRecording ? "bg-red-600 hover:bg-red-700 animate-pulse" : "bg-amber-600 hover:bg-amber-700"}
-            data-testid="voice-ticket-btn">
-            <Mic className="w-4 h-4 mr-1" />{isRecording ? "Stop Recording" : "Voice Ticket"}
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="text-zinc-300 border-zinc-700 hover:bg-zinc-800" onClick={fetchTickets} data-testid="refresh-tickets-btn">
+            <RefreshCw className="w-3 h-3 mr-1.5" />Refresh
           </Button>
-          <Button onClick={() => setWsDialog(true)} data-testid="create-ws-btn" className="bg-purple-600 hover:bg-purple-700"><Wrench className="w-4 h-4 mr-1" />Workshop</Button>
-          <Button onClick={() => setFjDialog(true)} data-testid="create-fj-btn" className="bg-cyan-600 hover:bg-cyan-700"><Radio className="w-4 h-4 mr-1" />Cabling / WISP</Button>
+          <Button variant="outline" size="sm" className="text-blue-300 border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
+            <Plus className="w-3 h-3 mr-1.5" />New SLA Job
+          </Button>
+          <Button variant="outline" size="sm"
+            className={isRecording
+              ? "text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 animate-pulse"
+              : "text-amber-300 border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"}
+            onClick={isRecording ? stopVoiceRecording : startVoiceRecording} data-testid="voice-ticket-btn">
+            <Mic className="w-3 h-3 mr-1.5" />{isRecording ? "Stop Recording" : "Voice Ticket"}
+          </Button>
+          <Button variant="outline" size="sm" className="text-purple-300 border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
+            <Wrench className="w-3 h-3 mr-1.5" />Workshop
+          </Button>
+          <Button variant="outline" size="sm" className="text-cyan-300 border-cyan-500/40 bg-cyan-500/5 hover:bg-cyan-500/10" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
+            <Radio className="w-3 h-3 mr-1.5" />Cabling / WISP
+          </Button>
         </div>
       </div>
 
@@ -3614,11 +3647,13 @@ export default function TicketsPage() {
           { val: "workshop", label: "Workshop", icon: Wrench, count: workshopJobs.length, color: "text-purple-400" },
           { val: "cabling_wisp", label: "Cabling / WISP", icon: Wifi, count: fieldJobs.length, color: "text-cyan-400" },
         ].map(t => (
-          <Button key={t.val} variant={typeFilter === t.val ? "default" : "outline"} size="sm"
+          <Button key={t.val} variant="outline" size="sm"
             onClick={() => setTypeFilter(t.val)}
-            className={`gap-1.5 ${typeFilter === t.val ? "" : "text-muted-foreground"}`}
+            className={`gap-1.5 ${typeFilter === t.val
+              ? "text-zinc-100 border-zinc-600 bg-zinc-800"
+              : "text-zinc-400 border-zinc-800 hover:bg-zinc-900 hover:text-zinc-300"}`}
             data-testid={`type-filter-${t.val}`}>
-            <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? "" : t.color || ""}`} />
+            <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? t.color || "" : "opacity-60"}`} />
             {t.label} <span className="text-xs opacity-70">({t.count})</span>
           </Button>
         ))}

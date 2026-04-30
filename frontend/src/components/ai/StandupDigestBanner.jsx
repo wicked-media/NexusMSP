@@ -1,8 +1,44 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, Sun } from "lucide-react";
+
+// Match #PREFIX-NUMBER (e.g., #INC-1234, #SR-0001). Capture the bare ref without the #.
+const TICKET_RE = /#([A-Z]{2,5}-\d{2,8})\b/g;
+
+function LinkifiedDigest({ text }) {
+  if (!text) return null;
+  // Split text into lines and tokens; keep line breaks.
+  const out = [];
+  text.split("\n").forEach((line, li) => {
+    let last = 0;
+    const parts = [];
+    line.replace(TICKET_RE, (match, ref, offset) => {
+      if (offset > last) parts.push(line.slice(last, offset));
+      parts.push(
+        <Link
+          key={`${li}-${offset}`}
+          to={`/tickets?ticket=${encodeURIComponent(ref)}`}
+          className="text-sky-400 hover:text-sky-300 underline decoration-sky-500/40 hover:decoration-sky-300 underline-offset-2 font-mono"
+          data-testid={`digest-ticket-link-${ref}`}
+        >
+          #{ref}
+        </Link>
+      );
+      last = offset + match.length;
+      return match;
+    });
+    if (last < line.length) parts.push(line.slice(last));
+    out.push(
+      <div key={li} className="leading-relaxed">
+        {parts.length ? parts : <>&nbsp;</>}
+      </div>
+    );
+  });
+  return <div className="text-xs text-zinc-300 font-sans space-y-1" data-testid="digest-body">{out}</div>;
+}
 
 /**
  * 7am Morning Standup Digest banner for the Dashboard.
@@ -73,7 +109,7 @@ export function StandupDigestBanner() {
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating brief…
             </div>
           ) : (
-            <pre className="whitespace-pre-wrap text-xs text-zinc-300 font-sans leading-relaxed" data-testid="digest-body">{digest?.ai_brief}</pre>
+            <LinkifiedDigest text={digest?.ai_brief} />
           )}
         </div>
       )}
