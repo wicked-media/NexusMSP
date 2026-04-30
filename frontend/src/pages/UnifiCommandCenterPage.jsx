@@ -155,7 +155,8 @@ export default function UnifiCommandCenterPage() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList data-testid="unifi-tabs">
-            <TabsTrigger value="sites" data-testid="unifi-tab-sites"><Server className="w-3 h-3 mr-1" />Sites</TabsTrigger>
+            <TabsTrigger value="sites" data-testid="unifi-tab-sites"><Server className="w-3 h-3 mr-1" />Cloud Sites</TabsTrigger>
+            <TabsTrigger value="controllers" data-testid="unifi-tab-controllers"><Wifi className="w-3 h-3 mr-1" />Controllers (live)</TabsTrigger>
             <TabsTrigger value="linked" data-testid="unifi-tab-linked"><LinkIcon className="w-3 h-3 mr-1" />Linked Clients</TabsTrigger>
           </TabsList>
 
@@ -465,6 +466,10 @@ export default function UnifiCommandCenterPage() {
             </div>
           </TabsContent>
 
+          <TabsContent value="controllers" className="space-y-4">
+            <ControllersPanel />
+          </TabsContent>
+
           <TabsContent value="linked">
             <Card>
               <CardContent className="p-0">
@@ -519,5 +524,211 @@ export default function UnifiCommandCenterPage() {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+function ControllersPanel() {
+  const { token } = useAuth();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [list, setList] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(null);
+
+  const load = async () => {
+    try {
+      const r = await axios.get(`${API}/unifi/controllers`, { headers });
+      setList(r.data || []);
+      if (r.data?.length && !selected) setSelected(r.data[0]);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  useEffect(() => {
+    if (!selected) { setSummary(null); return; }
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await axios.get(`${API}/unifi/controllers/${selected.id}/summary`, { headers });
+        setSummary(r.data);
+      } catch (e) {
+        setSummary({ error: e.response?.data?.detail || e.message, devices: [], clients: [] });
+      } finally { setLoading(false); }
+    })();
+  }, [selected, token]); // eslint-disable-line
+
+  const action = async (deviceId, act) => {
+    if (!selected) return;
+    const labels = { restart: "Restart", "power-cycle": "Power-cycle", locate: "Locate (LED blink)" };
+    if (!window.confirm(`${labels[act]} this device?`)) return;
+    setActionBusy(`${deviceId}:${act}`);
+    try {
+      const res = await axios.post(`${API}/unifi/controllers/${selected.id}/devices/${deviceId}/${act}`, {}, { headers });
+      if (res.data?.success) toast.success(res.data.message || `${labels[act]} sent`);
+      else toast.error(res.data?.message || "Failed");
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setActionBusy(null); }
+  };
+
+  if (list.length === 0) {
+    return (
+      <Card><CardContent className="p-8 text-center text-xs text-muted-foreground">
+        No controllers configured. Go to <Link to="/settings?tab=integrations&anchor=unifi-settings-card" className="text-sky-400 underline">Settings → UniFi → Direct Site Controllers</Link> to add one.
+      </CardContent></Card>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+      <Card>
+        <CardContent className="p-0">
+          <div className="divide-y divide-border max-h-[calc(100vh-280px)] overflow-y-auto">
+            {list.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c)}
+                className={`w-full text-left p-3 hover:bg-muted/30 ${selected?.id === c.id ? "bg-muted/40 border-l-2 border-l-sky-500" : ""}`}
+                data-testid={`unifi-ctrl-pick-${c.id}`}
+              >
+                <div className="text-sm font-medium truncate">{c.name}</div>
+                <div className="text-[10px] font-mono text-muted-foreground truncate">{c.controller_url}</div>
+                {c.last_test_status === "ok" && <Badge variant="outline" className="text-[9px] text-emerald-400 border-emerald-500/30 mt-1">OK</Badge>}
+                {c.last_test_status?.startsWith("fail") && <Badge variant="outline" className="text-[9px] text-rose-400 border-rose-500/30 mt-1">{c.last_test_status}</Badge>}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          {!selected ? (
+            <div className="text-center py-12 text-xs text-muted-foreground">Pick a controller.</div>
+          ) : loading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Loading…</div>
+          ) : summary?.error ? (
+            <div className="rounded border border-rose-500/30 bg-rose-500/5 p-4 text-xs text-rose-300">
+              <div className="font-medium mb-1">Couldn't reach this controller</div>
+              <div className="font-mono">{summary.error}</div>
+              <div className="text-muted-foreground mt-2">
+                Check: 1) controller URL is reachable from the NexusOps server, 2) API key is correct, 3) UniFi Network is 9.0+, 4) if local, the network has a route from this app to the controller.
+              </div>
+            </div>
+          ) : summary ? (
+            <>
+              <div className="flex items-start justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-lg font-semibold">{summary.controller.name}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono">{summary.controller.controller_url} · site: {summary.controller.network_site_id}</div>
+                </div>
+                <div className="text-[10px] text-muted-foreground">Synced {summary.last_synced_at ? new Date(summary.last_synced_at).toLocaleString() : "—"}</div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="rounded border border-border p-2 bg-muted/20">
+                  <div className="text-[10px] uppercase text-muted-foreground">Devices</div>
+                  <div className="text-lg font-semibold"><span className="text-emerald-400">{summary.stats.devices_online}</span> <span className="text-muted-foreground">/ {summary.stats.devices}</span></div>
+                </div>
+                <div className="rounded border border-border p-2 bg-muted/20">
+                  <div className="text-[10px] uppercase text-muted-foreground">Total clients</div>
+                  <div className="text-lg font-semibold">{summary.stats.clients}</div>
+                </div>
+                <div className="rounded border border-border p-2 bg-muted/20">
+                  <div className="text-[10px] uppercase text-muted-foreground">Wi-Fi</div>
+                  <div className="text-lg font-semibold text-indigo-400">{summary.stats.wifi_clients}</div>
+                </div>
+                <div className="rounded border border-border p-2 bg-muted/20">
+                  <div className="text-[10px] uppercase text-muted-foreground">Wired</div>
+                  <div className="text-lg font-semibold text-sky-400">{summary.stats.wired_clients}</div>
+                </div>
+              </div>
+
+              <Tabs defaultValue="devices">
+                <TabsList>
+                  <TabsTrigger value="devices"><Radio className="w-3 h-3 mr-1" />Devices</TabsTrigger>
+                  <TabsTrigger value="clients"><Users className="w-3 h-3 mr-1" />Clients</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="devices" className="mt-3">
+                  {summary.devices.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-muted-foreground">No devices.</div>
+                  ) : (
+                    <Table>
+                      <TableHeader><TableRow>
+                        <TableHead className="text-[10px] uppercase">Name</TableHead>
+                        <TableHead className="text-[10px] uppercase">Model</TableHead>
+                        <TableHead className="text-[10px] uppercase">Status</TableHead>
+                        <TableHead className="text-[10px] uppercase">IP</TableHead>
+                        <TableHead className="text-[10px] uppercase">Uptime</TableHead>
+                        <TableHead className="text-[10px] uppercase">Firmware</TableHead>
+                        <TableHead className="text-right text-[10px] uppercase">Actions</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {summary.devices.map((d) => (
+                          <TableRow key={d.id} data-testid={`unifi-ctrl-device-${d.id}`}>
+                            <TableCell className="font-medium text-sm">{d.name || d.model || d.mac}</TableCell>
+                            <TableCell className="text-xs font-mono">{d.model || d.type}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={d.status === "online" || d.status === "connected" ? "text-emerald-400 border-emerald-500/30" : "text-rose-400 border-rose-500/30"}>{d.status}</Badge>
+                            </TableCell>
+                            <TableCell className="text-xs font-mono">{d.ip || "—"}</TableCell>
+                            <TableCell className="text-xs font-mono">{uptimeHuman(d.uptime)}</TableCell>
+                            <TableCell className="text-[10px] font-mono">{d.firmware || "—"}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex gap-1 justify-end">
+                                <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" disabled={actionBusy === `${d.id}:locate`} onClick={() => action(d.id, "locate")} title="Locate" data-testid={`unifi-ctrl-locate-${d.id}`}>
+                                  {actionBusy === `${d.id}:locate` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" disabled={actionBusy === `${d.id}:power-cycle`} onClick={() => action(d.id, "power-cycle")} title="Power-cycle" data-testid={`unifi-ctrl-power-${d.id}`}>
+                                  {actionBusy === `${d.id}:power-cycle` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-amber-400" disabled={actionBusy === `${d.id}:restart`} onClick={() => action(d.id, "restart")} title="Restart" data-testid={`unifi-ctrl-restart-${d.id}`}>
+                                  {actionBusy === `${d.id}:restart` ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" />}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="clients" className="mt-3">
+                  {summary.clients.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-muted-foreground">No connected clients.</div>
+                  ) : (
+                    <Table>
+                      <TableHeader><TableRow>
+                        <TableHead className="text-[10px] uppercase">Name</TableHead>
+                        <TableHead className="text-[10px] uppercase">Type</TableHead>
+                        <TableHead className="text-[10px] uppercase">Network</TableHead>
+                        <TableHead className="text-[10px] uppercase">IP</TableHead>
+                        <TableHead className="text-[10px] uppercase">Signal</TableHead>
+                        <TableHead className="text-[10px] uppercase">MAC</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {summary.clients.slice(0, 200).map((c) => (
+                          <TableRow key={c.id} data-testid={`unifi-ctrl-client-${c.id}`}>
+                            <TableCell className="text-sm">{c.name || c.manufacturer || "—"}</TableCell>
+                            <TableCell><Badge variant="outline" className={c.is_wired ? "text-sky-400 border-sky-500/30" : "text-indigo-400 border-indigo-500/30"}>{c.is_wired ? "wired" : "wifi"}</Badge></TableCell>
+                            <TableCell className="text-xs">{c.network || "—"}</TableCell>
+                            <TableCell className="text-xs font-mono">{c.ip || "—"}</TableCell>
+                            <TableCell className="text-[10px] font-mono">{c.signal ? <span className="flex items-center gap-1"><Signal className="w-3 h-3" />{c.signal}</span> : "—"}</TableCell>
+                            <TableCell className="text-[10px] font-mono text-muted-foreground">{c.mac}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </>
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

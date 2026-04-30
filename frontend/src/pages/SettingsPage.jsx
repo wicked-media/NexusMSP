@@ -13,6 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichTextEditor } from "@/components/RichTextEditor";
+import UnifiControllersManager from "@/components/unifi/UnifiControllersManager";
 import { toast } from "sonner";
 import { 
   User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
@@ -2099,6 +2100,10 @@ export default function SettingsPage() {
                 Remove
               </Button>
             )}
+          </div>
+
+          <div className="border-t border-border pt-4 mt-2">
+            <UnifiControllersManager />
           </div>
         </CardContent>
       </Card>
