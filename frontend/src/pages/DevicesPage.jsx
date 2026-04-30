@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogD
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -54,6 +55,8 @@ export default function DevicesPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [deviceViewers, setDeviceViewers] = useState({});
   const [rdStatusMap, setRdStatusMap] = useState({});
+  const [activeProviders, setActiveProviders] = useState([]);
+  const [remoteBusy, setRemoteBusy] = useState({});
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -77,10 +80,62 @@ export default function DevicesPage() {
         const rdRes = await axios.get(`${API}/rustdesk/live/status-map`, { headers });
         if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
       } catch {}
+      // Fetch active remote providers (TRMM/RustDesk/etc.) once per page load
+      try {
+        const pRes = await axios.get(`${API}/remote-providers/active`, { headers });
+        setActiveProviders(pRes.data || []);
+      } catch { setActiveProviders([]); }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Launch handlers for inline Remote button (called from RemoteAccessButton)
+  const setDevBusy = (id, v) => setRemoteBusy(m => ({ ...m, [id]: v }));
+
+  const launchTrmmForDevice = async (dev) => {
+    // If not linked, deep-link to device detail where the link dialog is
+    if (!dev.trmm_agent_id) {
+      toast.info("Opening device to link TRMM agent…");
+      navigate(`/devices/${dev.id}`);
+      return;
+    }
+    setDevBusy(dev.id, true);
+    try {
+      const res = await axios.get(`${API}/trmm/agents/${dev.trmm_agent_id}/remote-url`, { headers });
+      if (res.data?.success && res.data?.urls) {
+        const url = res.data.urls.control || res.data.urls.terminal || res.data.urls.file
+          || Object.values(res.data.urls).find(v => typeof v === "string");
+        if (url) { window.open(url, "_blank", "noopener,noreferrer"); toast.success("Opening MeshCentral…"); }
+        else toast.error("No remote URL returned by TRMM");
+      } else {
+        toast.error(res.data?.message || "Could not start remote session");
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setDevBusy(dev.id, false); }
+  };
+
+  const launchRustDeskForDevice = async (dev) => {
+    if (!dev.rustdesk_id) {
+      toast.info("Opening device to configure RustDesk…");
+      navigate(`/devices/${dev.id}`);
+      return;
+    }
+    setDevBusy(dev.id, true);
+    try {
+      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: dev.rustdesk_id }, { headers });
+      const relay = res.data?.relay_server;
+      const uri = relay
+        ? `rustdesk://${dev.rustdesk_id}@${relay.replace(/^https?:\/\//, "").split("/")[0].split(":")[0]}`
+        : `rustdesk://${dev.rustdesk_id}`;
+      const a = document.createElement("a"); a.href = uri; a.style.display = "none";
+      document.body.appendChild(a); a.click();
+      setTimeout(() => document.body.removeChild(a), 100);
+      toast.success(`Launching RustDesk to ${dev.rustdesk_id}`);
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
+    finally { setDevBusy(dev.id, false); }
+  };
+
 
   // Poll for active remote viewers and RustDesk status every 15 seconds
   useEffect(() => {
@@ -461,7 +516,17 @@ export default function DevicesPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "-"}</TableCell>
                       <TableCell>
-                        <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                        <div className="flex gap-1 items-center" onClick={e => e.stopPropagation()}>
+                          <RemoteAccessButton
+                            device={d}
+                            status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
+                            busy={!!remoteBusy[d.id]}
+                            onLaunchTrmm={() => launchTrmmForDevice(d)}
+                            onLaunchRustDesk={() => launchRustDeskForDevice(d)}
+                            compact
+                            providersOverride={activeProviders}
+                            testid={`row-remote-${d.id}`}
+                          />
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="w-3 h-3" /></Button>
                         </div>
@@ -553,7 +618,19 @@ export default function DevicesPage() {
                   )}
                   <div className="flex items-center justify-between mt-3 pt-2 border-t text-[10px] text-muted-foreground">
                     <span>Last seen: {d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "N/A"}</span>
-                    <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <RemoteAccessButton
+                        device={d}
+                        status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
+                        busy={!!remoteBusy[d.id]}
+                        onLaunchTrmm={() => launchTrmmForDevice(d)}
+                        onLaunchRustDesk={() => launchRustDeskForDevice(d)}
+                        compact
+                        providersOverride={activeProviders}
+                        testid={`card-remote-${d.id}`}
+                      />
+                      <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
                   </div>
                 </CardContent>
               </Card>

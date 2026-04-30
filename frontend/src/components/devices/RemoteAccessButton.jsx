@@ -37,14 +37,19 @@ const PROVIDER_ICON = {
  * this device. When multiple providers are available, opens a dropdown so the
  * tech can choose. Falls back to a "Configure" CTA when nothing is set up.
  */
-export default function RemoteAccessButton({ device, status, onLaunchRustDesk, onLaunchTrmm, busy = false, testid = "remote-access-btn" }) {
+export default function RemoteAccessButton({ device, status, onLaunchRustDesk, onLaunchTrmm, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const [providers, setProviders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState(providersOverride || []);
+  const [loading, setLoading] = useState(providersOverride === null);
 
   useEffect(() => {
+    if (providersOverride !== null) {
+      setProviders(providersOverride);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -55,7 +60,7 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
       } finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [headers]);
+  }, [headers, providersOverride]);
 
   const isOffline = status === "offline";
 
@@ -70,16 +75,18 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
 
   // Pick a primary path
   let primary = null;
-  if (trmmReady) primary = { id: "trmm", label: "Remote (TRMM)", action: onLaunchTrmm };
-  else if (rdReady) primary = { id: "rustdesk", label: "Remote (RustDesk)", action: onLaunchRustDesk };
-  else if (trmmLinkable) primary = { id: "trmm-link", label: "Link TRMM agent", action: onLaunchTrmm };
-  else if (otherCfg.length === 1) primary = { id: otherCfg[0].id, label: `Remote (${otherCfg[0].name})`, action: () => toast.info(`${otherCfg[0].name} provider — open from Settings → Remote Providers`) };
+  if (trmmReady) primary = { id: "trmm", label: compact ? "Remote" : "Remote (TRMM)", action: onLaunchTrmm };
+  else if (rdReady) primary = { id: "rustdesk", label: compact ? "Remote" : "Remote (RustDesk)", action: onLaunchRustDesk };
+  else if (trmmLinkable) primary = { id: "trmm-link", label: compact ? "Link" : "Link TRMM agent", action: onLaunchTrmm };
+  else if (otherCfg.length === 1) primary = { id: otherCfg[0].id, label: compact ? "Remote" : `Remote (${otherCfg[0].name})`, action: () => toast.info(`${otherCfg[0].name} provider — open from Settings → Remote Providers`) };
+
+  const sizeCls = compact ? "h-7 text-[11px] px-2" : "";
 
   // Loading state
   if (loading) {
     return (
-      <Button size="sm" variant="outline" disabled data-testid={`${testid}-loading`}>
-        <RefreshCw className="w-4 h-4 mr-1 animate-spin" />Remote
+      <Button size="sm" variant="outline" disabled className={sizeCls} data-testid={`${testid}-loading`}>
+        <RefreshCw className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1 animate-spin`} />Remote
       </Button>
     );
   }
@@ -87,9 +94,26 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
   // Nothing configured at all → CTA
   if (!primary && providers.length === 0) {
     return (
-      <Button size="sm" variant="outline" asChild data-testid={`${testid}-configure`}>
+      <Button size="sm" variant="outline" asChild className={sizeCls} data-testid={`${testid}-configure`}>
         <Link to="/settings?tab=integrations">
-          <Settings className="w-4 h-4 mr-1" /> Configure Remote
+          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Setup" : "Configure Remote"}
+        </Link>
+      </Button>
+    );
+  }
+
+  // Providers exist globally but this device isn't linked to any → deep-link to device detail
+  if (!primary && providers.length > 0 && device?.id) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        asChild
+        className={`text-amber-400 border-amber-500/30 hover:bg-amber-500/10 ${sizeCls}`}
+        data-testid={`${testid}-link`}
+      >
+        <Link to={`/devices/${device.id}`}>
+          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Link
         </Link>
       </Button>
     );
@@ -98,8 +122,8 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
   // Offline indicator (still allow dropdown for queued actions / TRMM scheduling)
   if (isOffline && primary?.id !== "trmm-link") {
     return (
-      <Button size="sm" variant="outline" disabled data-testid={`${testid}-offline`}>
-        <XCircle className="w-4 h-4 mr-1" /> Offline
+      <Button size="sm" variant="outline" disabled className={sizeCls} data-testid={`${testid}-offline`}>
+        <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Offline
       </Button>
     );
   }
@@ -120,12 +144,12 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
       <Button
         size="sm"
         variant="outline"
-        className={`text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 ${hasAlternatives ? "rounded-r-none border-r-0" : ""}`}
+        className={`text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 ${hasAlternatives ? "rounded-r-none border-r-0" : ""} ${sizeCls}`}
         onClick={primary?.action}
         disabled={busy || !primary?.action}
         data-testid={testid}
       >
-        {busy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <PrimaryIcon className="w-4 h-4 mr-1" />}
+        {busy ? <RefreshCw className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1 animate-spin`} /> : <PrimaryIcon className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} />}
         {primary?.label || "Remote Access"}
       </Button>
       {hasAlternatives && (
@@ -134,10 +158,10 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
             <Button
               size="sm"
               variant="outline"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 rounded-l-none px-2"
+              className={`text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 rounded-l-none px-2 ${sizeCls}`}
               data-testid={`${testid}-menu-trigger`}
             >
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className={compact ? "w-3 h-3" : "w-4 h-4"} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
