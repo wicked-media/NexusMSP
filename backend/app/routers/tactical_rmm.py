@@ -970,3 +970,184 @@ async def broadcast_status(broadcast_id: str, current_user: dict = Depends(get_c
 async def list_broadcasts(limit: int = 20, current_user: dict = Depends(get_current_user)):
     cursor = db.trmm_broadcasts.find({}, {"_id": 0, "agent_map": 0}).sort("started_at", -1).limit(limit)
     return await cursor.to_list(limit)
+
+
+# ─────────────────────────── Scheduled broadcasts ───────────────────────────
+# Queue a broadcast for a later time (patch Tuesday, maintenance window).
+# The scheduler in server.py calls execute_due_scheduled_broadcasts() every 30s.
+
+
+@router.post("/trmm/scheduled-broadcasts")
+async def create_scheduled_broadcast(data: dict, current_user: dict = Depends(get_current_user)):
+    """body: {
+        agent_ids: [str],
+        command?: str, script_id?: int, args?: list, shell?: str, timeout?: int,
+        concurrency?: int, label?: str,
+        run_at: ISO datetime string (UTC or with TZ),
+        repeat?: 'once' | 'daily' | 'weekly' (default 'once'),
+    }
+    """
+    cfg = await _get_config()
+    if not cfg:
+        raise HTTPException(503, "Tactical RMM not configured")
+    agent_ids = [a for a in (data.get("agent_ids") or []) if a]
+    if not agent_ids:
+        raise HTTPException(400, "agent_ids required")
+    if len(agent_ids) > 200:
+        raise HTTPException(400, "Too many agents (max 200)")
+    command = (data.get("command") or "").strip()
+    script_id = data.get("script_id")
+    if not command and not script_id:
+        raise HTTPException(400, "Provide a command or script_id")
+    run_at = data.get("run_at")
+    if not run_at:
+        raise HTTPException(400, "run_at is required (ISO datetime)")
+    try:
+        run_at_dt = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+        if run_at_dt.tzinfo is None:
+            run_at_dt = run_at_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(400, "run_at must be a valid ISO datetime")
+
+    repeat = (data.get("repeat") or "once").lower()
+    if repeat not in {"once", "daily", "weekly"}:
+        raise HTTPException(400, "repeat must be once|daily|weekly")
+
+    sched_id = f"sched-{_uuid.uuid4().hex[:12]}"
+    doc = {
+        "id": sched_id,
+        "agent_ids": agent_ids,
+        "command": command[:4000],
+        "script_id": script_id,
+        "args": (data.get("args") or [])[:32],
+        "shell": data.get("shell", "powershell"),
+        "timeout": int(data.get("timeout", 60)),
+        "concurrency": max(1, min(20, int(data.get("concurrency", 8)))),
+        "label": (data.get("label") or "")[:160],
+        "run_at": run_at_dt.isoformat(),
+        "repeat": repeat,
+        "status": "pending",
+        "created_by": current_user.get("name"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_run_at": None,
+        "last_broadcast_id": None,
+        "runs_count": 0,
+    }
+    await db.trmm_scheduled_broadcasts.insert_one(doc)
+    doc.pop("_id", None)
+    await _audit("schedule-broadcast", sched_id, current_user.get("name"), f"{len(agent_ids)} agents @ {run_at_dt.isoformat()} · {repeat}")
+    return {"success": True, "id": sched_id, "run_at": run_at_dt.isoformat(), "repeat": repeat}
+
+
+@router.get("/trmm/scheduled-broadcasts")
+async def list_scheduled_broadcasts(include_completed: bool = False, current_user: dict = Depends(get_current_user)):
+    q = {} if include_completed else {"status": {"$in": ["pending", "scheduled"]}}
+    cursor = db.trmm_scheduled_broadcasts.find(q, {"_id": 0}).sort("run_at", 1)
+    return await cursor.to_list(200)
+
+
+@router.get("/trmm/scheduled-broadcasts/{sched_id}")
+async def get_scheduled_broadcast(sched_id: str, current_user: dict = Depends(get_current_user)):
+    doc = await db.trmm_scheduled_broadcasts.find_one({"id": sched_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Scheduled broadcast not found")
+    return doc
+
+
+@router.delete("/trmm/scheduled-broadcasts/{sched_id}")
+async def cancel_scheduled_broadcast(sched_id: str, current_user: dict = Depends(get_current_user)):
+    res = await db.trmm_scheduled_broadcasts.update_one(
+        {"id": sched_id, "status": {"$in": ["pending", "scheduled"]}},
+        {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc).isoformat(), "cancelled_by": current_user.get("name")}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Not found or already executed")
+    await _audit("cancel-schedule", sched_id, current_user.get("name"), "")
+    return {"success": True}
+
+
+async def execute_due_scheduled_broadcasts():
+    """Called by the server-wide scheduler. Executes any scheduled broadcast
+    whose run_at is in the past AND status is pending. For repeating schedules,
+    bumps run_at to the next occurrence on success."""
+    now = datetime.now(timezone.utc)
+    cursor = db.trmm_scheduled_broadcasts.find({
+        "status": {"$in": ["pending", "scheduled"]},
+        "run_at": {"$lte": now.isoformat()},
+    }, {"_id": 0})
+    docs = await cursor.to_list(50)
+    if not docs:
+        return 0
+
+    cfg = await _get_config()
+    if not cfg:
+        # TRMM not configured → skip this cycle, don't mark as failed (user may
+        # be in the middle of setting it up).
+        return 0
+
+    fired = 0
+    for s in docs:
+        try:
+            broadcast_id = f"bcast-{_uuid.uuid4().hex[:12]}"
+            bdoc = {
+                "id": broadcast_id,
+                "agent_ids": s["agent_ids"],
+                "total": len(s["agent_ids"]),
+                "completed": 0, "succeeded": 0, "failed_count": 0,
+                "shell": s.get("shell", "powershell"),
+                "command": (s.get("command") or "")[:4000],
+                "script_id": s.get("script_id"),
+                "args": s.get("args", []),
+                "timeout": s.get("timeout", 60),
+                "label": s.get("label") or f"scheduled · {s['id']}",
+                "concurrency": s.get("concurrency", 8),
+                "status": "running",
+                "by": f"scheduler ({s.get('created_by') or 'system'})",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "agent_map": {aid: {"agent_id": aid, "status": "queued"} for aid in s["agent_ids"]},
+                "scheduled_id": s["id"],
+            }
+            await db.trmm_broadcasts.insert_one(bdoc)
+            _asyncio.create_task(_run_broadcast(
+                broadcast_id, s["agent_ids"], s.get("shell", "powershell"),
+                s.get("command") or "", s.get("script_id"),
+                s.get("args") or [], s.get("timeout", 60), bdoc["label"],
+                f"scheduler ({s.get('created_by') or 'system'})",
+                s.get("concurrency", 8),
+            ))
+
+            update = {
+                "$set": {
+                    "last_broadcast_id": broadcast_id,
+                    "last_run_at": now.isoformat(),
+                },
+                "$inc": {"runs_count": 1},
+            }
+            repeat = s.get("repeat", "once")
+            if repeat == "daily":
+                from datetime import timedelta
+                next_at = datetime.fromisoformat(s["run_at"].replace("Z", "+00:00")) + timedelta(days=1)
+                while next_at <= now:
+                    next_at += timedelta(days=1)
+                update["$set"]["run_at"] = next_at.isoformat()
+                update["$set"]["status"] = "pending"
+            elif repeat == "weekly":
+                from datetime import timedelta
+                next_at = datetime.fromisoformat(s["run_at"].replace("Z", "+00:00")) + timedelta(days=7)
+                while next_at <= now:
+                    next_at += timedelta(days=7)
+                update["$set"]["run_at"] = next_at.isoformat()
+                update["$set"]["status"] = "pending"
+            else:
+                update["$set"]["status"] = "completed"
+                update["$set"]["completed_at"] = now.isoformat()
+
+            await db.trmm_scheduled_broadcasts.update_one({"id": s["id"]}, update)
+            fired += 1
+        except Exception as e:
+            await db.trmm_scheduled_broadcasts.update_one(
+                {"id": s["id"]},
+                {"$set": {"last_error": str(e)[:500], "last_run_at": now.isoformat()}}
+            )
+
+    return fired

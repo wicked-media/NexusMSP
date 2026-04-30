@@ -64,6 +64,7 @@ export default function TacticalRmmCommandCenterPage() {
 
   const [actionsLog, setActionsLog] = useState([]);
   const [linkedDevices, setLinkedDevices] = useState([]);
+  const [scheduled, setScheduled] = useState([]);
 
   const [autoLinkOpen, setAutoLinkOpen] = useState(false);
   const [autoLinkPreview, setAutoLinkPreview] = useState(null);
@@ -74,10 +75,11 @@ export default function TacticalRmmCommandCenterPage() {
     if (showSpinner) setLoading(true); else setRefreshing(true);
     setError(null);
     try {
-      const [sumRes, logRes, linkRes] = await Promise.all([
+      const [sumRes, logRes, linkRes, schedRes] = await Promise.all([
         axios.get(`${API}/trmm/summary`, { headers }).catch((e) => ({ data: null, _err: e })),
         axios.get(`${API}/trmm/actions/log`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/trmm/linked-devices`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/trmm/scheduled-broadcasts`, { headers }).catch(() => ({ data: [] })),
       ]);
       if (sumRes.data) {
         setSummary(sumRes.data);
@@ -88,6 +90,7 @@ export default function TacticalRmmCommandCenterPage() {
       }
       setActionsLog(logRes.data || []);
       setLinkedDevices(linkRes.data || []);
+      setScheduled(schedRes.data || []);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -217,6 +220,29 @@ export default function TacticalRmmCommandCenterPage() {
               {summary?.last_synced_at ? `Last sync ${timeAgo(summary.last_synced_at)}` : "Live agents from your self-hosted TRMM"}
             </p>
           </div>
+          {(() => {
+            const upcoming = scheduled.filter(s => {
+              if (!s.run_at) return false;
+              const ms = new Date(s.run_at).getTime() - Date.now();
+              return ms > 0 && ms < 24 * 60 * 60 * 1000;
+            });
+            if (upcoming.length === 0) return null;
+            const next = upcoming.sort((a, b) => new Date(a.run_at) - new Date(b.run_at))[0];
+            const mins = Math.round((new Date(next.run_at).getTime() - Date.now()) / 60000);
+            return (
+              <button
+                onClick={() => setActiveTab("scheduled")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition"
+                data-testid="trmm-maintenance-badge"
+                title="Upcoming scheduled broadcasts in next 24h"
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-medium">
+                  Maintenance window · {upcoming.length} pending · next in {mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`}
+                </span>
+              </button>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -263,6 +289,7 @@ export default function TacticalRmmCommandCenterPage() {
           <TabsList className="bg-muted/40 border border-border">
             <TabsTrigger value="agents" data-testid="trmm-tab-agents">Agents</TabsTrigger>
             <TabsTrigger value="linked" data-testid="trmm-tab-linked">Linked Devices ({linkedDevices.length})</TabsTrigger>
+            <TabsTrigger value="scheduled" data-testid="trmm-tab-scheduled">Scheduled ({scheduled.length})</TabsTrigger>
             <TabsTrigger value="audit" data-testid="trmm-tab-audit">Action Log</TabsTrigger>
           </TabsList>
 
@@ -479,6 +506,68 @@ export default function TacticalRmmCommandCenterPage() {
                                 <Eye className="w-3.5 h-3.5 mr-1" /> Open
                               </Button>
                             </Link>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Scheduled */}
+          <TabsContent value="scheduled" className="mt-4">
+            <Card>
+              <CardContent className="p-0">
+                {scheduled.length === 0 ? (
+                  <div className="p-12 text-center text-muted-foreground text-sm">
+                    No scheduled broadcasts. Use the Broadcast dialog and pick "Schedule for later" to queue patch Tuesdays, maintenance windows, or daily health checks.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Label / Command</TableHead>
+                        <TableHead>Targets</TableHead>
+                        <TableHead>Runs at</TableHead>
+                        <TableHead>Repeat</TableHead>
+                        <TableHead>Last run</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {scheduled.map(s => (
+                        <TableRow key={s.id} data-testid={`trmm-sched-row-${s.id}`}>
+                          <TableCell>
+                            <div className="text-sm">{s.label || (s.command ? s.command.slice(0, 60) : `script ${s.script_id}`)}</div>
+                            <div className="text-[10px] text-muted-foreground font-mono">{s.shell} · timeout {s.timeout}s · concurrency {s.concurrency}</div>
+                          </TableCell>
+                          <TableCell className="text-xs">{s.agent_ids?.length || 0}</TableCell>
+                          <TableCell className="text-xs">{new Date(s.run_at).toLocaleString()}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={s.repeat === "once" ? "text-zinc-400" : "text-violet-400 border-violet-500/30"}>{s.repeat}</Badge>
+                          </TableCell>
+                          <TableCell className="text-[11px] text-muted-foreground">
+                            {s.last_run_at ? `${timeAgo(s.last_run_at)} · runs ${s.runs_count || 0}` : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-rose-400 hover:bg-rose-500/10"
+                              onClick={async () => {
+                                if (!window.confirm(`Cancel scheduled broadcast "${s.label || s.id}"?`)) return;
+                                try {
+                                  await axios.delete(`${API}/trmm/scheduled-broadcasts/${s.id}`, { headers });
+                                  toast.success("Cancelled");
+                                  load(false);
+                                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                              }}
+                              data-testid={`trmm-sched-cancel-${s.id}`}
+                            >
+                              Cancel
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}

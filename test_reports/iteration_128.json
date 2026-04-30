@@ -1,0 +1,106 @@
+{
+  "summary": "Iteration 128: TRMM Scheduled Broadcasts - All 44 tests PASSED. Verified all new scheduled broadcast endpoints: POST /api/trmm/scheduled-broadcasts (503 when not configured, 400 for missing agent_ids, 400 for missing command/script_id, 400 for missing run_at, 400 for invalid ISO datetime, 400 for invalid repeat value, 400 for >200 agents, success returns {success:true, id:'sched-...', run_at, repeat}). GET /api/trmm/scheduled-broadcasts returns pending items sorted by run_at ASC. GET with include_completed=true shows completed/cancelled. GET /{id} returns full doc, 404 for bogus. DELETE /{id} cancels pending (status=cancelled), 404 for already-cancelled or bogus. E2E scheduler loop tests: once-repeat schedule fires within 35s and becomes 'completed' with runs_count=1 and last_broadcast_id referencing actual bcast- doc. Daily-repeat schedule fires and stays 'pending' with run_at bumped +24h. Cancelled schedules NOT picked up by loop. All regression tests for iterations 122-127 pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration128_trmm_scheduled_broadcasts.py",
+    "/app/test_reports/pytest/pytest_results_iter128.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/trmm/scheduled-broadcasts: Returns 503 when TRMM not configured (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 when agent_ids missing or empty (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 when both command AND script_id missing (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 when run_at missing (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 for invalid ISO datetime in run_at (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 for repeat not in (once|daily|weekly) (correct)",
+    "POST /api/trmm/scheduled-broadcasts: Returns 400 when agent_ids > 200 (correct)",
+    "POST /api/trmm/scheduled-broadcasts: With valid payload returns {success:true, id:'sched-...', run_at, repeat}",
+    "GET /api/trmm/scheduled-broadcasts: Returns pending items sorted by run_at ASC",
+    "GET /api/trmm/scheduled-broadcasts?include_completed=true: Also shows completed/cancelled items",
+    "GET /api/trmm/scheduled-broadcasts/{id}: Returns full doc with all fields",
+    "GET /api/trmm/scheduled-broadcasts/{id}: Returns 404 for bogus id",
+    "DELETE /api/trmm/scheduled-broadcasts/{id}: Cancels pending item (status=cancelled)",
+    "DELETE /api/trmm/scheduled-broadcasts/{id}: Returns 404 for already-cancelled",
+    "DELETE /api/trmm/scheduled-broadcasts/{id}: Returns 404 for bogus id",
+    "Scheduler loop (30s interval): Fires due schedules with run_at in past",
+    "Scheduler loop (once): Sets status='completed', runs_count=1, last_broadcast_id references bcast- doc",
+    "Scheduler loop (daily): Keeps status='pending', bumps run_at +24h, runs_count=1",
+    "Scheduler loop: Cancelled schedules NOT picked up",
+    "All endpoints require authentication (403 without token)",
+    "Regression: All TRMM endpoints from iterations 122-127 still pass"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration128_trmm_scheduled_broadcasts.py"
+  ],
+  "success_rate": {"backend": "100% (44/44 tests passed)", "frontend": "N/A (backend-only testing per request)"},
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Test scheduled broadcasts and broadcasts created during testing; TRMM settings cleaned up after tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All scheduled broadcast endpoints verified working. POST /api/trmm/scheduled-broadcasts creates a scheduled broadcast with run_at datetime and optional repeat (once|daily|weekly). The scheduler loop in server.py runs every 30s (with 20s initial delay) and fires due schedules. For once-repeat, status becomes 'completed'. For daily/weekly, status stays 'pending' and run_at is bumped. Cancelled schedules are ignored by the loop. Each fired schedule creates a broadcast doc in db.trmm_broadcasts with scheduled_id reference.",
+  "features_tested": {
+    "auth_tests": {
+      "POST /api/trmm/scheduled-broadcasts requires auth": "PASS - 403 without token",
+      "GET /api/trmm/scheduled-broadcasts requires auth": "PASS - 403 without token",
+      "GET /api/trmm/scheduled-broadcasts/{id} requires auth": "PASS - 403 without token",
+      "DELETE /api/trmm/scheduled-broadcasts/{id} requires auth": "PASS - 403 without token"
+    },
+    "validation_tests": {
+      "503 when TRMM not configured": "PASS",
+      "400 when agent_ids missing": "PASS",
+      "400 when agent_ids empty": "PASS",
+      "400 when command and script_id missing": "PASS",
+      "400 when run_at missing": "PASS",
+      "400 for invalid run_at (bad ISO)": "PASS",
+      "400 for repeat not in (once|daily|weekly)": "PASS",
+      "400 when agent_ids > 200": "PASS"
+    },
+    "crud_tests": {
+      "create with command returns success": "PASS - {success:true, id:'sched-...', run_at, repeat}",
+      "create with script_id instead of command": "PASS",
+      "create with repeat=weekly": "PASS",
+      "list returns pending sorted by run_at ASC": "PASS",
+      "list with include_completed=true shows cancelled": "PASS",
+      "get by id returns full doc": "PASS",
+      "get by id 404 for bogus": "PASS",
+      "cancel sets status=cancelled": "PASS",
+      "cancel already-cancelled returns 404": "PASS",
+      "cancel bogus id returns 404": "PASS"
+    },
+    "scheduler_loop_tests": {
+      "once-repeat fires and becomes completed": "PASS - status='completed', runs_count=1, last_broadcast_id set",
+      "daily-repeat fires and stays pending with bumped run_at": "PASS - status='pending', run_at +24h, runs_count=1",
+      "cancelled schedules not picked up": "PASS - status stays 'cancelled', runs_count=0"
+    },
+    "regression_tests": {
+      "GET /api/trmm/settings": "PASS",
+      "GET /api/trmm/status": "PASS",
+      "GET /api/trmm/summary": "PASS",
+      "GET /api/trmm/test": "PASS",
+      "POST /api/trmm/auto-link (503)": "PASS",
+      "GET /api/trmm/linked-devices": "PASS",
+      "GET /api/trmm/agents (503)": "PASS",
+      "GET /api/trmm/clients (503)": "PASS",
+      "GET /api/trmm/scripts (503)": "PASS",
+      "GET /api/trmm/scripts/favorites/mine": "PASS",
+      "GET /api/trmm/agents/{id}/services": "PASS",
+      "GET /api/trmm/agents/{id}/processes": "PASS",
+      "GET /api/trmm/agents/{id}/software": "PASS",
+      "GET /api/trmm/agents/{id}/winupdates": "PASS",
+      "GET /api/trmm/runs/bogus (404)": "PASS",
+      "GET /api/trmm/actions/log": "PASS",
+      "POST /api/trmm/broadcast (503)": "PASS",
+      "GET /api/trmm/broadcasts": "PASS",
+      "GET /api/trmm/broadcasts/{id} (404)": "PASS",
+      "GET /api/remote-providers/active": "PASS"
+    }
+  }
+}

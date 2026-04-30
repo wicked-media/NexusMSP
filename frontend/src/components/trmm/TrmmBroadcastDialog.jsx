@@ -62,6 +62,11 @@ export default function TrmmBroadcastDialog({ open, onClose, selectedAgents }) {
   const [starting, setStarting] = useState(false);
   const [expanded, setExpanded] = useState({}); // per-agent expand flags
 
+  // Scheduling
+  const [runWhen, setRunWhen] = useState("now"); // "now" | "schedule"
+  const [scheduleAt, setScheduleAt] = useState(""); // local datetime-input string
+  const [repeat, setRepeat] = useState("once"); // once | daily | weekly
+
   // reset when dialog opens
   useEffect(() => {
     if (open) {
@@ -128,13 +133,29 @@ export default function TrmmBroadcastDialog({ open, onClose, selectedAgents }) {
       };
       if (mode === "command") payload.command = command;
       else { payload.script_id = Number(scriptId); payload.args = args; }
-      const res = await axios.post(`${API}/trmm/broadcast`, payload, { headers });
-      if (res.data?.success) {
-        toast.success(`Broadcast queued to ${res.data.total} agents`);
-        const bdoc = await axios.get(`${API}/trmm/broadcasts/${res.data.broadcast_id}`, { headers });
-        setBroadcast(bdoc.data);
+
+      if (runWhen === "schedule") {
+        if (!scheduleAt) { toast.error("Pick a date/time"); setStarting(false); return; }
+        const dt = new Date(scheduleAt);
+        if (isNaN(dt.getTime())) { toast.error("Invalid date/time"); setStarting(false); return; }
+        payload.run_at = dt.toISOString();
+        payload.repeat = repeat;
+        const res = await axios.post(`${API}/trmm/scheduled-broadcasts`, payload, { headers });
+        if (res.data?.success) {
+          toast.success(`Scheduled for ${dt.toLocaleString()}${repeat !== "once" ? ` · repeats ${repeat}` : ""}`);
+          onClose();
+        } else {
+          toast.error(res.data?.message || "Schedule failed");
+        }
       } else {
-        toast.error(res.data?.message || "Broadcast failed");
+        const res = await axios.post(`${API}/trmm/broadcast`, payload, { headers });
+        if (res.data?.success) {
+          toast.success(`Broadcast queued to ${res.data.total} agents`);
+          const bdoc = await axios.get(`${API}/trmm/broadcasts/${res.data.broadcast_id}`, { headers });
+          setBroadcast(bdoc.data);
+        } else {
+          toast.error(res.data?.message || "Broadcast failed");
+        }
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || e.message);
@@ -263,6 +284,54 @@ export default function TrmmBroadcastDialog({ open, onClose, selectedAgents }) {
               </div>
             </div>
 
+            {/* Schedule selector */}
+            <div className="border border-border rounded-md p-3 bg-muted/20 space-y-2">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={runWhen === "now" ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" : ""}
+                  onClick={() => setRunWhen("now")}
+                  data-testid="bcast-when-now"
+                >
+                  Run now
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={runWhen === "schedule" ? "text-violet-400 border-violet-500/40 bg-violet-500/10" : ""}
+                  onClick={() => setRunWhen("schedule")}
+                  data-testid="bcast-when-schedule"
+                >
+                  Schedule for later
+                </Button>
+                {runWhen === "schedule" && (
+                  <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    <Input
+                      type="datetime-local"
+                      value={scheduleAt}
+                      onChange={(e) => setScheduleAt(e.target.value)}
+                      className="w-56 h-8 text-xs"
+                      data-testid="bcast-schedule-at"
+                    />
+                    <Select value={repeat} onValueChange={setRepeat}>
+                      <SelectTrigger className="w-28 h-8 text-xs" data-testid="bcast-repeat"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="once">Once</SelectItem>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+              {runWhen === "schedule" && (
+                <p className="text-[10px] text-muted-foreground">
+                  Tip: Choose 2:00 AM + "Daily" for a patch-Tuesday automation. The scheduler fires within ~30s of the run_at time.
+                </p>
+              )}
+            </div>
+
             <div className="border border-border rounded-md p-3 bg-muted/20">
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Targets</div>
               <div className="flex flex-wrap gap-1 max-h-32 overflow-auto">
@@ -290,7 +359,9 @@ export default function TrmmBroadcastDialog({ open, onClose, selectedAgents }) {
                 data-testid="bcast-start-btn"
               >
                 {starting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Play className="w-4 h-4 mr-1" />}
-                Broadcast to {onlineSelected.length} agent{onlineSelected.length === 1 ? "" : "s"}
+                {runWhen === "schedule"
+                  ? `Schedule for ${onlineSelected.length} agent${onlineSelected.length === 1 ? "" : "s"}`
+                  : `Broadcast to ${onlineSelected.length} agent${onlineSelected.length === 1 ? "" : "s"}`}
               </Button>
             </>
           ) : (

@@ -120,6 +120,8 @@ async def startup_event():
     asyncio.create_task(_recurring_invoice_scheduler())
     # Start 7am morning standup-digest delivery scheduler
     asyncio.create_task(_standup_digest_scheduler())
+    # Start TRMM scheduled-broadcast runner
+    asyncio.create_task(_trmm_scheduled_broadcast_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
@@ -194,6 +196,21 @@ async def _rustdesk_auto_sync_loop():
             logger.debug(f"RustDesk auto-sync loop error: {e}")
             import asyncio
             await asyncio.sleep(60)
+
+async def _trmm_scheduled_broadcast_loop():
+    """Background loop that fires TRMM scheduled broadcasts whose run_at has elapsed."""
+    import asyncio
+    await asyncio.sleep(20)  # let the app warm up
+    while True:
+        try:
+            from app.routers.tactical_rmm import execute_due_scheduled_broadcasts
+            fired = await execute_due_scheduled_broadcasts()
+            if fired:
+                logger.info(f"TRMM scheduler fired {fired} broadcast(s)")
+        except Exception as e:
+            logger.debug(f"TRMM scheduler loop error: {e}")
+        await asyncio.sleep(30)
+
 
 async def _recurring_invoice_scheduler():
     """Background loop that checks for due recurring invoices and auto-generates them."""
