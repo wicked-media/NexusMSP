@@ -119,6 +119,68 @@ async def get_remote_providers(current_user: dict = Depends(get_current_user)):
         result.append({**provider, "configured": configured, "active": config.get("active", False) if config else False})
     return result
 
+
+@router.get("/remote-providers/active")
+async def get_active_remote_providers(current_user: dict = Depends(get_current_user)):
+    """Compact list of providers that are currently configured AND active.
+
+    Includes Tactical RMM and the legacy RustDesk integration alongside the
+    generic remote_providers entries so the device 'Remote Access' button can
+    surface every configured option dynamically.
+    """
+    out = []
+
+    # Tactical RMM (separate router/settings document)
+    trmm = await db.settings.find_one({"type": "tactical_rmm"}, {"_id": 0})
+    if trmm and trmm.get("api_key_full") and trmm.get("base_url"):
+        out.append({
+            "id": "trmm",
+            "name": "Tactical RMM",
+            "type": "self-hosted",
+            "kind": "rmm",
+            "configured": True,
+            "active": True,
+            "primary": True,
+        })
+
+    # Legacy RustDesk router (its own settings doc)
+    rd_cfg = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
+    if rd_cfg:
+        val = rd_cfg.get("value", {})
+        if val.get("server_url") and val.get("enabled", True):
+            out.append({
+                "id": "rustdesk",
+                "name": "RustDesk",
+                "type": "self-hosted",
+                "kind": "remote",
+                "configured": True,
+                "active": True,
+            })
+
+    # Generic remote_providers settings
+    for provider in SUPPORTED_PROVIDERS:
+        # rustdesk handled above via its dedicated settings doc; skip duplicate
+        if provider["id"] == "rustdesk" and any(p["id"] == "rustdesk" for p in out):
+            continue
+        config = await db.settings.find_one({"type": f"remote_{provider['id']}"}, {"_id": 0})
+        if not config:
+            continue
+        if not config.get("active"):
+            continue
+        configured = any(config.get(f["key"]) for f in provider["config_fields"] if f["type"] in ("password", "url"))
+        if not configured:
+            continue
+        out.append({
+            "id": provider["id"],
+            "name": provider["name"],
+            "type": provider["type"],
+            "kind": "remote",
+            "configured": True,
+            "active": True,
+        })
+
+    return out
+
 @router.get("/remote-providers/{provider_id}/settings")
 async def get_provider_settings(provider_id: str, current_user: dict = Depends(get_current_user)):
     config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})

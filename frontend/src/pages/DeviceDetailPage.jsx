@@ -14,6 +14,7 @@ import { Progress } from "../components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -245,35 +246,14 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {trmmConfigured && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              onClick={startTrmmRemote}
-              disabled={trmmRemoteBusy}
-              data-testid="trmm-remote-btn"
-              title={dev.trmm_agent_id ? `Open remote session (TRMM agent ${dev.trmm_agent_id})` : "Link a TRMM agent to enable remote"}
-            >
-              {trmmRemoteBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Server className="w-4 h-4 mr-1" />}
-              {dev.trmm_agent_id ? "Remote (TRMM)" : "Link TRMM"}
-            </Button>
-          )}
-          {(rdLiveStatus || dev.status) === "online" && (
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
-              {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
-            </Button>
-          )}
-          {(rdLiveStatus || dev.status) === "offline" && (
-            <Button size="sm" variant="outline" disabled data-testid="remote-access-btn-disabled">
-              <XCircle className="w-4 h-4 mr-1" />Offline
-            </Button>
-          )}
-          {(rdLiveStatus || dev.status) === "warning" && (
-            <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
-              {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
-            </Button>
-          )}
+          <RemoteAccessButton
+            device={dev}
+            status={rdLiveStatus || dev.status}
+            busy={connectLoading || trmmRemoteBusy}
+            onLaunchTrmm={startTrmmRemote}
+            onLaunchRustDesk={startRemoteAccess}
+            testid="remote-access-btn"
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" data-testid="download-agent-btn"><Download className="w-4 h-4 mr-1" />Agent</Button>
