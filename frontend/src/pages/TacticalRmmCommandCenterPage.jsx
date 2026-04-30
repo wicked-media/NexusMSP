@@ -17,7 +17,7 @@ import {
   Server, RefreshCw, Loader2, ExternalLink, Search, Settings,
   Power, RotateCw, MonitorSmartphone, Terminal, ShieldCheck, Activity,
   AlertTriangle, CheckCircle2, Cpu, HardDrive, Wifi, Download, Play,
-  Users, FileCode, Eye,
+  Users, FileCode, Eye, Link2, Sparkles,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
@@ -62,6 +62,11 @@ export default function TacticalRmmCommandCenterPage() {
 
   const [actionsLog, setActionsLog] = useState([]);
   const [linkedDevices, setLinkedDevices] = useState([]);
+
+  const [autoLinkOpen, setAutoLinkOpen] = useState(false);
+  const [autoLinkPreview, setAutoLinkPreview] = useState(null);
+  const [autoLinkBusy, setAutoLinkBusy] = useState(false);
+  const [autoLinkOverwrite, setAutoLinkOverwrite] = useState(false);
 
   const load = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true); else setRefreshing(true);
@@ -159,6 +164,26 @@ export default function TacticalRmmCommandCenterPage() {
     }
   };
 
+  const runAutoLink = async (commit) => {
+    setAutoLinkBusy(true);
+    try {
+      const res = await axios.post(`${API}/trmm/auto-link`, {
+        dry_run: !commit,
+        overwrite: autoLinkOverwrite,
+      }, { headers });
+      setAutoLinkPreview(res.data);
+      if (commit) {
+        const s = res.data.stats;
+        toast.success(`Linked ${s.matched} device(s) · ${s.skipped} skipped · ${s.unmatched} unmatched`);
+        load(false);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message);
+    } finally {
+      setAutoLinkBusy(false);
+    }
+  };
+
   if (!loading && !configured) {
     return (
       <PageShell className="p-6">
@@ -212,6 +237,18 @@ export default function TacticalRmmCommandCenterPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+            onClick={() => { setAutoLinkOpen(true); setAutoLinkPreview(null); runAutoLink(false); }}
+            disabled={autoLinkBusy}
+            data-testid="trmm-auto-link-btn"
+            title="Auto-link TRMM agents to NexusOps devices by hostname / IP"
+          >
+            {autoLinkBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Sparkles className="w-4 h-4 mr-1" />}
+            Auto-link agents
+          </Button>
           <Button variant="outline" size="sm" onClick={() => load(false)} disabled={refreshing} data-testid="trmm-cc-refresh-btn">
             {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
             Refresh
@@ -458,6 +495,108 @@ export default function TacticalRmmCommandCenterPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Auto-Link Dialog */}
+      <Dialog open={autoLinkOpen} onOpenChange={(v) => { if (!v) { setAutoLinkOpen(false); setAutoLinkPreview(null); } }}>
+        <DialogContent className="max-w-3xl" data-testid="trmm-auto-link-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-500" /> Auto-link TRMM agents</DialogTitle>
+            <DialogDescription>
+              Matches agents to NexusOps devices by hostname (case-insensitive) and falls back to public/local IP. Ambiguous matches are skipped for review.
+            </DialogDescription>
+          </DialogHeader>
+
+          {autoLinkBusy && !autoLinkPreview && (
+            <div className="py-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Analysing…</div>
+          )}
+
+          {autoLinkPreview && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <div className="border border-border rounded-md p-2"><div className="text-[10px] uppercase text-muted-foreground tracking-widest">Agents</div><div className="text-xl">{autoLinkPreview.stats.agents_total}</div></div>
+                <div className="border border-emerald-500/30 bg-emerald-500/5 rounded-md p-2"><div className="text-[10px] uppercase text-emerald-400 tracking-widest">Will match</div><div className="text-xl text-emerald-400" data-testid="trmm-autolink-matched">{autoLinkPreview.stats.matched}</div></div>
+                <div className="border border-amber-500/30 bg-amber-500/5 rounded-md p-2"><div className="text-[10px] uppercase text-amber-400 tracking-widest">Skipped</div><div className="text-xl text-amber-400">{autoLinkPreview.stats.skipped}</div></div>
+                <div className="border border-rose-500/30 bg-rose-500/5 rounded-md p-2"><div className="text-[10px] uppercase text-rose-400 tracking-widest">Ambiguous</div><div className="text-xl text-rose-400">{autoLinkPreview.stats.ambiguous}</div></div>
+                <div className="border border-border rounded-md p-2"><div className="text-[10px] uppercase text-muted-foreground tracking-widest">Unmatched</div><div className="text-xl text-muted-foreground">{autoLinkPreview.stats.unmatched}</div></div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="trmm-autolink-overwrite"
+                  checked={autoLinkOverwrite}
+                  onChange={(e) => setAutoLinkOverwrite(e.target.checked)}
+                  data-testid="trmm-autolink-overwrite"
+                />
+                <Label htmlFor="trmm-autolink-overwrite" className="text-xs">Overwrite existing TRMM links (re-pair devices already matched)</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => runAutoLink(false)}
+                  disabled={autoLinkBusy}
+                  data-testid="trmm-autolink-recompute"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" /> Recompute
+                </Button>
+              </div>
+
+              <div className="border border-border rounded-md max-h-72 overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Device</TableHead>
+                      <TableHead>Agent (TRMM hostname)</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Match</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {autoLinkPreview.matched.length === 0 && (
+                      <TableRow><TableCell colSpan={4} className="text-center text-xs text-muted-foreground py-6">No new matches found.</TableCell></TableRow>
+                    )}
+                    {autoLinkPreview.matched.map((m, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-sm">{m.device_name}</TableCell>
+                        <TableCell className="font-mono text-xs">{m.agent_hostname}</TableCell>
+                        <TableCell className="text-xs">{m.client || "—"}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">{m.match_type}</Badge></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {(autoLinkPreview.ambiguous?.length || 0) > 0 && (
+                <div className="border border-rose-500/20 rounded-md p-3 bg-rose-500/5 text-xs">
+                  <div className="font-medium text-rose-400 mb-1">{autoLinkPreview.ambiguous.length} ambiguous · resolve manually</div>
+                  <div className="space-y-1 max-h-32 overflow-auto">
+                    {autoLinkPreview.ambiguous.slice(0, 25).map((a, i) => (
+                      <div key={i} className="text-muted-foreground">
+                        <span className="font-mono">{a.hostname}</span> → {a.candidates.map(c => c.name).join(", ")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAutoLinkOpen(false); setAutoLinkPreview(null); }}>Close</Button>
+            <Button
+              variant="outline"
+              className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+              onClick={() => runAutoLink(true)}
+              disabled={autoLinkBusy || !autoLinkPreview || (autoLinkPreview?.stats?.matched || 0) === 0}
+              data-testid="trmm-autolink-commit-btn"
+            >
+              {autoLinkBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Link2 className="w-4 h-4 mr-1" />}
+              Link {autoLinkPreview?.stats?.matched || 0} device(s)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Script Dialog */}
       <Dialog open={!!scriptOpen} onOpenChange={(v) => { if (!v) { setScriptOpen(false); setScriptResult(null); } }}>

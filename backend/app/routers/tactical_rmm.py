@@ -380,3 +380,164 @@ async def list_linked_devices(current_user: dict = Depends(get_current_user)):
         {"_id": 0, "id": 1, "name": 1, "trmm_agent_id": 1, "trmm_hostname": 1, "trmm_linked_at": 1, "client_name": 1},
     )
     return await cursor.to_list(1000)
+
+
+# ─────────────────────────── Auto-link (hostname / IP matcher) ───────────────────────────
+
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+
+def _agent_ips(agent: dict) -> list:
+    ips = []
+    pub = agent.get("public_ip") or ""
+    if pub:
+        ips.append(pub.strip())
+    local = agent.get("local_ips") or ""
+    if isinstance(local, str):
+        for chunk in local.replace(",", " ").split():
+            chunk = chunk.strip()
+            if chunk and chunk not in ips:
+                ips.append(chunk)
+    elif isinstance(local, list):
+        for chunk in local:
+            if chunk and str(chunk) not in ips:
+                ips.append(str(chunk).strip())
+    return [i for i in ips if i]
+
+
+@router.post("/trmm/auto-link")
+async def auto_link_agents(data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
+    """One-click matcher that pairs TRMM agents to NexusOps devices by hostname (case-insensitive) and IP.
+
+    Body (optional): { "dry_run": bool, "overwrite": bool }
+    - dry_run=true returns the proposed matches without persisting
+    - overwrite=true re-links devices that already have a trmm_agent_id
+    """
+    cfg = await _get_config()
+    if not cfg:
+        raise HTTPException(503, "Tactical RMM not configured")
+    body = data or {}
+    dry_run = bool(body.get("dry_run", False))
+    overwrite = bool(body.get("overwrite", False))
+
+    raw_agents = await _trmm_call("GET", "agents/")
+    agents = [_norm_agent(a) for a in _data(raw_agents)]
+
+    devices = await db.devices.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1, "hostname": 1, "trmm_agent_id": 1, "client_name": 1}
+    ).to_list(5000)
+
+    # Build lookup tables
+    by_host = {}
+    by_ip = {}
+    for d in devices:
+        for h in {_norm(d.get("name")), _norm(d.get("hostname"))}:
+            if h:
+                by_host.setdefault(h, []).append(d)
+        ip = (d.get("ip_address") or "").strip()
+        if ip:
+            by_ip.setdefault(ip, []).append(d)
+
+    matched, skipped, unmatched, ambiguous = [], [], [], []
+    seen_device_ids = set()
+    now = datetime.now(timezone.utc).isoformat()
+
+    for ag in agents:
+        ag_host = _norm(ag.get("hostname"))
+        ag_ips = _agent_ips(ag)
+        ag_id = ag.get("agent_id") or ag.get("id")
+        if not ag_id:
+            continue
+
+        candidates = []
+        # Try hostname first (highest confidence)
+        if ag_host and ag_host in by_host:
+            candidates = list(by_host[ag_host])
+        # Then fall back to IP
+        if not candidates:
+            for ip in ag_ips:
+                if ip in by_ip:
+                    candidates.extend(by_ip[ip])
+        # Dedupe by device id
+        seen_ids = set()
+        unique = []
+        for c in candidates:
+            if c["id"] not in seen_ids:
+                seen_ids.add(c["id"])
+                unique.append(c)
+
+        if not unique:
+            unmatched.append({"agent_id": ag_id, "hostname": ag.get("hostname"), "client": ag.get("client")})
+            continue
+        if len(unique) > 1:
+            ambiguous.append({
+                "agent_id": ag_id, "hostname": ag.get("hostname"),
+                "candidates": [{"id": c["id"], "name": c["name"]} for c in unique],
+            })
+            continue
+
+        dev = unique[0]
+        if dev["id"] in seen_device_ids:
+            skipped.append({"device_id": dev["id"], "agent_id": ag_id, "reason": "device already paired in this run"})
+            continue
+        existing = dev.get("trmm_agent_id")
+        if existing and existing != ag_id and not overwrite:
+            skipped.append({
+                "device_id": dev["id"], "device_name": dev["name"],
+                "agent_id": ag_id, "reason": f"already linked to {existing}",
+            })
+            continue
+        if existing == ag_id:
+            skipped.append({"device_id": dev["id"], "agent_id": ag_id, "reason": "already linked (no change)"})
+            continue
+
+        match_type = "hostname" if ag_host and ag_host == _norm(dev.get("name")) else (
+            "hostname" if ag_host and ag_host == _norm(dev.get("hostname")) else "ip"
+        )
+        matched.append({
+            "device_id": dev["id"], "device_name": dev["name"],
+            "agent_id": ag_id, "agent_hostname": ag.get("hostname"),
+            "client": ag.get("client") or dev.get("client_name"),
+            "match_type": match_type,
+        })
+        seen_device_ids.add(dev["id"])
+
+        if not dry_run:
+            await db.devices.update_one(
+                {"id": dev["id"]},
+                {"$set": {
+                    "trmm_agent_id": ag_id,
+                    "trmm_hostname": ag.get("hostname") or "",
+                    "trmm_linked_at": now,
+                    "trmm_linked_by": current_user.get("name") or "auto-link",
+                    "trmm_match_type": match_type,
+                }},
+            )
+
+    if not dry_run and matched:
+        await db.trmm_actions.insert_one({
+            "action": "auto-link",
+            "agent_id": f"{len(matched)}-pairs",
+            "by": current_user.get("name"),
+            "timestamp": now,
+            "result_preview": f"matched={len(matched)} skipped={len(skipped)} ambiguous={len(ambiguous)} unmatched={len(unmatched)}",
+        })
+
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "overwrite": overwrite,
+        "stats": {
+            "agents_total": len(agents),
+            "devices_total": len(devices),
+            "matched": len(matched),
+            "skipped": len(skipped),
+            "ambiguous": len(ambiguous),
+            "unmatched": len(unmatched),
+        },
+        "matched": matched,
+        "skipped": skipped,
+        "ambiguous": ambiguous,
+        "unmatched": unmatched[:50],
+    }

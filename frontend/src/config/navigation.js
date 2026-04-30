@@ -96,7 +96,7 @@ export const navGroups = [
         children: [
           { path: "/devices", label: "All Devices" },
           { path: "/bulk-actions", label: "Bulk Actions" },
-          { path: "/remote-access", label: "Remote Access" },
+          { path: "/tactical-rmm", label: "Remote & Patching (TRMM)" },
           { path: "/custom-monitors", label: "Custom Monitors" },
         ]
       },
@@ -126,14 +126,6 @@ export const navGroups = [
         path: "/backup-dashboard", icon: HardDrive, label: "Backup Center",
         children: [
           { path: "/backup-dashboard", label: "Backup Center" },
-        ]
-      },
-      {
-        path: "/patch-hub", icon: Layers, label: "Patch Management",
-        children: [
-          { path: "/patch-hub", label: "Patch Hub" },
-          { path: "/patch-compliance", label: "Compliance" },
-          { path: "/third-party-patching", label: "3rd Party" },
         ]
       },
       {
