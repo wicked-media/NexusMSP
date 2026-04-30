@@ -419,3 +419,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
   - Verified: Bindiwalla Pastoral tenant → Acme Corporation client: $2.36 C2C Storage + $9.00 M365 Seats = $11.36 persisted as real line items on `contract-001`
 
 
+
+---
+
+## 2026-04-30 — Tactical RMM (Self-Hosted) integration + Global UI sweep
+
+### What shipped
+- **Tactical RMM router** (`/app/backend/app/routers/tactical_rmm.py`)
+  - Settings CRUD: `/api/trmm/settings` (GET/POST/DELETE), `/api/trmm/status`, `/api/trmm/test`
+  - Data: `/api/trmm/agents`, `/api/trmm/agents/{id}`, `/api/trmm/clients`, `/api/trmm/checks`, `/api/trmm/alerts`, `/api/trmm/summary`
+  - Actions: reboot, shutdown, run-script (cmd/script_id), run-checks, install-patches, remote-url (MeshCentral)
+  - Linking: POST/DELETE `/api/devices/{id}/link-trmm-agent`, GET `/api/trmm/linked-devices`, GET `/api/trmm/actions/log`
+  - Auth: `X-API-KEY` header against self-hosted TRMM REST API
+  - Inert until configured — returns `configured=false` shaped responses (no 500s)
+- **Settings TRMM card** in `SettingsPage.jsx` (id `trmm-settings-card`) under Integrations
+- **Tactical RMM Command Center** (`/tactical-rmm`) — KPI strip, agents table with per-row Remote / Script / Checks / Reboot actions, Linked Devices tab, Audit Log tab, Run Script dialog
+- **Device Detail page** — Syncro-style "Remote (TRMM)" button + Link TRMM Agent dialog
+- **Global Break-button styling sweep** applied to Hudu (Apply filter), CIPP (Create user, Send digest), Clients (Create, Link tenant, Create user, Link submit) — outlined with color-tinted bg
+
+### Tests
+- `/app/test_reports/iteration_122.json` — 25/25 passed (backend), zero issues, no regressions on existing integrations.
+
+### Next backlog (P1 → P2)
+- Wire UniFi telemetry (offline APs/switches) into Client Health Score (Network Health dimension)
+- Recharts console warnings (recurring) — add minWidth/minHeight to ResponsiveContainer
+- Decompose `TicketsPage.jsx` (~4200 lines)
+- Network Topology Map + Outage Simulator
+- Wave C AI: Billboard Mode, PSA Time Machine, Geofence auto-time entry
+- Service Desk bundle (Escalation, Change Mgmt, Skills Matrix)
+- Security bundle (Vuln Scanner, Dark Web, Phishing Sim, MFA Mgmt)
