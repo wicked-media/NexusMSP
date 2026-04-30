@@ -480,3 +480,16 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 ### Tests
 - `/app/test_reports/iteration_124.json` — 13/13 passed, zero issues. Confirmed via UI smoke that the button correctly shows "Remote (RustDesk)" when only RustDesk is configured, and will switch to "Remote (TRMM)" once TRMM is wired up + agents linked.
+
+## 2026-04-30 (cont. 3) — Inline Remote button on Devices list
+
+### What shipped
+- `RemoteAccessButton` now accepts `compact` + `providersOverride` props so it can be embedded in table rows without doing N network calls (parent DevicesPage fetches `/api/remote-providers/active` once and forwards the result to every row).
+- **Table view**: new inline "Remote" / "Link" / "Offline" button in the actions column of each device row (testid `row-remote-{deviceId}`).
+- **Grid view**: same compact button added to each card's footer (testid `card-remote-{deviceId}`).
+- When a device has `rustdesk_id` or `trmm_agent_id`: click-to-launch (calls `/api/rustdesk/quick-connect` or `/api/trmm/agents/{id}/remote-url`).
+- When the device has no provider linkage yet: amber "Link" button navigates to device detail so the tech can assign an ID / link a TRMM agent.
+- Offline devices show a disabled "Offline" pill.
+
+### Tests
+- `/app/test_reports/iteration_125.json` — 13/13 regression tests passed.
