@@ -284,7 +284,31 @@ async def agent_shutdown(agent_id: str, current_user: dict = Depends(get_current
 
 @router.post("/trmm/agents/{agent_id}/run-script")
 async def agent_run_script(agent_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    """body: { script_id?: int, command?: string, shell?: 'powershell'|'cmd'|'python'|'bash', timeout?: int, args?: list }"""
+    """body: { script_id?: int, command?: string, shell?: 'powershell'|'cmd'|'python'|'bash', timeout?: int, args?: list, cwd?: str, label?: str }
+
+    Captures stdout/stderr/exit_code into db.trmm_runs so the UI can render a
+    scrollback buffer even though the TRMM REST API is request/response (not
+    a true PTY).
+    """
+    import uuid as _uuid
+    run_id = f"trmm-run-{_uuid.uuid4().hex[:10]}"
+    started = datetime.now(timezone.utc)
+    label = (data or {}).get("label") or ""
+    shell = (data or {}).get("shell", "powershell")
+    cmd_preview = (data or {}).get("command") or f"script_id={data.get('script_id')}"
+
+    base_doc = {
+        "id": run_id,
+        "agent_id": agent_id,
+        "by": current_user.get("name"),
+        "started_at": started.isoformat(),
+        "shell": shell,
+        "command": cmd_preview[:2000],
+        "label": label[:120],
+        "status": "running",
+    }
+    await db.trmm_runs.insert_one(base_doc)
+
     try:
         if data.get("script_id"):
             payload = {
@@ -296,14 +320,237 @@ async def agent_run_script(agent_id: str, data: dict, current_user: dict = Depen
         else:
             payload = {
                 "cmd": data.get("command", ""),
-                "shell": data.get("shell", "powershell"),
+                "shell": shell,
                 "timeout": data.get("timeout", 60),
             }
             result = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body=payload)
+
+        # TRMM returns either a string of output, or { stdout, stderr, retcode }.
+        stdout, stderr, retcode = "", "", None
+        if isinstance(result, dict):
+            stdout = str(result.get("stdout") or result.get("output") or result.get("raw") or "")
+            stderr = str(result.get("stderr") or "")
+            retcode = result.get("retcode")
+        elif isinstance(result, str):
+            stdout = result
+        elif isinstance(result, list):
+            stdout = "\n".join(str(x) for x in result)
+
+        finished = datetime.now(timezone.utc)
+        await db.trmm_runs.update_one({"id": run_id}, {"$set": {
+            "stdout": stdout[:200000],
+            "stderr": stderr[:60000],
+            "retcode": retcode,
+            "finished_at": finished.isoformat(),
+            "duration_ms": int((finished - started).total_seconds() * 1000),
+            "status": "failed" if (retcode not in (None, 0) or stderr) else "ok",
+        }})
         await _audit("run-script", agent_id, current_user.get("name"), result)
-        return {"success": True, "message": "Script executed", "result": result}
+        return {
+            "success": True,
+            "run_id": run_id,
+            "stdout": stdout,
+            "stderr": stderr,
+            "retcode": retcode,
+            "duration_ms": int((finished - started).total_seconds() * 1000),
+            "result": result,
+        }
+    except HTTPException as e:
+        await db.trmm_runs.update_one({"id": run_id}, {"$set": {
+            "stderr": str(e.detail)[:4000],
+            "retcode": None,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error",
+        }})
+        return {"success": False, "run_id": run_id, "message": str(e.detail), "status": e.status_code}
+
+
+@router.get("/trmm/agents/{agent_id}/runs")
+async def agent_runs(agent_id: str, limit: int = 50, current_user: dict = Depends(get_current_user)):
+    return await db.trmm_runs.find({"agent_id": agent_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
+
+
+@router.get("/trmm/runs/{run_id}")
+async def run_detail(run_id: str, current_user: dict = Depends(get_current_user)):
+    doc = await db.trmm_runs.find_one({"id": run_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Run not found")
+    return doc
+
+
+# ─────────────────────────── Scripts library ───────────────────────────
+
+@router.get("/trmm/scripts")
+async def list_scripts(current_user: dict = Depends(get_current_user)):
+    raw = await _trmm_call("GET", "scripts/")
+    items = _data(raw)
+    norm = []
+    for s in items:
+        norm.append({
+            "id": s.get("id") or s.get("pk"),
+            "name": s.get("name") or "",
+            "description": s.get("description") or "",
+            "shell": s.get("shell") or "powershell",
+            "category": s.get("category") or "",
+            "favorite": bool(s.get("favorite", False)),
+            "default_timeout": s.get("default_timeout") or 90,
+            "args": s.get("args") or [],
+            "script_type": s.get("script_type") or "",
+            "syntax": s.get("syntax") or "",
+            "filename": s.get("filename") or "",
+            "tags": s.get("tags") or [],
+        })
+    return norm
+
+
+@router.get("/trmm/scripts/{script_id}")
+async def get_script_detail(script_id: int, current_user: dict = Depends(get_current_user)):
+    raw = await _trmm_call("GET", f"scripts/{script_id}/")
+    if not isinstance(raw, dict):
+        raise HTTPException(502, "Unexpected TRMM response")
+    return {
+        "id": raw.get("id") or raw.get("pk"),
+        "name": raw.get("name") or "",
+        "description": raw.get("description") or "",
+        "shell": raw.get("shell") or "powershell",
+        "category": raw.get("category") or "",
+        "default_timeout": raw.get("default_timeout") or 90,
+        "args": raw.get("args") or [],
+        "script_body": raw.get("script_body") or raw.get("code") or "",
+        "script_type": raw.get("script_type") or "",
+        "filename": raw.get("filename") or "",
+        "tags": raw.get("tags") or [],
+    }
+
+
+@router.post("/trmm/scripts/{script_id}/favorite")
+async def toggle_script_favorite(script_id: int, data: dict, current_user: dict = Depends(get_current_user)):
+    """Local favorites (stored in NexusOps, not TRMM) for quick-access scripts per user."""
+    fav = bool((data or {}).get("favorite", True))
+    user = current_user.get("name") or "unknown"
+    if fav:
+        await db.trmm_script_favorites.update_one(
+            {"user": user, "script_id": script_id},
+            {"$set": {"user": user, "script_id": script_id, "added_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    else:
+        await db.trmm_script_favorites.delete_one({"user": user, "script_id": script_id})
+    return {"success": True, "favorite": fav}
+
+
+@router.get("/trmm/scripts/favorites/mine")
+async def my_script_favorites(current_user: dict = Depends(get_current_user)):
+    user = current_user.get("name") or "unknown"
+    docs = await db.trmm_script_favorites.find({"user": user}, {"_id": 0}).to_list(200)
+    return [d["script_id"] for d in docs]
+
+
+# ─────────────────────────── Services ───────────────────────────
+
+@router.get("/trmm/agents/{agent_id}/services")
+async def agent_services(agent_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        raw = await _trmm_call("GET", f"agents/{agent_id}/services/")
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "services": []}
+    items = _data(raw) or (raw if isinstance(raw, list) else [])
+    norm = []
+    for s in items:
+        norm.append({
+            "name": s.get("name") or s.get("ServiceName") or "",
+            "display_name": s.get("display_name") or s.get("DisplayName") or s.get("name") or "",
+            "status": (s.get("status") or s.get("Status") or "").lower(),
+            "start_type": s.get("start_type") or s.get("StartType") or "",
+            "description": s.get("description") or s.get("Description") or "",
+            "pid": s.get("pid") or s.get("Pid") or 0,
+            "username": s.get("username") or s.get("UserName") or "",
+        })
+    return {"success": True, "services": norm}
+
+
+@router.post("/trmm/agents/{agent_id}/services/{service_name}/{action}")
+async def agent_service_action(agent_id: str, service_name: str, action: str, current_user: dict = Depends(get_current_user)):
+    if action not in {"start", "stop", "restart"}:
+        raise HTTPException(400, "action must be start|stop|restart")
+    try:
+        result = await _trmm_call("POST", f"services/{agent_id}/{service_name}/{action}/")
+        await _audit(f"svc-{action}", agent_id, current_user.get("name"), f"{service_name}: {str(result)[:200]}")
+        return {"success": True, "message": f"{action} queued for {service_name}", "result": result}
     except HTTPException as e:
         return {"success": False, "message": str(e.detail), "status": e.status_code}
+
+
+# ─────────────────────────── Processes ───────────────────────────
+
+@router.get("/trmm/agents/{agent_id}/processes")
+async def agent_processes(agent_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        raw = await _trmm_call("GET", f"agents/{agent_id}/processes/")
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "processes": []}
+    items = _data(raw) or (raw if isinstance(raw, list) else [])
+    norm = []
+    for p in items:
+        norm.append({
+            "pid": p.get("pid") or p.get("Pid") or 0,
+            "name": p.get("name") or p.get("Name") or "",
+            "cpu_percent": p.get("cpu_percent") or p.get("CpuPercent") or 0,
+            "mem_mb": p.get("mem_mb") or round((p.get("MemoryUsage") or 0) / (1024 * 1024), 1) if p.get("MemoryUsage") else (p.get("mem_mb") or 0),
+            "username": p.get("username") or p.get("UserName") or "",
+        })
+    return {"success": True, "processes": norm}
+
+
+@router.post("/trmm/agents/{agent_id}/processes/{pid}/kill")
+async def kill_process(agent_id: str, pid: int, current_user: dict = Depends(get_current_user)):
+    try:
+        result = await _trmm_call("POST", f"agents/{agent_id}/processes/{pid}/")
+        await _audit("kill-process", agent_id, current_user.get("name"), f"pid={pid}: {str(result)[:200]}")
+        return {"success": True, "message": f"Killed pid {pid}"}
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "status": e.status_code}
+
+
+# ─────────────────────────── Software inventory & Patches ───────────────────────────
+
+@router.get("/trmm/agents/{agent_id}/software")
+async def agent_software(agent_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        raw = await _trmm_call("GET", f"software/{agent_id}/")
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "software": []}
+    items = _data(raw) or (raw if isinstance(raw, list) else (raw.get("software", []) if isinstance(raw, dict) else []))
+    norm = []
+    for s in items:
+        norm.append({
+            "name": s.get("name") or s.get("DisplayName") or "",
+            "version": s.get("version") or s.get("DisplayVersion") or "",
+            "publisher": s.get("publisher") or s.get("Publisher") or "",
+            "install_date": s.get("install_date") or s.get("InstallDate") or "",
+        })
+    return {"success": True, "software": norm}
+
+
+@router.get("/trmm/agents/{agent_id}/winupdates")
+async def agent_winupdates(agent_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        raw = await _trmm_call("GET", f"winupdate/{agent_id}/")
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "updates": []}
+    items = _data(raw) or (raw if isinstance(raw, list) else [])
+    norm = []
+    for u in items:
+        norm.append({
+            "guid": u.get("guid") or u.get("id") or "",
+            "kb": u.get("kb") or "",
+            "title": u.get("title") or "",
+            "severity": u.get("severity") or "",
+            "installed": bool(u.get("installed", False)),
+            "downloaded": bool(u.get("downloaded", False)),
+            "date_installed": u.get("date_installed") or "",
+        })
+    return {"success": True, "updates": norm}
 
 
 @router.post("/trmm/agents/{agent_id}/run-checks")

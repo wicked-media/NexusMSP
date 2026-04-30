@@ -20,6 +20,7 @@ import {
   Users, FileCode, Eye, Link2, Sparkles,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import TrmmAgentWorkspace from "@/components/trmm/TrmmAgentWorkspace";
 
 function timeAgo(iso) {
   if (!iso) return "—";
@@ -55,10 +56,7 @@ export default function TacticalRmmCommandCenterPage() {
   const [activeTab, setActiveTab] = useState("agents");
 
   const [actionAgent, setActionAgent] = useState(null);
-  const [scriptOpen, setScriptOpen] = useState(false);
-  const [scriptForm, setScriptForm] = useState({ command: "", shell: "powershell", timeout: 60 });
-  const [scriptBusy, setScriptBusy] = useState(false);
-  const [scriptResult, setScriptResult] = useState(null);
+  const [workspaceAgent, setWorkspaceAgent] = useState(null);
 
   const [actionsLog, setActionsLog] = useState([]);
   const [linkedDevices, setLinkedDevices] = useState([]);
@@ -140,26 +138,6 @@ export default function TacticalRmmCommandCenterPage() {
       toast.error(e.response?.data?.detail || e.message);
     } finally {
       setActionAgent(null);
-      load(false);
-    }
-  };
-
-  const submitScript = async () => {
-    if (!scriptForm.command || !scriptOpen) return;
-    setScriptBusy(true);
-    setScriptResult(null);
-    try {
-      const res = await axios.post(`${API}/trmm/agents/${scriptOpen.agent_id || scriptOpen.id}/run-script`, {
-        command: scriptForm.command,
-        shell: scriptForm.shell,
-        timeout: Number(scriptForm.timeout) || 60,
-      }, { headers });
-      setScriptResult(res.data);
-      if (res.data?.success !== false) toast.success("Script dispatched");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || e.message);
-    } finally {
-      setScriptBusy(false);
       load(false);
     }
   };
@@ -340,9 +318,9 @@ export default function TacticalRmmCommandCenterPage() {
                     </TableHeader>
                     <TableBody>
                       {filtered.slice(0, 200).map((a) => (
-                        <TableRow key={a.id || a.agent_id} data-testid={`trmm-agent-row-${a.agent_id || a.id}`}>
+                        <TableRow key={a.id || a.agent_id} data-testid={`trmm-agent-row-${a.agent_id || a.id}`} className="cursor-pointer hover:bg-muted/30" onClick={() => setWorkspaceAgent(a)}>
                           <TableCell>
-                            <div className="font-medium">{a.hostname || "—"}</div>
+                            <div className="font-medium hover:text-emerald-400 transition-colors">{a.hostname || "—"}</div>
                             <div className="text-[10px] text-muted-foreground font-mono">{a.public_ip || a.local_ips || ""}</div>
                           </TableCell>
                           <TableCell>
@@ -364,7 +342,17 @@ export default function TacticalRmmCommandCenterPage() {
                           <TableCell className="text-xs">{a.patches_pending || 0}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">{timeAgo(a.last_seen)}</TableCell>
                           <TableCell className="text-right">
-                            <div className="flex items-center gap-1 justify-end flex-wrap">
+                            <div className="flex items-center gap-1 justify-end flex-wrap" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                                onClick={() => setWorkspaceAgent(a)}
+                                data-testid={`trmm-workspace-btn-${a.agent_id || a.id}`}
+                                title="Open workspace (terminal, scripts, services, processes)"
+                              >
+                                <Terminal className="w-3.5 h-3.5 mr-1" /> Workspace
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -375,16 +363,6 @@ export default function TacticalRmmCommandCenterPage() {
                                 title="Open remote (MeshCentral)"
                               >
                                 <MonitorSmartphone className="w-3.5 h-3.5 mr-1" /> Remote
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-                                disabled={a.status !== "online"}
-                                onClick={() => { setScriptOpen(a); setScriptResult(null); setScriptForm({ command: "", shell: a.plat === "linux" ? "bash" : "powershell", timeout: 60 }); }}
-                                data-testid={`trmm-script-btn-${a.agent_id || a.id}`}
-                              >
-                                <Terminal className="w-3.5 h-3.5 mr-1" /> Script
                               </Button>
                               <Button
                                 size="sm"
@@ -496,6 +474,13 @@ export default function TacticalRmmCommandCenterPage() {
         </Tabs>
       </div>
 
+      {/* Agent Workspace Drawer */}
+      <TrmmAgentWorkspace
+        agent={workspaceAgent}
+        open={!!workspaceAgent}
+        onClose={() => setWorkspaceAgent(null)}
+      />
+
       {/* Auto-Link Dialog */}
       <Dialog open={autoLinkOpen} onOpenChange={(v) => { if (!v) { setAutoLinkOpen(false); setAutoLinkPreview(null); } }}>
         <DialogContent className="max-w-3xl" data-testid="trmm-auto-link-dialog">
@@ -598,60 +583,7 @@ export default function TacticalRmmCommandCenterPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Script Dialog */}
-      <Dialog open={!!scriptOpen} onOpenChange={(v) => { if (!v) { setScriptOpen(false); setScriptResult(null); } }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Terminal className="w-4 h-4 text-violet-500" /> Run Script · {scriptOpen?.hostname}</DialogTitle>
-            <DialogDescription>Executes via Tactical RMM. Output is captured in the action log.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
-                <Label>Shell</Label>
-                <Select value={scriptForm.shell} onValueChange={(v) => setScriptForm({ ...scriptForm, shell: v })}>
-                  <SelectTrigger data-testid="trmm-script-shell"><SelectValue /></SelectTrigger>
-                  <SelectContent>{SHELLS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Timeout (s)</Label>
-                <Input type="number" value={scriptForm.timeout} onChange={(e) => setScriptForm({ ...scriptForm, timeout: e.target.value })} data-testid="trmm-script-timeout" />
-              </div>
-            </div>
-            <div>
-              <Label>Command</Label>
-              <Textarea
-                rows={6}
-                value={scriptForm.command}
-                onChange={(e) => setScriptForm({ ...scriptForm, command: e.target.value })}
-                placeholder="Get-Service Spooler"
-                className="font-mono text-xs"
-                data-testid="trmm-script-command"
-              />
-            </div>
-            {scriptResult && (
-              <div className="bg-muted/40 border border-border rounded-md p-3 max-h-60 overflow-auto">
-                <div className="text-[10px] uppercase text-muted-foreground tracking-widest mb-1">Result</div>
-                <pre className="text-[11px] font-mono whitespace-pre-wrap">{JSON.stringify(scriptResult.result || scriptResult, null, 2)}</pre>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setScriptOpen(false); setScriptResult(null); }}>Close</Button>
-            <Button
-              onClick={submitScript}
-              disabled={scriptBusy || !scriptForm.command}
-              className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-              variant="outline"
-              data-testid="trmm-script-run-btn"
-            >
-              {scriptBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Play className="w-4 h-4 mr-1" />}
-              Execute
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Script Dialog removed — replaced by TrmmAgentWorkspace */}
     </PageShell>
   );
 }
