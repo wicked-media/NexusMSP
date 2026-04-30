@@ -13,7 +13,8 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Wifi, RefreshCw, Loader2, ExternalLink, Search, Link as LinkIcon,
-  Server, Users, AlertTriangle, Radio, Activity, Network, Signal,
+  Server, Users, AlertTriangle, Radio, Network, Signal,
+  Power, Lightbulb, RotateCw,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
@@ -271,8 +272,8 @@ export default function UnifiCommandCenterPage() {
                                   <TableHead className="text-[10px] uppercase">Status</TableHead>
                                   <TableHead className="text-[10px] uppercase">IP</TableHead>
                                   <TableHead className="text-[10px] uppercase">Uptime</TableHead>
-                                  <TableHead className="text-[10px] uppercase">Clients</TableHead>
                                   <TableHead className="text-[10px] uppercase">Firmware</TableHead>
+                                  <TableHead className="text-right text-[10px] uppercase">Actions</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -287,8 +288,20 @@ export default function UnifiCommandCenterPage() {
                                     </TableCell>
                                     <TableCell className="text-xs font-mono">{d.ip || "—"}</TableCell>
                                     <TableCell className="text-xs font-mono">{uptimeHuman(d.uptime)}</TableCell>
-                                    <TableCell className="text-xs font-mono">{d.num_clients || 0}</TableCell>
                                     <TableCell className="text-[10px] font-mono">{d.firmware || "—"}{d.firmware_status === "updateAvailable" && <Badge variant="outline" className="ml-1 text-[9px] text-amber-400 border-amber-500/30">update</Badge>}</TableCell>
+                                    <TableCell className="text-right">
+                                      <div className="flex gap-1 justify-end">
+                                        <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" disabled={actionBusy === `${d.id}:locate`} onClick={() => doDeviceAction(d, "locate")} title="Locate (LED blink)" data-testid={`unifi-action-locate-${d.id}`}>
+                                          {actionBusy === `${d.id}:locate` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" disabled={actionBusy === `${d.id}:power-cycle`} onClick={() => doDeviceAction(d, "power-cycle")} title="Power-cycle PoE port" data-testid={`unifi-action-power-${d.id}`}>
+                                          {actionBusy === `${d.id}:power-cycle` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-amber-400" disabled={actionBusy === `${d.id}:restart`} onClick={() => doDeviceAction(d, "restart")} title="Restart device" data-testid={`unifi-action-restart-${d.id}`}>
+                                          {actionBusy === `${d.id}:restart` ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" />}
+                                        </Button>
+                                      </div>
+                                    </TableCell>
                                   </TableRow>
                                 ))}
                               </TableBody>

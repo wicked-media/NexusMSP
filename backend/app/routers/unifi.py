@@ -38,7 +38,8 @@ async def _get_config() -> Optional[dict]:
     return cfg
 
 
-async def _unifi_call(method: str, path: str, params: Optional[dict] = None, json_body: Optional[dict] = None):
+async def _unifi_call(method: str, path: str, params=None, json_body: Optional[dict] = None):
+    """params can be a dict OR a list of (key, value) tuples to preserve `hostIds[]` literal brackets."""
     cfg = await _get_config()
     if not cfg:
         raise HTTPException(503, "UniFi not configured")
@@ -53,7 +54,13 @@ async def _unifi_call(method: str, path: str, params: Optional[dict] = None, jso
         async with httpx.AsyncClient(timeout=30, verify=verify) as client:
             r = await client.request(method, url, headers=headers, params=params, json=json_body)
             if r.status_code in (401, 403):
+                # Distinguish read-only key from totally invalid key
+                body = (r.text or "").lower()
+                if "read" in body or "write" in body or method != "GET":
+                    raise HTTPException(403, "UniFi API key is read-only or lacks permission for this action")
                 raise HTTPException(r.status_code, "UniFi auth failed — check API key")
+            if r.status_code in (404, 405, 501):
+                raise HTTPException(r.status_code, f"UniFi endpoint not available on this account: {r.text[:200]}")
             if r.status_code == 429:
                 raise HTTPException(429, "UniFi rate limit hit — wait and retry")
             if r.status_code >= 400:
@@ -234,30 +241,60 @@ async def list_sites(current_user: dict = Depends(get_current_user)):
     return [_norm_site(s) for s in _data(data)]
 
 
-async def _fetch_devices_for_host(host_id: str) -> list:
-    """The /v1/devices response is grouped per host: [{ hostId, devices: [...] }]."""
-    raw = await _unifi_call("GET", "devices", params={"hostIds[]": host_id})
+async def _fetch_devices_for_host(host_id: str = "") -> list:
+    """The /v1/devices response can be grouped per host: [{hostId, devices: [...]}] OR flat [device, ...].
+    We try with hostIds[] filter first, then fall back to no filter."""
     out = []
-    for group in _data(raw):
-        gid = group.get("hostId") or host_id
-        for dev in group.get("devices") or []:
-            out.append(_norm_device(dev, host_id=gid))
+
+    async def _ingest(raw):
+        for item in _data(raw):
+            if isinstance(item, dict) and isinstance(item.get("devices"), list):
+                gid = item.get("hostId") or host_id
+                for dev in item["devices"]:
+                    out.append(_norm_device(dev, host_id=gid))
+            elif isinstance(item, dict):
+                # Flat device row
+                out.append(_norm_device(item, host_id=item.get("hostId") or host_id))
+
+    if host_id:
+        try:
+            # Pass as list-of-tuples so httpx keeps the literal `hostIds[]` brackets
+            raw = await _unifi_call("GET", "devices", params=[("hostIds[]", host_id)])
+            await _ingest(raw)
+        except HTTPException:
+            pass
+    if not out:
+        try:
+            raw = await _unifi_call("GET", "devices")
+            await _ingest(raw)
+            if host_id:
+                # Filter to this host if we got everything back
+                out = [d for d in out if not d.get("host_id") or str(d["host_id"]) == str(host_id)]
+        except HTTPException:
+            pass
     return out
 
 
 @router.get("/unifi/sites/{site_id}/devices")
 async def list_site_devices(site_id: str, current_user: dict = Depends(get_current_user)):
-    """Look up the host owning this site, fetch all its devices, then filter to this site."""
+    """Look up the host owning this site, fetch devices, then filter by site if available.
+    Site Manager API doesn't always expose siteId on the device payload — when missing, we
+    return all of the host's devices (better than returning empty)."""
     sites = _data(await _unifi_call("GET", "sites"))
     target = next((s for s in sites if str(s.get("id")) == str(site_id)), None)
     if not target:
         raise HTTPException(404, "Site not found")
-    host_id = target.get("hostId")
-    if not host_id:
-        return []
+    host_id = target.get("hostId") or ""
     all_devs = await _fetch_devices_for_host(host_id)
-    site_devs = [d for d in all_devs if not d.get("site_id") or str(d["site_id"]) == str(site_id)]
-    return site_devs
+    # Soft filter: if any device is tagged with this site, only return matches; otherwise return all
+    tagged = [d for d in all_devs if str(d.get("site_id") or "") == str(site_id)]
+    return tagged if tagged else all_devs
+
+
+@router.get("/unifi/devices")
+async def list_all_devices(current_user: dict = Depends(get_current_user)):
+    """All devices visible to the API key — useful when Site Manager doesn't expose site->device mapping."""
+    return await _fetch_devices_for_host("")
 
 
 @router.get("/unifi/hosts/{host_id}/devices")
@@ -380,7 +417,86 @@ async def unifi_summary(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ─────────────────────────── Link UniFi site → NexusOps client ───────────────────────────
+# ─────────────────────────── Device actions (restart / locate / power-cycle) ───────────────────────────
+# The UniFi Site Manager API is officially read-only today. Ubiquiti has begun rolling out
+# write endpoints — these handlers attempt the action and surface a clear message if your
+# API key lacks write access yet. Track availability at https://unifi.ui.com/api.
+
+async def _device_action(host_id: str, device_id: str, action: str, body: Optional[dict] = None):
+    """Try several known endpoint shapes; return the first success or raise.
+    Known shapes (varies by EA cohort):
+      POST /v1/hosts/{hostId}/devices/{deviceId}/actions  body {action}
+      POST /v1/devices/{deviceId}/actions                 body {action, hostId}
+      POST /v1/devices/{deviceId}/{action}                no body
+    """
+    payload = {"action": action, **(body or {})}
+    candidates = [
+        ("POST", f"hosts/{host_id}/devices/{device_id}/actions", payload),
+        ("POST", f"devices/{device_id}/actions", {**payload, "hostId": host_id}),
+        ("POST", f"devices/{device_id}/{action}", None),
+    ]
+    last_err = None
+    for method, path, p in candidates:
+        try:
+            return await _unifi_call(method, path, json_body=p)
+        except HTTPException as e:
+            last_err = e
+            if e.status_code in (401, 403):
+                raise  # auth/permission won't fix by trying another path
+            continue
+    raise last_err or HTTPException(501, "No supported action endpoint on this UniFi account")
+
+
+@router.post("/unifi/devices/{device_id}/restart")
+async def device_restart(device_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    host_id = (data or {}).get("host_id", "")
+    try:
+        result = await _device_action(host_id, device_id, "restart", data)
+        await db.unifi_actions.insert_one({
+            "action": "restart", "device_id": device_id, "host_id": host_id,
+            "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(), "result": str(result)[:300],
+        })
+        return {"success": True, "message": "Restart issued", "result": result}
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "status": e.status_code}
+
+
+@router.post("/unifi/devices/{device_id}/power-cycle")
+async def device_power_cycle(device_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Power-cycle a PoE port on the device. body: { host_id, port_idx? }"""
+    host_id = (data or {}).get("host_id", "")
+    try:
+        result = await _device_action(host_id, device_id, "power-cycle", data)
+        await db.unifi_actions.insert_one({
+            "action": "power-cycle", "device_id": device_id, "host_id": host_id,
+            "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(), "result": str(result)[:300],
+        })
+        return {"success": True, "message": "Power-cycle issued", "result": result}
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "status": e.status_code}
+
+
+@router.post("/unifi/devices/{device_id}/locate")
+async def device_locate(device_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Toggle the 'locate' LED-blink for the device. body: { host_id, enable?: bool }"""
+    host_id = (data or {}).get("host_id", "")
+    enable = (data or {}).get("enable", True)
+    action = "locate" if enable else "locate-stop"
+    try:
+        result = await _device_action(host_id, device_id, action, data)
+        await db.unifi_actions.insert_one({
+            "action": action, "device_id": device_id, "host_id": host_id,
+            "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(), "result": str(result)[:300],
+        })
+        return {"success": True, "message": f"Locate {'on' if enable else 'off'}", "result": result}
+    except HTTPException as e:
+        return {"success": False, "message": str(e.detail), "status": e.status_code}
+
+
+@router.get("/unifi/actions/log")
+async def actions_log(current_user: dict = Depends(get_current_user)):
+    rows = await db.unifi_actions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    return rows
 
 @router.post("/clients/{client_id}/link-unifi-site")
 async def link_unifi_site(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
