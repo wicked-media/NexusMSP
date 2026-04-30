@@ -493,3 +493,31 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 ### Tests
 - `/app/test_reports/iteration_125.json` — 13/13 regression tests passed.
+
+## 2026-04-30 (cont. 4) — TRMM Agent Workspace: World-Class Scripts & Live Terminal
+
+### What shipped
+**Backend (10 new endpoints):**
+- `GET /api/trmm/scripts` — full script library from TRMM
+- `GET /api/trmm/scripts/{id}` — script detail incl. body/args
+- `POST /api/trmm/scripts/{id}/favorite` — per-user favorites (stored locally in NexusOps)
+- `GET /api/trmm/scripts/favorites/mine`
+- `GET /api/trmm/agents/{id}/services` + POST `/services/{name}/{start|stop|restart}`
+- `GET /api/trmm/agents/{id}/processes` + POST `/processes/{pid}/kill`
+- `GET /api/trmm/agents/{id}/software` (installed inventory)
+- `GET /api/trmm/agents/{id}/winupdates` (pending Windows updates)
+- Upgraded `POST /api/trmm/agents/{id}/run-script` — captures stdout/stderr/retcode/duration into `db.trmm_runs`, returns `run_id`
+- `GET /api/trmm/agents/{id}/runs` and `GET /api/trmm/runs/{run_id}` — persistent run history
+
+**Frontend: `TrmmAgentWorkspace` drawer** — opened by clicking any agent row or the Workspace button. 6 tabs:
+- **Terminal** — Live interactive console with PowerShell/CMD/Bash/Python shells, `↑/↓` command history, Ctrl-L to clear, auto-scroll, quick-command palette (OS-aware: PS `Get-ComputerInfo`, CMD `systeminfo`, Bash `uptime/df/journalctl`), colorised output (cyan for cmd, rose for stderr, emerald for stdout, zinc for system), persistent exit code + duration footer per command.
+- **Scripts** — Full TRMM library with search + shell filter, starrable favorites (persisted per-user), inline per-script args input, one-click "Run" with live-scrolling output piped into the Terminal tab. Side panel shows Recent Runs with expandable stdout/stderr and exit codes.
+- **Services** — Filterable Windows services table with Start/Stop/Restart buttons that call the TRMM service action endpoint and auto-refresh.
+- **Processes** — Sortable by CPU/Memory/PID with one-click kill + confirm.
+- **Software** — Installed software inventory, searchable.
+- **Updates** — Pending Windows updates list + "Install pending" button.
+
+Every action is audited in `db.trmm_actions` and every script run is captured in `db.trmm_runs` for forensic replay.
+
+### Tests
+- `/app/test_reports/iteration_126.json` — 33/33 passed, zero issues.
