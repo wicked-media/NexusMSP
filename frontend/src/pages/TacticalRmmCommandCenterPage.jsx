@@ -17,10 +17,12 @@ import {
   Server, RefreshCw, Loader2, ExternalLink, Search, Settings,
   Power, RotateCw, MonitorSmartphone, Terminal, ShieldCheck, Activity,
   AlertTriangle, CheckCircle2, Cpu, HardDrive, Wifi, Download, Play,
-  Users, FileCode, Eye, Link2, Sparkles,
+  Users, FileCode, Eye, Link2, Sparkles, Radio,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import TrmmAgentWorkspace from "@/components/trmm/TrmmAgentWorkspace";
+import TrmmBroadcastDialog from "@/components/trmm/TrmmBroadcastDialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 function timeAgo(iso) {
   if (!iso) return "—";
@@ -57,6 +59,8 @@ export default function TacticalRmmCommandCenterPage() {
 
   const [actionAgent, setActionAgent] = useState(null);
   const [workspaceAgent, setWorkspaceAgent] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const [actionsLog, setActionsLog] = useState([]);
   const [linkedDevices, setLinkedDevices] = useState([]);
@@ -294,6 +298,29 @@ export default function TacticalRmmCommandCenterPage() {
                 ))}
               </div>
               <span className="text-xs text-muted-foreground ml-auto">{filtered.length} of {agents.length}</span>
+              {selectedIds.size > 0 && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+                    onClick={() => setBroadcastOpen(true)}
+                    data-testid="trmm-broadcast-btn"
+                  >
+                    <Radio className="w-3.5 h-3.5 mr-1" />
+                    Broadcast · {selectedIds.size}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelectedIds(new Set())}
+                    data-testid="trmm-broadcast-clear-selection"
+                    className="text-[11px]"
+                  >
+                    Clear
+                  </Button>
+                </>
+              )}
             </div>
 
             <Card>
@@ -306,6 +333,18 @@ export default function TacticalRmmCommandCenterPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-8">
+                          <Checkbox
+                            checked={filtered.length > 0 && filtered.every(a => selectedIds.has(a.agent_id || a.id))}
+                            onCheckedChange={(v) => {
+                              const next = new Set(selectedIds);
+                              if (v) filtered.forEach(a => next.add(a.agent_id || a.id));
+                              else filtered.forEach(a => next.delete(a.agent_id || a.id));
+                              setSelectedIds(next);
+                            }}
+                            data-testid="trmm-select-all"
+                          />
+                        </TableHead>
                         <TableHead>Hostname</TableHead>
                         <TableHead>Client / Site</TableHead>
                         <TableHead>OS</TableHead>
@@ -319,6 +358,18 @@ export default function TacticalRmmCommandCenterPage() {
                     <TableBody>
                       {filtered.slice(0, 200).map((a) => (
                         <TableRow key={a.id || a.agent_id} data-testid={`trmm-agent-row-${a.agent_id || a.id}`} className="cursor-pointer hover:bg-muted/30" onClick={() => setWorkspaceAgent(a)}>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedIds.has(a.agent_id || a.id)}
+                              onCheckedChange={(v) => {
+                                const next = new Set(selectedIds);
+                                if (v) next.add(a.agent_id || a.id);
+                                else next.delete(a.agent_id || a.id);
+                                setSelectedIds(next);
+                              }}
+                              data-testid={`trmm-select-${a.agent_id || a.id}`}
+                            />
+                          </TableCell>
                           <TableCell>
                             <div className="font-medium hover:text-emerald-400 transition-colors">{a.hostname || "—"}</div>
                             <div className="text-[10px] text-muted-foreground font-mono">{a.public_ip || a.local_ips || ""}</div>
@@ -473,6 +524,13 @@ export default function TacticalRmmCommandCenterPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Broadcast Dialog */}
+      <TrmmBroadcastDialog
+        open={broadcastOpen}
+        onClose={() => setBroadcastOpen(false)}
+        selectedAgents={agents.filter(a => selectedIds.has(a.agent_id || a.id))}
+      />
 
       {/* Agent Workspace Drawer */}
       <TrmmAgentWorkspace

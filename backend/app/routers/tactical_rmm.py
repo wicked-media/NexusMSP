@@ -788,3 +788,185 @@ async def auto_link_agents(data: Optional[dict] = None, current_user: dict = Dep
         "ambiguous": ambiguous,
         "unmatched": unmatched[:50],
     }
+
+
+# ─────────────────────────── Multi-agent broadcast ───────────────────────────
+# Run one command or script against many agents concurrently. Each agent's
+# execution is persisted as a regular `trmm_runs` entry (so it shows up in the
+# per-agent workspace) PLUS a broadcast document that links them together.
+# The UI polls GET /api/trmm/broadcasts/{id} for live progress.
+
+import asyncio as _asyncio
+import uuid as _uuid
+
+
+async def _execute_broadcast_one(agent_id: str, shell: str, command: str, script_id: Optional[int],
+                                  args: list, timeout: int, label: str, user_name: str, broadcast_id: str) -> dict:
+    run_id = f"trmm-run-{_uuid.uuid4().hex[:10]}"
+    started = datetime.now(timezone.utc)
+    await db.trmm_runs.insert_one({
+        "id": run_id,
+        "agent_id": agent_id,
+        "by": user_name,
+        "started_at": started.isoformat(),
+        "shell": shell,
+        "command": (command or f"script_id={script_id}")[:2000],
+        "label": label[:120],
+        "broadcast_id": broadcast_id,
+        "status": "running",
+    })
+    try:
+        if script_id:
+            payload = {"script": int(script_id), "args": args, "timeout": timeout}
+            result = await _trmm_call("POST", f"agents/{agent_id}/runscript/", json_body=payload)
+        else:
+            payload = {"cmd": command, "shell": shell, "timeout": timeout}
+            result = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body=payload)
+
+        stdout, stderr, retcode = "", "", None
+        if isinstance(result, dict):
+            stdout = str(result.get("stdout") or result.get("output") or result.get("raw") or "")
+            stderr = str(result.get("stderr") or "")
+            retcode = result.get("retcode")
+        elif isinstance(result, str):
+            stdout = result
+        elif isinstance(result, list):
+            stdout = "\n".join(str(x) for x in result)
+
+        finished = datetime.now(timezone.utc)
+        status = "failed" if (retcode not in (None, 0) or stderr) else "ok"
+        await db.trmm_runs.update_one({"id": run_id}, {"$set": {
+            "stdout": stdout[:200000], "stderr": stderr[:60000], "retcode": retcode,
+            "finished_at": finished.isoformat(),
+            "duration_ms": int((finished - started).total_seconds() * 1000),
+            "status": status,
+        }})
+        return {
+            "agent_id": agent_id, "run_id": run_id, "status": status, "retcode": retcode,
+            "duration_ms": int((finished - started).total_seconds() * 1000),
+            "stdout_preview": stdout[:500], "stderr_preview": stderr[:500],
+        }
+    except HTTPException as e:
+        await db.trmm_runs.update_one({"id": run_id}, {"$set": {
+            "stderr": str(e.detail)[:4000], "retcode": None,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error",
+        }})
+        return {"agent_id": agent_id, "run_id": run_id, "status": "error", "message": str(e.detail)}
+    except Exception as e:
+        await db.trmm_runs.update_one({"id": run_id}, {"$set": {
+            "stderr": str(e)[:4000], "retcode": None,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error",
+        }})
+        return {"agent_id": agent_id, "run_id": run_id, "status": "error", "message": str(e)}
+
+
+async def _run_broadcast(broadcast_id: str, agent_ids: list, shell: str, command: str,
+                         script_id: Optional[int], args: list, timeout: int, label: str,
+                         user_name: str, concurrency: int = 8):
+    """Background task. Updates db.trmm_broadcasts.agent_results as each agent finishes."""
+    sem = _asyncio.Semaphore(concurrency)
+
+    async def _worker(aid: str):
+        async with sem:
+            res = await _execute_broadcast_one(aid, shell, command, script_id, args, timeout, label, user_name, broadcast_id)
+            await db.trmm_broadcasts.update_one(
+                {"id": broadcast_id},
+                {
+                    "$set": {f"agent_map.{aid}": res},
+                    "$inc": {"completed": 1, ("succeeded" if res.get("status") == "ok" else "failed_count"): 1},
+                }
+            )
+            return res
+
+    tasks = [_worker(aid) for aid in agent_ids]
+    await _asyncio.gather(*tasks, return_exceptions=True)
+    await db.trmm_broadcasts.update_one(
+        {"id": broadcast_id},
+        {"$set": {"status": "complete", "completed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+
+@router.post("/trmm/broadcast")
+async def start_broadcast(data: dict, current_user: dict = Depends(get_current_user)):
+    """Kick off a concurrent run across many TRMM agents.
+
+    body: {
+        agent_ids: [str],
+        command?: str,
+        script_id?: int,
+        args?: list,
+        shell?: 'powershell'|'cmd'|'bash'|'python',
+        timeout?: int,
+        label?: str,
+        concurrency?: int  (default 8, clamped to 1..20)
+    }
+    """
+    cfg = await _get_config()
+    if not cfg:
+        raise HTTPException(503, "Tactical RMM not configured")
+
+    agent_ids = [a for a in (data.get("agent_ids") or []) if a]
+    if not agent_ids:
+        raise HTTPException(400, "agent_ids is required")
+    if len(agent_ids) > 200:
+        raise HTTPException(400, "Too many agents (max 200)")
+    command = (data.get("command") or "").strip()
+    script_id = data.get("script_id")
+    if not command and not script_id:
+        raise HTTPException(400, "Provide a command or script_id")
+    shell = data.get("shell", "powershell")
+    timeout = int(data.get("timeout", 60))
+    label = (data.get("label") or (f"broadcast · {command[:50]}" if command else f"broadcast · script {script_id}"))[:160]
+    concurrency = max(1, min(20, int(data.get("concurrency", 8))))
+
+    broadcast_id = f"bcast-{_uuid.uuid4().hex[:12]}"
+    doc = {
+        "id": broadcast_id,
+        "agent_ids": agent_ids,
+        "total": len(agent_ids),
+        "completed": 0,
+        "succeeded": 0,
+        "failed_count": 0,
+        "shell": shell,
+        "command": command[:4000],
+        "script_id": script_id,
+        "args": (data.get("args") or [])[:32],
+        "timeout": timeout,
+        "label": label,
+        "concurrency": concurrency,
+        "status": "running",
+        "by": current_user.get("name") or "unknown",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "agent_map": {aid: {"agent_id": aid, "status": "queued"} for aid in agent_ids},
+    }
+    await db.trmm_broadcasts.insert_one(doc)
+    doc.pop("_id", None)
+
+    await _audit("broadcast", f"{len(agent_ids)}-agents", current_user.get("name"), label)
+
+    # Fire-and-forget background execution
+    _asyncio.create_task(_run_broadcast(
+        broadcast_id, agent_ids, shell, command, script_id,
+        data.get("args") or [], timeout, label, current_user.get("name") or "unknown", concurrency,
+    ))
+
+    return {"success": True, "broadcast_id": broadcast_id, "total": len(agent_ids)}
+
+
+@router.get("/trmm/broadcasts/{broadcast_id}")
+async def broadcast_status(broadcast_id: str, current_user: dict = Depends(get_current_user)):
+    doc = await db.trmm_broadcasts.find_one({"id": broadcast_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Broadcast not found")
+    # Flatten agent_map dict -> list for UI rendering convenience
+    amap = doc.get("agent_map") or {}
+    doc["agents"] = [amap.get(aid, {"agent_id": aid, "status": "queued"}) for aid in doc.get("agent_ids", [])]
+    return doc
+
+
+@router.get("/trmm/broadcasts")
+async def list_broadcasts(limit: int = 20, current_user: dict = Depends(get_current_user)):
+    cursor = db.trmm_broadcasts.find({}, {"_id": 0, "agent_map": 0}).sort("started_at", -1).limit(limit)
+    return await cursor.to_list(limit)
