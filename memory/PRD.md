@@ -521,3 +521,27 @@ Every action is audited in `db.trmm_actions` and every script run is captured in
 
 ### Tests
 - `/app/test_reports/iteration_126.json` — 33/33 passed, zero issues.
+
+## 2026-04-30 (cont. 5) — Multi-Agent Terminal Broadcast
+
+### What shipped
+**Backend:**
+- `POST /api/trmm/broadcast` — fire-and-forget concurrent executor. Accepts `{agent_ids[], command|script_id, shell, timeout, args, concurrency(1..20)}`. Creates one `db.trmm_runs` record per target + one `db.trmm_broadcasts` document linking them. Uses `asyncio.Semaphore` for per-broadcast concurrency clamp.
+- `GET /api/trmm/broadcasts/{id}` — live status polling; returns `agents[]` flattened with per-target {status, retcode, duration_ms, stdout_preview, stderr_preview}. Counters (completed/succeeded/failed_count) increment atomically as each worker finishes.
+- `GET /api/trmm/broadcasts` — list recent broadcasts (limit 20).
+- Validation: 503 when TRMM not configured · 400 for missing agent_ids/command · 400 for >200 agents.
+
+**Frontend:** `TrmmBroadcastDialog` component (`/app/frontend/src/components/trmm/TrmmBroadcastDialog.jsx`)
+- Tabbed "Ad-hoc command" vs "Saved script" picker (script picker pulls `/api/trmm/scripts`, filterable).
+- Concurrency + timeout + label inputs.
+- Automatic offline-filtering (offline agents in selection are shown as skip-warnings).
+- Live grid view: one card per agent, color-coded icon (running/queued/ok/failed/error), expandable panel showing stdout/stderr preview, progress bar with total completion %, auto-poll every 1.5s until broadcast.status==='complete'.
+- Sorted grid: running → queued → error → failed → ok so attention goes where it's needed.
+
+**Wiring in TRMM Command Center:**
+- Row selection checkboxes (header select-all filters-aware)
+- "Broadcast · N" toolbar button appears the moment anything is selected
+- "Clear" resets selection
+
+### Tests
+- `/app/test_reports/iteration_127.json` — 34/34 passed, zero issues.
