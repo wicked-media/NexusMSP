@@ -448,3 +448,21 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Wave C AI: Billboard Mode, PSA Time Machine, Geofence auto-time entry
 - Service Desk bundle (Escalation, Change Mgmt, Skills Matrix)
 - Security bundle (Vuln Scanner, Dark Web, Phishing Sim, MFA Mgmt)
+
+## 2026-04-30 (cont.) — TRMM Auto-Link + Sidebar Cleanup
+
+### What shipped
+- **POST `/api/trmm/auto-link`** — One-click matcher
+  - Pairs TRMM agents → NexusOps devices by hostname (case-insensitive) with IP fallback
+  - Body: `{ dry_run?: bool, overwrite?: bool }`
+  - Response: `{ success, stats:{agents_total, devices_total, matched, skipped, ambiguous, unmatched}, matched[], skipped[], ambiguous[], unmatched[] }`
+  - Persists `trmm_agent_id`, `trmm_hostname`, `trmm_linked_at`, `trmm_linked_by`, `trmm_match_type` on the device
+  - Records audit entry in `db.trmm_actions` with `action: "auto-link"`
+- **Auto-link dialog** in TRMM Command Center — preview matches with stats grid (matched/skipped/ambiguous/unmatched), Overwrite toggle, Recompute, then commit with one click.
+- **Sidebar cleanup**:
+  - Removed "Remote Access" from Devices submenu → replaced with "Remote & Patching (TRMM)" linking to `/tactical-rmm`
+  - Removed entire "Patch Management" group (Patch Hub, Compliance, 3rd Party) — handled in TRMM
+  - Routes preserved (no 404s for old bookmarks); only nav/discoverability changed
+
+### Tests
+- `/app/test_reports/iteration_123.json` — 18/18 passed (backend), zero issues, all TRMM regression tests still green.
