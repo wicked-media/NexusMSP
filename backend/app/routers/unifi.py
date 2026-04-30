@@ -237,39 +237,59 @@ async def list_hosts(current_user: dict = Depends(get_current_user)):
 
 @router.get("/unifi/sites")
 async def list_sites(current_user: dict = Depends(get_current_user)):
-    data = await _unifi_call("GET", "sites")
-    return [_norm_site(s) for s in _data(data)]
+    items = await _unifi_paged("sites")
+    return [_norm_site(s) for s in items]
+
+
+async def _unifi_paged(path: str, params=None) -> list:
+    """GET path, follow nextToken pagination, return concatenated `data` arrays."""
+    out = []
+    base_params = list(params) if isinstance(params, list) else (list(params.items()) if isinstance(params, dict) else [])
+    base_params.append(("pageSize", "500"))
+    page_params = list(base_params)
+    for _ in range(20):  # hard cap at 20 pages = 10k items
+        raw = await _unifi_call("GET", path, params=page_params)
+        items = _data(raw)
+        out.extend(items)
+        next_token = raw.get("nextToken") if isinstance(raw, dict) else None
+        if not next_token:
+            break
+        page_params = list(base_params) + [("nextToken", next_token)]
+    return out
 
 
 async def _fetch_devices_for_host(host_id: str = "") -> list:
-    """The /v1/devices response can be grouped per host: [{hostId, devices: [...]}] OR flat [device, ...].
-    We try with hostIds[] filter first, then fall back to no filter."""
+    """The /v1/devices response is grouped per host: [{hostId, devices: [...]}]
+    OR sometimes flat. We always paginate, and we always look at every host group."""
     out = []
 
-    async def _ingest(raw):
-        for item in _data(raw):
+    def _ingest_items(items):
+        for item in items:
             if isinstance(item, dict) and isinstance(item.get("devices"), list):
                 gid = item.get("hostId") or host_id
                 for dev in item["devices"]:
                     out.append(_norm_device(dev, host_id=gid))
             elif isinstance(item, dict):
-                # Flat device row
                 out.append(_norm_device(item, host_id=item.get("hostId") or host_id))
 
+    # 1) Try host-filtered call first
     if host_id:
         try:
-            # Pass as list-of-tuples so httpx keeps the literal `hostIds[]` brackets
-            raw = await _unifi_call("GET", "devices", params=[("hostIds[]", host_id)])
-            await _ingest(raw)
+            items = await _unifi_paged("devices", params=[("hostIds[]", host_id)])
+            _ingest_items(items)
         except HTTPException:
             pass
+
+    # 2) ALWAYS also fetch unfiltered if filtered call returned nothing
     if not out:
         try:
-            raw = await _unifi_call("GET", "devices")
-            await _ingest(raw)
+            items = await _unifi_paged("devices")
+            _ingest_items(items)
             if host_id:
-                # Filter to this host if we got everything back
-                out = [d for d in out if not d.get("host_id") or str(d["host_id"]) == str(host_id)]
+                # Filter to this host
+                filtered = [d for d in out if not d.get("host_id") or str(d["host_id"]) == str(host_id)]
+                if filtered:
+                    out = filtered
         except HTTPException:
             pass
     return out
@@ -497,6 +517,65 @@ async def device_locate(device_id: str, data: dict = None, current_user: dict = 
 async def actions_log(current_user: dict = Depends(get_current_user)):
     rows = await db.unifi_actions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
     return rows
+
+
+# ─────────────────────────── Debug helpers ───────────────────────────
+
+@router.get("/unifi/_debug/raw")
+async def debug_raw(path: str = "devices", current_user: dict = Depends(get_current_user)):
+    """Return the raw paginated response from a UniFi endpoint to diagnose why devices aren't appearing.
+    Allowed paths: sites, devices, hosts.  e.g. GET /api/unifi/_debug/raw?path=devices"""
+    if path not in ("sites", "devices", "hosts"):
+        raise HTTPException(400, "path must be one of: sites, devices, hosts")
+    cfg = await _get_config()
+    if not cfg:
+        return {"configured": False, "message": "UniFi not configured"}
+    try:
+        raw = await _unifi_call("GET", path, params=[("pageSize", "500")])
+        return {
+            "configured": True,
+            "path": path,
+            "data_count": len(_data(raw)),
+            "next_token": raw.get("nextToken") if isinstance(raw, dict) else None,
+            "trace_id": raw.get("traceId") if isinstance(raw, dict) else None,
+            "first_data_item": (_data(raw) or [None])[0],
+            "raw_keys": list(raw.keys()) if isinstance(raw, dict) else None,
+        }
+    except HTTPException as e:
+        return {"configured": True, "path": path, "error": str(e.detail), "status": e.status_code}
+
+
+@router.get("/unifi/_debug/host-devices")
+async def debug_host_devices(host_id: str, current_user: dict = Depends(get_current_user)):
+    """Diagnose: show what devices return for a given host using both filter strategies."""
+    cfg = await _get_config()
+    if not cfg:
+        return {"configured": False}
+    out = {"host_id": host_id}
+    try:
+        filtered = await _unifi_paged("devices", params=[("hostIds[]", host_id)])
+        out["filtered"] = {
+            "groups": len(filtered),
+            "first_group_keys": list(filtered[0].keys()) if filtered and isinstance(filtered[0], dict) else None,
+            "first_group_device_count": len(filtered[0].get("devices", [])) if filtered and isinstance(filtered[0], dict) else 0,
+            "first_device_sample": (filtered[0].get("devices", []) or [None])[0] if filtered else None,
+        }
+    except HTTPException as e:
+        out["filtered"] = {"error": str(e.detail), "status": e.status_code}
+    try:
+        unfiltered = await _unifi_paged("devices")
+        match = next((g for g in unfiltered if isinstance(g, dict) and g.get("hostId") == host_id), None)
+        out["unfiltered"] = {
+            "total_groups": len(unfiltered),
+            "all_host_ids": [g.get("hostId") for g in unfiltered if isinstance(g, dict)][:20],
+            "matched_group_device_count": len(match.get("devices", [])) if match else 0,
+            "matched_first_device": (match.get("devices", []) or [None])[0] if match else None,
+        }
+    except HTTPException as e:
+        out["unfiltered"] = {"error": str(e.detail), "status": e.status_code}
+    return out
+
+
 
 @router.post("/clients/{client_id}/link-unifi-site")
 async def link_unifi_site(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):

@@ -262,7 +262,22 @@ export default function UnifiCommandCenterPage() {
 
                         <TabsContent value="devices" className="mt-3">
                           {devices.length === 0 ? (
-                            <div className="text-center py-8 text-xs text-muted-foreground">No devices returned.</div>
+                            <div className="rounded border border-amber-500/30 bg-amber-500/5 p-4 text-xs space-y-2" data-testid="unifi-devices-empty">
+                              <div className="font-medium text-amber-300 flex items-center gap-2">
+                                <AlertTriangle className="w-3.5 h-3.5" />Site Manager API returned no devices for this host
+                              </div>
+                              <div className="text-zinc-400 leading-relaxed">
+                                This site has <span className="font-mono text-emerald-400">{selectedSite.devices_online ?? 0}/{selectedSite.devices ?? 0}</span> devices reported in stats,
+                                but the <code className="bg-muted/30 px-1 rounded">/v1/devices</code> endpoint returned an empty list.
+                              </div>
+                              <div className="text-zinc-400 leading-relaxed">
+                                <span className="text-amber-300 font-medium">This is a known Ubiquiti issue</span> on Site Manager 5.2.x — Ubiquiti's own API returns 200 OK with no data for some hosts.
+                                {" "}<a className="text-sky-400 hover:underline" href="https://community.ui.com/questions/Site-Manager-5-2-1-API-List-devices-not-working/970aa5fc-72fc-4553-b76c-0eda9dc3fd16" target="_blank" rel="noreferrer">See community thread</a>.
+                              </div>
+                              <div className="text-zinc-500">
+                                For full device-level access (with restart/locate actions), use the <strong>UniFi Network API</strong> directly per-controller — open <code className="bg-muted/30 px-1 rounded">UniFi Network → Settings → Control Plane → Integrations</code> on each console to generate a Network API key. That's the only API Ubiquiti exposes write actions on today.
+                              </div>
+                            </div>
                           ) : (
                             <Table>
                               <TableHeader>
