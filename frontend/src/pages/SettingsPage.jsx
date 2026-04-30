@@ -2019,11 +2019,12 @@ export default function SettingsPage() {
               <Input
                 value={unifi.base_url || ""}
                 onChange={(e) => setUnifi({ ...unifi, base_url: e.target.value })}
-                placeholder="https://api.ui.com/ea"
+                placeholder="https://api.ui.com/v1"
                 data-testid="unifi-base-url"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                Default <code>https://api.ui.com/ea</code> (Early Access). Some accounts use <code>/v1</code>.
+                Default <code>https://api.ui.com/v1</code> (stable, 10k req/min).
+                Use <code>/ea</code> only for Early Access features (100 req/min limit).
               </p>
             </div>
             <div>

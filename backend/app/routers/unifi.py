@@ -1,11 +1,24 @@
 """
-UniFi Site Manager API (hosted by Ubiquiti at api.ui.com) integration.
+UniFi Site Manager API integration (api.ui.com).
+
+API REFERENCE: https://developer.ui.com/
 Auth: X-API-KEY header.
-Docs: https://developer.ui.com/site-manager-api/
+
+Available endpoints (read-only on Site Manager):
+  GET /v1/hosts                       — list UniFi consoles
+  GET /v1/hosts/{hostId}              — host details
+  GET /v1/sites                       — list sites (with rich `statistics.counts`)
+  GET /v1/devices?hostIds[]=<id>      — list devices grouped by host
+  GET /v1/isps                        — ISP info (where supported)
+
+Default base is /v1 (stable, 10000 req/min). /ea is Early Access (100 req/min).
+
+Note: Per-site clients/networks/alerts are NOT exposed by the Site Manager API.
+We surface client/device counts from the site's `statistics.counts` instead.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 import httpx
 import os
 
@@ -15,7 +28,7 @@ from app.auth import get_current_user
 router = APIRouter()
 
 SETTINGS_KEY = "unifi"
-DEFAULT_BASE_URL = "https://api.ui.com/ea"  # Early Access path; /v1 also works for some accounts
+DEFAULT_BASE_URL = "https://api.ui.com/v1"
 
 
 async def _get_config() -> Optional[dict]:
@@ -34,13 +47,12 @@ async def _unifi_call(method: str, path: str, params: Optional[dict] = None, jso
     headers = {
         "X-API-KEY": cfg["api_key_full"],
         "Accept": "application/json",
-        "Content-Type": "application/json",
     }
     verify = os.environ.get("ALLOW_SELF_SIGNED_CERTS", "false").lower() != "true"
     try:
         async with httpx.AsyncClient(timeout=30, verify=verify) as client:
             r = await client.request(method, url, headers=headers, params=params, json=json_body)
-            if r.status_code == 401 or r.status_code == 403:
+            if r.status_code in (401, 403):
                 raise HTTPException(r.status_code, "UniFi auth failed — check API key")
             if r.status_code == 429:
                 raise HTTPException(429, "UniFi rate limit hit — wait and retry")
@@ -56,14 +68,14 @@ async def _unifi_call(method: str, path: str, params: Optional[dict] = None, jso
         raise HTTPException(502, f"UniFi request failed: {str(e)[:160]}")
 
 
-def _unwrap(data):
-    """UniFi responses are often {data: [...]} or {sites: [...]} or just [...]."""
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for k in ("data", "sites", "hosts", "devices", "clients", "alerts", "networks", "events", "Results", "items"):
-            if isinstance(data.get(k), list):
-                return data[k]
+def _data(resp: Any) -> list:
+    """Site Manager API wraps everything in `{data: [...], httpStatusCode, traceId, nextToken}`."""
+    if isinstance(resp, list):
+        return resp
+    if isinstance(resp, dict):
+        d = resp.get("data")
+        if isinstance(d, list):
+            return d
     return []
 
 
@@ -86,7 +98,6 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
 
 @router.get("/unifi/status")
 async def get_status(current_user: dict = Depends(get_current_user)):
-    """Alias of /unifi/settings for parity with other integrations."""
     return await get_settings(current_user)
 
 
@@ -127,7 +138,7 @@ async def test_connection(current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc).isoformat()
     try:
         data = await _unifi_call("GET", "hosts")
-        hosts = _unwrap(data)
+        hosts = _data(data)
         await db.settings.update_one(
             {"type": SETTINGS_KEY},
             {"$set": {"last_test_status": "ok", "last_tested_at": now}},
@@ -144,64 +155,68 @@ async def test_connection(current_user: dict = Depends(get_current_user)):
 # ─────────────────────────── Normalization ───────────────────────────
 
 def _norm_site(s: dict) -> dict:
+    meta = s.get("meta") or {}
+    stats = (s.get("statistics") or {}).get("counts") or {}
+    counts = {
+        "total_devices": stats.get("totalDevice", 0),
+        "offline_devices": stats.get("offlineDevice", 0),
+        "pending_devices": stats.get("pendingDevice", 0),
+        "wlan_configured": stats.get("wlanConfigured", 0),
+        "lan_configured": stats.get("lanConfigured", 0),
+        "guest_clients": stats.get("guestClient", 0),
+        "wifi_clients": stats.get("wifiClient", 0),
+        "wired_clients": stats.get("wiredClient", 0),
+        "critical_notifications": stats.get("criticalNotification", 0),
+    }
+    online = max(counts["total_devices"] - counts["offline_devices"], 0)
+    total_clients = counts["wifi_clients"] + counts["wired_clients"] + counts["guest_clients"]
+    internet = (s.get("statistics") or {}).get("internet") or {}
     return {
-        "id": str(s.get("id") or s.get("siteId") or s.get("site_id") or s.get("_id") or ""),
-        "name": s.get("desc") or s.get("name") or s.get("displayName") or s.get("internalName") or "",
-        "host_id": s.get("hostId") or s.get("host_id") or s.get("host") or "",
-        "internal_name": s.get("internalName") or s.get("internal_name") or "",
-        "status": s.get("status") or s.get("health") or "unknown",
-        "meta": {k: v for k, v in s.items() if k not in ("id", "name", "desc", "_id")},
+        "id": str(s.get("id") or s.get("siteId") or ""),
+        "name": meta.get("desc") or meta.get("name") or s.get("internalReference") or s.get("id") or "",
+        "internal_name": meta.get("name") or s.get("internalReference") or "",
+        "host_id": s.get("hostId") or "",
+        "is_owner": s.get("isOwner", False),
+        "permission": s.get("permission") or "",
+        "timezone": meta.get("timezone") or "",
+        "gateway_mac": meta.get("gatewayMac") or "",
+        "counts": counts,
+        "devices_total": counts["total_devices"],
+        "devices_online": online,
+        "clients_total": total_clients,
+        "alerts": counts["critical_notifications"],
+        "internet": internet,
     }
 
 
-def _norm_device(d: dict) -> dict:
-    state = d.get("state") or d.get("status")
+def _norm_device(d: dict, host_id: str = "") -> dict:
+    """Devices come from /v1/devices grouped under each host's `devices` array."""
+    state = d.get("status") or d.get("state")
     if isinstance(state, int):
         state = "online" if state == 1 else "offline"
+    if not state:
+        # Some shapes use `connectionState`
+        cs = d.get("connectionState") or {}
+        state = cs.get("state") or "unknown"
+    uptime = d.get("uptimeSec") or d.get("uptime") or 0
     return {
         "id": str(d.get("id") or d.get("_id") or d.get("mac") or ""),
         "mac": d.get("mac") or "",
-        "name": d.get("name") or d.get("hostname") or d.get("model") or "",
-        "model": d.get("model") or d.get("type") or "",
-        "type": d.get("type") or d.get("deviceType") or "",
-        "status": (state or "unknown"),
-        "ip": d.get("ip") or d.get("lanIp") or "",
-        "uptime": d.get("uptime") or 0,
-        "firmware": d.get("version") or d.get("firmware") or "",
-        "adopted": d.get("adopted", True),
-        "site_id": str(d.get("siteId") or d.get("site_id") or ""),
-        "last_seen": d.get("last_seen") or d.get("lastSeen") or "",
-        "num_clients": d.get("num_sta") or d.get("numClients") or 0,
-    }
-
-
-def _norm_client(c: dict) -> dict:
-    return {
-        "id": str(c.get("id") or c.get("_id") or c.get("mac") or ""),
-        "mac": c.get("mac") or "",
-        "name": c.get("name") or c.get("hostname") or c.get("displayName") or "",
-        "ip": c.get("ip") or c.get("fixed_ip") or "",
-        "is_wired": bool(c.get("is_wired") or c.get("isWired")),
-        "network": c.get("network") or c.get("essid") or "",
-        "ap_mac": c.get("ap_mac") or c.get("apMac") or "",
-        "rx_bytes": c.get("rx_bytes") or 0,
-        "tx_bytes": c.get("tx_bytes") or 0,
-        "signal": c.get("signal") or c.get("rssi") or 0,
-        "last_seen": c.get("last_seen") or c.get("lastSeen") or "",
-        "first_seen": c.get("first_seen") or c.get("firstSeen") or "",
-        "manufacturer": c.get("oui") or c.get("manufacturer") or "",
-    }
-
-
-def _norm_alert(a: dict) -> dict:
-    return {
-        "id": str(a.get("id") or a.get("_id") or ""),
-        "type": a.get("type") or a.get("key") or "",
-        "severity": a.get("severity") or ("critical" if a.get("archived") is False else "info"),
-        "message": a.get("msg") or a.get("message") or a.get("description") or "",
-        "timestamp": a.get("time") or a.get("timestamp") or a.get("datetime") or "",
-        "archived": a.get("archived", False),
-        "site_id": str(a.get("site_id") or a.get("siteId") or ""),
+        "name": d.get("name") or d.get("shortname") or d.get("model") or "",
+        "model": d.get("model") or d.get("shortname") or d.get("productLine") or "",
+        "type": d.get("productLine") or d.get("type") or "",
+        "shortname": d.get("shortname") or "",
+        "status": str(state).lower(),
+        "ip": d.get("ip") or d.get("ipAddress") or "",
+        "uptime": uptime,
+        "firmware": d.get("version") or d.get("firmwareVersion") or "",
+        "firmware_status": d.get("firmwareStatus") or "",
+        "adopted": d.get("adopted", True) if "adopted" in d else True,
+        "is_console": bool(d.get("isConsole", False)),
+        "host_id": host_id or d.get("hostId") or "",
+        "site_id": str(d.get("siteId") or ""),
+        "startup_time": d.get("startupTime") or "",
+        "note": d.get("note") or "",
     }
 
 
@@ -210,128 +225,135 @@ def _norm_alert(a: dict) -> dict:
 @router.get("/unifi/hosts")
 async def list_hosts(current_user: dict = Depends(get_current_user)):
     data = await _unifi_call("GET", "hosts")
-    return _unwrap(data)
+    return _data(data)
 
 
 @router.get("/unifi/sites")
 async def list_sites(current_user: dict = Depends(get_current_user)):
     data = await _unifi_call("GET", "sites")
-    sites = [_norm_site(s) for s in _unwrap(data)]
-    return sites
+    return [_norm_site(s) for s in _data(data)]
+
+
+async def _fetch_devices_for_host(host_id: str) -> list:
+    """The /v1/devices response is grouped per host: [{ hostId, devices: [...] }]."""
+    raw = await _unifi_call("GET", "devices", params={"hostIds[]": host_id})
+    out = []
+    for group in _data(raw):
+        gid = group.get("hostId") or host_id
+        for dev in group.get("devices") or []:
+            out.append(_norm_device(dev, host_id=gid))
+    return out
 
 
 @router.get("/unifi/sites/{site_id}/devices")
 async def list_site_devices(site_id: str, current_user: dict = Depends(get_current_user)):
-    # Many Site Manager implementations use hostId-prefixed device endpoints
-    try:
-        data = await _unifi_call("GET", f"sites/{site_id}/devices")
-    except HTTPException:
-        # Fallback: some revisions expose /devices?siteId=
-        data = await _unifi_call("GET", "devices", params={"siteId": site_id})
-    return [_norm_device(d) for d in _unwrap(data)]
+    """Look up the host owning this site, fetch all its devices, then filter to this site."""
+    sites = _data(await _unifi_call("GET", "sites"))
+    target = next((s for s in sites if str(s.get("id")) == str(site_id)), None)
+    if not target:
+        raise HTTPException(404, "Site not found")
+    host_id = target.get("hostId")
+    if not host_id:
+        return []
+    all_devs = await _fetch_devices_for_host(host_id)
+    site_devs = [d for d in all_devs if not d.get("site_id") or str(d["site_id"]) == str(site_id)]
+    return site_devs
+
+
+@router.get("/unifi/hosts/{host_id}/devices")
+async def list_host_devices(host_id: str, current_user: dict = Depends(get_current_user)):
+    return await _fetch_devices_for_host(host_id)
 
 
 @router.get("/unifi/sites/{site_id}/clients")
 async def list_site_clients(site_id: str, current_user: dict = Depends(get_current_user)):
-    try:
-        data = await _unifi_call("GET", f"sites/{site_id}/clients")
-    except HTTPException:
-        data = await _unifi_call("GET", "clients", params={"siteId": site_id})
-    return [_norm_client(c) for c in _unwrap(data)]
-
-
-@router.get("/unifi/sites/{site_id}/alerts")
-async def list_site_alerts(site_id: str, current_user: dict = Depends(get_current_user)):
-    try:
-        data = await _unifi_call("GET", f"sites/{site_id}/alerts")
-    except HTTPException:
-        data = await _unifi_call("GET", "alerts", params={"siteId": site_id})
-    alerts = [_norm_alert(a) for a in _unwrap(data)]
-    # Most-recent first when timestamps present
-    alerts.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
-    return alerts
+    """Site Manager API does not expose individual client objects. Return aggregate counts from site stats."""
+    sites = _data(await _unifi_call("GET", "sites"))
+    target = next((s for s in sites if str(s.get("id")) == str(site_id)), None)
+    if not target:
+        raise HTTPException(404, "Site not found")
+    counts = (target.get("statistics") or {}).get("counts") or {}
+    summary = {
+        "wifi": counts.get("wifiClient", 0),
+        "wired": counts.get("wiredClient", 0),
+        "guest": counts.get("guestClient", 0),
+        "total": counts.get("wifiClient", 0) + counts.get("wiredClient", 0) + counts.get("guestClient", 0),
+    }
+    return {
+        "supported": False,
+        "summary": summary,
+        "message": "Per-client detail is not exposed by the UniFi Site Manager API. Aggregate counts shown.",
+        "items": [],
+    }
 
 
 @router.get("/unifi/sites/{site_id}/networks")
 async def list_site_networks(site_id: str, current_user: dict = Depends(get_current_user)):
-    try:
-        data = await _unifi_call("GET", f"sites/{site_id}/networks")
-    except HTTPException:
-        data = await _unifi_call("GET", "networks", params={"siteId": site_id})
-    nets = _unwrap(data)
-    return [{
-        "id": str(n.get("id") or n.get("_id") or ""),
-        "name": n.get("name") or n.get("ssid") or "",
-        "ssid": n.get("ssid") or n.get("name") or "",
-        "enabled": n.get("enabled", True),
-        "security": n.get("security") or n.get("x_passphrase_mode") or "",
-        "num_clients": n.get("num_sta") or 0,
-        "vlan": n.get("vlan") or n.get("vlan_id") or "",
-    } for n in nets]
+    """SSIDs are not enumerated by the Site Manager API. Return wlan/lan counts."""
+    sites = _data(await _unifi_call("GET", "sites"))
+    target = next((s for s in sites if str(s.get("id")) == str(site_id)), None)
+    if not target:
+        raise HTTPException(404, "Site not found")
+    counts = (target.get("statistics") or {}).get("counts") or {}
+    return {
+        "supported": False,
+        "summary": {
+            "wlan_configured": counts.get("wlanConfigured", 0),
+            "lan_configured": counts.get("lanConfigured", 0),
+        },
+        "message": "Detailed SSID/VLAN list is only available from the on-controller Network API. Counts shown.",
+        "items": [],
+    }
 
 
-@router.get("/unifi/sites/{site_id}/events")
-async def list_site_events(site_id: str, limit: int = 50, current_user: dict = Depends(get_current_user)):
-    try:
-        data = await _unifi_call("GET", f"sites/{site_id}/events", params={"limit": limit})
-    except HTTPException:
-        data = await _unifi_call("GET", "events", params={"siteId": site_id, "limit": limit})
-    return _unwrap(data)[:limit]
+@router.get("/unifi/sites/{site_id}/alerts")
+async def list_site_alerts(site_id: str, current_user: dict = Depends(get_current_user)):
+    """Site Manager API exposes only critical notification counts, not individual alerts."""
+    sites = _data(await _unifi_call("GET", "sites"))
+    target = next((s for s in sites if str(s.get("id")) == str(site_id)), None)
+    if not target:
+        raise HTTPException(404, "Site not found")
+    counts = (target.get("statistics") or {}).get("counts") or {}
+    critical = counts.get("criticalNotification", 0)
+    return {
+        "supported": False,
+        "summary": {"critical_notifications": critical},
+        "message": "Individual alert objects are not exposed by the Site Manager API. Counts shown.",
+        "items": [],
+    }
 
 
 # ─────────────────────────── Summary / dashboard ───────────────────────────
 
 @router.get("/unifi/summary")
 async def unifi_summary(current_user: dict = Depends(get_current_user)):
-    """Aggregated summary across every site visible to the API key."""
+    """Aggregated summary across every site visible to the API key — no extra API calls beyond /sites."""
     cfg = await _get_config()
     if not cfg:
         return {"configured": False, "message": "UniFi not configured"}
 
     try:
         sites_raw = await _unifi_call("GET", "sites")
-        sites = [_norm_site(s) for s in _unwrap(sites_raw)]
+        sites = [_norm_site(s) for s in _data(sites_raw)]
     except HTTPException as e:
         return {"configured": True, "error": str(e.detail)[:200], "sites": []}
 
-    total_devices = 0
-    online_devices = 0
-    total_clients = 0
-    total_alerts = 0
-    site_rows = []
-    for s in sites[:100]:
-        devs = []
-        clients = []
-        alerts = []
-        try:
-            devs = [_norm_device(d) for d in _unwrap(await _unifi_call("GET", f"sites/{s['id']}/devices"))]
-        except Exception:
-            pass
-        try:
-            clients = [_norm_client(c) for c in _unwrap(await _unifi_call("GET", f"sites/{s['id']}/clients"))]
-        except Exception:
-            pass
-        try:
-            alerts = [_norm_alert(a) for a in _unwrap(await _unifi_call("GET", f"sites/{s['id']}/alerts"))]
-            alerts = [a for a in alerts if not a.get("archived")]
-        except Exception:
-            pass
+    total_devices = sum(s["devices_total"] for s in sites)
+    online_devices = sum(s["devices_online"] for s in sites)
+    total_clients = sum(s["clients_total"] for s in sites)
+    total_alerts = sum(s["alerts"] for s in sites)
 
-        online = sum(1 for d in devs if d["status"] in ("online", "1", "connected"))
-        total_devices += len(devs)
-        online_devices += online
-        total_clients += len(clients)
-        total_alerts += len(alerts)
-
-        site_rows.append({
-            "id": s["id"],
-            "name": s["name"],
-            "host_id": s["host_id"],
-            "devices": len(devs),
-            "devices_online": online,
-            "clients": len(clients),
-            "alerts": len(alerts),
-        })
+    site_rows = [{
+        "id": s["id"],
+        "name": s["name"],
+        "host_id": s["host_id"],
+        "devices": s["devices_total"],
+        "devices_online": s["devices_online"],
+        "clients": s["clients_total"],
+        "alerts": s["alerts"],
+    } for s in sites]
+    # Sort: most devices first
+    site_rows.sort(key=lambda x: x["devices"], reverse=True)
 
     now = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one(

@@ -45,9 +45,9 @@ export default function UnifiCommandCenterPage() {
   const [query, setQuery] = useState("");
 
   const [devices, setDevices] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [networks, setNetworks] = useState([]);
+  const [clientsData, setClientsData] = useState({ items: [], summary: null, supported: true, message: "" });
+  const [alertsData, setAlertsData] = useState({ items: [], summary: null, supported: true, message: "" });
+  const [networksData, setNetworksData] = useState({ items: [], summary: null, supported: true, message: "" });
   const [loadingSite, setLoadingSite] = useState(false);
 
   const [allClients, setAllClients] = useState([]);
@@ -73,20 +73,22 @@ export default function UnifiCommandCenterPage() {
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
   useEffect(() => {
-    if (!selectedSite) { setDevices([]); setClients([]); setAlerts([]); setNetworks([]); return; }
+    if (!selectedSite) { setDevices([]); setClientsData({ items: [], summary: null, supported: true, message: "" }); setAlertsData({ items: [], summary: null, supported: true, message: "" }); setNetworksData({ items: [], summary: null, supported: true, message: "" }); return; }
     (async () => {
       setLoadingSite(true);
       try {
         const [d, c, a, n] = await Promise.all([
           axios.get(`${API}/unifi/sites/${selectedSite.id}/devices`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${API}/unifi/sites/${selectedSite.id}/clients`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${API}/unifi/sites/${selectedSite.id}/alerts`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${API}/unifi/sites/${selectedSite.id}/networks`, { headers }).catch(() => ({ data: [] })),
+          axios.get(`${API}/unifi/sites/${selectedSite.id}/clients`, { headers }).catch(() => ({ data: { items: [], summary: null, supported: true, message: "" } })),
+          axios.get(`${API}/unifi/sites/${selectedSite.id}/alerts`, { headers }).catch(() => ({ data: { items: [], summary: null, supported: true, message: "" } })),
+          axios.get(`${API}/unifi/sites/${selectedSite.id}/networks`, { headers }).catch(() => ({ data: { items: [], summary: null, supported: true, message: "" } })),
         ]);
-        setDevices(d.data || []);
-        setClients(c.data || []);
-        setAlerts(a.data || []);
-        setNetworks(n.data || []);
+        setDevices(Array.isArray(d.data) ? d.data : []);
+        // Endpoints below return either an array (legacy) or {items, summary, supported, message}
+        const wrap = (x) => Array.isArray(x) ? { items: x, summary: null, supported: true, message: "" } : { items: x?.items || [], summary: x?.summary || null, supported: x?.supported !== false, message: x?.message || "" };
+        setClientsData(wrap(c.data));
+        setAlertsData(wrap(a.data));
+        setNetworksData(wrap(n.data));
       } finally { setLoadingSite(false); }
     })();
   }, [selectedSite, token]); // eslint-disable-line
@@ -225,19 +227,27 @@ export default function UnifiCommandCenterPage() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         <div className="rounded border border-border p-2 bg-muted/20">
                           <div className="text-[10px] uppercase text-muted-foreground">Devices</div>
-                          <div className="text-lg font-semibold"><span className="text-emerald-400">{devices.filter(d => d.status === "online" || d.status === "1" || d.status === "connected").length}</span> <span className="text-muted-foreground">/ {devices.length}</span></div>
+                          <div className="text-lg font-semibold"><span className="text-emerald-400">{devices.filter(d => d.status === "online" || d.status === "connected").length}</span> <span className="text-muted-foreground">/ {devices.length}</span></div>
                         </div>
                         <div className="rounded border border-border p-2 bg-muted/20">
                           <div className="text-[10px] uppercase text-muted-foreground">Clients</div>
-                          <div className="text-lg font-semibold">{clients.length}</div>
+                          <div className="text-lg font-semibold">{clientsData.summary?.total ?? clientsData.items.length}</div>
+                          {clientsData.summary && (
+                            <div className="text-[9px] text-muted-foreground font-mono">wifi {clientsData.summary.wifi} · wired {clientsData.summary.wired}{clientsData.summary.guest ? ` · guest ${clientsData.summary.guest}` : ""}</div>
+                          )}
                         </div>
                         <div className="rounded border border-border p-2 bg-muted/20">
                           <div className="text-[10px] uppercase text-muted-foreground">Networks</div>
-                          <div className="text-lg font-semibold">{networks.length}</div>
+                          <div className="text-lg font-semibold">{networksData.summary ? (networksData.summary.wlan_configured + networksData.summary.lan_configured) : networksData.items.length}</div>
+                          {networksData.summary && (
+                            <div className="text-[9px] text-muted-foreground font-mono">wlan {networksData.summary.wlan_configured} · lan {networksData.summary.lan_configured}</div>
+                          )}
                         </div>
                         <div className="rounded border border-border p-2 bg-muted/20">
-                          <div className="text-[10px] uppercase text-muted-foreground">Alerts</div>
-                          <div className={`text-lg font-semibold ${alerts.length ? "text-rose-400" : "text-emerald-400"}`}>{alerts.length}</div>
+                          <div className="text-[10px] uppercase text-muted-foreground">Critical</div>
+                          <div className={`text-lg font-semibold ${(alertsData.summary?.critical_notifications ?? alertsData.items.length) ? "text-rose-400" : "text-emerald-400"}`}>
+                            {alertsData.summary?.critical_notifications ?? alertsData.items.length}
+                          </div>
                         </div>
                       </div>
 
@@ -271,14 +281,14 @@ export default function UnifiCommandCenterPage() {
                                     <TableCell className="font-medium text-sm">{d.name || d.model || d.mac}</TableCell>
                                     <TableCell className="text-xs font-mono">{d.model || d.type}</TableCell>
                                     <TableCell>
-                                      <Badge variant="outline" className={(d.status === "online" || d.status === "connected" || d.status === "1") ? "text-emerald-400 border-emerald-500/30" : "text-rose-400 border-rose-500/30"}>
+                                      <Badge variant="outline" className={d.status === "online" || d.status === "connected" ? "text-emerald-400 border-emerald-500/30" : d.status === "unknown" ? "text-zinc-400 border-zinc-700" : "text-rose-400 border-rose-500/30"}>
                                         {d.status}
                                       </Badge>
                                     </TableCell>
                                     <TableCell className="text-xs font-mono">{d.ip || "—"}</TableCell>
                                     <TableCell className="text-xs font-mono">{uptimeHuman(d.uptime)}</TableCell>
                                     <TableCell className="text-xs font-mono">{d.num_clients || 0}</TableCell>
-                                    <TableCell className="text-[10px] font-mono">{d.firmware || "—"}</TableCell>
+                                    <TableCell className="text-[10px] font-mono">{d.firmware || "—"}{d.firmware_status === "updateAvailable" && <Badge variant="outline" className="ml-1 text-[9px] text-amber-400 border-amber-500/30">update</Badge>}</TableCell>
                                   </TableRow>
                                 ))}
                               </TableBody>
@@ -287,7 +297,26 @@ export default function UnifiCommandCenterPage() {
                         </TabsContent>
 
                         <TabsContent value="clients" className="mt-3">
-                          {clients.length === 0 ? (
+                          {clientsData.summary && !clientsData.supported ? (
+                            <div className="rounded border border-amber-500/30 bg-amber-500/5 p-4 text-xs">
+                              <div className="font-medium text-amber-300 mb-2">Client counts (Site Manager API)</div>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="rounded border border-border p-2 bg-muted/20">
+                                  <div className="text-[10px] uppercase text-muted-foreground">Wi-Fi</div>
+                                  <div className="text-lg font-semibold text-indigo-400">{clientsData.summary.wifi}</div>
+                                </div>
+                                <div className="rounded border border-border p-2 bg-muted/20">
+                                  <div className="text-[10px] uppercase text-muted-foreground">Wired</div>
+                                  <div className="text-lg font-semibold text-sky-400">{clientsData.summary.wired}</div>
+                                </div>
+                                <div className="rounded border border-border p-2 bg-muted/20">
+                                  <div className="text-[10px] uppercase text-muted-foreground">Guest</div>
+                                  <div className="text-lg font-semibold text-violet-400">{clientsData.summary.guest}</div>
+                                </div>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-3">{clientsData.message}</div>
+                            </div>
+                          ) : clientsData.items.length === 0 ? (
                             <div className="text-center py-8 text-xs text-muted-foreground">No clients connected.</div>
                           ) : (
                             <Table>
@@ -303,7 +332,7 @@ export default function UnifiCommandCenterPage() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {clients.slice(0, 200).map((c) => (
+                                {clientsData.items.slice(0, 200).map((c) => (
                                   <TableRow key={c.id} data-testid={`unifi-client-${c.id}`}>
                                     <TableCell className="text-sm">{c.name || c.manufacturer || "—"}</TableCell>
                                     <TableCell>
@@ -326,7 +355,22 @@ export default function UnifiCommandCenterPage() {
                         </TabsContent>
 
                         <TabsContent value="networks" className="mt-3">
-                          {networks.length === 0 ? (
+                          {networksData.summary && !networksData.supported ? (
+                            <div className="rounded border border-amber-500/30 bg-amber-500/5 p-4 text-xs">
+                              <div className="font-medium text-amber-300 mb-2">Network counts (Site Manager API)</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="rounded border border-border p-2 bg-muted/20">
+                                  <div className="text-[10px] uppercase text-muted-foreground">Wireless (WLAN) configured</div>
+                                  <div className="text-lg font-semibold text-indigo-400">{networksData.summary.wlan_configured}</div>
+                                </div>
+                                <div className="rounded border border-border p-2 bg-muted/20">
+                                  <div className="text-[10px] uppercase text-muted-foreground">Wired (LAN) configured</div>
+                                  <div className="text-lg font-semibold text-sky-400">{networksData.summary.lan_configured}</div>
+                                </div>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-3">{networksData.message}</div>
+                            </div>
+                          ) : networksData.items.length === 0 ? (
                             <div className="text-center py-8 text-xs text-muted-foreground">No networks/SSIDs.</div>
                           ) : (
                             <Table>
@@ -338,7 +382,7 @@ export default function UnifiCommandCenterPage() {
                                 <TableHead className="text-[10px] uppercase">Status</TableHead>
                               </TableRow></TableHeader>
                               <TableBody>
-                                {networks.map((n) => (
+                                {networksData.items.map((n) => (
                                   <TableRow key={n.id} data-testid={`unifi-network-${n.id}`}>
                                     <TableCell className="font-medium text-sm">{n.ssid || n.name}</TableCell>
                                     <TableCell className="text-xs font-mono">{n.security || "—"}</TableCell>
@@ -357,11 +401,22 @@ export default function UnifiCommandCenterPage() {
                         </TabsContent>
 
                         <TabsContent value="alerts" className="mt-3">
-                          {alerts.length === 0 ? (
+                          {alertsData.summary && !alertsData.supported ? (
+                            <div className="rounded border border-amber-500/30 bg-amber-500/5 p-4 text-xs">
+                              <div className="font-medium text-amber-300 mb-2">Critical notifications (Site Manager API)</div>
+                              <div className="rounded border border-border p-2 bg-muted/20 max-w-xs">
+                                <div className="text-[10px] uppercase text-muted-foreground">Critical</div>
+                                <div className={`text-2xl font-semibold ${alertsData.summary.critical_notifications ? "text-rose-400" : "text-emerald-400"}`}>
+                                  {alertsData.summary.critical_notifications}
+                                </div>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-3">{alertsData.message}</div>
+                            </div>
+                          ) : alertsData.items.length === 0 ? (
                             <div className="text-center py-8 text-xs text-emerald-400">All clear — no active alerts.</div>
                           ) : (
                             <div className="space-y-1 max-h-96 overflow-y-auto">
-                              {alerts.map((a) => (
+                              {alertsData.items.map((a) => (
                                 <div key={a.id} className="flex items-start gap-2 p-2 rounded border border-border bg-muted/10" data-testid={`unifi-alert-${a.id}`}>
                                   <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${a.severity === "critical" ? "bg-rose-400" : a.severity === "warning" ? "bg-amber-400" : "bg-sky-400"}`} />
                                   <div className="flex-1 min-w-0">
