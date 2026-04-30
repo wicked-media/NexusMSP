@@ -22,6 +22,7 @@ export default function HuduCommandCenterPage() {
 
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [activeTab, setActiveTab] = useState("articles");
 
   const [query, setQuery] = useState("");
@@ -35,20 +36,32 @@ export default function HuduCommandCenterPage() {
   const [revealing, setRevealing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Summary + companies once
-  useEffect(() => {
-    (async () => {
-      setLoadingSummary(true);
-      try {
-        const [sumRes, compRes] = await Promise.all([
-          axios.get(`${API}/hudu/summary`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/hudu/companies?page_size=100`, { headers }).catch(() => ({ data: { companies: [] } })),
-        ]);
-        setSummary(sumRes.data);
-        setCompanies(compRes.data?.companies || []);
-      } finally { setLoadingSummary(false); }
-    })();
+  // Summary + companies (extracted so Refresh / Sync can re-call it)
+  const loadSummary = useCallback(async () => {
+    setLoadingSummary(true);
+    try {
+      const [sumRes, compRes] = await Promise.all([
+        axios.get(`${API}/hudu/summary`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/hudu/companies?page_size=100`, { headers }).catch(() => ({ data: { companies: [] } })),
+      ]);
+      setSummary(sumRes.data);
+      setCompanies(compRes.data?.companies || []);
+    } finally { setLoadingSummary(false); }
   }, [token]); // eslint-disable-line
+
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      const r = await axios.post(`${API}/hudu/sync`, {}, { headers });
+      toast.success(r.data?.message || "Hudu sync complete");
+      await loadSummary();
+      await loadTab();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Sync failed");
+    } finally { setSyncing(false); }
+  };
 
   // Load tab data
   const loadTab = useCallback(async () => {
@@ -134,8 +147,11 @@ export default function HuduCommandCenterPage() {
                 <Link to="/settings?tab=integrations"><ExternalLink className="w-3 h-3 mr-1" />Configure Hudu</Link>
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={loadTab} disabled={loading || notConfigured} data-testid="hudu-refresh-btn">
-              {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
+            <Button size="sm" variant="outline" onClick={syncNow} disabled={syncing || notConfigured} data-testid="hudu-sync-btn" title="Pull latest from Hudu and refresh stats">
+              {syncing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}{syncing ? "Syncing…" : "Sync now"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { loadSummary(); loadTab(); }} disabled={loading || loadingSummary || notConfigured} data-testid="hudu-refresh-btn">
+              {(loading || loadingSummary) ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
             </Button>
           </div>
         </div>
