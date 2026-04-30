@@ -61,6 +61,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "cipp-settings-card", label: "CIPP (M365 management)", keywords: "cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
+  { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
@@ -132,6 +133,8 @@ export default function SettingsPage() {
   const [supedSaving, setSupedSaving] = useState(false);
   const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [cippBusy, setCippBusy] = useState(false);
+  const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [unifiBusy, setUnifiBusy] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -164,7 +167,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -185,6 +188,7 @@ export default function SettingsPage() {
           axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/unifi/status`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -196,6 +200,7 @@ export default function SettingsPage() {
         if (pax8Res?.data) setPax8(prev => ({ ...prev, ...pax8Res.data, client_secret: "" }));
         if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
         if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
+        if (unifiRes?.data) setUnifi(prev => ({ ...prev, ...unifiRes.data, api_key: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -1980,6 +1985,123 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* UniFi Site Manager */}
+      <Card id="unifi-settings-card" data-testid="unifi-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Wifi className="w-5 h-5 text-sky-500" />
+            <CardTitle>UniFi · Site Manager</CardTitle>
+          </div>
+          <CardDescription>
+            Connect to Ubiquiti's hosted UniFi Site Manager (api.ui.com) to pull sites, devices,
+            clients, networks, and alerts across every console you manage.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={unifi.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="unifi-status-badge">
+              {unifi.configured ? "Configured" : "Not Configured"}
+            </Badge>
+            {unifi.api_key_preview && (
+              <Badge variant="outline" className="font-mono text-[10px]">Key: {unifi.api_key_preview}</Badge>
+            )}
+            {unifi.last_test_status && (
+              <Badge variant="outline" className="text-[10px]">Last test: {unifi.last_test_status}</Badge>
+            )}
+            {unifi.last_synced_at && (
+              <Badge variant="outline" className="text-[10px]">Synced: {new Date(unifi.last_synced_at).toLocaleString()}</Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>API Base URL</Label>
+              <Input
+                value={unifi.base_url || ""}
+                onChange={(e) => setUnifi({ ...unifi, base_url: e.target.value })}
+                placeholder="https://api.ui.com/ea"
+                data-testid="unifi-base-url"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Default <code>https://api.ui.com/ea</code> (Early Access). Some accounts use <code>/v1</code>.
+              </p>
+            </div>
+            <div>
+              <Label>API Key (X-API-KEY)</Label>
+              <Input
+                type="password"
+                value={unifi.api_key}
+                onChange={(e) => setUnifi({ ...unifi, api_key: e.target.value })}
+                placeholder={unifi.configured ? "•••••• (enter to replace)" : "Enter UniFi Site Manager API key"}
+                data-testid="unifi-api-key"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Create at <a href="https://unifi.ui.com" target="_blank" rel="noreferrer" className="text-primary underline">unifi.ui.com</a> → Settings → API Keys.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              onClick={async () => {
+                if (!unifi.api_key) {
+                  if (!unifi.configured) { toast.error("Enter an API key"); return; }
+                  toast.error("Enter a new API key to update");
+                  return;
+                }
+                setUnifiBusy(true);
+                try {
+                  await axios.post(`${API}/unifi/settings`, { base_url: unifi.base_url || undefined, api_key: unifi.api_key }, { headers });
+                  toast.success("UniFi credentials saved");
+                  const st = await axios.get(`${API}/unifi/status`, { headers });
+                  setUnifi(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setUnifiBusy(false); }
+              }}
+              disabled={unifiBusy}
+              data-testid="unifi-save-btn"
+            >
+              {unifiBusy ? "Saving…" : "Save credentials"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setUnifiBusy(true);
+                try {
+                  const res = await axios.get(`${API}/unifi/test`, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message || "Connection failed");
+                  const st = await axios.get(`${API}/unifi/status`, { headers });
+                  setUnifi(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setUnifiBusy(false); }
+              }}
+              disabled={unifiBusy || !unifi.configured}
+              data-testid="unifi-test-btn"
+            >
+              Test connection
+            </Button>
+            {unifi.configured && (
+              <Button
+                variant="ghost" className="text-red-400 hover:bg-red-500/10"
+                onClick={async () => {
+                  if (!window.confirm("Remove UniFi credentials?")) return;
+                  setUnifiBusy(true);
+                  try {
+                    await axios.delete(`${API}/unifi/settings`, { headers });
+                    setUnifi({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    toast.success("UniFi credentials removed");
+                  } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                  finally { setUnifiBusy(false); }
+                }}
+                data-testid="unifi-clear-btn"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
 
       {/* Splynx ISP Billing Integration */}
       <Card data-testid="splynx-settings-card">

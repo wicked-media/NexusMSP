@@ -8,6 +8,30 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Apr 23, 2026 — UniFi Site Manager Command Center + Production Deployment Fix)
+
+### Production deployment fix
+- `server.py`: added unprefixed `GET /health` (and `GET /api/health`) returning 200 with no DB calls so K8s readiness probe passes.
+- Moved `seed_data()` + ticket-number backfill out of `@app.on_event("startup")` into a background `_boot_warmup()` task so uvicorn reports startup complete in <1s on cold Atlas boots. This unblocks production deployment timeouts.
+
+### UniFi Site Manager integration (api.ui.com, hosted)
+- **Backend `/app/backend/app/routers/unifi.py`** — full router using `X-API-KEY` auth:
+  - Settings: `GET/POST/DELETE /api/unifi/settings`, `GET /api/unifi/status`, `GET /api/unifi/test`.
+  - Data: `/unifi/hosts`, `/unifi/sites`, `/unifi/sites/{id}/devices`, `/unifi/sites/{id}/clients`, `/unifi/sites/{id}/alerts`, `/unifi/sites/{id}/networks`, `/unifi/sites/{id}/events`.
+  - Dashboard: `/unifi/summary` aggregates devices/clients/alerts across all sites.
+  - Link to client: `POST/DELETE /api/clients/{id}/link-unifi-site`, `GET /api/unifi/linked-clients`.
+  - Robust normalization helpers tolerate UniFi response-shape variations (data/sites/hosts/items keys + state→online/offline).
+- **Frontend `/app/frontend/src/pages/UnifiCommandCenterPage.jsx`** at `/unifi`:
+  - 5-metric strip (Sites · Devices online/total · Clients · Alerts · Linked %).
+  - Tabs: Sites (master-detail with site list + sub-tabs Devices/Clients/SSIDs/Alerts) · Linked Clients.
+  - Per-site detail: device table (model, status, IP, uptime, firmware, client-count), client table (wired/wifi badges, signal, RX/TX), SSID table, alerts feed.
+  - "Link to client" dialog from any site.
+- **Settings** — UniFi card with Base URL + API key (default `https://api.ui.com/ea`), Save/Test/Remove flow, masked key preview, last test/sync timestamps.
+- **Navigation** — Sidebar Integrations group now includes UniFi (`/unifi`).
+- **Testing** (`iteration_120.json`): 32/32 backend tests PASS, 100% frontend pass. Zero issues.
+
+
+
 ## Recent Updates (Apr 23, 2026 — CIPP Hygiene → Client Health Score + Weekly M365 Hygiene Digest)
 - **Backend `/app/backend/app/routers/cipp_hygiene.py`** — 7-dimension hygiene scoring per M365 tenant:
   - Dimensions: License efficiency (20), MFA coverage (25), Stale users (15), License waste (15), Admin sprawl (10), Guest posture (10), Modern auth CA (5). Each dimension gracefully degrades when CIPP source data is missing.
