@@ -367,6 +367,7 @@ export const navGroups = [
           { path: "/hudu", label: "Hudu" },
           { path: "/cipp", label: "CIPP" },
           { path: "/unifi", label: "UniFi" },
+          { path: "/tactical-rmm", label: "Tactical RMM" },
           { path: "/suped", label: "Suped" },
           { path: "/webhook-builder", label: "Webhook Builder" },
           { path: "/git-scripts", label: "Git Scripts Sync" },

@@ -181,7 +181,7 @@ export default function HuduCommandCenterPage() {
                 {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
-            <Button size="sm" onClick={loadTab} disabled={loading} data-testid="hudu-apply-filter">
+            <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={loadTab} disabled={loading} data-testid="hudu-apply-filter">
               Apply
             </Button>
             {(query || companyFilter) && (

@@ -278,7 +278,7 @@ export default function CippCommandCenterPage() {
                           <Button size="sm" variant="outline" onClick={() => setLinkDialog(selectedTenant)} data-testid="cipp-link-client-btn">
                             <LinkIcon className="w-3 h-3 mr-1" />Link to client
                           </Button>
-                          <Button size="sm" onClick={() => setCreateDialog(true)} data-testid="cipp-create-user-btn">
+                          <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateDialog(true)} data-testid="cipp-create-user-btn">
                             <UserPlus className="w-3 h-3 mr-1" />Create user
                           </Button>
                         </div>
@@ -654,7 +654,7 @@ function CippHygienePanel() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={load} data-testid="cipp-digest-refresh"><RefreshCw className="w-3 h-3 mr-1" />Recompute</Button>
-          <Button size="sm" onClick={sendDigest} disabled={sending} data-testid="cipp-digest-send">
+          <Button size="sm" variant="outline" className="text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10" onClick={sendDigest} disabled={sending} data-testid="cipp-digest-send">
             {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}Send digest
           </Button>
         </div>

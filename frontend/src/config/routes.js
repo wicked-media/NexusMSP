@@ -12,6 +12,7 @@ export const routeConfig = [
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/cipp", component: page("CippCommandCenterPage"), auth: true, layout: true },
   { path: "/unifi", component: page("UnifiCommandCenterPage"), auth: true, layout: true },
+  { path: "/tactical-rmm", component: page("TacticalRmmCommandCenterPage"), auth: true, layout: true },
   { path: "/suped", component: page("SupedCommandCenterPage"), auth: true, layout: true },
   { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },
   { path: "/morning-checks", component: page("MorningChecksPage"), auth: true, layout: true },

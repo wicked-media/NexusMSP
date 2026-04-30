@@ -51,6 +51,59 @@ export default function DeviceDetailPage() {
   const [connectLoading, setConnectLoading] = useState(false);
   const [diskHealth, setDiskHealth] = useState([]);
   const [rdLiveStatus, setRdLiveStatus] = useState(null);
+  const [trmmAgents, setTrmmAgents] = useState([]);
+  const [trmmConfigured, setTrmmConfigured] = useState(false);
+  const [trmmLinkOpen, setTrmmLinkOpen] = useState(false);
+  const [trmmAgentSelect, setTrmmAgentSelect] = useState("");
+  const [trmmRemoteBusy, setTrmmRemoteBusy] = useState(false);
+
+  // Fetch TRMM status + agents (best effort)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await axios.get(`${API}/trmm/status`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }));
+        if (cancelled) return;
+        const cfg = !!status?.data?.configured;
+        setTrmmConfigured(cfg);
+        if (cfg) {
+          const a = await axios.get(`${API}/trmm/agents`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: [] }));
+          if (!cancelled) setTrmmAgents(a.data || []);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const startTrmmRemote = async () => {
+    if (!data?.device?.trmm_agent_id) { setTrmmLinkOpen(true); return; }
+    setTrmmRemoteBusy(true);
+    try {
+      const res = await axios.get(`${API}/trmm/agents/${data.device.trmm_agent_id}/remote-url`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.data?.success && res.data?.urls) {
+        const url = res.data.urls.control || res.data.urls.terminal || res.data.urls.file || Object.values(res.data.urls).find(v => typeof v === "string");
+        if (url) {
+          window.open(url, "_blank", "noopener,noreferrer");
+          toast.success("Opening MeshCentral remote session…");
+        } else { toast.error("No remote URL returned by TRMM"); }
+      } else { toast.error(res.data?.message || "Could not start remote session"); }
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setTrmmRemoteBusy(false); }
+  };
+
+  const linkTrmmAgent = async () => {
+    if (!trmmAgentSelect) { toast.error("Pick a TRMM agent"); return; }
+    const agent = trmmAgents.find(a => (a.agent_id || a.id) === trmmAgentSelect);
+    try {
+      await axios.post(`${API}/devices/${deviceId}/link-trmm-agent`, {
+        agent_id: agent?.agent_id || trmmAgentSelect,
+        hostname: agent?.hostname || "",
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("TRMM agent linked");
+      setTrmmLinkOpen(false);
+      fetchDetail();
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+  };
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -192,6 +245,20 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {trmmConfigured && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+              onClick={startTrmmRemote}
+              disabled={trmmRemoteBusy}
+              data-testid="trmm-remote-btn"
+              title={dev.trmm_agent_id ? `Open remote session (TRMM agent ${dev.trmm_agent_id})` : "Link a TRMM agent to enable remote"}
+            >
+              {trmmRemoteBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Server className="w-4 h-4 mr-1" />}
+              {dev.trmm_agent_id ? "Remote (TRMM)" : "Link TRMM"}
+            </Button>
+          )}
           {(rdLiveStatus || dev.status) === "online" && (
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={startRemoteAccess} disabled={connectLoading} data-testid="remote-access-btn">
               {connectLoading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Remote Access
@@ -1002,6 +1069,47 @@ export default function DeviceDetailPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* TRMM Link Dialog */}
+      <Dialog open={trmmLinkOpen} onOpenChange={setTrmmLinkOpen}>
+        <DialogContent className="max-w-md" data-testid="trmm-link-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Server className="w-5 h-5 text-emerald-500" />Link Tactical RMM agent</DialogTitle>
+            <DialogDescription>Pick the TRMM agent that matches <span className="text-foreground">{dev?.name}</span>.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>TRMM agent</Label>
+            <select
+              value={trmmAgentSelect}
+              onChange={(e) => setTrmmAgentSelect(e.target.value)}
+              className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
+              data-testid="trmm-link-select"
+            >
+              <option value="">— Select an agent —</option>
+              {trmmAgents.map(a => (
+                <option key={a.agent_id || a.id} value={a.agent_id || a.id}>
+                  {a.hostname} · {a.client || "—"} · {a.status}
+                </option>
+              ))}
+            </select>
+            {trmmAgents.length === 0 && (
+              <p className="text-xs text-muted-foreground">No agents loaded yet — make sure TRMM is configured in Settings.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTrmmLinkOpen(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+              disabled={!trmmAgentSelect}
+              onClick={linkTrmmAgent}
+              data-testid="trmm-link-confirm-btn"
+            >
+              Link agent
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

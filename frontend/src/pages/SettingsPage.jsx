@@ -20,7 +20,7 @@ import {
   Clock, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
   CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
-  Smartphone, Copy, Cloud
+  Smartphone, Copy, Cloud, Server, Activity
 } from "lucide-react";
 
 const TABS = [
@@ -63,6 +63,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "cipp-settings-card", label: "CIPP (M365 management)", keywords: "cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
+  { tab: "integrations", anchor: "trmm-settings-card", label: "Tactical RMM", keywords: "tactical rmm trmm self-hosted agents endpoints remote meshcentral patches scripts checks" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
@@ -136,6 +137,8 @@ export default function SettingsPage() {
   const [cippBusy, setCippBusy] = useState(false);
   const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
+  const [trmm, setTrmm] = useState({ base_url: "", api_key: "", verify_tls: true, configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [trmmBusy, setTrmmBusy] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -168,7 +171,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -190,6 +193,7 @@ export default function SettingsPage() {
           axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/unifi/status`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/trmm/status`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -202,6 +206,7 @@ export default function SettingsPage() {
         if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
         if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
         if (unifiRes?.data) setUnifi(prev => ({ ...prev, ...unifiRes.data, api_key: "" }));
+        if (trmmRes?.data) setTrmm(prev => ({ ...prev, ...trmmRes.data, api_key: "" }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -2104,6 +2109,144 @@ export default function SettingsPage() {
 
           <div className="border-t border-border pt-4 mt-2">
             <UnifiControllersManager />
+          </div>
+        </CardContent>
+      </Card>
+
+
+      {/* Tactical RMM (Self-hosted) */}
+      <Card id="trmm-settings-card" data-testid="trmm-settings-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Server className="w-5 h-5 text-emerald-500" />
+            <CardTitle>Tactical RMM · Self-Hosted</CardTitle>
+          </div>
+          <CardDescription>
+            Connect your self-hosted Tactical RMM instance to surface agents, run scripts, push patches,
+            reboot endpoints, and launch MeshCentral remote sessions directly from NexusOps.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={trmm.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="trmm-status-badge">
+              {trmm.configured ? "Configured" : "Not Configured"}
+            </Badge>
+            {trmm.api_key_preview && (
+              <Badge variant="outline" className="font-mono text-[10px]">Key: {trmm.api_key_preview}</Badge>
+            )}
+            {trmm.last_test_status && (
+              <Badge variant="outline" className="text-[10px]">Last test: {trmm.last_test_status}</Badge>
+            )}
+            {trmm.last_synced_at && (
+              <Badge variant="outline" className="text-[10px]">Synced: {new Date(trmm.last_synced_at).toLocaleString()}</Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>TRMM API Base URL</Label>
+              <Input
+                value={trmm.base_url || ""}
+                onChange={(e) => setTrmm({ ...trmm, base_url: e.target.value })}
+                placeholder="https://api.your-trmm.example.com"
+                data-testid="trmm-base-url"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Use the API endpoint of your TRMM stack (typically <code>https://api.&lt;your-domain&gt;</code>).
+              </p>
+            </div>
+            <div>
+              <Label>API Key (X-API-KEY)</Label>
+              <Input
+                type="password"
+                value={trmm.api_key}
+                onChange={(e) => setTrmm({ ...trmm, api_key: e.target.value })}
+                placeholder={trmm.configured ? "•••••• (enter to replace)" : "Generate at TRMM → Settings → Global → API Keys"}
+                data-testid="trmm-api-key"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Create a key for a user with the <code>Admin</code> role. The key is sent as <code>X-API-KEY</code> on every request.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="trmm-verify-tls"
+              checked={trmm.verify_tls !== false}
+              onCheckedChange={(v) => setTrmm({ ...trmm, verify_tls: v })}
+              data-testid="trmm-verify-tls"
+            />
+            <Label htmlFor="trmm-verify-tls" className="text-sm">Verify TLS certificate (disable only for self-signed staging instances)</Label>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              onClick={async () => {
+                if (!trmm.api_key) {
+                  if (!trmm.configured) { toast.error("Enter an API key"); return; }
+                  toast.error("Enter a new API key to update");
+                  return;
+                }
+                if (!trmm.base_url) { toast.error("Enter your TRMM base URL"); return; }
+                setTrmmBusy(true);
+                try {
+                  await axios.post(`${API}/trmm/settings`, { base_url: trmm.base_url, api_key: trmm.api_key, verify_tls: trmm.verify_tls !== false }, { headers });
+                  toast.success("Tactical RMM credentials saved");
+                  const st = await axios.get(`${API}/trmm/status`, { headers });
+                  setTrmm(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setTrmmBusy(false); }
+              }}
+              disabled={trmmBusy}
+              data-testid="trmm-save-btn"
+            >
+              {trmmBusy ? "Saving…" : "Save credentials"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setTrmmBusy(true);
+                try {
+                  const res = await axios.get(`${API}/trmm/test`, { headers });
+                  if (res.data.success) toast.success(res.data.message);
+                  else toast.error(res.data.message || "Connection failed");
+                  const st = await axios.get(`${API}/trmm/status`, { headers });
+                  setTrmm(prev => ({ ...prev, ...st.data, api_key: "" }));
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                finally { setTrmmBusy(false); }
+              }}
+              disabled={trmmBusy || !trmm.configured}
+              data-testid="trmm-test-btn"
+            >
+              <TestTube className="w-4 h-4 mr-1" />
+              Test connection
+            </Button>
+            <Button
+              variant="outline"
+              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+              onClick={() => window.open("/tactical-rmm", "_self")}
+              disabled={!trmm.configured}
+              data-testid="trmm-open-cc-btn"
+            >
+              <Activity className="w-4 h-4 mr-1" />
+              Open Command Center
+            </Button>
+            {trmm.configured && (
+              <Button
+                variant="ghost" className="text-red-400 hover:bg-red-500/10"
+                onClick={async () => {
+                  if (!window.confirm("Remove Tactical RMM credentials?")) return;
+                  setTrmmBusy(true);
+                  try {
+                    await axios.delete(`${API}/trmm/settings`, { headers });
+                    setTrmm({ base_url: "", api_key: "", verify_tls: true, configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    toast.success("Tactical RMM credentials removed");
+                  } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                  finally { setTrmmBusy(false); }
+                }}
+                data-testid="trmm-clear-btn"
+              >
+                Remove
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

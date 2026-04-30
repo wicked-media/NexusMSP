@@ -400,7 +400,7 @@ export default function ClientsPage() {
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setCreateDialog(false)}>Cancel</Button>
-              <Button onClick={createClient} data-testid="create-client-btn"><Plus className="w-4 h-4 mr-1" />Create</Button>
+              <Button onClick={createClient} variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" data-testid="create-client-btn"><Plus className="w-4 h-4 mr-1" />Create</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -807,7 +807,7 @@ function CippTenantPanel({ client }) {
         <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-orange-400" /><span className="font-medium">CIPP · M365 tenant</span></div>
         <p className="text-sm text-zinc-400 mb-3">No CIPP tenant linked to this client. Link a tenant to manage users and licenses in M365.</p>
         <div className="flex gap-2">
-          <Button size="sm" onClick={openLink} data-testid="client-cipp-link-btn"><LinkIcon className="w-3 h-3 mr-1" />Link tenant</Button>
+          <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={openLink} data-testid="client-cipp-link-btn"><LinkIcon className="w-3 h-3 mr-1" />Link tenant</Button>
           <Button size="sm" variant="outline" asChild><Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure CIPP</Link></Button>
         </div>
 
@@ -831,7 +831,7 @@ function CippTenantPanel({ client }) {
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setLinkOpen(false)}>Cancel</Button>
-              <Button onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link</Button>
+              <Button variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -853,7 +853,7 @@ function CippTenantPanel({ client }) {
             <div className="text-[10px] text-zinc-600 font-mono">tenant: {tenantId}</div>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
+            <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
             <Button size="sm" variant="outline" asChild><Link to="/cipp"><ExternalLink className="w-3 h-3 mr-1" />CIPP Center</Link></Button>
             <Button size="sm" variant="ghost" className="text-rose-400" onClick={doUnlink} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
           </div>
