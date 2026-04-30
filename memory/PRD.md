@@ -545,3 +545,22 @@ Every action is audited in `db.trmm_actions` and every script run is captured in
 
 ### Tests
 - `/app/test_reports/iteration_127.json` — 34/34 passed, zero issues.
+
+## 2026-04-30 (cont. 6) — Scheduled Broadcasts + Maintenance Window Badge
+
+### What shipped
+**Backend (4 new endpoints + scheduler loop):**
+- `POST /api/trmm/scheduled-broadcasts` — queue a command/script for future execution. Body includes `run_at` (ISO datetime), `repeat` (once/daily/weekly), all broadcast fields. Validation: 503 unconfigured · 400 for missing agent_ids/command/run_at/repeat · 400 for >200 agents.
+- `GET /api/trmm/scheduled-broadcasts` — list pending (or `?include_completed=true` for history)
+- `GET /api/trmm/scheduled-broadcasts/{id}` — detail
+- `DELETE /api/trmm/scheduled-broadcasts/{id}` — cancel (404 if already executed/cancelled)
+- `execute_due_scheduled_broadcasts()` — called by `_trmm_scheduled_broadcast_loop()` in server.py every 30s. Fires due items, creates real bcast- record, links `last_broadcast_id`, increments runs_count. For daily/weekly, bumps run_at forward to next occurrence instead of marking complete.
+
+**Frontend:**
+- **Broadcast dialog**: "Run now" vs "Schedule for later" pill toggle; when scheduling shows datetime-local picker + repeat (once/daily/weekly) dropdown. Submit button label adapts ("Schedule for 5 agents" / "Broadcast to 5 agents").
+- **Scheduled tab** in TRMM Command Center — table with label/command, target count, run-at, repeat badge, last-run info, Cancel action.
+- **Maintenance-window badge** in TRMM CC header — appears when any scheduled broadcast is queued within next 24h; shows count + time-until-next, click jumps straight to the Scheduled tab.
+
+### Tests
+- `/app/test_reports/iteration_128.json` — 44/44 passed, zero issues.
+- End-to-end verified: one-time schedule fired in 30s; daily repeat correctly bumped run_at forward.
