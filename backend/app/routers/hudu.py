@@ -354,30 +354,52 @@ async def global_search(q: str = Query(..., min_length=1), current_user: dict = 
 
 
 @router.get("/hudu/summary")
-async def summary(current_user: dict = Depends(get_current_user)):
-    """Dashboard roll-up: counts per resource + recently updated articles."""
+async def summary(force: bool = False, current_user: dict = Depends(get_current_user)):
+    """Dashboard roll-up. Reads from cache (db.settings type='hudu_summary_cache') unless
+    force=true. Cache is refreshed by /hudu/sync and on first ever call.
+    Always returns a `stats` block — never times out the UI."""
     config = await get_hudu_config()
     if not config:
-        return {"configured": False, "message": "Hudu not configured"}
+        return {"configured": False, "message": "Hudu not configured", "stats": {"companies": 0, "articles": 0, "assets": 0, "procedures": 0, "websites": 0, "passwords": 0}}
 
+    cache = await db.settings.find_one({"type": "hudu_summary_cache"}, {"_id": 0})
+    cache_age_min = 999
+    if cache and cache.get("computed_at"):
+        try:
+            dt = datetime.fromisoformat(cache["computed_at"].replace("Z", "+00:00"))
+            cache_age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+        except Exception:
+            pass
+
+    if cache and cache.get("stats") and not force and cache_age_min < 60:
+        return {
+            "configured": True,
+            "stats": cache["stats"],
+            "recent_articles": cache.get("recent_articles", []),
+            "last_synced_at": cache.get("computed_at"),
+            "cache_age_minutes": round(cache_age_min, 1),
+        }
+
+    # Cache miss / stale / force — compute fresh (best effort)
+    fresh = await _compute_hudu_summary(config)
+    return fresh
+
+
+async def _compute_hudu_summary(config: dict) -> dict:
+    """Compute counts live from Hudu, persist to db.settings cache, return."""
     async def safe(coro):
         try:
             return await coro
         except Exception:
             return None
 
-    # Hudu pagination returns totals in the headers for some installations, but not guaranteed.
-    # We use a cheap approach: list with page_size=1 and look at the total_pages when present,
-    # otherwise return length of page-1.
     async def count(path: str, key: str):
         d = await safe(_hudu_get(config, path, params={"page_size": 1}))
         if not d:
             return 0
         total_pages = (d.get("meta") or {}).get("total_pages") or d.get("total_pages") or 0
-        # Best effort: if Hudu returns meta, use it; else fall back to a bigger page
         if total_pages and isinstance(total_pages, int):
-            # Need last page to get remainder; approximate as (total_pages - 1) * 1 + len(last)
-            return total_pages  # Treat as count when per_page == 1
+            return total_pages  # per_page=1 → total_pages == total items
         items = d.get(key) or []
         return len(items)
 
@@ -408,10 +430,17 @@ async def summary(current_user: dict = Depends(get_current_user)):
         "passwords": passwords_cnt,
     }
     await db.settings.update_one(
-        {"type": "hudu"},
-        {"$set": {"last_synced_at": now, "last_summary": stats}},
+        {"type": "hudu_summary_cache"},
+        {"$set": {"type": "hudu_summary_cache", "stats": stats, "recent_articles": recent_articles, "computed_at": now}},
+        upsert=True,
     )
-    return {"configured": True, "stats": stats, "recent_articles": recent_articles, "last_synced_at": now}
+    return {
+        "configured": True,
+        "stats": stats,
+        "recent_articles": recent_articles,
+        "last_synced_at": now,
+        "cache_age_minutes": 0,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -568,7 +597,7 @@ async def suggest_for_ticket(data: dict, current_user: dict = Depends(get_curren
 
 @router.post("/hudu/sync")
 async def sync_hudu_to_kb(data: dict = None, current_user: dict = Depends(get_current_user)):
-    """Sync Hudu articles into the local Knowledge Base."""
+    """Sync Hudu articles into local KB AND refresh the summary count cache."""
     config = await get_hudu_config()
     if not config:
         raise _not_configured()
@@ -616,4 +645,17 @@ async def sync_hudu_to_kb(data: dict = None, current_user: dict = Depends(get_cu
                 await db.kb_articles.insert_one(kb_article)
                 imported += 1
 
-    return {"imported": imported, "updated": updated, "message": f"Synced {imported} new, {updated} updated"}
+    # Refresh summary count cache so the dashboard tiles update immediately after sync
+    summary_payload = {"stats": {}, "computed_at": None}
+    try:
+        summary_payload = await _compute_hudu_summary(config)
+    except Exception as e:
+        # Non-fatal — sync still succeeded
+        summary_payload = {"error": str(e)[:160]}
+
+    return {
+        "imported": imported,
+        "updated": updated,
+        "message": f"Synced {imported} new, {updated} updated",
+        "summary": summary_payload.get("stats"),
+    }
