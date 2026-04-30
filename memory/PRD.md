@@ -466,3 +466,17 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 ### Tests
 - `/app/test_reports/iteration_123.json` — 18/18 passed (backend), zero issues, all TRMM regression tests still green.
+
+## 2026-04-30 (cont. 2) — Unified Remote Access Button on Devices
+
+### What shipped
+- **GET `/api/remote-providers/active`** — Compact list of all currently active+configured remote providers, surfaces TRMM (from `db.settings.type='tactical_rmm'`) and RustDesk (from `db.settings.key='rustdesk_config'`) alongside the generic remote_providers entries.
+- **`<RemoteAccessButton/>` component** (`/app/frontend/src/components/devices/RemoteAccessButton.jsx`) — Single unified button on the Device Detail page that:
+  - Picks the primary action based on priority: TRMM (if device has `trmm_agent_id`) → RustDesk (if `rustdesk_id`) → "Link TRMM" (if TRMM configured but device unlinked) → other providers
+  - Shows a chevron dropdown listing every available provider when more than one option exists
+  - Falls back to a "Configure Remote" CTA linking to Settings if nothing is configured
+  - Handles offline state gracefully
+- DeviceDetailPage no longer hard-codes RustDesk — both old buttons (RustDesk-only + standalone TRMM) replaced with this single component.
+
+### Tests
+- `/app/test_reports/iteration_124.json` — 13/13 passed, zero issues. Confirmed via UI smoke that the button correctly shows "Remote (RustDesk)" when only RustDesk is configured, and will switch to "Remote (TRMM)" once TRMM is wired up + agents linked.
