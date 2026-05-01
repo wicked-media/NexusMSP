@@ -23,6 +23,7 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
 import { ThreatRadarTicker } from "@/components/ai/ThreatRadarTicker";
+import { ChurnRiskTile } from "@/components/ai/ChurnRiskTile";
 import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
 import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
 
@@ -211,7 +212,10 @@ export default function DashboardPage() {
       {/* Morning Standup Digest */}
       <StandupDigestBanner />
       <ThreatRadarTicker />
-      <BlueprintInsightsTile />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BlueprintInsightsTile />
+        <ChurnRiskTile />
+      </div>
 
       {/* Huntress Security Snapshot */}
       <HuntressSummaryCard compact />

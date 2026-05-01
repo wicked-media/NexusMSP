@@ -21,7 +21,7 @@ import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3,
+  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
   Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -819,6 +819,14 @@ export default function InvoicesPage() {
                 </Button>
                 <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => handlePdfDownload(inv)} data-testid="download-pdf-detail-btn">
                   <Download className="w-4 h-4 mr-1" />Download PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                  onClick={() => window.open(`${API}/invoices/${inv.id}/dispute-shield.pdf?token=${encodeURIComponent(token)}`, "_blank")}
+                  data-testid={`dispute-shield-btn-${inv.id}`}
+                >
+                  <Shield className="w-4 h-4 mr-1" />Dispute Shield
                 </Button>
                 <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => {
                   const client = clients.find(c => c.id === inv.client_id);

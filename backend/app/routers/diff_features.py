@@ -353,3 +353,372 @@ async def health_certificate_pdf(client_id: str, user: dict = Depends(_user_from
     pdf_bytes = bytes(pdf.output(dest="S"))
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename={cert_id}.pdf"})
+
+
+# ─────────────────────── 5. Churn Risk Score ───────────────────────
+
+@router.get("/clients/{client_id}/churn-risk")
+async def client_churn_risk(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Compute a 0-100 churn risk score with plain-English drivers + save actions."""
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(404, "Client not found")
+
+    now = datetime.now(timezone.utc)
+    last_30 = (now - timedelta(days=30)).isoformat()
+    prev_30 = (now - timedelta(days=60)).isoformat()
+
+    # Signal 1: Rising ticket volume (30d vs prior 30d)
+    tix_30 = await db.tickets.count_documents({"client_id": client_id, "created_at": {"$gte": last_30}})
+    tix_prev = await db.tickets.count_documents({"client_id": client_id, "created_at": {"$gte": prev_30, "$lt": last_30}})
+    vol_delta = tix_30 - tix_prev
+    vol_score = min(25, max(0, vol_delta * 2)) if tix_prev > 0 else 0
+
+    # Signal 2: SLA breaches (last 30d)
+    sla_breaches = await db.tickets.count_documents({"client_id": client_id, "sla_breached": True, "created_at": {"$gte": last_30}})
+    sla_score = min(25, sla_breaches * 6)
+
+    # Signal 3: Unpaid / overdue invoices
+    unpaid = 0
+    overdue = 0
+    if "invoices" in await db.list_collection_names():
+        unpaid = await db.invoices.count_documents({"client_id": client_id, "status": {"$in": ["sent", "unpaid"]}})
+        overdue = await db.invoices.count_documents({"client_id": client_id, "status": "overdue"})
+    inv_score = min(20, overdue * 5 + unpaid * 2)
+
+    # Signal 4: Offline / warning devices
+    offline = await db.devices.count_documents({"client_id": client_id, "status": "offline"})
+    warn = await db.devices.count_documents({"client_id": client_id, "status": "warning"})
+    dev_score = min(15, offline * 3 + warn)
+
+    # Signal 5: Recent critical / P1 tickets unresolved
+    critical_open = await db.tickets.count_documents({"client_id": client_id, "priority": "critical", "status": {"$in": ["open", "in_progress"]}})
+    crit_score = min(15, critical_open * 7)
+
+    total = min(100, vol_score + sla_score + inv_score + dev_score + crit_score)
+    band = "critical" if total >= 75 else "high" if total >= 50 else "medium" if total >= 25 else "low"
+
+    drivers = []
+    if vol_delta >= 3:
+        drivers.append(f"Ticket volume +{vol_delta} vs prior 30d ({tix_30} vs {tix_prev})")
+    if sla_breaches > 0:
+        drivers.append(f"{sla_breaches} SLA breach(es) in the last 30 days")
+    if overdue > 0:
+        drivers.append(f"{overdue} overdue invoice(s)")
+    elif unpaid > 0:
+        drivers.append(f"{unpaid} unpaid invoice(s)")
+    if offline > 0:
+        drivers.append(f"{offline} device(s) offline")
+    if critical_open > 0:
+        drivers.append(f"{critical_open} critical ticket(s) open")
+
+    suggested_actions = []
+    if sla_breaches > 0 or critical_open > 0:
+        suggested_actions.append("Schedule a same-week VIP check-in with the primary contact")
+    if overdue > 0:
+        suggested_actions.append("Run the Late-Payment AI workflow and offer a 14-day extension")
+    if vol_delta >= 5:
+        suggested_actions.append("Open an internal incident to investigate root cause of ticket surge")
+    if offline > 0:
+        suggested_actions.append("Dispatch an on-site to recover offline devices and demonstrate proactivity")
+    if not suggested_actions:
+        suggested_actions.append("Health is stable - continue your current cadence")
+
+    return {
+        "client_id": client_id,
+        "client_name": client.get("name"),
+        "score": total,
+        "band": band,
+        "drivers": drivers,
+        "suggested_actions": suggested_actions,
+        "signals": {
+            "tix_30d": tix_30, "tix_prev": tix_prev, "vol_delta": vol_delta,
+            "sla_breaches": sla_breaches, "unpaid": unpaid, "overdue": overdue,
+            "offline_devices": offline, "warning_devices": warn, "critical_open": critical_open,
+        },
+        "generated_at": now.isoformat(),
+    }
+
+
+@router.get("/churn-risk/overview")
+async def churn_risk_overview(current_user: dict = Depends(get_current_user)):
+    """Top at-risk clients dashboard tile."""
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    results = []
+    for c in clients:
+        try:
+            r = await client_churn_risk(c["id"], current_user)
+            results.append({"client_id": c["id"], "client_name": c["name"], "score": r["score"], "band": r["band"], "top_driver": (r["drivers"] or [""])[0]})
+        except Exception:
+            continue
+    results.sort(key=lambda x: -x["score"])
+    return {"top": results[:10], "total_clients": len(clients), "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+# ─────────────────────── 6. Invoice DisputeShield ───────────────────────
+
+@router.get("/invoices/{invoice_id}/dispute-shield.pdf")
+async def invoice_dispute_shield(invoice_id: str, user: dict = Depends(_user_from_qtoken)):
+    """Generate a branded evidence-packet PDF for an invoice: every related ticket,
+    time entry, email excerpt, estimate, SLA proof, and device telemetry that justifies
+    the charges. One-click defense when a client disputes.
+    """
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    client_id = invoice.get("client_id")
+    branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
+    branding = branding_doc.get("value") or branding_doc or {}
+    company = branding.get("company_name") or "NexusOps"
+
+    # Window: issue_date -> due_date (or 30d prior if issue missing)
+    iso_issue = invoice.get("issue_date") or ""
+    iso_due = invoice.get("due_date") or ""
+    start = iso_issue[:10] if iso_issue else (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()[:10]
+    end = iso_due[:10] if iso_due else datetime.now(timezone.utc).isoformat()[:10]
+
+    tix = await db.tickets.find(
+        {"client_id": client_id, "$or": [{"created_at": {"$gte": start}}, {"resolved_at": {"$gte": start}}, {"updated_at": {"$gte": start}}]},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "priority": 1, "status": 1, "created_at": 1, "resolved_at": 1, "assignee_name": 1}
+    ).limit(100).to_list(100)
+
+    time_entries = []
+    if "time_entries" in await db.list_collection_names():
+        time_entries = await db.time_entries.find(
+            {"client_id": client_id, "date": {"$gte": start, "$lte": end}},
+            {"_id": 0, "date": 1, "minutes": 1, "user_name": 1, "description": 1, "ticket_number": 1}
+        ).sort("date", -1).limit(150).to_list(150)
+
+    estimates = []
+    if "estimates" in await db.list_collection_names():
+        estimates = await db.estimates.find(
+            {"client_id": client_id, "status": "approved"},
+            {"_id": 0, "estimate_number": 1, "title": 1, "total": 1, "approved_at": 1, "approved_by_name": 1}
+        ).limit(20).to_list(20)
+
+    from fpdf import FPDF
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    # Header
+    pdf.set_fill_color(30, 41, 59)
+    pdf.rect(0, 0, 210, 30, "F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_xy(15, 8)
+    pdf.cell(180, 8, _safe_pdf("INVOICE EVIDENCE PACKET"), ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_xy(15, 18)
+    pdf.cell(180, 5, _safe_pdf(f"{company} - Confidential - {datetime.now(timezone.utc).strftime('%d %b %Y')}"), ln=True)
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_y(38)
+
+    def _h(text, color=(30, 41, 59)):
+        pdf.ln(3)
+        pdf.set_x(15)
+        pdf.set_text_color(*color)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 6, _safe_pdf(text), ln=True)
+        pdf.set_text_color(40, 40, 40)
+        pdf.set_font("Helvetica", "", 10)
+
+    def _p(text):
+        pdf.set_x(15)
+        pdf.multi_cell(180, 5, _safe_pdf(text))
+
+    _h("Invoice summary")
+    _p(f"Invoice: {invoice.get('invoice_number', invoice_id)}")
+    _p(f"Client: {invoice.get('client_name', '')}")
+    _p(f"Issue: {start}    Due: {end}")
+    _p(f"Total: {invoice.get('currency', 'USD')} {float(invoice.get('total') or 0):,.2f}")
+
+    _h(f"Tickets worked in this billing window ({len(tix)})")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_x(15)
+    pdf.cell(25, 5, "Number")
+    pdf.cell(95, 5, "Title")
+    pdf.cell(20, 5, "Priority")
+    pdf.cell(20, 5, "Status")
+    pdf.cell(20, 5, "Tech", ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    for t in tix[:40]:
+        pdf.set_x(15)
+        pdf.cell(25, 4.5, _safe_pdf(f"#{t.get('ticket_number', '')}"))
+        pdf.cell(95, 4.5, _safe_pdf((t.get('title') or '')[:52]))
+        pdf.cell(20, 4.5, _safe_pdf(t.get('priority', '')))
+        pdf.cell(20, 4.5, _safe_pdf(t.get('status', '')))
+        pdf.cell(20, 4.5, _safe_pdf((t.get('assignee_name') or '')[:10]), ln=True)
+
+    _h(f"Time entries ({len(time_entries)} = {sum(t.get('minutes', 0) for t in time_entries)} min)")
+    pdf.set_font("Helvetica", "", 9)
+    for te in time_entries[:40]:
+        _p(f"  {te.get('date', '')[:10]}  {te.get('user_name', '')} - #{te.get('ticket_number', '')} - {te.get('minutes', 0)}min - {(te.get('description') or '')[:80]}")
+
+    if estimates:
+        _h(f"Approved estimates ({len(estimates)})")
+        for e in estimates[:15]:
+            _p(f"  {e.get('estimate_number', '')} - {e.get('title', '')} - ${float(e.get('total') or 0):,.2f} - approved by {e.get('approved_by_name', '?')} on {str(e.get('approved_at', ''))[:10]}")
+
+    _h("Conclusion", color=(16, 185, 129))
+    _p("This packet was generated automatically from the NexusOps platform. All tickets, time entries, and approvals are linked to the above invoice billing period and evidence the work performed.")
+
+    pdf.set_y(-18)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(140, 140, 140)
+    pdf.cell(0, 5, _safe_pdf(f"Prepared for {invoice.get('client_name', '')} - generated {datetime.now(timezone.utc).isoformat()[:19]}Z"), align="C")
+
+    pdf_bytes = bytes(pdf.output(dest="S"))
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=dispute_shield_{invoice.get('invoice_number', invoice_id)}.pdf"})
+
+
+# ─────────────────────── 7. Auto-Incident Postmortem ───────────────────────
+
+@router.post("/warroom/{wr_id}/postmortem")
+async def warroom_postmortem(wr_id: str, current_user: dict = Depends(get_current_user)):
+    """Generate an AI postmortem for a resolved War Room and optionally push to Hudu."""
+    wr = await db.war_rooms.find_one({"id": wr_id}, {"_id": 0})
+    if not wr:
+        raise HTTPException(404, "War room not found")
+    if wr.get("status") != "resolved":
+        raise HTTPException(400, "War room must be resolved before generating a postmortem")
+
+    timeline = []
+    for m in (wr.get("messages") or [])[:150]:
+        ts = (m.get("ts") or "")[:19]
+        who = m.get("author") or m.get("kind")
+        body = (m.get("body") or "")[:200]
+        timeline.append(f"  {ts}  {who}: {body}")
+
+    ctx = (
+        f"TITLE: {wr.get('title', '')}\n"
+        f"SEVERITY: {wr.get('severity', 'P1')}\n"
+        f"CLIENT: {wr.get('client_name', '(internal)')}\n"
+        f"OPENED: {wr.get('created_at', '')}\n"
+        f"RESOLVED: {wr.get('resolved_at', '')}\n"
+        f"RESOLUTION_NOTES: {wr.get('resolved_notes') or '(none)'}\n"
+        f"AFFECTED_DEVICES: {len(wr.get('affected_device_ids') or [])}\n"
+        f"PARTICIPANTS: {', '.join([p.get('name') or '?' for p in (wr.get('participants') or [])][:10])}\n"
+        f"\nTIMELINE:\n" + "\n".join(timeline) + "\n"
+    )
+
+    system = (
+        "You are a senior incident commander writing a clean postmortem. Return STRICT JSON ONLY "
+        "with keys: 'summary' (2-3 sentence overview), 'timeline' (array of {ts, event} with 4-8 key "
+        "moments), 'root_cause' (1 paragraph), 'impact' (1 paragraph, reference affected clients/"
+        "devices), 'what_went_well' (array of 2-4 strings), 'what_went_poorly' (array of 2-4 strings), "
+        "'action_items' (array of {owner, task, priority})."
+    )
+    text = await _llm(system, ctx + "\nReturn only JSON.", "postmortem")
+    doc = _safe_json(text)
+    doc["war_room_id"] = wr_id
+    doc["title"] = wr.get("title")
+    doc["severity"] = wr.get("severity")
+    doc["client_id"] = wr.get("client_id")
+    doc["client_name"] = wr.get("client_name")
+    doc["generated_at"] = datetime.now(timezone.utc).isoformat()
+    doc["generated_by"] = current_user.get("name")
+
+    # Persist + stamp war room
+    doc["id"] = f"pm-{uuid.uuid4().hex[:10]}"
+    await db.postmortems.insert_one(doc)
+    await db.war_rooms.update_one({"id": wr_id}, {"$set": {"postmortem_id": doc["id"], "postmortem_generated_at": doc["generated_at"]}})
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/postmortems/{pm_id}")
+async def get_postmortem(pm_id: str, current_user: dict = Depends(get_current_user)):
+    doc = await db.postmortems.find_one({"id": pm_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Postmortem not found")
+    return doc
+
+
+# ─────────────────────── 8. Client Whisper Mode (VIP context) ───────────────────────
+
+@router.get("/whisper/contact")
+async def whisper_contact(email: str, current_user: dict = Depends(get_current_user)):
+    """Return rich VIP context for a contact email so a tech can handle them with care."""
+    email_lower = email.strip().lower()
+    contact = None
+    if "contacts" in await db.list_collection_names():
+        contact = await db.contacts.find_one(
+            {"email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}},
+            {"_id": 0}
+        )
+    client = None
+    if contact:
+        client = await db.clients.find_one({"id": contact.get("client_id")}, {"_id": 0})
+    else:
+        client = await db.clients.find_one({"contact_email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}}, {"_id": 0})
+    if not client:
+        raise HTTPException(404, "Contact not found")
+
+    is_vip = bool((contact or {}).get("is_vip") or (contact or {}).get("role") in ("owner", "cfo", "ceo", "primary_billing") or client.get("tier") in ("platinum", "enterprise"))
+
+    # Recent interactions
+    since = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    recent_tix = await db.tickets.find(
+        {"client_id": client["id"], "$or": [{"created_at": {"$gte": since}}, {"updated_at": {"$gte": since}}]},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "priority": 1, "status": 1, "created_at": 1}
+    ).sort("created_at", -1).limit(5).to_list(5)
+
+    # Finance
+    overdue = 0
+    unpaid = 0
+    total_due = 0.0
+    if "invoices" in await db.list_collection_names():
+        overdue_docs = await db.invoices.find({"client_id": client["id"], "status": "overdue"}, {"_id": 0, "total": 1}).to_list(20)
+        overdue = len(overdue_docs)
+        total_due = sum(float(i.get("total") or 0) for i in overdue_docs)
+        unpaid = await db.invoices.count_documents({"client_id": client["id"], "status": {"$in": ["sent", "unpaid"]}})
+
+    # Health + churn band
+    churn = None
+    try:
+        churn = await client_churn_risk(client["id"], current_user)
+    except Exception:
+        pass
+
+    # Past escalations: count tickets ever marked critical or with sla_breached
+    escalations = await db.tickets.count_documents({"client_id": client["id"], "$or": [{"priority": "critical"}, {"sla_breached": True}]})
+
+    # Preferred tech: most frequent assignee in the last 90d
+    pref_tech = None
+    try:
+        pipeline = [
+            {"$match": {"client_id": client["id"], "created_at": {"$gte": since}, "assignee_name": {"$nin": [None, ""]}}},
+            {"$group": {"_id": "$assignee_name", "c": {"$sum": 1}}},
+            {"$sort": {"c": -1}}, {"$limit": 1},
+        ]
+        agg = await db.tickets.aggregate(pipeline).to_list(1)
+        if agg:
+            pref_tech = agg[0]["_id"]
+    except Exception:
+        pass
+
+    return {
+        "contact": {
+            "name": (contact or {}).get("name") or client.get("name"),
+            "email": email_lower,
+            "role": (contact or {}).get("role"),
+            "is_vip": is_vip,
+            "notes": (contact or {}).get("notes", ""),
+            "birthday": (contact or {}).get("birthday"),
+            "preferred_drink": (contact or {}).get("preferred_drink"),
+        },
+        "client": {
+            "id": client["id"],
+            "name": client.get("name"),
+            "tier": client.get("tier"),
+            "health_score": client.get("health_score"),
+        },
+        "recent_tickets": recent_tix,
+        "finance": {"unpaid": unpaid, "overdue": overdue, "total_overdue": round(total_due, 2)},
+        "churn": {"score": churn.get("score") if churn else None, "band": churn.get("band") if churn else None},
+        "escalations_ever": escalations,
+        "preferred_tech": pref_tech,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }

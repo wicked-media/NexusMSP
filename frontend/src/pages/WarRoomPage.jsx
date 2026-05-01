@@ -18,6 +18,7 @@ import {
   CheckCircle2, Loader2, ChevronRight, Share2, Copy, Link2, XCircle,
   Activity, Server, FileText, Zap, Plus, Eye, Megaphone, ChevronUp, RefreshCw,
 } from "lucide-react";
+import { PostmortemButton } from "@/components/ai/PostmortemButton";
 
 const STATUS_CLS = {
   investigating: "text-rose-400 border-rose-500/40 bg-rose-500/10",
@@ -330,6 +331,7 @@ function WarRoomDetail({ wrId }) {
               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />Resolve
             </Button>
           )}
+          {wr.status === "resolved" && <PostmortemButton warRoomId={wr.id} />}
         </div>
       </div>
 

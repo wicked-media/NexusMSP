@@ -6,6 +6,7 @@ import DOMPurify from "dompurify";
 import CoPilotPanel from "@/components/CoPilotPanel";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
+import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2481,6 +2482,11 @@ export default function TicketsPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* VIP Whisper Rail — shows rich context on the requester */}
+        {(viewingTicket.requester_email || viewingTicket.contact_email) && (
+          <WhisperRail email={viewingTicket.requester_email || viewingTicket.contact_email} />
+        )}
 
         {/* Technician Co-Pilot */}
         <CoPilotPanel ticket={viewingTicket} device={deviceStatus} />
