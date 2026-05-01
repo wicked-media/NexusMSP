@@ -42,6 +42,15 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - **Frontend** — `TicketBlueprintPanel` empty state gets a "Suggest from history" button (violet break-button style). Opens `SuggestDialog` showing the learned-from ticket refs, editable name/description, and the proposed fields + checklist. "Save & Apply" persists as a new blueprint and applies it to the current ticket in one shot.
 - Smoke-tested: Claude generated a correct "New User Onboarding" blueprint (6 fields incl. a Select, 8 required checklist items, `require_completion=true`) from 2 source tickets.
 
+### Cross-client Blueprint Pattern Library (May 1, 2026 · follow-up 2)
+- **Backend** `GET /api/blueprint-patterns` — bigram clustering over ALL resolved/closed tickets across every client. Returns top patterns with `ticket_count`, `client_count`, `sample_titles`, `sample_ticket_ids`, `affected_client_ids`, `related_blueprints` and collapses bigrams whose ticket pool overlaps >60%.
+- **Backend** `POST /api/blueprint-patterns/suggest` — feeds the cross-client corpus to Claude 4.5 with a tenant-agnostic prompt → returns a shared-blueprint draft.
+- **Backend** `POST /api/blueprints/{bp_id}/push-to-clients` — bulk-assigns blueprint to N clients at once, with optional `make_default` flag.
+- **Frontend** — `/blueprints` splits into **Library** and **Pattern Discovery** tabs. Pattern cards show name guess, tokens, ticket/client counts, top category, sample titles. "Generate Blueprint" button → AI dialog with editable draft + two switches: **Push to all N clients** (on by default) and **Also set as default**.
+- **Bug fix**: `push-to-clients` was only updating 1 client because `{}` is falsy in Python; now uses `client is None` guard + matched_count. Fixed the endpoint path mismatch caught by the testing agent (`/blueprint-patterns` instead of `/blueprints/patterns` to avoid shadowing `/blueprints/{bp_id}`).
+- Smoke-tested: Claude 4.5 generated "VPN Configuration & Troubleshooting" blueprint with 5 fields (incl. 2 Select dropdowns) and 8 production-grade checklist items from 2 cross-client VPN tickets. Push endpoint now correctly updates all 4 clients.
+- **Testing**: `iteration_132.json` — 17/17 backend tests PASS · 100% frontend UI pass.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)
