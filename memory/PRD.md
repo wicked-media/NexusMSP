@@ -68,6 +68,19 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - **Routing/Nav**: `/qbr` route added; "QBRs" nav item under Business section between Revenue Growth and War Rooms.
 - **Testing**: `iteration_134.json` — 23/23 backend tests PASS · 100% frontend UI pass. Zero blockers. Generated valid 6.4KB PDF starting with `%PDF-1.3` header.
 
+### Big differentiator drop (May 1, 2026 · iteration 135) — six new features in one batch
+1. **Invoice PDF Template Builder** (`/app/backend/app/routers/invoice_pdf_templates.py`, `/app/frontend/src/pages/InvoiceTemplatesPage.jsx`):
+   - CRUD `/api/invoice-templates` with 12 toggleable, reorderable blocks (logo, company_info, bill_to, invoice_meta, line_items, totals, payment_terms, notes, bank_details, qr_pay, thank_you, footer).
+   - Inline editable copy with merge tags (`{{invoice_number}}`, `{{client_name}}`, `{{due_date}}`, `{{total}}`, `{{terms_days}}`, `{{bank_name}}`, etc).
+   - 4 base layouts (classic/minimal/bold/executive), 3 densities, custom hex primary colour.
+   - Live PDF preview iframe via GET `/preview-pdf?token=...`. Per-doc default + per-invoice template override (`/api/invoices/{id}/pdf-with-template?template_id=...`).
+2. **AI "Why on fire?"** (`/api/ai/why-on-fire/{entity_type}/{entity_id}`): aggregates last-24h notes/alerts/tickets/devices for a ticket/device/client and asks Claude Sonnet 4.5 for diagnosis/severity/likely_root_cause/3 next steps/confidence. Wired as a rose break-button on ticket detail; opens `WhyOnFireButton` dialog.
+3. **Auto-Quote from Conversation** (`POST /api/tickets/{id}/auto-quote`): reads ticket + notes + product catalog → Claude returns a draft quote with line_items, subtotal, tax, total, confidence, notes_for_tech. Wired as "Quote It" emerald break-button on ticket detail.
+4. **Walk-in Kiosk** (`/app/backend/app/routers/kiosk.py`, `/app/frontend/src/pages/KioskPage.jsx`): zero-auth tablet UI at `/kiosk/:token`. Admin registers a kiosk, gets a long-lived token; clients identify by email (rate-limited 5/min) → see open tickets, approve estimates one-tap, click pay-link on invoices.
+5. **Threat Radar Ticker** (`/api/threat-radar` + `ThreatRadarTicker.jsx`): scrolling marquee on the dashboard pulling Huntress (`threat_events`, `identity_threats`), critical alerts, and live cross-client ticket patterns. Hidden when no items.
+6. **Client Health Certificate PDF** (`/api/clients/{id}/health-certificate.pdf?token=`): branded landscape A4 cert with score, grade, dimensions, cert ID. ★ Certificate button next to the Health Dial on client detail.
+- **Testing**: `iteration_135.json` — **33/35 backend (94%) · 100% frontend**. The 2 minor items (entity_type missing on quiet-period response; warroom path collision in test) fixed in this round.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)

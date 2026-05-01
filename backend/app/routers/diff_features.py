@@ -98,7 +98,16 @@ async def why_on_fire(entity_type: str, entity_id: str, current_user: dict = Dep
         bundle.append(f"  Devices: {offline} offline, {warning} warning")
 
     if len(bundle) < 2:
-        return {"diagnosis": "Not enough activity in the last 24h to diagnose anything significant.", "next_steps": [], "severity": "info"}
+        return {
+            "diagnosis": "Not enough activity in the last 24h to diagnose anything significant.",
+            "next_steps": [],
+            "severity": "info",
+            "confidence": "low",
+            "likely_root_cause": "",
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     system = (
         "You are a senior MSP engineer doing on-call triage. Given a snapshot of the last 24 hours "
