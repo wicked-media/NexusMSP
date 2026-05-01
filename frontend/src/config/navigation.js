@@ -222,6 +222,7 @@ export const navGroups = [
       },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
+      { path: "/growth", icon: TrendingUp, label: "Revenue Growth" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
       { path: "/license-management", icon: Layers, label: "License Mgmt" },
     ]

@@ -601,3 +601,33 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
 ### Tests
 - Hand-verified end-to-end: seeded client-001 with a dummy UniFi site (10 devices, 8 online, 1 alert) → health score dropped from 72 → 66, composite reflects network_score=75, risk factors show "2 UniFi device(s) offline at Acme HQ" + "1 UniFi site alerts", `details.network` returns full stats.
 - Regression: existing health endpoints unchanged for clients without UniFi (network_health stays null, legacy 6-dimension scoring intact).
+
+## 2026-05-01 — Revenue Opportunity Scanner ⭐ (MSP differentiator)
+
+### What shipped
+**Backend** (`/app/backend/app/routers/growth.py`):
+- `POST /api/growth/scan` — walks every client, applies 6 detectors, creates ranked opportunities. Keeps human-curated statuses (quoted/won/lost/dismissed), only refreshes `status='new'`.
+- `GET /api/growth/opportunities` — filter by status, client_id, category
+- `GET /api/growth/summary` — pipeline value, by_status, by_category, top 10 opps, top 10 clients by pipeline
+- `PATCH /api/growth/opportunities/{id}` — status lifecycle (new → quoted → won/lost/dismissed), notes, quoted_value
+- `POST /api/growth/opportunities/{id}/pitch` — Claude Sonnet 4.5 drafts a tailored 3-5 sentence email pitch body using Emergent LLM key
+
+**Detectors** (each emits `{monthly_value, one_time_value, confidence}` → priority score):
+1. **EOL Windows devices** → hardware refresh ($2k × device, confidence 0.9)
+2. **M365 hygiene < 70** → Managed MFA/MDR ($18 × users/mo, confidence 0.85)
+3. **Security posture gap** (≥3 alerts, no EDR flag) → Managed EDR ($8 × endpoints/mo, 0.75)
+4. **Backup failure rate > 10%** → Immutable-backup upgrade ($15 × endpoints/mo, 0.9)
+5. **Expiring contracts** (≤90d) → Renewal with 15% uplift (confidence scales with urgency)
+6. **Contract over-utilisation** (>10% over cap) → Hour-pack upsell ($150 × extra h/mo, 0.8)
+
+**Frontend** (`/app/frontend/src/pages/GrowthPage.jsx`):
+- Route `/growth`, nav under Finance/Business section with TrendingUp icon.
+- 4 KPI cards: Open pipeline $, Won all-time, Top category, Last scan metadata.
+- "Top clients by pipeline" row with per-client $ values.
+- Filterable table: status tabs (Active/New/Quoted/Won/Lost-Dismissed), category chips (Hardware/Security/Data Protection/Contracts), free-text search.
+- Priority bar visualisation per row.
+- Side-drawer detail view with evidence JSON, suggested action, AI-pitch panel (Draft email → Claude Sonnet generates body → Copy button), quoted value + notes fields, status-change buttons (Quoted/Won/Lost/Dismissed).
+
+### Tests
+- Hand-tested via curl: scan across 20 seed clients → 7 opportunities, $9,080 annual pipeline. All endpoints behave correctly.
+- Frontend visually verified: Growth page renders with KPI cards, top clients grid, filterable opportunity table. Lint clean.
