@@ -4,6 +4,7 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import DOMPurify from "dompurify";
 import CoPilotPanel from "@/components/CoPilotPanel";
+import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1265,6 +1266,12 @@ export default function TicketsPage() {
             <Button variant="outline" size="sm" onClick={handleDownloadPdf} data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
+            {viewingTicket.blueprint_id && (
+              <Badge variant="outline" className="text-sky-400 border-sky-500/30 bg-sky-500/10 gap-1">
+                <Lightbulb className="w-3 h-3" />
+                {viewingTicket.blueprint_name || "Blueprint"}
+              </Badge>
+            )}
           </div>
         </div>
 
@@ -1473,8 +1480,9 @@ export default function TicketsPage() {
 
             {/* Tabs: Conversation first, then Suggestions, etc */}
             <Tabs defaultValue="conversation">
-              <TabsList className="w-full grid grid-cols-8">
+              <TabsList className="w-full grid grid-cols-9">
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length + ticketSms.length})</TabsTrigger>
+                <TabsTrigger value="blueprint" data-testid="blueprint-tab"><Lightbulb className="w-3 h-3 mr-1" />{viewingTicket.blueprint_id ? "Worksheet" : "Blueprint"}</TabsTrigger>
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
                 <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
                 <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
@@ -1483,6 +1491,14 @@ export default function TicketsPage() {
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
               </TabsList>
+
+              {/* BLUEPRINT / WORKSHEET TAB */}
+              <TabsContent value="blueprint" className="space-y-4">
+                <TicketBlueprintPanel
+                  ticket={viewingTicket}
+                  onTicketUpdated={(updated) => setViewingTicket(updated)}
+                />
+              </TabsContent>
 
               {/* AI SUGGESTIONS TAB */}
               <TabsContent value="suggestions" className="space-y-4">

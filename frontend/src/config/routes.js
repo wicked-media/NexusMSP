@@ -16,6 +16,8 @@ export const routeConfig = [
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
   { path: "/warroom/:id", component: page("WarRoomPage"), auth: true, layout: false },
   { path: "/warroom/public/:slug", component: page("WarRoomPublicPage"), auth: false, layout: false },
+  { path: "/tech-roster", component: page("TechRosterPage"), auth: true, layout: true },
+  { path: "/blueprints", component: page("BlueprintsPage"), auth: true, layout: true },
   { path: "/growth", component: page("GrowthPage"), auth: true, layout: true },
   { path: "/suped", component: page("SupedCommandCenterPage"), auth: true, layout: true },
   { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },

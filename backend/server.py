@@ -122,6 +122,7 @@ async def startup_event():
     asyncio.create_task(_standup_digest_scheduler())
     # Start TRMM scheduled-broadcast runner
     asyncio.create_task(_trmm_scheduled_broadcast_loop())
+    asyncio.create_task(_warroom_escalation_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
@@ -209,6 +210,19 @@ async def _trmm_scheduled_broadcast_loop():
                 logger.info(f"TRMM scheduler fired {fired} broadcast(s)")
         except Exception as e:
             logger.debug(f"TRMM scheduler loop error: {e}")
+        await asyncio.sleep(30)
+
+
+async def _warroom_escalation_loop():
+    """Background loop that auto-escalates unacked War Room pages tier by tier."""
+    import asyncio
+    await asyncio.sleep(25)
+    while True:
+        try:
+            from app.routers.warroom import warroom_escalation_tick
+            await warroom_escalation_tick()
+        except Exception as e:
+            logger.debug(f"War Room escalation loop error: {e}")
         await asyncio.sleep(30)
 
 

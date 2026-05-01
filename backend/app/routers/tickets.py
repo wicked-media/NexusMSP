@@ -110,6 +110,28 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     doc['sla_due'] = doc['sla_due'].isoformat() if doc['sla_due'] else None
     await db.tickets.insert_one(doc)
     await db.clients.update_one({"id": ticket_data.client_id}, {"$inc": {"ticket_count": 1}})
+
+    # Auto-apply default blueprint if the client has one (Syncro-style worksheet auto-apply)
+    try:
+        if client and client.get("default_blueprint_id"):
+            bp = await db.blueprints.find_one({"id": client["default_blueprint_id"], "active": True}, {"_id": 0})
+            if bp:
+                from app.routers.blueprints import _hydrate_ticket_with_blueprint
+                _hydrate_ticket_with_blueprint(doc, bp)
+                doc["blueprint_applied_at"] = datetime.now(timezone.utc).isoformat()
+                doc["blueprint_applied_by"] = "auto"
+                await db.tickets.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {k: doc[k] for k in (
+                        "priority", "category", "status", "assignee_id", "sla_minutes",
+                        "blueprint_id", "blueprint_name", "blueprint_require_completion",
+                        "blueprint_fields", "blueprint_checklist",
+                        "blueprint_applied_at", "blueprint_applied_by",
+                    ) if k in doc}},
+                )
+    except Exception as e:
+        logger.warning(f"Failed to auto-apply blueprint: {e}")
+
     await log_activity(current_user, "created", "ticket", ticket.id, ticket.title, f"Created ticket {ticket_number} for {client_name}", metadata={"ticket_number": ticket_number, "client_name": client_name, "priority": ticket_data.priority})
     
     # Auto-ping relevant team members
@@ -131,6 +153,21 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # Auto-close: when marked as resolved, automatically set to closed
     if ticket_data.get("status") == "resolved":
         ticket_data["status"] = "closed"
+    # Blueprint gate: if ticket has a require_completion blueprint, block close/resolve until
+    # required checklist items are done and required fields are filled.
+    if ticket_data.get("status") in ("resolved", "closed") and old_ticket and old_ticket.get("blueprint_require_completion"):
+        cl = old_ticket.get("blueprint_checklist") or []
+        missing_items = [c.get("label") for c in cl if c.get("required") and not c.get("done")]
+        # Resolve required worksheet field labels too
+        bp = await db.blueprints.find_one({"id": old_ticket.get("blueprint_id")}, {"_id": 0, "fields": 1}) if old_ticket.get("blueprint_id") else None
+        required_fields = [f for f in ((bp or {}).get("fields") or []) if f.get("required")]
+        fvals = old_ticket.get("blueprint_fields") or {}
+        missing_fields = [f["label"] for f in required_fields if not str(fvals.get(f["key"], "") or "").strip()]
+        if missing_items or missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Blueprint incomplete. Missing checklist: {', '.join(missing_items) or 'none'}. Missing fields: {', '.join(missing_fields) or 'none'}",
+            )
     # Resolve device name if device_id changed
     if 'device_id' in ticket_data and ticket_data['device_id']:
         device = await db.devices.find_one({"id": ticket_data['device_id']}, {"_id": 0, "name": 1})

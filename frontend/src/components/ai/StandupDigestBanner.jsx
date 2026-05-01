@@ -3,19 +3,18 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
-import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, Sun } from "lucide-react";
+import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, Sun, Sunrise, Moon } from "lucide-react";
 
-// Match #PREFIX-NUMBER (e.g., #INC-1234, #SR-0001). Capture the bare ref without the #.
-const TICKET_RE = /#([A-Z]{2,5}-\d{2,8})\b/g;
+// Match #PREFIX-NUMBER or bare PREFIX-NUMBER tokens (INC-1234 / SR-0001).
+const TICKET_RE = /(#?)([A-Z]{2,5}-\d{2,8})\b/g;
 
 function LinkifiedDigest({ text }) {
   if (!text) return null;
-  // Split text into lines and tokens; keep line breaks.
   const out = [];
   text.split("\n").forEach((line, li) => {
     let last = 0;
     const parts = [];
-    line.replace(TICKET_RE, (match, ref, offset) => {
+    line.replace(TICKET_RE, (match, hash, ref, offset) => {
       if (offset > last) parts.push(line.slice(last, offset));
       parts.push(
         <Link
@@ -40,9 +39,12 @@ function LinkifiedDigest({ text }) {
   return <div className="text-xs text-zinc-300 font-sans space-y-1" data-testid="digest-body">{out}</div>;
 }
 
+const SLOT_ICON = { morning: Sunrise, afternoon: Sun, evening: Moon };
+const SLOT_DEFAULT_LABEL = { morning: "Morning Standup", afternoon: "Midday Pulse", evening: "End-of-Day Wrap" };
+
 /**
- * 7am Morning Standup Digest banner for the Dashboard.
- * One-click generate, collapse/expand, refresh.
+ * Time-aware Standup Digest banner for the Dashboard.
+ * Auto-rotates morning / afternoon / evening based on local hour.
  */
 export function StandupDigestBanner() {
   const { token } = useAuth();
@@ -54,7 +56,7 @@ export function StandupDigestBanner() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/ai/standup-digest?hours=12`, { headers });
+      const res = await axios.get(`${API}/ai/standup-digest`, { headers });
       setDigest(res.data);
     } catch {
       setDigest({ ai_brief: "Unable to generate digest right now.", stats: {} });
@@ -64,6 +66,9 @@ export function StandupDigestBanner() {
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const s = digest?.stats || {};
+  const slot = digest?.slot || "morning";
+  const label = digest?.slot_label || SLOT_DEFAULT_LABEL[slot] || "Standup";
+  const Icon = SLOT_ICON[slot] || Sun;
   const urgencyTone =
     (s.critical_open || 0) > 0 || (s.sla_breaches || 0) > 0 ? "rose" :
     (s.failed_backups || 0) > 0 || (s.offline_devices || 0) > 5 ? "amber" : "emerald";
@@ -78,11 +83,11 @@ export function StandupDigestBanner() {
     <div className={`rounded-2xl border ${t.border} ${t.bg} overflow-hidden`} data-testid="standup-digest-banner">
       <div className="flex items-center gap-3 px-4 py-2.5">
         <div className={`w-7 h-7 rounded-lg bg-zinc-900 border ${t.border} flex items-center justify-center ${t.icon}`}>
-          <Sun className="w-3.5 h-3.5" />
+          <Icon className="w-3.5 h-3.5" />
         </div>
         <div className="flex-1">
-          <div className={`text-[10px] uppercase tracking-widest font-semibold ${t.accent} flex items-center gap-2`}>
-            Morning Standup · {new Date().toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}
+          <div className={`text-[10px] uppercase tracking-widest font-semibold ${t.accent} flex items-center gap-2`} data-testid={`standup-slot-${slot}`}>
+            {label} · {new Date().toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}
             <Sparkles className="w-3 h-3" />
           </div>
           {!expanded && digest?.ai_brief && (

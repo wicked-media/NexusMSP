@@ -296,20 +296,79 @@ def _format_digest_prompt(snap: dict) -> str:
     )
 
 
-@router.get("/ai/standup-digest")
-async def standup_digest(hours: int = 12, current_user: dict = Depends(get_current_user)):
-    """
-    Returns a natural-language overnight brief PLUS raw structured data.
-    """
-    snap = await _build_overnight_snapshot(hours=max(1, min(48, hours)))
-    prompt_body = _format_digest_prompt(snap)
+def _slot_for_hour(h: int) -> dict:
+    """Return slot metadata for a given local hour (0-23)."""
+    if 5 <= h < 12:
+        return {
+            "key": "morning", "label": "Morning Standup", "icon": "sunrise",
+            "default_window": 14,  # look back overnight
+            "system": (
+                "You are the 7am MSP morning-standup briefer. Produce a 4-6 bullet overnight briefing. "
+                "Lead with what requires IMMEDIATE action today, then SLA risk, then ops health. "
+                "Always reference tickets using the format #TICKET-NUMBER (e.g. #INC-1234) so they link. "
+                "Be concrete (numbers + client names). Plain text, no markdown headers, no preamble."
+            ),
+        }
+    if 12 <= h < 17:
+        return {
+            "key": "afternoon", "label": "Midday Pulse", "icon": "sun",
+            "default_window": 6,
+            "system": (
+                "You are the midday MSP pulse-check. Produce a 4-5 bullet SINCE-MORNING update. "
+                "Flag what has slipped SLA since 7am, what new P1/P2 tickets came in, open tickets with "
+                "no activity in 4+ hours, and what must close before EOD. Always reference tickets as "
+                "#TICKET-NUMBER so they link. Concrete, plain text, no preamble."
+            ),
+        }
+    return {
+        "key": "evening", "label": "End-of-Day Wrap", "icon": "moon",
+        "default_window": 10,
+        "system": (
+            "You are the 5pm MSP end-of-day wrap. Produce a 4-6 bullet wrap: what was resolved today, "
+            "what's rolling into tomorrow's overnight queue, SLA risk, and a one-line on-call handoff note. "
+            "Always reference tickets as #TICKET-NUMBER so they link. Concrete, plain text, no preamble."
+        ),
+    }
 
-    system = (
-        "You are the 7am MSP standup briefer. Produce a 4-6 bullet briefing for the service-desk "
-        "team. Lead with what requires IMMEDIATE action, then note SLA risk, then ops health. "
-        "Be concrete (use numbers and client names). Plain text, no markdown headers, no preamble."
-    )
-    out = await _llm_complete(system, prompt_body, session_prefix="digest")
+
+@router.get("/ai/standup-digest")
+async def standup_digest(
+    hours: int | None = None,
+    slot: str | None = None,
+    hour_override: int | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Returns a natural-language brief PLUS raw structured data.
+
+    Time-aware: slot auto-selected from local hour (morning/afternoon/evening) unless
+    the caller passes `slot`. Use `hour_override` to preview a different slot.
+    """
+    from zoneinfo import ZoneInfo
+    tz_name = "Australia/Sydney"
+    try:
+        doc = await db.settings.find_one({"key": "standup_digest"}, {"_id": 0}) or {}
+        tz_name = (doc.get("value") or {}).get("timezone") or tz_name
+    except Exception:
+        pass
+    try:
+        local_hour = hour_override if hour_override is not None else datetime.now(ZoneInfo(tz_name)).hour
+    except Exception:
+        local_hour = hour_override if hour_override is not None else datetime.now().hour
+
+    if slot == "morning":
+        meta = _slot_for_hour(8)
+    elif slot == "afternoon":
+        meta = _slot_for_hour(14)
+    elif slot == "evening":
+        meta = _slot_for_hour(18)
+    else:
+        meta = _slot_for_hour(local_hour)
+
+    window_hours = hours if hours is not None else meta["default_window"]
+    snap = await _build_overnight_snapshot(hours=max(1, min(48, window_hours)))
+    prompt_body = _format_digest_prompt(snap)
+    out = await _llm_complete(meta["system"], prompt_body, session_prefix=f"digest-{meta['key']}")
 
     ai_brief = None
     if out.startswith("__AI_NOT_CONFIGURED__"):
@@ -323,6 +382,9 @@ async def standup_digest(hours: int = 12, current_user: dict = Depends(get_curre
         "id": f"digest-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_hours": snap["window_hours"],
+        "slot": meta["key"],
+        "slot_label": meta["label"],
+        "slot_icon": meta["icon"],
         "ai_brief": ai_brief,
         "stats": {
             "new_tickets": snap["new_ticket_count"],

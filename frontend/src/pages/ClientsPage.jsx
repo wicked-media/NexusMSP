@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Badge } from "@/components/ui/badge";
@@ -481,6 +481,7 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             { v: "assets", l: "Assets" },
             { v: "contacts", l: "Contacts" },
             { v: "billing", l: "Billing" },
+            { v: "blueprints", l: "Blueprints" },
             { v: "integrations", l: "Integrations" },
             { v: "cipp", l: "M365 / CIPP" },
             { v: "activity", l: "Activity" },
@@ -593,6 +594,10 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
               <DollarSign className="w-8 h-8 mx-auto mb-3 opacity-40" />
               <Link className="text-indigo-400 hover:underline" to={`/invoices?clientId=${client.id}`}>Open invoices & recurring</Link>
             </div>
+          </TabsContent>
+
+          <TabsContent value="blueprints" className="mt-0">
+            <ClientBlueprintsPanel clientId={client.id} />
           </TabsContent>
 
           <TabsContent value="integrations" className="mt-0 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1078,6 +1083,99 @@ function CippTenantPanel({ client }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ClientBlueprintsPanel({ clientId }) {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [allBps, setAllBps] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [defaultId, setDefaultId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [allRes, cliRes] = await Promise.all([
+        axios.get(`${API}/blueprints?active_only=true`, { headers }),
+        axios.get(`${API}/clients/${clientId}/blueprints`, { headers }),
+      ]);
+      setAllBps(allRes.data || []);
+      setSelected(cliRes.data?.blueprint_ids || []);
+      setDefaultId(cliRes.data?.default_blueprint_id || "");
+    } catch (e) { toast.error("Load failed"); }
+    finally { setLoading(false); }
+  }, [headers, clientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = (id) => {
+    setSelected((prev) => {
+      const has = prev.includes(id);
+      const next = has ? prev.filter((x) => x !== id) : [...prev, id];
+      if (has && defaultId === id) setDefaultId("");
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`${API}/clients/${clientId}/blueprints`, { blueprint_ids: selected, default_blueprint_id: defaultId || null }, { headers });
+      toast.success("Blueprints saved");
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="p-6 text-center text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading…</div>;
+
+  return (
+    <div className="space-y-4" data-testid="client-blueprints-panel">
+      <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="text-sm font-medium">Assigned Blueprints</div>
+            <div className="text-[11px] text-zinc-500">The default blueprint is auto-applied to every new ticket for this client.</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={save} disabled={saving} className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="client-blueprints-save">
+            {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}Save
+          </Button>
+        </div>
+        {allBps.length === 0 ? (
+          <div className="text-xs text-zinc-500 py-6 text-center">
+            No blueprints yet. <Link to="/blueprints" className="text-sky-400 underline">Create one</Link>.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {allBps.map((bp) => {
+              const picked = selected.includes(bp.id);
+              const isDefault = defaultId === bp.id;
+              return (
+                <div key={bp.id} className={`flex items-center gap-2 rounded px-2 py-1.5 ${picked ? "bg-sky-500/5 border border-sky-500/20" : "bg-zinc-900/40 border border-zinc-800"}`} data-testid={`client-bp-row-${bp.id}`}>
+                  <input type="checkbox" checked={picked} onChange={() => toggle(bp.id)} className="accent-sky-500" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{bp.name}</div>
+                    <div className="text-[10px] text-zinc-500">{(bp.fields || []).length} fields · {(bp.checklist || []).length} items</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`h-7 text-[10px] ${isDefault ? "text-amber-400" : "text-zinc-500"}`}
+                    disabled={!picked}
+                    onClick={() => setDefaultId(isDefault ? "" : bp.id)}
+                    data-testid={`client-bp-default-${bp.id}`}
+                  >
+                    {isDefault ? "★ Default" : "Set default"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

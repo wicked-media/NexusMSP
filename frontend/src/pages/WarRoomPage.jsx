@@ -11,11 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   Siren, AlertTriangle, Clock, Users, Radio, MessageSquare, Send,
   CheckCircle2, Loader2, ChevronRight, Share2, Copy, Link2, XCircle,
-  Activity, Server, FileText, Zap, Plus, Eye,
+  Activity, Server, FileText, Zap, Plus, Eye, Megaphone, ChevronUp, RefreshCw,
 } from "lucide-react";
 
 const STATUS_CLS = {
@@ -234,6 +235,7 @@ function WarRoomDetail({ wrId }) {
   const [etaDraft, setEtaDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [pageOpen, setPageOpen] = useState(false);
   const messagesRef = useRef(null);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -311,6 +313,15 @@ function WarRoomDetail({ wrId }) {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <Button
+            variant="outline" size="sm"
+            className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+            onClick={() => setPageOpen(true)}
+            disabled={wr.status === "resolved"}
+            data-testid="warroom-page-btn"
+          >
+            <Megaphone className="w-3.5 h-3.5 mr-1" />Page Team
+          </Button>
           <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(publicUrl); toast.success("Public status URL copied"); }} data-testid="warroom-share-btn">
             <Share2 className="w-3.5 h-3.5 mr-1" />Share
           </Button>
@@ -366,6 +377,39 @@ function WarRoomDetail({ wrId }) {
               <p className="text-[9px] text-muted-foreground leading-tight">Share with client — no login needed. Techs' private chat stays hidden.</p>
             </CardContent>
           </Card>
+
+          {wr.pages?.length > 0 && (
+            <Card>
+              <CardContent className="p-3">
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1 mb-2">
+                  <Megaphone className="w-3 h-3" /> Escalation Ladder
+                  {wr.auto_escalate && wr.next_escalation_at && (
+                    <Badge variant="outline" className="ml-auto text-[9px] text-amber-400 border-amber-500/30">
+                      <Clock className="w-2.5 h-2.5 mr-1" />Next: {timeAgo(wr.next_escalation_at)}
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  {wr.pages.map((p) => (
+                    <div key={p.id} className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${p.status === "ack" ? "bg-emerald-500/10 border border-emerald-500/20" : p.status === "sent" ? "bg-zinc-800/60" : "bg-zinc-900/40 opacity-70"}`} data-testid={`warroom-page-${p.id}`}>
+                      <Badge variant="outline" className={`text-[9px] ${p.tier === 1 ? "text-rose-400 border-rose-500/30" : p.tier === 2 ? "text-amber-400 border-amber-500/30" : "text-sky-400 border-sky-500/30"}`}>T{p.tier}</Badge>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{p.name}</div>
+                        <div className="text-[9px] text-muted-foreground font-mono truncate">{(p.channels || []).join(" · ")}</div>
+                      </div>
+                      {p.status === "ack" ? (
+                        <Badge variant="outline" className="text-[9px] text-emerald-400 border-emerald-500/30"><CheckCircle2 className="w-2.5 h-2.5 mr-0.5" />ACK</Badge>
+                      ) : p.status === "sent" ? (
+                        <Badge variant="outline" className="text-[9px] text-zinc-400 border-zinc-600">sent</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[9px] text-zinc-500 border-zinc-700">pending</Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {wr.affected_devices?.length > 0 && (
             <Card>
@@ -466,6 +510,177 @@ function WarRoomDetail({ wrId }) {
           )}
         </div>
       </div>
+
+      <PageTeamDialog
+        open={pageOpen}
+        onOpenChange={setPageOpen}
+        wrId={wrId}
+        headers={headers}
+        onPaged={() => load()}
+      />
     </div>
+  );
+}
+
+function PageTeamDialog({ open, onOpenChange, wrId, headers, onPaged }) {
+  const [techs, setTechs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [channels, setChannels] = useState(new Set(["email", "push", "sms"]));
+  const [autoEscalate, setAutoEscalate] = useState(true);
+  const [grace, setGrace] = useState(5);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    axios.get(`${API}/tech-roster?active_only=true`, { headers })
+      .then((r) => {
+        setTechs(r.data || []);
+        // Pre-select tier-1 on-call techs
+        const pre = new Set((r.data || []).filter((t) => t.escalation_tier === 1).map((t) => t.id));
+        setSelected(pre);
+      })
+      .catch(() => toast.error("Failed to load roster"))
+      .finally(() => setLoading(false));
+  }, [open, headers]);
+
+  const toggle = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleChannel = (c) => {
+    setChannels((prev) => {
+      const next = new Set(prev);
+      next.has(c) ? next.delete(c) : next.add(c);
+      return next;
+    });
+  };
+
+  const fire = async () => {
+    if (selected.size === 0) { toast.error("Pick at least one tech"); return; }
+    setSending(true);
+    try {
+      await axios.post(
+        `${API}/warroom/${wrId}/page`,
+        {
+          tech_ids: Array.from(selected),
+          channels: Array.from(channels),
+          auto_escalate: autoEscalate,
+          grace_minutes: grace,
+        },
+        { headers },
+      );
+      toast.success(autoEscalate ? "Tier 1 paged — escalation armed" : `Paged ${selected.size} tech(s)`);
+      onOpenChange(false);
+      onPaged && onPaged();
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setSending(false); }
+  };
+
+  const groups = { 1: [], 2: [], 3: [] };
+  techs.forEach((t) => groups[t.escalation_tier || 2]?.push(t));
+
+  const CHS = [
+    { k: "slack", l: "Slack" }, { k: "teams", l: "Teams" }, { k: "sms", l: "SMS" },
+    { k: "email", l: "Email" }, { k: "push", l: "In-app" },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl" data-testid="warroom-page-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Megaphone className="w-5 h-5 text-rose-500" /> Page Team
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-muted/30 rounded-md px-3 py-2">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                <ChevronUp className="w-4 h-4 text-rose-400" /> Auto-Escalate
+              </div>
+              <div className="text-[10px] text-muted-foreground">Fires Tier 1 now · escalates to Tier 2 then Tier 3 if no ack</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <Label className="text-[10px] text-muted-foreground">Grace</Label>
+                <Input type="number" min={1} max={60} value={grace} onChange={(e) => setGrace(parseInt(e.target.value) || 5)} className="h-7 w-14 text-xs" data-testid="warroom-page-grace" />
+                <span className="text-[10px] text-muted-foreground">min</span>
+              </div>
+              <Switch checked={autoEscalate} onCheckedChange={setAutoEscalate} data-testid="warroom-page-autoescalate" />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Channels</Label>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              {CHS.map(({ k, l }) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => toggleChannel(k)}
+                  className={`px-3 py-1 rounded-md border text-xs ${channels.has(k) ? "bg-sky-500/10 border-sky-500/40 text-sky-300" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"}`}
+                  data-testid={`warroom-page-ch-${k}`}
+                >{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Technicians</Label>
+            {loading ? (
+              <div className="py-8 text-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading roster…</div>
+            ) : techs.length === 0 ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">
+                No technicians in roster. <Link to="/tech-roster" className="text-sky-400 underline">Add some</Link> to enable paging.
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-72 overflow-y-auto mt-1.5 pr-1">
+                {[1, 2, 3].map((tier) => groups[tier].length > 0 && (
+                  <div key={tier}>
+                    <div className={`text-[10px] uppercase tracking-widest font-semibold mb-1 ${tier === 1 ? "text-rose-400" : tier === 2 ? "text-amber-400" : "text-sky-400"}`}>
+                      Tier {tier}
+                    </div>
+                    <div className="space-y-1">
+                      {groups[tier].map((t) => (
+                        <label key={t.id} className="flex items-center gap-2 bg-muted/30 hover:bg-muted/50 rounded px-2 py-1.5 cursor-pointer" data-testid={`warroom-page-tech-${t.id}`}>
+                          <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} className="accent-rose-500" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium flex items-center gap-2">
+                              {t.name}
+                              {t.on_call && <Badge variant="outline" className="text-[9px] text-emerald-400 border-emerald-500/30">ON-CALL</Badge>}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">{t.role || ""}{t.mobile ? ` · ${t.mobile}` : ""}</div>
+                          </div>
+                          <div className="text-[9px] text-muted-foreground font-mono">{(t.preferred_channels || []).join("/")}</div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={fire}
+            disabled={sending || selected.size === 0}
+            variant="outline"
+            className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+            data-testid="warroom-page-fire-btn"
+          >
+            {sending ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Megaphone className="w-4 h-4 mr-1" />}
+            {autoEscalate ? "Fire Tier 1 · Arm escalation" : `Page ${selected.size} now`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

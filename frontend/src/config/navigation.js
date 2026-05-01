@@ -37,6 +37,7 @@ export const navGroups = [
           { path: "/tickets", label: "All Tickets" },
           { path: "/kanban-tickets", label: "Kanban Board" },
           { path: "/sla-timer", label: "SLA Center" },
+          { path: "/blueprints", label: "Blueprints" },
         ]
       },
       {
@@ -61,6 +62,7 @@ export const navGroups = [
         path: "/technicians", icon: UserCog, label: "Team Management",
         children: [
           { path: "/technicians", label: "Technicians" },
+          { path: "/tech-roster", label: "On-Call Roster" },
           { path: "/skills-matrix", label: "Skills Matrix" },
           { path: "/tech-utilization", label: "Utilization" },
           { path: "/leaderboard", label: "Leaderboard" },
