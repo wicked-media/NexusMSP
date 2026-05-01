@@ -722,3 +722,294 @@ async def whisper_contact(email: str, current_user: dict = Depends(get_current_u
         "preferred_tech": pref_tech,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─────────────────────── 9. Conversation Sentiment Tracker ───────────────────────
+
+@router.get("/tickets/{ticket_id}/sentiment")
+async def ticket_sentiment(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Score the ticket's client-side conversation for sentiment trajectory."""
+    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "title": 1, "client_name": 1})
+    if not t:
+        raise HTTPException(404, "Ticket not found")
+    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0, "body": 1, "author": 1, "author_type": 1, "created_at": 1}).sort("created_at", 1).limit(40).to_list(40)
+    # Filter to client-side messages
+    client_msgs = [n for n in notes if (n.get("author_type") == "client" or not n.get("author_type", "").startswith("tech"))]
+    if len(client_msgs) < 2:
+        return {"ticket_id": ticket_id, "score": None, "trend": "insufficient_data", "message_count": len(client_msgs), "flag": None}
+
+    corpus = "\n".join([f"{i+1}. {(n.get('body') or '')[:300]}" for i, n in enumerate(client_msgs[-10:])])
+    system = (
+        "You are a customer-experience analyst. Score each message 1-5 where 1=very positive, 3=neutral, 5=very angry. "
+        "Return STRICT JSON ONLY: {per_message:[int,...], latest_score (int), overall_trend ('improving'|'stable'|'worsening'|'volatile'), "
+        "reasoning (1 sentence), escalate_recommended (bool)}."
+    )
+    text = await _llm(system, f"Client messages:\n{corpus}\n\nReturn JSON only.", "sentiment")
+    out = _safe_json(text)
+    flag = None
+    if out.get("escalate_recommended") or (out.get("latest_score") and int(out["latest_score"]) >= 4):
+        flag = "escalating"
+    return {
+        "ticket_id": ticket_id,
+        "ticket_title": t.get("title"),
+        "client_name": t.get("client_name"),
+        "per_message": out.get("per_message", []),
+        "latest_score": out.get("latest_score"),
+        "trend": out.get("overall_trend"),
+        "reasoning": out.get("reasoning"),
+        "escalate_recommended": bool(out.get("escalate_recommended")),
+        "flag": flag,
+        "message_count": len(client_msgs),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─────────────────────── 10. Predictive SLA Breach Radar ───────────────────────
+
+@router.get("/sla-radar")
+async def sla_radar(current_user: dict = Depends(get_current_user)):
+    """Heuristic-based SLA breach predictor.
+
+    Score 0-100 by:
+      - hours_elapsed_vs_target (weight 40)
+      - priority (weight 20, critical more risk)
+      - activity_gap — time since last note (weight 20)
+      - assignee_workload — how many active tickets tech has (weight 20)
+    Tickets >=60 are 'at risk'; >=80 are 'danger zone' (<2h to breach heuristically).
+    """
+    now = datetime.now(timezone.utc)
+    open_tix = await db.tickets.find(
+        {"status": {"$in": ["open", "in_progress"]}},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "priority": 1, "created_at": 1, "sla_due_at": 1,
+         "client_name": 1, "assignee_id": 1, "assignee_name": 1, "sla_target_minutes": 1, "last_activity_at": 1,
+         "updated_at": 1}
+    ).limit(500).to_list(500)
+
+    # Count workload per assignee
+    workload = {}
+    for t in open_tix:
+        aid = t.get("assignee_id")
+        if aid:
+            workload[aid] = workload.get(aid, 0) + 1
+
+    PRI_TARGET_MIN = {"critical": 240, "high": 480, "medium": 1440, "low": 2880}
+    at_risk = []
+    for t in open_tix:
+        target_min = t.get("sla_target_minutes") or PRI_TARGET_MIN.get((t.get("priority") or "medium").lower(), 1440)
+        created_iso = t.get("created_at") or t.get("updated_at") or ""
+        try:
+            created = datetime.fromisoformat(created_iso.replace("Z", "+00:00")) if created_iso else now
+        except Exception:
+            created = now
+        elapsed_min = (now - created).total_seconds() / 60
+        elapsed_pct = min(1.5, elapsed_min / max(1, target_min))
+        age_score = min(40, int(elapsed_pct * 40))
+
+        pri_score = {"critical": 20, "high": 14, "medium": 8, "low": 4}.get((t.get("priority") or "medium").lower(), 8)
+
+        # Activity gap
+        last_activity = t.get("last_activity_at") or t.get("updated_at") or created_iso
+        try:
+            la = datetime.fromisoformat(last_activity.replace("Z", "+00:00")) if last_activity else created
+        except Exception:
+            la = created
+        gap_hours = (now - la).total_seconds() / 3600
+        gap_score = min(20, int(gap_hours * 2))
+
+        load = workload.get(t.get("assignee_id"), 0)
+        load_score = min(20, load * 2)
+
+        score = age_score + pri_score + gap_score + load_score
+        mins_to_breach = max(0, int(target_min - elapsed_min))
+        if score >= 60:
+            at_risk.append({
+                "ticket_id": t["id"],
+                "ticket_number": t.get("ticket_number"),
+                "title": t.get("title"),
+                "client_name": t.get("client_name"),
+                "priority": t.get("priority"),
+                "assignee_name": t.get("assignee_name"),
+                "score": min(100, score),
+                "minutes_to_breach": mins_to_breach,
+                "reasons": [
+                    f"Age: {int(elapsed_pct * 100)}% of SLA window used",
+                    f"Last activity: {int(gap_hours)}h ago" if gap_hours >= 2 else None,
+                    f"Tech workload: {load} open" if load >= 5 else None,
+                ],
+            })
+
+    at_risk.sort(key=lambda x: -x["score"])
+    return {
+        "at_risk": at_risk[:20],
+        "danger_zone_count": sum(1 for t in at_risk if t["score"] >= 80),
+        "generated_at": now.isoformat(),
+    }
+
+
+# ─────────────────────── 11. Payment Promise Tracker ───────────────────────
+
+@router.post("/invoices/{invoice_id}/promises")
+async def record_payment_promise(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Record a payment promise. Body: { text: 'They said pay by Friday', promised_by?: 'contact name' }
+    AI extracts the date.
+    """
+    text = (data.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0, "id": 1, "invoice_number": 1, "client_id": 1, "client_name": 1, "total": 1})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    system = (
+        f"Today is {today}. Extract a payment promise from the given text. Return STRICT JSON ONLY: "
+        "{promised_date: 'YYYY-MM-DD', confidence: 'low|medium|high', snippet: 'quoted promise', "
+        "method: 'bank_transfer|card|cheque|unknown'}. If no date is specified, set promised_date to null."
+    )
+    try:
+        ai = _safe_json(await _llm(system, f"Text: {text}\nReturn JSON only.", "promise"))
+    except Exception:
+        ai = {"promised_date": None, "confidence": "low", "snippet": text[:200], "method": "unknown"}
+
+    doc = {
+        "id": f"pp-{uuid.uuid4().hex[:10]}",
+        "invoice_id": invoice_id,
+        "invoice_number": inv.get("invoice_number"),
+        "client_id": inv.get("client_id"),
+        "client_name": inv.get("client_name"),
+        "invoice_total": inv.get("total"),
+        "raw_text": text,
+        "promised_by": (data.get("promised_by") or "").strip()[:200],
+        "promised_date": ai.get("promised_date"),
+        "method": ai.get("method"),
+        "confidence": ai.get("confidence"),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user.get("name"),
+    }
+    await db.payment_promises.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/payment-promises")
+async def list_payment_promises(status: str | None = None, client_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    q = {}
+    if status:
+        q["status"] = status
+    if client_id:
+        q["client_id"] = client_id
+    promises = await db.payment_promises.find(q, {"_id": 0}).sort("promised_date", 1).to_list(200)
+    # Auto-flag broken promises (promised_date < today & status still pending)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for p in promises:
+        if p.get("status") == "pending" and p.get("promised_date") and p["promised_date"] < today:
+            p["overdue"] = True
+        else:
+            p["overdue"] = False
+    return promises
+
+
+@router.put("/payment-promises/{pp_id}")
+async def update_payment_promise(pp_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Mark status: kept | broken | cancelled."""
+    new_status = data.get("status")
+    if new_status not in ("pending", "kept", "broken", "cancelled"):
+        raise HTTPException(400, "invalid status")
+    patch = {"status": new_status, "resolved_at": datetime.now(timezone.utc).isoformat() if new_status != "pending" else None}
+    res = await db.payment_promises.update_one({"id": pp_id}, {"$set": patch})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Promise not found")
+    return await db.payment_promises.find_one({"id": pp_id}, {"_id": 0})
+
+
+# ─────────────────────── 12. Estimate Follow-up AI ───────────────────────
+
+@router.post("/estimates/{estimate_id}/followup-draft")
+async def estimate_followup_draft(estimate_id: str, current_user: dict = Depends(get_current_user)):
+    est = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
+    if not est:
+        raise HTTPException(404, "Estimate not found")
+    if est.get("status") == "approved":
+        raise HTTPException(400, "Estimate already approved - no follow-up needed")
+
+    # Gather conversation history from related ticket if present
+    convo = ""
+    if est.get("ticket_id"):
+        notes = await db.ticket_notes.find({"ticket_id": est["ticket_id"]}, {"_id": 0, "body": 1, "author": 1}).sort("created_at", -1).limit(15).to_list(15)
+        convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:200]}" for n in notes])
+
+    days_old = 0
+    try:
+        created = datetime.fromisoformat((est.get("created_at") or "").replace("Z", "+00:00"))
+        days_old = (datetime.now(timezone.utc) - created).days
+    except Exception:
+        pass
+
+    items = est.get("items") or est.get("line_items") or []
+    items_text = "\n".join([f"  - {it.get('description','')}: {float(it.get('total') or 0):,.2f}" for it in items[:10]])
+
+    system = (
+        "You are a friendly but effective MSP account manager writing a follow-up email for a stalled estimate. "
+        "Identify the most likely objection (price / scope / timing / competing priority) from the conversation, "
+        "then draft an email that ACKNOWLEDGES it and gives a practical next step (e.g. phased rollout, volume discount, "
+        "call scheduled). Return STRICT JSON ONLY: "
+        "{likely_objection: string, subject: string, body: string (3-5 short paragraphs), tone: 'friendly'|'urgent', cta: string}"
+    )
+    user_msg = (
+        f"Estimate #{est.get('estimate_number','')} for {est.get('client_name','')}\n"
+        f"Amount: ${float(est.get('total') or 0):,.2f}\n"
+        f"Status: {est.get('status')} | Age: {days_old} days\n"
+        f"Items:\n{items_text}\n\n"
+        f"Recent conversation:\n{convo or '  (no conversation)'}\n\nReturn only JSON."
+    )
+    draft = _safe_json(await _llm(system, user_msg, "estfollow"))
+    draft["estimate_id"] = estimate_id
+    draft["estimate_number"] = est.get("estimate_number")
+    draft["days_since_sent"] = days_old
+    draft["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return draft
+
+
+# ─────────────────────── 13. Invoice Explainer ───────────────────────
+
+@router.get("/invoices/{invoice_id}/explainer")
+async def invoice_explainer(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+
+    start = (inv.get("issue_date") or "")[:10] or (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()[:10]
+    end = (inv.get("due_date") or datetime.now(timezone.utc).isoformat())[:10]
+    cid = inv.get("client_id")
+
+    tix = await db.tickets.find({
+        "client_id": cid,
+        "$or": [{"resolved_at": {"$gte": start, "$lte": end}}, {"created_at": {"$gte": start, "$lte": end}}]
+    }, {"_id": 0, "title": 1, "priority": 1, "status": 1, "ticket_number": 1}).limit(60).to_list(60)
+    critical = sum(1 for t in tix if t.get("priority") == "critical")
+
+    devices = await db.devices.count_documents({"client_id": cid}) if cid else 0
+    items_text = "\n".join([f"  - {it.get('description', '')}: ${float(it.get('total') or 0):,.2f}" for it in (inv.get("items") or [])[:15]])
+
+    system = (
+        "You are writing a short, warm, plain-English explainer for a business owner (non-technical) of what their "
+        "invoice covers. 4-6 short sentences. NO markdown. NO technical jargon. Use 'we' not 'our team'. "
+        "End with one sentence that thanks them for trusting you. Output plain text only, no preamble."
+    )
+    user_msg = (
+        f"Invoice #{inv.get('invoice_number','')} for {inv.get('client_name','')}\n"
+        f"Total: ${float(inv.get('total') or 0):,.2f}\n"
+        f"Period: {start} to {end}\n"
+        f"Tickets in period: {len(tix)} ({critical} critical)\n"
+        f"Devices managed: {devices}\n"
+        f"Line items:\n{items_text}\n"
+    )
+    body = await _llm(system, user_msg, "invexp")
+    return {
+        "invoice_id": invoice_id,
+        "invoice_number": inv.get("invoice_number"),
+        "summary": body.strip() if isinstance(body, str) else str(body),
+        "stats": {"tickets": len(tix), "critical": critical, "devices": devices, "period_start": start, "period_end": end},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
