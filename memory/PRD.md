@@ -9,6 +9,36 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 
 
+## Recent Updates (May 1, 2026 — Escalation Ladder + Blueprints + Time-aware Standups)
+
+### 🚨 War Room Paging with Escalation Ladder
+- **Backend `/app/backend/app/routers/warroom.py`** (appended):
+  - `POST /api/warroom/{id}/page` — body `{tech_ids, channels?, auto_escalate?, grace_minutes?}`. When `auto_escalate=true`, only Tier-1 techs fire immediately; Tier-2/3 stay `pending` with `next_escalation_at` set.
+  - `GET /api/warroom/page/ack/{token}` — **no auth**, HTML response. Magic-link the tech gets via SMS/Slack/email. Clears `next_escalation_at`, adds participant, idempotent.
+  - `POST /api/warroom/{id}/page/{page_id}/resend` — re-dispatches a specific page.
+  - Channels: Slack webhook, Teams webhook, SMS via MobileMessage, Email (queues notification), In-app push (creates notification doc). Missing channel configs return `no_webhook`/`no_config` markers — paging never blocks.
+  - `warroom_escalation_tick()` promotes tier 1→2→3 every grace period. Wired into `server.py` as `_warroom_escalation_loop` background task (30s cadence).
+- **Tech Roster `/app/backend/app/routers/tech_roster.py` (NEW)** — `db.tech_roster` CRUD; escalation_tier 1/2/3, preferred_channels, on_call flag, active flag.
+- **Frontend** — `WarRoomPage.jsx` gains `PageTeamDialog` (grouped by tier, channel chips, auto-escalate switch + grace input) and **Escalation Ladder** sidebar card showing per-page status (pending/sent/ack) with T1/T2/T3 badges + "Next: 2m" countdown. New `TechRosterPage.jsx` at `/tech-roster` with tier columns + table editor.
+
+### 🎫 Ticket Blueprints (Syncro worksheet-killer)
+- **Backend `/app/backend/app/routers/blueprints.py` (NEW)**:
+  - Full CRUD `/api/blueprints` with name, description, default_priority/category/status/sla_minutes, `require_completion` gate, typed `fields[]` (text/textarea/number/date/select/checkbox) + `checklist[]`.
+  - `GET/PUT /api/clients/{id}/blueprints` — assign blueprints to a client with a default.
+  - `POST /api/tickets/{id}/apply-blueprint`, `PUT /api/tickets/{id}/blueprint-fields`, `POST /api/tickets/{id}/blueprint-checklist/{item_id}/toggle` (adds done_by/done_at).
+  - **Auto-apply**: on ticket create (`routers/tickets.py`), if the client has `default_blueprint_id`, blueprint gets hydrated into the ticket (fields, checklist, defaults).
+  - **Resolve gate**: `PUT /api/tickets/{id}` with `status=resolved|closed` returns 400 listing missing checklist items + required fields when `blueprint_require_completion=true`.
+- **Frontend**: `BlueprintsPage.jsx` at `/blueprints` with field+checklist builder (auto-slug keys, req toggles, select options). New Blueprint **tab** on ticket detail backed by `TicketBlueprintPanel.jsx` (empty-state picker → worksheet with progress %, inline saves, per-item checklist toggle). New **Blueprints tab** on Client detail for assignment + "★ Default" picker. Blueprint badge appears in ticket top toolbar in break-button sky style.
+
+### 🌅🌤️🌙 Time-aware Standups
+- **Backend `/app/backend/app/routers/ai_wave_a.py`** — `_slot_for_hour()` returns morning (5-11), afternoon (12-16), evening (17+) with slot-specific AI system prompt + default lookback window. Standup digest endpoint now accepts `slot` and `hour_override` params and returns `slot`, `slot_label`, `slot_icon` in response.
+- **Frontend `StandupDigestBanner.jsx`** — rotates Sunrise/Sun/Moon icon and label ("Morning Standup" / "Midday Pulse" / "End-of-Day Wrap") automatically. Ticket-number regex extended to match `INC-1234` and `#INC-1234` so ticket refs hyperlink to `/tickets?ticket=...`.
+
+### Testing
+- `iteration_131.json`: **29/29 backend tests PASS · 100% frontend UI pass**. Zero blocking issues.
+
+
+
 ## Recent Updates (May 1, 2026 — Live Incident War Room)
 One URL that becomes the shared battle-station when a P1 fires.
 - **Backend `/app/backend/app/routers/warroom.py`** — 7 endpoints:
