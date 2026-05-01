@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +39,8 @@ const slugify = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").repla
 export default function BlueprintsPage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get("pattern") ? "patterns" : "library";
   const [bps, setBps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -133,7 +136,7 @@ export default function BlueprintsPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="library">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="library" data-testid="blueprints-tab-library"><Clipboard className="w-3 h-3 mr-1" />Library</TabsTrigger>
           <TabsTrigger value="patterns" data-testid="blueprints-tab-patterns"><Sparkles className="w-3 h-3 mr-1" />Pattern Discovery</TabsTrigger>
@@ -195,7 +198,11 @@ export default function BlueprintsPage() {
         </TabsContent>
 
         <TabsContent value="patterns" className="mt-4">
-          <PatternsPanel onCreated={() => load()} />
+          <PatternsPanel
+            onCreated={() => load()}
+            initialTokens={searchParams.get("t") ? searchParams.get("t").split(",") : null}
+            onConsumed={() => setSearchParams({})}
+          />
         </TabsContent>
       </Tabs>
 
@@ -344,7 +351,7 @@ export default function BlueprintsPage() {
   );
 }
 
-function PatternsPanel({ onCreated }) {
+function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [patterns, setPatterns] = useState([]);
@@ -371,6 +378,19 @@ function PatternsPanel({ onCreated }) {
   }, [headers, minTix]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-open suggest dialog if landing here with ?t=tok1,tok2 from the dashboard tile
+  useEffect(() => {
+    if (!initialTokens || initialTokens.length < 2 || patterns.length === 0) return;
+    const match = patterns.find((p) =>
+      p.tokens[0] === initialTokens[0] && p.tokens[1] === initialTokens[1]
+    );
+    if (match) {
+      openSuggest(match);
+      onConsumed && onConsumed();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patterns, initialTokens]);
 
   const openSuggest = async (p) => {
     setPattern(p);

@@ -21,6 +21,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
+import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
 import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
 import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
 
@@ -208,6 +209,7 @@ export default function DashboardPage() {
 
       {/* Morning Standup Digest */}
       <StandupDigestBanner />
+      <BlueprintInsightsTile />
 
       {/* Huntress Security Snapshot */}
       <HuntressSummaryCard compact />

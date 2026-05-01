@@ -620,3 +620,95 @@ async def push_blueprint_to_clients(bp_id: str, data: dict, current_user: dict =
             updated += 1
 
     return {"success": True, "updated": updated, "blueprint": bp["name"]}
+
+
+# ─────────────────────── Trending patterns (dashboard tile) ───────────────────────
+
+from datetime import timedelta as _td
+
+
+@router.get("/blueprint-patterns/trends")
+async def pattern_trends(days: int = 7, current_user: dict = Depends(get_current_user)):
+    """Compare resolved-ticket patterns between THIS window and the PREVIOUS window.
+    Returns top 3 'rising' patterns — surges or brand-new patterns.
+
+    Output per pattern:
+      { key, name_guess, tokens, ticket_count_this, ticket_count_prev,
+        client_count_this, delta, is_new, sample_titles, sample_ticket_ids, affected_client_ids }
+    """
+    now = datetime.now(timezone.utc)
+    days = max(1, min(60, days))
+    this_start = (now - _td(days=days)).isoformat()
+    prev_start = (now - _td(days=days * 2)).isoformat()
+
+    def _score_tix(tickets):
+        pool = {}
+        for t in tickets:
+            seen = set()
+            for bg in _bigrams(_tokens(t.get("title", ""))):
+                if bg in seen:
+                    continue
+                seen.add(bg)
+                pool.setdefault(bg, []).append(t)
+        return pool
+
+    this_tix = await db.tickets.find(
+        {
+            "status": {"$in": ["resolved", "closed"]},
+            "$or": [
+                {"resolved_at": {"$gte": this_start}},
+                {"resolved_at": None, "updated_at": {"$gte": this_start}},
+            ],
+        },
+        {"_id": 0, "id": 1, "title": 1, "client_id": 1, "client_name": 1, "ticket_number": 1}
+    ).limit(2000).to_list(2000)
+
+    prev_tix = await db.tickets.find(
+        {
+            "status": {"$in": ["resolved", "closed"]},
+            "$or": [
+                {"resolved_at": {"$gte": prev_start, "$lt": this_start}},
+                {"resolved_at": None, "updated_at": {"$gte": prev_start, "$lt": this_start}},
+            ],
+        },
+        {"_id": 0, "id": 1, "title": 1}
+    ).limit(2000).to_list(2000)
+
+    this_pool = _score_tix(this_tix)
+    prev_pool = _score_tix(prev_tix)
+
+    rising = []
+    for bg, tickets in this_pool.items():
+        if len(tickets) < 2:
+            continue
+        prev_count = len(prev_pool.get(bg, []))
+        this_count = len(tickets)
+        delta = this_count - prev_count
+        is_new = prev_count == 0
+        # Score: surge % with bonus for new patterns
+        score = (this_count * 1.5 if is_new else delta) + this_count * 0.5
+        if score <= 0:
+            continue
+        clients = {t.get("client_id") for t in tickets if t.get("client_id")}
+        rising.append({
+            "key": f"{bg[0]}_{bg[1]}",
+            "tokens": list(bg),
+            "name_guess": f"{bg[0].title()} {bg[1].title()}",
+            "ticket_count_this": this_count,
+            "ticket_count_prev": prev_count,
+            "client_count_this": len(clients),
+            "delta": delta,
+            "is_new": is_new,
+            "score": score,
+            "sample_titles": [t["title"] for t in tickets[:3]],
+            "sample_ticket_ids": [t["id"] for t in tickets[:20]],
+            "affected_client_ids": list(clients),
+        })
+
+    rising.sort(key=lambda r: -r["score"])
+    return {
+        "rising": rising[:3],
+        "window_days": days,
+        "this_total": len(this_tix),
+        "prev_total": len(prev_tix),
+    }
