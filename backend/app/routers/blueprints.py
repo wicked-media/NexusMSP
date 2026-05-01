@@ -271,3 +271,132 @@ async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict
         raise HTTPException(404, "Checklist item not found")
     await db.tickets.update_one({"id": ticket_id}, {"$set": {"blueprint_checklist": cl}})
     return {"success": True, "checklist": cl}
+
+
+# ─────────────────────── AI: Suggest blueprint from history ───────────────────────
+
+@router.post("/blueprints/suggest-from-history")
+async def suggest_blueprint_from_history(data: dict, current_user: dict = Depends(get_current_user)):
+    """Use Claude Sonnet 4.5 to draft a blueprint from this client's resolved tickets.
+
+    body: { ticket_id?: "...", client_id?: "...", title_hint?: "..." }
+    Returns a draft blueprint JSON (NOT saved) for the user to review + save.
+    """
+    import os
+    import re
+    import json
+
+    ticket_id = data.get("ticket_id")
+    client_id = data.get("client_id")
+    title_hint = (data.get("title_hint") or "").strip()
+
+    if ticket_id and not client_id:
+        t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "client_id": 1, "title": 1})
+        if t:
+            client_id = t.get("client_id")
+            if not title_hint:
+                title_hint = t.get("title", "")
+
+    if not client_id:
+        raise HTTPException(400, "client_id (or ticket_id) required")
+
+    # Pull resolved/closed tickets for this client — match on title tokens to narrow scope
+    tokens = [tok.lower() for tok in re.split(r"[\s\-_]+", title_hint) if len(tok) > 3][:6]
+    q = {"client_id": client_id, "status": {"$in": ["resolved", "closed"]}}
+    tix = await db.tickets.find(
+        q,
+        {"_id": 0, "id": 1, "title": 1, "description": 1, "category": 1, "priority": 1,
+         "resolution": 1, "resolved_at": 1, "ticket_number": 1}
+    ).sort("resolved_at", -1).limit(200).to_list(200)
+
+    if tokens:
+        scored = []
+        for t in tix:
+            title_lower = (t.get("title") or "").lower()
+            score = sum(1 for tok in tokens if tok in title_lower)
+            if score > 0:
+                scored.append((score, t))
+        scored.sort(key=lambda x: -x[0])
+        matched = [t for _, t in scored[:15]]
+    else:
+        matched = tix[:15]
+
+    if len(matched) < 2:
+        raise HTTPException(400, "Not enough similar resolved tickets to learn from (need at least 2). Create a blueprint manually.")
+
+    # Build corpus for the LLM
+    corpus_lines = []
+    for t in matched[:12]:
+        corpus_lines.append(
+            f"#{t.get('ticket_number','')} [{t.get('priority','medium')}·{t.get('category','support')}] "
+            f"{t.get('title','')}\n  Fix: {(t.get('resolution') or t.get('description') or '')[:400]}"
+        )
+    corpus = "\n\n".join(corpus_lines)
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(503, "AI not configured (EMERGENT_LLM_KEY missing)")
+
+    system_msg = (
+        "You are an MSP automation designer. Given a bundle of resolved support tickets of the "
+        "same recurring type, produce a REUSABLE Ticket Blueprint that standardises handling. "
+        "Return STRICT JSON only (no prose) with keys: "
+        "name (short, title-case), description (1 sentence), default_priority "
+        "(low|medium|high|critical), default_category (single word), sla_minutes (integer), "
+        "require_completion (bool — true if tickets tend to have data-gathering up-front), "
+        "fields (array of {key (snake_case), label, type (text|textarea|number|date|select|checkbox), "
+        "required, placeholder, options? (array of strings for 'select' only)}), "
+        "checklist (array of {label, required}). "
+        "Aim for 3-6 fields and 4-8 checklist items based on real patterns in the corpus. "
+        "Do NOT invent fields not hinted by the corpus. Keep keys machine-friendly."
+    )
+    user_msg = (
+        f"CLIENT resolved tickets (most-similar first):\n\n{corpus}\n\n"
+        f"Target title hint: {title_hint or '(none)'}\n\n"
+        "Return only the JSON."
+    )
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        import uuid as _uuid
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"bp-suggest-{_uuid.uuid4().hex[:8]}",
+            system_message=system_msg,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        raw = await chat.send_message(UserMessage(text=user_msg))
+        text = raw.strip() if isinstance(raw, str) else str(raw)
+    except Exception as e:
+        raise HTTPException(502, f"AI call failed: {str(e)[:160]}")
+
+    # Extract the first JSON block
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        raise HTTPException(502, "AI did not return JSON")
+    try:
+        draft = json.loads(m.group(0))
+    except Exception:
+        raise HTTPException(502, "AI returned invalid JSON")
+
+    # Validate + coerce through the existing sanitizers so the shape matches CRUD
+    safe = {
+        "name": str(draft.get("name") or title_hint or "Suggested Blueprint")[:120],
+        "description": str(draft.get("description") or "")[:600],
+        "default_priority": draft.get("default_priority"),
+        "default_category": draft.get("default_category"),
+        "default_status": None,
+        "sla_minutes": draft.get("sla_minutes"),
+        "require_completion": bool(draft.get("require_completion", False)),
+        "fields": _validate_fields(draft.get("fields")),
+        "checklist": _validate_checklist([{**c, "id": f"cl-{uuid.uuid4().hex[:8]}"} for c in (draft.get("checklist") or [])]),
+    }
+    try:
+        safe["sla_minutes"] = int(safe["sla_minutes"]) if safe["sla_minutes"] else None
+    except Exception:
+        safe["sla_minutes"] = None
+
+    return {
+        "draft": safe,
+        "source_tickets": [{"id": t.get("id"), "ticket_number": t.get("ticket_number"), "title": t.get("title")} for t in matched[:12]],
+        "ai_model": "claude-sonnet-4-5-20250929",
+    }

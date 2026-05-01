@@ -37,6 +37,11 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 ### Testing
 - `iteration_131.json`: **29/29 backend tests PASS · 100% frontend UI pass**. Zero blocking issues.
 
+### AI-suggested Blueprints (May 1, 2026 · follow-up)
+- **Backend** `POST /api/blueprints/suggest-from-history` — scans the client's resolved/closed tickets (string-scored by title overlap when a `title_hint` is supplied, otherwise the most recent 15), feeds them to Claude Sonnet 4.5 as a corpus, and returns a STRICT-JSON draft blueprint (name, priority, category, sla_minutes, fields[], checklist[], require_completion). Requires ≥2 matching resolved tickets.
+- **Frontend** — `TicketBlueprintPanel` empty state gets a "Suggest from history" button (violet break-button style). Opens `SuggestDialog` showing the learned-from ticket refs, editable name/description, and the proposed fields + checklist. "Save & Apply" persists as a new blueprint and applies it to the current ticket in one shot.
+- Smoke-tested: Claude generated a correct "New User Onboarding" blueprint (6 fields incl. a Select, 8 required checklist items, `require_completion=true`) from 2 source tickets.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)

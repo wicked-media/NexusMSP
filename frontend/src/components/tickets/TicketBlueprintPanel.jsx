@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Clipboard, CheckCircle2, Circle, Wand2, ListChecks, AlertTriangle, Loader2 } from "lucide-react";
+import { Clipboard, CheckCircle2, Circle, Wand2, ListChecks, AlertTriangle, Loader2, Sparkles } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 /**
  * Renders the active blueprint worksheet (fields + checklist) for a ticket.
@@ -25,6 +26,11 @@ export default function TicketBlueprintPanel({ ticket, onTicketUpdated }) {
   const [applying, setApplying] = useState(false);
   const [dirty, setDirty] = useState({});
   const [saving, setSaving] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [sourceTix, setSourceTix] = useState([]);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const loadBp = useCallback(async (id) => {
     if (!id) { setBp(null); return; }
@@ -88,41 +94,100 @@ export default function TicketBlueprintPanel({ ticket, onTicketUpdated }) {
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
   };
 
+  const suggestFromHistory = async () => {
+    setSuggesting(true);
+    setSuggestOpen(true);
+    try {
+      const res = await axios.post(`${API}/blueprints/suggest-from-history`, {
+        ticket_id: ticket.id,
+        client_id: ticket.client_id,
+        title_hint: ticket.title,
+      }, { headers });
+      setDraft(res.data.draft);
+      setSourceTix(res.data.source_tickets || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message);
+      setSuggestOpen(false);
+    } finally { setSuggesting(false); }
+  };
+
+  const saveAndApplyDraft = async () => {
+    if (!draft?.name) return;
+    setSavingDraft(true);
+    try {
+      const create = await axios.post(`${API}/blueprints`, draft, { headers });
+      const newBp = create.data;
+      const res = await axios.post(`${API}/tickets/${ticket.id}/apply-blueprint`, { blueprint_id: newBp.id }, { headers });
+      toast.success(`"${newBp.name}" saved & applied`);
+      setSuggestOpen(false);
+      setDraft(null);
+      onTicketUpdated && onTicketUpdated(res.data);
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setSavingDraft(false); }
+  };
+
   // Empty state: no blueprint applied
   if (!ticket?.blueprint_id) {
     const options = clientBps.length > 0 ? clientBps : allBps;
     return (
-      <div className="rounded-xl border border-dashed border-sky-500/30 bg-sky-500/5 p-6 text-center" data-testid="blueprint-panel-empty">
-        <Clipboard className="w-8 h-8 text-sky-400 mx-auto mb-2" />
-        <div className="text-sm font-medium">No blueprint applied</div>
-        <p className="text-xs text-muted-foreground mt-1 mb-4">
-          Blueprints add a structured worksheet + checklist to a ticket. Apply one to standardise the workflow.
-        </p>
-        {options.length === 0 ? (
-          <div className="text-xs text-muted-foreground">No blueprints available yet.</div>
-        ) : (
+      <>
+        <div className="rounded-xl border border-dashed border-sky-500/30 bg-sky-500/5 p-6 text-center" data-testid="blueprint-panel-empty">
+          <Clipboard className="w-8 h-8 text-sky-400 mx-auto mb-2" />
+          <div className="text-sm font-medium">No blueprint applied</div>
+          <p className="text-xs text-muted-foreground mt-1 mb-4">
+            Blueprints add a structured worksheet + checklist to a ticket. Apply one, or let AI clone a blueprint from this client's past tickets.
+          </p>
           <div className="flex items-center justify-center gap-2 max-w-md mx-auto">
-            <Select value={picked} onValueChange={setPicked}>
-              <SelectTrigger className="h-8 text-xs" data-testid="blueprint-picker">
-                <SelectValue placeholder="Pick a blueprint…" />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {options.length > 0 && (
+              <>
+                <Select value={picked} onValueChange={setPicked}>
+                  <SelectTrigger className="h-8 text-xs" data-testid="blueprint-picker">
+                    <SelectValue placeholder="Pick a blueprint…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {options.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                  disabled={!picked || applying}
+                  onClick={apply}
+                  data-testid="blueprint-apply-btn"
+                >
+                  {applying ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}Apply
+                </Button>
+              </>
+            )}
             <Button
               size="sm"
               variant="outline"
-              className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
-              disabled={!picked || applying}
-              onClick={apply}
-              data-testid="blueprint-apply-btn"
+              className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+              onClick={suggestFromHistory}
+              disabled={suggesting}
+              data-testid="blueprint-suggest-btn"
             >
-              {applying ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}Apply
+              {suggesting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
+              Suggest from history
             </Button>
           </div>
-        )}
-      </div>
+          {options.length === 0 && (
+            <div className="text-[10px] text-muted-foreground mt-3">No blueprints yet — use "Suggest from history" to draft one automatically.</div>
+          )}
+        </div>
+
+        <SuggestDialog
+          open={suggestOpen}
+          onOpenChange={(v) => { setSuggestOpen(v); if (!v) setDraft(null); }}
+          suggesting={suggesting}
+          draft={draft}
+          setDraft={setDraft}
+          sourceTix={sourceTix}
+          saveAndApply={saveAndApplyDraft}
+          savingDraft={savingDraft}
+        />
+      </>
     );
   }
 
@@ -255,5 +320,126 @@ export default function TicketBlueprintPanel({ ticket, onTicketUpdated }) {
         </div>
       )}
     </div>
+  );
+}
+
+function SuggestDialog({ open, onOpenChange, suggesting, draft, setDraft, sourceTix, saveAndApply, savingDraft }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="blueprint-suggest-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-violet-400" /> AI-suggested Blueprint
+          </DialogTitle>
+        </DialogHeader>
+        {suggesting ? (
+          <div className="py-12 text-center text-sm text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
+            Scanning this client's past tickets and drafting a blueprint…
+          </div>
+        ) : !draft ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">No draft yet.</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-md bg-violet-500/5 border border-violet-500/20 p-3">
+              <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1">Learned from</div>
+              <div className="flex flex-wrap gap-1">
+                {(sourceTix || []).map((t) => (
+                  <span key={t.id} className="text-[10px] font-mono bg-muted/40 rounded px-1.5 py-0.5">
+                    #{t.ticket_number} {(t.title || "").slice(0, 36)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground">Name</label>
+              <input
+                className="w-full bg-background border border-zinc-800 rounded px-3 py-2 text-sm"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                data-testid="suggest-draft-name"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Description</label>
+              <textarea
+                rows={2}
+                className="w-full bg-background border border-zinc-800 rounded px-3 py-2 text-sm"
+                value={draft.description || ""}
+                onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 text-xs">
+              <div className="bg-muted/30 rounded px-3 py-2">
+                <div className="text-[10px] uppercase text-muted-foreground">Priority</div>
+                <div className="font-medium">{draft.default_priority || "—"}</div>
+              </div>
+              <div className="bg-muted/30 rounded px-3 py-2">
+                <div className="text-[10px] uppercase text-muted-foreground">Category</div>
+                <div className="font-medium">{draft.default_category || "—"}</div>
+              </div>
+              <div className="bg-muted/30 rounded px-3 py-2">
+                <div className="text-[10px] uppercase text-muted-foreground">SLA</div>
+                <div className="font-medium">{draft.sla_minutes ? `${draft.sla_minutes}m` : "—"}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
+                <Wand2 className="w-3 h-3" /> Fields ({(draft.fields || []).length})
+              </div>
+              <div className="space-y-1">
+                {(draft.fields || []).map((f) => (
+                  <div key={f.key} className="flex items-center justify-between bg-muted/30 rounded px-2 py-1 text-xs">
+                    <div>
+                      <span className="font-medium">{f.label}</span>
+                      {f.required && <span className="text-rose-400 ml-1">*</span>}
+                      <span className="text-[10px] text-muted-foreground font-mono ml-2">{f.key}</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">{f.type}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
+                <ListChecks className="w-3 h-3" /> Checklist ({(draft.checklist || []).length})
+              </div>
+              <div className="space-y-1">
+                {(draft.checklist || []).map((c) => (
+                  <div key={c.id} className="flex items-center gap-2 bg-muted/30 rounded px-2 py-1 text-xs">
+                    <Circle className="w-3 h-3 text-zinc-500" />
+                    <span className="flex-1">{c.label}</span>
+                    {c.required && <span className="text-rose-400 text-[9px]">required</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {draft.require_completion && (
+              <div className="text-[11px] text-amber-400 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" /> AI recommended blocking resolve until checklist is complete.
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={saveAndApply}
+            disabled={!draft || savingDraft}
+            variant="outline"
+            className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+            data-testid="suggest-save-apply"
+          >
+            {savingDraft ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Sparkles className="w-4 h-4 mr-1" />}
+            Save & Apply
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
