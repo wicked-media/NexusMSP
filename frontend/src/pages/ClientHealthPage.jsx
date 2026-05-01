@@ -18,7 +18,7 @@ import {
   Activity, Heart, Shield, Monitor, DollarSign, AlertTriangle, TrendingUp,
   TrendingDown, Users, RefreshCw, Loader2, ChevronRight, ChevronDown, ChevronUp,
   Target, Zap, Bell, Settings, Camera, ArrowUp, ArrowDown, Check, X,
-  HardDrive, Ticket, CreditCard, Lock, Search, FileText
+  HardDrive, Ticket, CreditCard, Lock, Search, FileText, Wifi
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
@@ -135,6 +135,8 @@ export default function ClientHealthPage() {
     { metric: "Backups", value: clientDetail.metrics?.backup_health || 0 },
     { metric: "Security", value: clientDetail.metrics?.security_health || 0 },
     { metric: "Engagement", value: clientDetail.metrics?.engagement || 0 },
+    ...(clientDetail.metrics?.network_health != null ? [{ metric: "Network", value: clientDetail.metrics.network_health }] : []),
+    ...(clientDetail.metrics?.m365_hygiene != null ? [{ metric: "M365", value: clientDetail.metrics.m365_hygiene }] : []),
   ] : [];
 
   return (
@@ -335,6 +337,12 @@ export default function ClientHealthPage() {
                   <MetricBar label="Payment Health" value={clientDetail.metrics?.payment_health || 0} icon={CreditCard} color="bg-emerald-500/15 text-emerald-400" />
                   <MetricBar label="Backup Health" value={clientDetail.metrics?.backup_health || 0} icon={HardDrive} color="bg-purple-500/15 text-purple-400" />
                   <MetricBar label="Security Posture" value={clientDetail.metrics?.security_health || 0} icon={Shield} color="bg-red-500/15 text-red-400" />
+                  {clientDetail.metrics?.network_health != null && (
+                    <MetricBar label="Network Health" value={clientDetail.metrics.network_health} icon={Wifi} color="bg-indigo-500/15 text-indigo-400" />
+                  )}
+                  {clientDetail.metrics?.m365_hygiene != null && (
+                    <MetricBar label="M365 Hygiene" value={clientDetail.metrics.m365_hygiene} icon={Lock} color="bg-sky-500/15 text-sky-400" />
+                  )}
                   <MetricBar label="Engagement" value={clientDetail.metrics?.engagement || 0} icon={Activity} color="bg-amber-500/15 text-amber-400" />
                 </CardContent>
               </Card>

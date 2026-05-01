@@ -54,6 +54,29 @@ async def _compute_health(client):
             m365_score = h.get("score")
             m365_top_risks = [r["factor"] for r in (h.get("risks") or [])[:3]]
 
+    # Network health (UniFi) — only when the client is linked to a UniFi site.
+    # Reads the per-site cache populated by GET /api/unifi/summary.
+    network_score = None
+    network_stats = None
+    if client.get("unifi_site_id"):
+        uni = await db.unifi_site_cache.find_one({"site_id": client["unifi_site_id"]}, {"_id": 0})
+        if uni:
+            devs_total = uni.get("devices_total") or 0
+            devs_online = uni.get("devices_online") or 0
+            alerts = uni.get("alerts") or 0
+            uptime_pct = round((devs_online / max(devs_total, 1)) * 100) if devs_total else 100
+            # Penalties: offline network gear hurts worse than endpoints, alerts are warnings
+            network_score = max(0, uptime_pct - (alerts * 5))
+            network_stats = {
+                "devices_total": devs_total,
+                "devices_online": devs_online,
+                "offline_devices": max(0, devs_total - devs_online),
+                "clients_connected": uni.get("clients_total") or 0,
+                "alerts": alerts,
+                "uptime_pct": uptime_pct,
+                "site_name": uni.get("name"),
+            }
+
     # ===== SCORING =====
     # Ticket Health (25 pts)
     ticket_health = max(0, 100 - (open_tickets * 8) - (critical_tickets * 25))
@@ -75,25 +98,31 @@ async def _compute_health(client):
 
     # When we have an M365 hygiene score, rebalance the composite to give it 10% of weight
     # (pulled from engagement 10→5 and security 10→5). Otherwise keep the legacy weights.
+    # Network Health (UniFi) when present takes another 10% from engagement + device dimensions.
+    weights = {
+        "ticket": 0.25, "device": 0.20, "payment": 0.20, "backup": 0.15,
+        "security": 0.10, "engagement": 0.10, "m365": 0.0, "network": 0.0,
+    }
     if m365_score is not None:
-        composite = int(
-            ticket_health * 0.25 +
-            device_health * 0.20 +
-            payment_health * 0.20 +
-            backup_health * 0.15 +
-            security_health * 0.05 +
-            engagement * 0.05 +
-            m365_score * 0.10
-        )
-    else:
-        composite = int(
-            ticket_health * 0.25 +
-            device_health * 0.20 +
-            payment_health * 0.20 +
-            backup_health * 0.15 +
-            security_health * 0.10 +
-            engagement * 0.10
-        )
+        weights["m365"] = 0.10
+        weights["security"] = 0.05
+        weights["engagement"] = 0.05
+    if network_score is not None:
+        weights["network"] = 0.10
+        # Borrow 5% from device (endpoints) and 5% from engagement since network health is
+        # a broader infrastructure signal and engagement is a softer metric.
+        weights["device"] = max(0.10, weights["device"] - 0.05)
+        weights["engagement"] = max(0.0, weights["engagement"] - 0.05)
+    composite = int(
+        ticket_health * weights["ticket"] +
+        device_health * weights["device"] +
+        payment_health * weights["payment"] +
+        backup_health * weights["backup"] +
+        security_health * weights["security"] +
+        engagement * weights["engagement"] +
+        (m365_score or 0) * weights["m365"] +
+        (network_score or 0) * weights["network"]
+    )
     composite = max(0, min(100, composite))
 
     status = "thriving" if composite >= 85 else "healthy" if composite >= 70 else "needs_attention" if composite >= 50 else "at_risk" if composite >= 30 else "critical"
@@ -134,6 +163,17 @@ async def _compute_health(client):
     for tr in m365_top_risks[:2]:
         risk_factors.append({"factor": tr, "severity": "info", "impact": -2})
 
+    # Network health (UniFi) factors
+    if network_stats:
+        offline = network_stats["offline_devices"]
+        if offline > 0:
+            sev = "critical" if offline >= 3 else "warning"
+            risk_factors.append({"factor": f"{offline} UniFi device(s) offline at {network_stats['site_name']}", "severity": sev, "impact": -offline * 5})
+        if network_stats["alerts"] > 0:
+            risk_factors.append({"factor": f"{network_stats['alerts']} UniFi site alerts", "severity": "warning", "impact": -network_stats["alerts"] * 5})
+        if network_stats["uptime_pct"] == 100 and network_stats["devices_total"] > 0 and network_stats["alerts"] == 0:
+            positive_factors.append({"factor": f"All {network_stats['devices_total']} network devices online", "impact": "+3"})
+
     return {
         "client_id": cid,
         "client_name": client.get("name", ""),
@@ -151,6 +191,7 @@ async def _compute_health(client):
             "engagement": engagement,
             "sentiment": sentiment_score,
             "m365_hygiene": m365_score,
+            "network_health": network_score,
         },
         "details": {
             "open_tickets": open_tickets,
@@ -166,6 +207,7 @@ async def _compute_health(client):
             "security_alerts": security_alerts,
             "expiring_contracts": expiring_contracts,
             "monthly_revenue": mrr,
+            "network": network_stats,
         },
         "risk_factors": risk_factors,
         "positive_factors": positive_factors,

@@ -581,3 +581,23 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
 
 ### Tests
 - `/app/test_reports/iteration_129.json` — 37/37 passed, zero issues. Hand-tested: real Slack-format card delivered to httpbin.org/post returned 200 OK.
+
+## 2026-04-30 (cont. 8) — UniFi → Client Health Score (Network Health dimension)
+
+### What shipped
+**Backend:**
+- `/api/unifi/summary` now persists per-site snapshots into `db.unifi_site_cache` (`{site_id, devices_total, devices_online, clients_total, alerts, cached_at}`) whenever it runs — no new API calls needed by the health engine.
+- `_compute_health()` in `client_health.py` now reads the cache for clients with `unifi_site_id`, computes `network_score = uptime_pct - (alerts * 5)`, and emits:
+  - `metrics.network_health` (0-100)
+  - `details.network` (full breakdown)
+  - Risk factors for offline devices & alerts (critical if ≥3 offline)
+  - Positive factor "All N network devices online" when everything is clean
+- **Weight rebalancing**: when network_health is present, it gets 10% of the composite (borrowed 5% from device, 5% from engagement). M365 hygiene (10%) stacks on top when also present.
+
+**Frontend:**
+- `ClientHealthPage.jsx` radar chart now renders Network + M365 axes dynamically when scores exist (not hardcoded 6-axis).
+- Health Breakdown panel shows an indigo "Network Health" bar with Wifi icon + sky-blue "M365 Hygiene" bar.
+
+### Tests
+- Hand-verified end-to-end: seeded client-001 with a dummy UniFi site (10 devices, 8 online, 1 alert) → health score dropped from 72 → 66, composite reflects network_score=75, risk factors show "2 UniFi device(s) offline at Acme HQ" + "1 UniFi site alerts", `details.network` returns full stats.
+- Regression: existing health endpoints unchanged for clients without UniFi (network_health stays null, legacy 6-dimension scoring intact).

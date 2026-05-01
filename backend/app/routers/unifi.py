@@ -418,6 +418,23 @@ async def unifi_summary(current_user: dict = Depends(get_current_user)):
         {"$set": {"last_synced_at": now}},
     )
 
+    # Per-site cache for client_health scoring (read by /api/client-health/scores)
+    for s in sites:
+        await db.unifi_site_cache.update_one(
+            {"site_id": s["id"]},
+            {"$set": {
+                "site_id": s["id"],
+                "host_id": s["host_id"],
+                "name": s["name"],
+                "devices_total": s["devices_total"],
+                "devices_online": s["devices_online"],
+                "clients_total": s["clients_total"],
+                "alerts": s["alerts"],
+                "cached_at": now,
+            }},
+            upsert=True,
+        )
+
     linked = await db.clients.count_documents({"unifi_site_id": {"$exists": True, "$ne": ""}})
     total_clients_nx = await db.clients.count_documents({})
 
