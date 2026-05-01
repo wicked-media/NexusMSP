@@ -886,6 +886,11 @@ async def _run_broadcast(broadcast_id: str, agent_ids: list, shell: str, command
         {"id": broadcast_id},
         {"$set": {"status": "complete", "completed_at": datetime.now(timezone.utc).isoformat()}}
     )
+    # Push Slack/Teams summary (best-effort, never raises)
+    try:
+        await _send_broadcast_notification(broadcast_id)
+    except Exception:
+        pass
 
 
 @router.post("/trmm/broadcast")
@@ -1151,3 +1156,168 @@ async def execute_due_scheduled_broadcasts():
             )
 
     return fired
+
+
+# ─────────────────────────── Notifications (Slack / Teams) ───────────────────────────
+# After every broadcast finishes, push a summary card to configured webhooks.
+
+NOTIF_KEY = "tactical_rmm_notifications"
+
+
+@router.get("/trmm/notifications/settings")
+async def get_notif_settings(current_user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"type": NOTIF_KEY}, {"_id": 0}) or {}
+    return {
+        "slack_webhook_url": doc.get("slack_webhook_url") or "",
+        "teams_webhook_url": doc.get("teams_webhook_url") or "",
+        "notify_on": doc.get("notify_on", "all"),  # all | failures | none
+        "include_per_agent": bool(doc.get("include_per_agent", True)),
+        "configured": bool(doc.get("slack_webhook_url") or doc.get("teams_webhook_url")),
+    }
+
+
+@router.post("/trmm/notifications/settings")
+async def save_notif_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    notify_on = (data.get("notify_on") or "all").lower()
+    if notify_on not in {"all", "failures", "none"}:
+        raise HTTPException(400, "notify_on must be all|failures|none")
+    payload = {
+        "type": NOTIF_KEY,
+        "slack_webhook_url": (data.get("slack_webhook_url") or "").strip(),
+        "teams_webhook_url": (data.get("teams_webhook_url") or "").strip(),
+        "notify_on": notify_on,
+        "include_per_agent": bool(data.get("include_per_agent", True)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": current_user.get("name"),
+    }
+    await db.settings.update_one({"type": NOTIF_KEY}, {"$set": payload}, upsert=True)
+    return {"success": True, "configured": bool(payload["slack_webhook_url"] or payload["teams_webhook_url"])}
+
+
+def _build_slack_blocks(b: dict) -> dict:
+    label = b.get("label") or (b.get("command") or f"script {b.get('script_id')}")[:80]
+    fail = b.get("failed_count", 0)
+    ok = b.get("succeeded", 0)
+    total = b.get("total", 0)
+    color = "#22c55e" if fail == 0 else ("#f59e0b" if ok > 0 else "#ef4444")
+    icon = ":white_check_mark:" if fail == 0 else (":warning:" if ok > 0 else ":rotating_light:")
+    fields = [
+        {"type": "mrkdwn", "text": f"*Total*\n{total}"},
+        {"type": "mrkdwn", "text": f"*Succeeded*\n{ok}"},
+        {"type": "mrkdwn", "text": f"*Failed*\n{fail}"},
+        {"type": "mrkdwn", "text": f"*Concurrency*\n{b.get('concurrency', '?')}"},
+    ]
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"{icon} TRMM broadcast: {label[:120]}"}},
+        {"type": "section", "fields": fields},
+    ]
+    if b.get("command"):
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"`{b['command'][:200]}` _({b.get('shell','?')})_"}]})
+    if b.get("by"):
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"by *{b['by']}* · started {b.get('started_at','')}"}]})
+    return {"attachments": [{"color": color, "blocks": blocks}]}
+
+
+def _build_teams_card(b: dict) -> dict:
+    label = b.get("label") or (b.get("command") or f"script {b.get('script_id')}")[:80]
+    fail = b.get("failed_count", 0)
+    ok = b.get("succeeded", 0)
+    total = b.get("total", 0)
+    color = "00B050" if fail == 0 else ("FFA500" if ok > 0 else "D9534F")
+    return {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "themeColor": color,
+        "summary": f"TRMM broadcast: {label}",
+        "sections": [
+            {
+                "activityTitle": f"**TRMM broadcast: {label[:120]}**",
+                "activitySubtitle": f"by {b.get('by','—')} · started {b.get('started_at','')}",
+                "facts": [
+                    {"name": "Total", "value": str(total)},
+                    {"name": "Succeeded", "value": str(ok)},
+                    {"name": "Failed", "value": str(fail)},
+                    {"name": "Concurrency", "value": str(b.get('concurrency', '?'))},
+                ] + ([{"name": "Command", "value": f"`{b['command'][:200]}`"}] if b.get("command") else []),
+                "markdown": True,
+            }
+        ],
+    }
+
+
+async def _send_broadcast_notification(broadcast_id: str):
+    """Called after a broadcast finishes to push to Slack/Teams. Tolerant of missing config."""
+    settings = await db.settings.find_one({"type": NOTIF_KEY}, {"_id": 0})
+    if not settings:
+        return
+    notify_on = settings.get("notify_on", "all")
+    if notify_on == "none":
+        return
+    bdoc = await db.trmm_broadcasts.find_one({"id": broadcast_id}, {"_id": 0})
+    if not bdoc:
+        return
+    if notify_on == "failures" and bdoc.get("failed_count", 0) == 0:
+        return
+
+    sent = []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        slack = settings.get("slack_webhook_url")
+        if slack:
+            try:
+                r = await client.post(slack, json=_build_slack_blocks(bdoc))
+                sent.append({"target": "slack", "status": r.status_code})
+            except Exception as e:
+                sent.append({"target": "slack", "error": str(e)[:200]})
+        teams = settings.get("teams_webhook_url")
+        if teams:
+            try:
+                r = await client.post(teams, json=_build_teams_card(bdoc))
+                sent.append({"target": "teams", "status": r.status_code})
+            except Exception as e:
+                sent.append({"target": "teams", "error": str(e)[:200]})
+
+    if sent:
+        await db.trmm_broadcasts.update_one(
+            {"id": broadcast_id},
+            {"$set": {"notifications": sent, "notified_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+
+@router.post("/trmm/notifications/test")
+async def test_notification(data: dict, current_user: dict = Depends(get_current_user)):
+    """Sends a fake broadcast summary to whichever channel(s) are configured.
+    Body: { target: 'slack' | 'teams' | 'both' (default both) }"""
+    target = (data.get("target") or "both").lower()
+    settings = await db.settings.find_one({"type": NOTIF_KEY}, {"_id": 0}) or {}
+    if not settings.get("slack_webhook_url") and not settings.get("teams_webhook_url"):
+        raise HTTPException(400, "No webhook configured")
+
+    fake = {
+        "id": "test-broadcast",
+        "label": "TRMM notification test",
+        "command": "Get-Service Spooler",
+        "shell": "powershell",
+        "total": 5,
+        "succeeded": 4,
+        "failed_count": 1,
+        "concurrency": 8,
+        "by": current_user.get("name") or "test",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    results = []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        if target in ("slack", "both") and settings.get("slack_webhook_url"):
+            try:
+                r = await client.post(settings["slack_webhook_url"], json=_build_slack_blocks(fake))
+                results.append({"target": "slack", "status": r.status_code, "ok": 200 <= r.status_code < 300})
+            except Exception as e:
+                results.append({"target": "slack", "error": str(e)[:200], "ok": False})
+        if target in ("teams", "both") and settings.get("teams_webhook_url"):
+            try:
+                r = await client.post(settings["teams_webhook_url"], json=_build_teams_card(fake))
+                results.append({"target": "teams", "status": r.status_code, "ok": 200 <= r.status_code < 300})
+            except Exception as e:
+                results.append({"target": "teams", "error": str(e)[:200], "ok": False})
+
+    success = bool(results) and all(r.get("ok") for r in results)
+    return {"success": success, "results": results}

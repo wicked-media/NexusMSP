@@ -1,0 +1,97 @@
+{
+  "summary": "Iteration 129: TRMM Broadcast Notifications (Slack/Teams) - All 37 tests PASSED. Verified all new notification endpoints: GET /api/trmm/notifications/settings returns default shape {slack_webhook_url:'', teams_webhook_url:'', notify_on:'all', include_per_agent:true, configured:false}. POST /api/trmm/notifications/settings returns 400 for invalid notify_on, saves successfully with valid Slack/Teams URLs. POST /api/trmm/notifications/test returns 400 when no webhook configured, returns {success:true, results:[{target:'slack', status:200, ok:true}]} with httpbin.org/post. E2E: broadcast completion populates 'notifications' field and 'notified_at' timestamp. notify_on='none' skips notification. notify_on='failures' with failures sends notification. All regression tests for iterations 122-128 pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration129_trmm_notifications.py",
+    "/app/test_reports/pytest/pytest_results_iter129.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/trmm/notifications/settings: Returns default shape when nothing saved (correct)",
+    "POST /api/trmm/notifications/settings: Returns 400 when notify_on not in (all|failures|none) (correct)",
+    "POST /api/trmm/notifications/settings: Saves successfully with valid Slack URL; subsequent GET shows configured:true (correct)",
+    "POST /api/trmm/notifications/settings: Saves successfully with valid Teams URL (correct)",
+    "POST /api/trmm/notifications/settings: Accepts notify_on='none' (correct)",
+    "POST /api/trmm/notifications/test: Returns 400 'No webhook configured' when neither URL set (correct)",
+    "POST /api/trmm/notifications/test with target='slack': Returns {success:true, results:[{target:'slack', status:200, ok:true}]} with httpbin (correct)",
+    "POST /api/trmm/notifications/test with target='teams': Returns {success:true, results:[{target:'teams', status:200, ok:true}]} with httpbin (correct)",
+    "POST /api/trmm/notifications/test with target='both': Fires both if configured (correct)",
+    "POST /api/trmm/notifications/test with partial success: Returns {success:false,...} with per-target breakdown (correct)",
+    "E2E broadcast with notification: db.trmm_broadcasts gets 'notifications' field and 'notified_at' timestamp (correct)",
+    "E2E with notify_on='none': Broadcast completes but notifications NOT set (correct)",
+    "E2E with notify_on='failures' and failed_count>0: Notification IS sent (correct)",
+    "All endpoints require authentication (401/403 without token)",
+    "Regression: All TRMM endpoints from iterations 122-128 still pass",
+    "httpbin.org/post used as public sink to validate webhook delivery without real Slack/Teams credentials"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration129_trmm_notifications.py"
+  ],
+  "success_rate": {"backend": "100% (37/37 tests passed)", "frontend": "N/A (backend-only testing per request)"},
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Test broadcasts and notification settings created during testing; cleaned up after tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All notification endpoints verified working. GET /api/trmm/notifications/settings returns default shape when nothing saved. POST /api/trmm/notifications/settings saves Slack/Teams webhook URLs with notify_on (all|failures|none). POST /api/trmm/notifications/test sends test notification to configured webhooks. After broadcast completion, _send_broadcast_notification() is called which populates 'notifications' and 'notified_at' fields in db.trmm_broadcasts. notify_on='none' skips notification entirely. notify_on='failures' only sends if failed_count>0. httpbin.org/post is used as a public 200-returning sink for testing webhook delivery.",
+  "features_tested": {
+    "auth_tests": {
+      "GET /api/trmm/notifications/settings requires auth": "PASS - 401/403 without token",
+      "POST /api/trmm/notifications/settings requires auth": "PASS - 401/403 without token",
+      "POST /api/trmm/notifications/test requires auth": "PASS - 401/403 without token"
+    },
+    "default_settings_tests": {
+      "GET returns default shape when nothing saved": "PASS - {slack_webhook_url:'', teams_webhook_url:'', notify_on:'all', include_per_agent:true, configured:false}"
+    },
+    "validation_tests": {
+      "400 when notify_on not in (all|failures|none)": "PASS",
+      "saves with valid Slack URL": "PASS - configured:true after save",
+      "saves with valid Teams URL": "PASS",
+      "accepts notify_on='none'": "PASS"
+    },
+    "test_notification_tests": {
+      "400 when no webhook configured": "PASS",
+      "target='slack' with httpbin returns success": "PASS - {success:true, results:[{target:'slack', status:200, ok:true}]}",
+      "target='teams' with httpbin returns success": "PASS - {success:true, results:[{target:'teams', status:200, ok:true}]}",
+      "target='both' fires both": "PASS - 2 results",
+      "partial success returns success:false": "PASS - per-target breakdown"
+    },
+    "e2e_tests": {
+      "broadcast with notification populates fields": "PASS - notifications and notified_at set",
+      "notify_on='none' skips notification": "PASS - notifications NOT set",
+      "notify_on='failures' with failures sends notification": "PASS"
+    },
+    "regression_tests": {
+      "GET /api/trmm/settings": "PASS",
+      "GET /api/trmm/status": "PASS",
+      "GET /api/trmm/summary": "PASS",
+      "GET /api/trmm/test": "PASS",
+      "POST /api/trmm/auto-link (503)": "PASS",
+      "GET /api/trmm/linked-devices": "PASS",
+      "GET /api/trmm/agents (503)": "PASS",
+      "GET /api/trmm/clients (503)": "PASS",
+      "GET /api/trmm/scripts (503)": "PASS",
+      "GET /api/trmm/scripts/favorites/mine": "PASS",
+      "GET /api/trmm/agents/{id}/services": "PASS",
+      "GET /api/trmm/agents/{id}/processes": "PASS",
+      "GET /api/trmm/agents/{id}/software": "PASS",
+      "GET /api/trmm/agents/{id}/winupdates": "PASS",
+      "GET /api/trmm/runs/bogus (404)": "PASS",
+      "GET /api/trmm/actions/log": "PASS",
+      "POST /api/trmm/broadcast (503)": "PASS",
+      "GET /api/trmm/broadcasts": "PASS",
+      "GET /api/trmm/broadcasts/{id} (404)": "PASS",
+      "GET /api/trmm/scheduled-broadcasts": "PASS",
+      "GET /api/trmm/scheduled-broadcasts/{id} (404)": "PASS",
+      "GET /api/remote-providers/active": "PASS"
+    }
+  },
+  "mocked_api_note": "httpbin.org/post is used as a real public HTTP endpoint (NOT a mock) to validate Slack/Teams webhook delivery. It returns 200 for any POST request, simulating successful webhook delivery without requiring real Slack/Teams credentials."
+}

@@ -139,6 +139,8 @@ export default function SettingsPage() {
   const [unifiBusy, setUnifiBusy] = useState(false);
   const [trmm, setTrmm] = useState({ base_url: "", api_key: "", verify_tls: true, configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [trmmBusy, setTrmmBusy] = useState(false);
+  const [trmmNotif, setTrmmNotif] = useState({ slack_webhook_url: "", teams_webhook_url: "", notify_on: "all", include_per_agent: true, configured: false });
+  const [trmmNotifBusy, setTrmmNotifBusy] = useState(false);
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -171,7 +173,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes] = await Promise.all([
+        const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, resendRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -194,6 +196,7 @@ export default function SettingsPage() {
           axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/unifi/status`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/trmm/status`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/trmm/notifications/settings`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(usersRes.data);
         setThreshold(thresholdRes.data);
@@ -207,6 +210,7 @@ export default function SettingsPage() {
         if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
         if (unifiRes?.data) setUnifi(prev => ({ ...prev, ...unifiRes.data, api_key: "" }));
         if (trmmRes?.data) setTrmm(prev => ({ ...prev, ...trmmRes.data, api_key: "" }));
+        if (trmmNotifRes?.data) setTrmmNotif(prev => ({ ...prev, ...trmmNotifRes.data }));
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
@@ -2247,6 +2251,94 @@ export default function SettingsPage() {
                 Remove
               </Button>
             )}
+          </div>
+
+          {/* Slack / Teams notifications */}
+          <div className="border-t border-border pt-4 mt-2 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-violet-500" /> Broadcast notifications
+                </Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Push a summary of every broadcast (success / failure counts + per-command output) to Slack or Microsoft Teams. Perfect for unattended 2 AM patch runs.
+                </p>
+              </div>
+              {trmmNotif.configured && <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 bg-emerald-500/5 text-[10px]">Notifications active</Badge>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Slack incoming-webhook URL</Label>
+                <Input
+                  value={trmmNotif.slack_webhook_url}
+                  onChange={(e) => setTrmmNotif({ ...trmmNotif, slack_webhook_url: e.target.value })}
+                  placeholder="https://hooks.slack.com/services/T0…/B0…/…"
+                  data-testid="trmm-slack-webhook"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Microsoft Teams webhook URL</Label>
+                <Input
+                  value={trmmNotif.teams_webhook_url}
+                  onChange={(e) => setTrmmNotif({ ...trmmNotif, teams_webhook_url: e.target.value })}
+                  placeholder="https://your-tenant.webhook.office.com/…"
+                  data-testid="trmm-teams-webhook"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <Label className="text-xs">Notify on</Label>
+                <select
+                  value={trmmNotif.notify_on}
+                  onChange={(e) => setTrmmNotif({ ...trmmNotif, notify_on: e.target.value })}
+                  className="bg-background border border-border rounded-md px-3 py-2 text-sm h-10"
+                  data-testid="trmm-notify-on"
+                >
+                  <option value="all">Every broadcast</option>
+                  <option value="failures">Only when failures present</option>
+                  <option value="none">Disabled (drafts saved)</option>
+                </select>
+              </div>
+              <div className="flex items-end gap-2 ml-auto">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    setTrmmNotifBusy(true);
+                    try {
+                      await axios.post(`${API}/trmm/notifications/settings`, trmmNotif, { headers });
+                      const r = await axios.get(`${API}/trmm/notifications/settings`, { headers });
+                      setTrmmNotif(prev => ({ ...prev, ...r.data }));
+                      toast.success("Notification settings saved");
+                    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                    finally { setTrmmNotifBusy(false); }
+                  }}
+                  disabled={trmmNotifBusy}
+                  data-testid="trmm-notif-save"
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+                  disabled={trmmNotifBusy || (!trmmNotif.slack_webhook_url && !trmmNotif.teams_webhook_url)}
+                  onClick={async () => {
+                    setTrmmNotifBusy(true);
+                    try {
+                      // Save first so the test uses the latest values
+                      await axios.post(`${API}/trmm/notifications/settings`, trmmNotif, { headers });
+                      const res = await axios.post(`${API}/trmm/notifications/test`, { target: "both" }, { headers });
+                      if (res.data?.success) toast.success("Test notification sent — check your channel");
+                      else toast.error(`Test failed: ${(res.data?.results || []).map(r => `${r.target}=${r.status || r.error}`).join(", ")}`);
+                    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+                    finally { setTrmmNotifBusy(false); }
+                  }}
+                  data-testid="trmm-notif-test"
+                >
+                  <Activity className="w-4 h-4 mr-1" /> Send test
+                </Button>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
