@@ -15,7 +15,7 @@ import {
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown
+  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown, Siren
 } from "lucide-react";
 
 /*
@@ -223,6 +223,7 @@ export const navGroups = [
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/growth", icon: TrendingUp, label: "Revenue Growth" },
+      { path: "/warroom", icon: Siren, label: "War Rooms" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
       { path: "/license-management", icon: Layers, label: "License Mgmt" },
     ]
