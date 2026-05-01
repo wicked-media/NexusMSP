@@ -8,6 +8,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+
+## Recent Updates (May 1, 2026 — Live Incident War Room)
+One URL that becomes the shared battle-station when a P1 fires.
+- **Backend `/app/backend/app/routers/warroom.py`** — 7 endpoints:
+  - `POST /api/warroom` (title required, auto-generates `public_slug` via `secrets.token_urlsafe(8)`, resolves `client_name` + auto-populates `similar_incidents` by string-matching past resolved tickets, writes opening system message).
+  - `GET /api/warroom?include_resolved=false` — excludes resolved by default.
+  - `GET /api/warroom/{id}` — hydrates `affected_devices` with live status.
+  - `POST /api/warroom/{id}/messages` — chat, auto-adds participant if new.
+  - `POST /api/warroom/{id}/status` — update status/eta/summary, writes system messages on change, 400 on invalid status.
+  - `POST /api/warroom/{id}/resolve` — sets `resolved_at`, `resolved_notes`, system message.
+  - `GET /api/warroom/public/{slug}` — **no auth**; returns reduced payload; filters messages to only `system`/`status` kinds (internal chat hidden).
+- **Frontend** — `WarRoomPage.jsx` (list with KPIs + create dialog + 3-col detail view: ETA/status/participants/public URL + live tech chat (4s polling) + similar-incidents sidebar + affected devices) and `WarRoomPublicPage.jsx` (zero-auth client status page, 15s polling, timeline only).
+- **Routing** (`config/routes.js`) — `/warroom` (auth + layout), `/warroom/:id` (auth, no layout), `/warroom/public/:slug` (auth:false). Added to Service Desk nav.
+- **DB model** `db.war_rooms` — `{id, public_slug, title, severity, status, summary, eta, ticket_id, client_id, client_name, affected_device_ids, participants[], messages[], similar_incidents[], created_*, resolved_*}`.
+- **Testing** (`iteration_130.json`): 28/28 backend tests PASS, 100% frontend UI pass. Zero issues.
+
+
 ## Recent Updates (Apr 23, 2026 — UniFi Site Manager Command Center + Production Deployment Fix)
 
 ### Production deployment fix
