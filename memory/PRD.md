@@ -564,3 +564,20 @@ Every action is audited in `db.trmm_actions` and every script run is captured in
 ### Tests
 - `/app/test_reports/iteration_128.json` — 44/44 passed, zero issues.
 - End-to-end verified: one-time schedule fired in 30s; daily repeat correctly bumped run_at forward.
+
+## 2026-04-30 (cont. 7) — Slack/Teams Notifications for TRMM Broadcasts
+
+### What shipped
+**Backend (3 new endpoints + auto-dispatch):**
+- `GET /api/trmm/notifications/settings`
+- `POST /api/trmm/notifications/settings` — accepts slack_webhook_url, teams_webhook_url, notify_on (all|failures|none); 400 on invalid notify_on
+- `POST /api/trmm/notifications/test` — sends a sample summary card to the configured channel(s) for verification
+- **Auto-dispatch**: every broadcast invokes `_send_broadcast_notification()` after `gather()` completes (try/except wrapped so a webhook failure never breaks the broadcast). Persists per-target delivery status into `db.trmm_broadcasts.notifications` plus a `notified_at` timestamp.
+- Slack message uses native blocks API (header + 4 fields + command context) with green/amber/red color based on success ratio.
+- Teams message uses MessageCard schema (themeColor + facts).
+
+**Frontend:** New "Broadcast notifications" panel inside the TRMM Settings card —
+Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failures / Disabled) · Save · **Send test** button (validates config by firing a sample message).
+
+### Tests
+- `/app/test_reports/iteration_129.json` — 37/37 passed, zero issues. Hand-tested: real Slack-format card delivered to httpbin.org/post returned 200 OK.
