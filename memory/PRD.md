@@ -81,6 +81,13 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 6. **Client Health Certificate PDF** (`/api/clients/{id}/health-certificate.pdf?token=`): branded landscape A4 cert with score, grade, dimensions, cert ID. ★ Certificate button next to the Health Dial on client detail.
 - **Testing**: `iteration_135.json` — **33/35 backend (94%) · 100% frontend**. The 2 minor items (entity_type missing on quiet-period response; warroom path collision in test) fixed in this round.
 
+### Four more differentiators (May 1, 2026 · iteration 136)
+1. **Client Churn Risk Score** — `/api/clients/{id}/churn-risk` returns 0-100 score + band + drivers (rising volume, SLA breaches, overdue invoices, offline devices, critical open tickets) + plain-English save actions. `/api/churn-risk/overview` ranks all clients. **ChurnRiskTile** mounted on dashboard next to BlueprintInsightsTile showing top at-risk clients.
+2. **Invoice DisputeShield PDF** — `/api/invoices/{id}/dispute-shield.pdf` auto-assembles a branded evidence packet: every ticket worked in the billing window, time entries with tech names, approved estimates, defence conclusion. One-click button on invoice detail (amber break-button).
+3. **Auto-Incident Postmortem** — `POST /api/warroom/{id}/postmortem` (400 unless resolved) → Claude drafts summary/timeline/root-cause/impact/what-went-well/what-went-poorly/action_items. Persists to `db.postmortems` and stamps the war room. **Generate Postmortem** button appears on resolved war rooms (sky break-button).
+4. **Client Whisper Mode** — `/api/whisper/contact?email=X` returns rich VIP context (role/is_vip/birthday/preferred_drink/notes + recent tickets + finance + churn score + escalations + preferred tech). **WhisperRail** renders above CoPilotPanel on ticket detail when `requester_email` is set; VIPs get amber Crown + border.
+- **Testing**: `iteration_136.json` — **15/15 real backend tests PASS · 100% frontend**.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)
