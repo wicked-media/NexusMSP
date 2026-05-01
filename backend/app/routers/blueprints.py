@@ -400,3 +400,223 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
         "source_tickets": [{"id": t.get("id"), "ticket_number": t.get("ticket_number"), "title": t.get("title")} for t in matched[:12]],
         "ai_model": "claude-sonnet-4-5-20250929",
     }
+
+
+# ─────────────────────── Cross-client Pattern Library ───────────────────────
+
+import re as _re
+from collections import Counter as _Counter
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "have", "has", "not",
+    "are", "was", "were", "but", "you", "your", "our", "their", "its", "his",
+    "her", "been", "being", "will", "would", "could", "should", "into", "onto",
+    "about", "over", "under", "test", "issue", "problem", "new", "need", "needs",
+    "please", "help", "support", "ticket", "error", "failed", "failure", "unable",
+}
+
+
+def _tokens(text: str):
+    return [t for t in _re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) >= 4 and t not in _STOPWORDS]
+
+
+def _bigrams(tokens):
+    return [(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)]
+
+
+@router.get("/blueprint-patterns")
+async def detect_patterns(limit: int = 10, min_tickets: int = 3, current_user: dict = Depends(get_current_user)):
+    """Mine resolved tickets ACROSS all clients for recurring issue patterns.
+
+    Groups by top-scoring title bigrams so related tickets like "vpn connection",
+    "vpn connectivity", "vpn drop" all bubble up as one pattern.
+    """
+    tix = await db.tickets.find(
+        {"status": {"$in": ["resolved", "closed"]}},
+        {"_id": 0, "id": 1, "title": 1, "category": 1, "client_id": 1, "client_name": 1, "ticket_number": 1, "resolved_at": 1}
+    ).sort("resolved_at", -1).limit(3000).to_list(3000)
+
+    # Score every bigram by the count of tickets it appears in
+    bigram_tickets = {}  # bigram -> [ticket_ids]
+    for t in tix:
+        seen = set()
+        for bg in _bigrams(_tokens(t.get("title", ""))):
+            if bg in seen:
+                continue
+            seen.add(bg)
+            bigram_tickets.setdefault(bg, []).append(t)
+
+    # Rank patterns; collapse bigrams that share a ticket pool >70% into the top bigram
+    ranked = sorted(bigram_tickets.items(), key=lambda kv: -len(kv[1]))
+    patterns = []
+    used_ticket_ids = set()
+    existing_bps = await db.blueprints.find({"active": True}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+
+    for bg, tickets in ranked:
+        if len(tickets) < min_tickets:
+            continue
+        ids = {t["id"] for t in tickets}
+        # Skip if >60% of these tickets already got assigned to a stronger pattern
+        overlap = len(ids & used_ticket_ids) / max(1, len(ids))
+        if overlap > 0.6:
+            continue
+        used_ticket_ids |= ids
+        clients = {t.get("client_id") for t in tickets if t.get("client_id")}
+        categories = _Counter(t.get("category") for t in tickets if t.get("category"))
+        pattern_key = f"{bg[0]}_{bg[1]}"
+        name_guess = f"{bg[0].title()} {bg[1].title()}"
+        # Find any existing blueprint that looks related
+        related = [
+            bp for bp in existing_bps
+            if bg[0] in bp["name"].lower() or bg[1] in bp["name"].lower()
+        ][:3]
+        patterns.append({
+            "key": pattern_key,
+            "name_guess": name_guess,
+            "tokens": list(bg),
+            "ticket_count": len(tickets),
+            "client_count": len(clients),
+            "top_category": categories.most_common(1)[0][0] if categories else None,
+            "sample_titles": [t["title"] for t in tickets[:5]],
+            "sample_ticket_ids": [t["id"] for t in tickets[:20]],
+            "related_blueprints": related,
+            "affected_client_ids": list(clients),
+        })
+        if len(patterns) >= limit:
+            break
+
+    return {
+        "patterns": patterns,
+        "total_scanned": len(tix),
+        "window": "all resolved/closed tickets",
+    }
+
+
+@router.post("/blueprint-patterns/suggest")
+async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_current_user)):
+    """Draft a blueprint from a detected cross-client pattern.
+    Body: { tokens: [str,str], sample_ticket_ids?: [ids] }
+    """
+    import os as _os
+    import json as _json
+
+    tokens = data.get("tokens") or []
+    ids = data.get("sample_ticket_ids") or []
+    if len(tokens) < 2 and not ids:
+        raise HTTPException(400, "tokens (2) or sample_ticket_ids required")
+
+    if ids:
+        tix = await db.tickets.find(
+            {"id": {"$in": ids}},
+            {"_id": 0, "id": 1, "title": 1, "description": 1, "resolution": 1, "category": 1, "priority": 1, "ticket_number": 1, "client_name": 1}
+        ).to_list(50)
+    else:
+        # Re-query by tokens on title
+        regexes = [{"title": {"$regex": tok, "$options": "i"}} for tok in tokens]
+        tix = await db.tickets.find(
+            {"status": {"$in": ["resolved", "closed"]}, "$and": regexes},
+            {"_id": 0, "id": 1, "title": 1, "description": 1, "resolution": 1, "category": 1, "priority": 1, "ticket_number": 1, "client_name": 1}
+        ).sort("resolved_at", -1).limit(25).to_list(25)
+
+    if len(tix) < 2:
+        raise HTTPException(400, "Not enough matching tickets to learn from")
+
+    corpus = "\n\n".join([
+        f"#{t.get('ticket_number','')} ({t.get('client_name','')}) [{t.get('priority','medium')}·{t.get('category','support')}] "
+        f"{t.get('title','')}\n  Fix: {(t.get('resolution') or t.get('description') or '')[:400]}"
+        for t in tix[:15]
+    ])
+
+    api_key = _os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(503, "AI not configured (EMERGENT_LLM_KEY missing)")
+
+    system_msg = (
+        "You design shared ticket blueprints for an MSP serving many clients. Given a corpus of "
+        "resolved tickets from MULTIPLE CLIENTS that all share a common theme, produce a REUSABLE "
+        "Ticket Blueprint that will work across all of them. Return STRICT JSON only with: "
+        "name (title-case, short), description (1 sentence explaining why this blueprint exists), "
+        "default_priority (low|medium|high|critical), default_category, sla_minutes (int), "
+        "require_completion (bool), "
+        "fields (array of {key (snake_case), label, type "
+        "(text|textarea|number|date|select|checkbox), required, placeholder, options?}), "
+        "checklist (array of {label, required}). "
+        "Prefer fields/checklist items that are TENANT-AGNOSTIC (usable for any client). "
+        "3-6 fields, 4-8 checklist items."
+    )
+    user_msg = (
+        f"Cross-client resolved tickets (theme: {' '.join(tokens)}):\n\n{corpus}\n\n"
+        "Return only the JSON."
+    )
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        import uuid as _uuid
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"bp-pattern-{_uuid.uuid4().hex[:8]}",
+            system_message=system_msg,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        raw = await chat.send_message(UserMessage(text=user_msg))
+        text = raw.strip() if isinstance(raw, str) else str(raw)
+    except Exception as e:
+        raise HTTPException(502, f"AI call failed: {str(e)[:160]}")
+
+    m = _re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        raise HTTPException(502, "AI did not return JSON")
+    try:
+        draft = _json.loads(m.group(0))
+    except Exception:
+        raise HTTPException(502, "AI returned invalid JSON")
+
+    safe = {
+        "name": str(draft.get("name") or f"{' '.join(tokens).title()} Blueprint")[:120],
+        "description": str(draft.get("description") or "")[:600],
+        "default_priority": draft.get("default_priority"),
+        "default_category": draft.get("default_category"),
+        "default_status": None,
+        "sla_minutes": draft.get("sla_minutes"),
+        "require_completion": bool(draft.get("require_completion", False)),
+        "fields": _validate_fields(draft.get("fields")),
+        "checklist": _validate_checklist([{**c, "id": f"cl-{uuid.uuid4().hex[:8]}"} for c in (draft.get("checklist") or [])]),
+    }
+    try:
+        safe["sla_minutes"] = int(safe["sla_minutes"]) if safe["sla_minutes"] else None
+    except Exception:
+        safe["sla_minutes"] = None
+
+    return {
+        "draft": safe,
+        "source_tickets": [{"id": t["id"], "ticket_number": t.get("ticket_number"), "title": t.get("title"), "client_name": t.get("client_name")} for t in tix[:15]],
+        "ai_model": "claude-sonnet-4-5-20250929",
+    }
+
+
+@router.post("/blueprints/{bp_id}/push-to-clients")
+async def push_blueprint_to_clients(bp_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Add blueprint to the assigned-list of multiple clients at once.
+    Body: { client_ids: [str], make_default?: bool }
+    """
+    bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0, "id": 1, "name": 1})
+    if not bp:
+        raise HTTPException(404, "Blueprint not found")
+    client_ids = data.get("client_ids") or []
+    if not client_ids:
+        raise HTTPException(400, "client_ids required")
+    make_default = bool(data.get("make_default", False))
+
+    updated = 0
+    for cid in client_ids:
+        client = await db.clients.find_one({"id": cid}, {"_id": 0, "id": 1, "blueprint_ids": 1, "default_blueprint_id": 1})
+        if client is None:
+            continue
+        bp_ids = list({*(client.get("blueprint_ids") or []), bp_id})
+        patch = {"blueprint_ids": bp_ids}
+        if make_default:
+            patch["default_blueprint_id"] = bp_id
+        res = await db.clients.update_one({"id": cid}, {"$set": patch})
+        if res.matched_count:
+            updated += 1
+
+    return {"success": True, "updated": updated, "blueprint": bp["name"]}

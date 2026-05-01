@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertical, X } from "lucide-react";
+import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertical, X, Sparkles, Users, ChevronRight, Send } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const FIELD_TYPES = [
   { value: "text", label: "Short text" },
@@ -132,8 +133,15 @@ export default function BlueprintsPage() {
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+      <Tabs defaultValue="library">
+        <TabsList>
+          <TabsTrigger value="library" data-testid="blueprints-tab-library"><Clipboard className="w-3 h-3 mr-1" />Library</TabsTrigger>
+          <TabsTrigger value="patterns" data-testid="blueprints-tab-patterns"><Sparkles className="w-3 h-3 mr-1" />Pattern Discovery</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="library" className="mt-4">
+          <Card>
+            <CardContent className="p-0">
           {loading ? (
             <div className="p-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Loading…</div>
           ) : bps.length === 0 ? (
@@ -184,6 +192,12 @@ export default function BlueprintsPage() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="patterns" className="mt-4">
+          <PatternsPanel onCreated={() => load()} />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="blueprint-dialog">
@@ -322,6 +336,256 @@ export default function BlueprintsPage() {
             <Button onClick={save} disabled={saving || !form.name.trim()} variant="outline" className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="blueprint-save-btn">
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
               {editing ? "Save" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PatternsPanel({ onCreated }) {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [patterns, setPatterns] = useState([]);
+  const [totalScanned, setTotalScanned] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [minTix, setMinTix] = useState(3);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [sourceTix, setSourceTix] = useState([]);
+  const [pattern, setPattern] = useState(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [pushToAll, setPushToAll] = useState(true);
+  const [makeDefault, setMakeDefault] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API}/blueprint-patterns?min_tickets=${minTix}&limit=12`, { headers });
+      setPatterns(res.data?.patterns || []);
+      setTotalScanned(res.data?.total_scanned || 0);
+    } catch { toast.error("Failed to detect patterns"); }
+    finally { setLoading(false); }
+  }, [headers, minTix]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openSuggest = async (p) => {
+    setPattern(p);
+    setSuggesting(true);
+    setSuggestOpen(true);
+    setDraft(null);
+    try {
+      const res = await axios.post(`${API}/blueprint-patterns/suggest`, {
+        tokens: p.tokens,
+        sample_ticket_ids: p.sample_ticket_ids,
+      }, { headers });
+      setDraft(res.data.draft);
+      setSourceTix(res.data.source_tickets || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message);
+      setSuggestOpen(false);
+    } finally { setSuggesting(false); }
+  };
+
+  const saveDraft = async () => {
+    if (!draft?.name) return;
+    setSavingDraft(true);
+    try {
+      const res = await axios.post(`${API}/blueprints`, draft, { headers });
+      const newBp = res.data;
+      if (pushToAll && pattern?.affected_client_ids?.length) {
+        await axios.post(`${API}/blueprints/${newBp.id}/push-to-clients`, {
+          client_ids: pattern.affected_client_ids,
+          make_default: makeDefault,
+        }, { headers });
+        toast.success(`"${newBp.name}" saved + pushed to ${pattern.affected_client_ids.length} client(s)`);
+      } else {
+        toast.success(`"${newBp.name}" saved to library`);
+      }
+      setSuggestOpen(false);
+      setDraft(null);
+      onCreated && onCreated();
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setSavingDraft(false); }
+  };
+
+  if (loading) return <div className="p-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Scanning resolved tickets across all clients…</div>;
+
+  return (
+    <div className="space-y-4" data-testid="patterns-panel">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          Scanned <span className="font-mono text-sky-400">{totalScanned}</span> resolved/closed tickets across your MSP. Showing top {patterns.length} recurring patterns.
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-[10px] text-muted-foreground">Min tickets</Label>
+          <Input type="number" value={minTix} onChange={(e) => setMinTix(parseInt(e.target.value) || 3)} className="h-7 w-14 text-xs" min={2} max={50} />
+          <Button size="sm" variant="outline" onClick={load} data-testid="patterns-refresh"><Loader2 className="w-3 h-3 mr-1" style={{ display: "none" }} />Rescan</Button>
+        </div>
+      </div>
+
+      {patterns.length === 0 ? (
+        <div className="p-16 text-center text-sm text-muted-foreground bg-muted/20 rounded-xl border border-dashed border-zinc-800">
+          No recurring patterns detected yet. Resolve more tickets to start seeing patterns.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {patterns.map((p) => (
+            <Card key={p.key} className="border-zinc-800 hover:border-violet-500/30 transition-colors" data-testid={`pattern-${p.key}`}>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-base font-medium flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                      {p.name_guess}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{p.tokens.join(" + ")}</div>
+                  </div>
+                  <div className="flex gap-2 text-right">
+                    <Badge variant="outline" className="text-xs">
+                      {p.ticket_count} <span className="ml-1 text-[9px] text-muted-foreground">tix</span>
+                    </Badge>
+                    <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-500/30">
+                      <Users className="w-2.5 h-2.5 mr-0.5" />{p.client_count}
+                    </Badge>
+                  </div>
+                </div>
+
+                {p.related_blueprints?.length > 0 && (
+                  <div className="text-[10px] text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded px-2 py-1">
+                    Similar to: {p.related_blueprints.map((b) => b.name).join(", ")}
+                  </div>
+                )}
+
+                <div className="space-y-0.5">
+                  {p.sample_titles.slice(0, 3).map((t, i) => (
+                    <div key={i} className="text-[11px] text-muted-foreground line-clamp-1">· {t}</div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-zinc-800">
+                  <div className="text-[10px] text-muted-foreground">
+                    {p.top_category && <Badge variant="outline" className="text-[9px] mr-1">{p.top_category}</Badge>}
+                    Affects {p.client_count} client{p.client_count === 1 ? "" : "s"}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+                    onClick={() => openSuggest(p)}
+                    data-testid={`pattern-gen-${p.key}`}
+                  >
+                    <Wand2 className="w-3 h-3 mr-1" /> Generate Blueprint
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={suggestOpen} onOpenChange={(v) => { setSuggestOpen(v); if (!v) { setDraft(null); setPattern(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="pattern-suggest-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-violet-400" /> AI-drafted Cross-client Blueprint
+            </DialogTitle>
+          </DialogHeader>
+          {suggesting ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
+              Reading {pattern?.ticket_count} tickets across {pattern?.client_count} client(s) to draft a shared blueprint…
+            </div>
+          ) : !draft ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">No draft yet.</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-md bg-violet-500/5 border border-violet-500/20 p-3">
+                <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1">Pattern · learned from {sourceTix.length} tickets across {pattern?.client_count} clients</div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {sourceTix.slice(0, 10).map((t) => (
+                    <span key={t.id} className="text-[10px] font-mono bg-muted/40 rounded px-1.5 py-0.5">
+                      #{t.ticket_number} · {(t.client_name || "").slice(0, 14)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">Name</Label>
+                <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} data-testid="pattern-draft-name" />
+              </div>
+              <div>
+                <Label className="text-xs">Description</Label>
+                <Textarea rows={2} value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-muted/30 rounded px-3 py-2">
+                  <div className="text-[10px] uppercase text-muted-foreground">Priority</div>
+                  <div className="font-medium">{draft.default_priority || "—"}</div>
+                </div>
+                <div className="bg-muted/30 rounded px-3 py-2">
+                  <div className="text-[10px] uppercase text-muted-foreground">Category</div>
+                  <div className="font-medium">{draft.default_category || "—"}</div>
+                </div>
+                <div className="bg-muted/30 rounded px-3 py-2">
+                  <div className="text-[10px] uppercase text-muted-foreground">SLA</div>
+                  <div className="font-medium">{draft.sla_minutes ? `${draft.sla_minutes}m` : "—"}</div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1"><Wand2 className="w-3 h-3" /> Fields ({(draft.fields || []).length})</div>
+                <div className="space-y-1">
+                  {(draft.fields || []).map((f) => (
+                    <div key={f.key} className="flex items-center justify-between bg-muted/30 rounded px-2 py-1 text-xs">
+                      <div><span className="font-medium">{f.label}</span>{f.required && <span className="text-rose-400 ml-1">*</span>}<span className="text-[10px] text-muted-foreground font-mono ml-2">{f.key}</span></div>
+                      <span className="text-[10px] text-muted-foreground">{f.type}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1"><ListChecks className="w-3 h-3" /> Checklist ({(draft.checklist || []).length})</div>
+                <div className="space-y-1">
+                  {(draft.checklist || []).map((c) => (
+                    <div key={c.id} className="flex items-center gap-2 bg-muted/30 rounded px-2 py-1 text-xs">
+                      <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                      <span className="flex-1">{c.label}</span>
+                      {c.required && <span className="text-rose-400 text-[9px]">required</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-md p-3 space-y-2">
+                <div className="text-sm font-medium flex items-center gap-2">
+                  <Send className="w-4 h-4 text-emerald-400" /> Push to clients
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <Switch checked={pushToAll} onCheckedChange={setPushToAll} data-testid="pattern-push-toggle" />
+                  <span>Assign this blueprint to all <span className="text-emerald-400 font-medium">{pattern?.client_count || 0}</span> affected client(s)</span>
+                </div>
+                {pushToAll && (
+                  <div className="flex items-center gap-2 text-xs pl-6">
+                    <Switch checked={makeDefault} onCheckedChange={setMakeDefault} data-testid="pattern-default-toggle" />
+                    <span>Also set as the <strong>default</strong> for those clients (auto-applies to future tickets)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSuggestOpen(false)}>Cancel</Button>
+            <Button onClick={saveDraft} disabled={!draft || savingDraft} variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10" data-testid="pattern-save-btn">
+              {savingDraft ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Sparkles className="w-4 h-4 mr-1" />}
+              {pushToAll ? `Save & Push to ${pattern?.client_count || 0}` : "Save to library"}
             </Button>
           </DialogFooter>
         </DialogContent>
