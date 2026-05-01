@@ -57,6 +57,17 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - **Auto-open flow**: landing on `/blueprints` with `?pattern&?t` URL params auto-selects the Pattern Discovery tab and auto-opens the suggest dialog for the matching pattern; URL params are cleared on consume. Pattern panel `min_tickets` default lowered from 3 → 2 so deep-links from the dashboard tile reliably resolve.
 - **Testing**: `iteration_133.json` — 21/21 backend tests PASS · 100% frontend UI pass. Zero blockers.
 
+### QBR Auto-Generator (May 1, 2026 · follow-up 4)
+- **Backend** `/app/backend/app/routers/qbr.py` (NEW):
+  - `GET /api/qbr/{client_id}?quarter=YYYY-QN` — aggregates per-client tickets (volume, priority, top categories, SLA breaches, resolved count), device health, backup health, critical alerts, quarter spend, plus **cross-client pattern hits** that affected this client (bridges `blueprints._bigrams/_tokens`). Calls Claude Sonnet 4.5 to draft 7 sections: executive_summary, key_wins, incident_breakdown (with sla_assessment), infrastructure_health, risks_and_recommendations, **msp_intelligence**, next_quarter_focus. Defaults to most recently completed quarter when no param.
+  - `POST /api/qbr/{client_id}/save` — persists draft + edits to `db.qbrs`.
+  - `GET /api/qbr/{client_id}/list` — past QBRs for client.
+  - `GET /api/qbrs/{qbr_id}` — full QBR.
+  - `GET /api/qbrs/{qbr_id}/pdf?token=...` — branded PDF using fpdf with `_safe()` unicode sanitizer (latin-1 compat) and explicit margins to avoid horizontal-space errors. Cover header in MSP brand color, KPI summary, all sections + risks/recommendations, MSP intelligence with pattern hit bullets.
+- **Frontend** `/app/frontend/src/pages/QBRPage.jsx` (NEW): client + quarter selectors, "Generate QBR" button (Claude takes 30-60s), KPI strip (5 cards: Tickets, Critical, Devices, SLA, Spend), 6 editable section cards with bullet builders, MSP Intelligence card showing pattern hits each linking to `/blueprints?pattern=...&t=...` for one-click cross-client blueprint generation, sticky Save + Download PDF footer, recent QBR history list.
+- **Routing/Nav**: `/qbr` route added; "QBRs" nav item under Business section between Revenue Growth and War Rooms.
+- **Testing**: `iteration_134.json` — 23/23 backend tests PASS · 100% frontend UI pass. Zero blockers. Generated valid 6.4KB PDF starting with `%PDF-1.3` header.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)
