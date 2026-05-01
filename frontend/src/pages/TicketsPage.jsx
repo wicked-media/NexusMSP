@@ -5,6 +5,7 @@ import { API, useAuth } from "@/App";
 import DOMPurify from "dompurify";
 import CoPilotPanel from "@/components/CoPilotPanel";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
+import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1266,6 +1267,21 @@ export default function TicketsPage() {
             <Button variant="outline" size="sm" onClick={handleDownloadPdf} data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
+            <WhyOnFireButton entityType="ticket" entityId={viewingTicket.id} />
+            <Button
+              variant="outline" size="sm"
+              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+              onClick={async () => {
+                try {
+                  const r = await axios.post(`${API}/tickets/${viewingTicket.id}/auto-quote`, {}, { headers: { Authorization: `Bearer ${token}` } });
+                  toast.success(`Quote drafted: ${r.data?.line_items?.length || 0} items @ $${r.data?.total || 0}`);
+                  console.log("Auto-quote draft:", r.data);
+                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+              }}
+              data-testid="auto-quote-btn"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1" />Quote It
+            </Button>
             {viewingTicket.blueprint_id && (
               <Badge variant="outline" className="text-sky-400 border-sky-500/30 bg-sky-500/10 gap-1">
                 <Lightbulb className="w-3 h-3" />

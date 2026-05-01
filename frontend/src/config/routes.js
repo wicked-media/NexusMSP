@@ -19,6 +19,8 @@ export const routeConfig = [
   { path: "/tech-roster", component: page("TechRosterPage"), auth: true, layout: true },
   { path: "/blueprints", component: page("BlueprintsPage"), auth: true, layout: true },
   { path: "/qbr", component: page("QBRPage"), auth: true, layout: true },
+  { path: "/invoice-templates", component: page("InvoiceTemplatesPage"), auth: true, layout: true },
+  { path: "/kiosk/:kioskToken", component: page("KioskPage"), auth: false, layout: false },
   { path: "/growth", component: page("GrowthPage"), auth: true, layout: true },
   { path: "/suped", component: page("SupedCommandCenterPage"), auth: true, layout: true },
   { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },

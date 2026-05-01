@@ -440,7 +440,17 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             {client.last_activity && <span className="text-[10px] text-zinc-500 ml-2 font-mono">last activity {formatDistanceToNow(new Date(client.last_activity), { addSuffix: true })}</span>}
           </div>
         </div>
-        <HealthDial score={client.health_score} size={56} />
+        <div className="flex items-center gap-2">
+          <HealthDial score={client.health_score} size={56} />
+          <button
+            type="button"
+            className="text-[10px] px-2 py-1 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+            onClick={() => window.open(`${API}/clients/${client.id}/health-certificate.pdf?token=${encodeURIComponent(token)}`, "_blank")}
+            data-testid={`health-cert-btn-${client.id}`}
+          >
+            ★ Certificate
+          </button>
+        </div>
       </div>
 
       {/* Quick metrics strip */}
