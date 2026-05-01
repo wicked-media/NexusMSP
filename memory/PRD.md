@@ -51,6 +51,12 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Smoke-tested: Claude 4.5 generated "VPN Configuration & Troubleshooting" blueprint with 5 fields (incl. 2 Select dropdowns) and 8 production-grade checklist items from 2 cross-client VPN tickets. Push endpoint now correctly updates all 4 clients.
 - **Testing**: `iteration_132.json` — 17/17 backend tests PASS · 100% frontend UI pass.
 
+### Blueprint Insights — Dashboard tile (May 1, 2026 · follow-up 3)
+- **Backend** `GET /api/blueprint-patterns/trends?days=7` — compares this-window vs previous-window resolved tickets, returns top 3 rising patterns with `is_new` flag (prev=0) and `delta` for surges. Falls back to `updated_at` when `resolved_at` is null. `score = (this*1.5 if is_new else delta) + this*0.5`.
+- **Frontend** `BlueprintInsightsTile.jsx` mounted on the Dashboard right after the standup banner. Each rising pattern shows a NEW badge (rose) or "+N vs last wk" badge (amber), ticket/client counts, sample title, and a "Draft" button that deep-links to `/blueprints?pattern={key}&t=tok1,tok2`.
+- **Auto-open flow**: landing on `/blueprints` with `?pattern&?t` URL params auto-selects the Pattern Discovery tab and auto-opens the suggest dialog for the matching pattern; URL params are cleared on consume. Pattern panel `min_tickets` default lowered from 3 → 2 so deep-links from the dashboard tile reliably resolve.
+- **Testing**: `iteration_133.json` — 21/21 backend tests PASS · 100% frontend UI pass. Zero blockers.
+
 
 
 ## Recent Updates (May 1, 2026 — Live Incident War Room)

@@ -357,7 +357,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
   const [patterns, setPatterns] = useState([]);
   const [totalScanned, setTotalScanned] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [minTix, setMinTix] = useState(3);
+  const [minTix, setMinTix] = useState(2);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [draft, setDraft] = useState(null);
