@@ -37,6 +37,8 @@ export const routeConfig = [
   { path: "/knowledge-base", component: page("KnowledgeBasePage"), auth: true, layout: true },
   { path: "/insights", component: page("InsightsHubPage"), auth: true, layout: true },
   { path: "/command-center", component: page("CommandCenterPage"), auth: true, layout: true },
+  { path: "/me", component: page("TechProfilePage"), auth: true, layout: true },
+  { path: "/team/:id", component: page("TechProfilePage"), auth: true, layout: true },
 
   // Integrations
   { path: "/pax8", component: page("Pax8CommandCenterPage"), auth: true, layout: true },

@@ -9,6 +9,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { AICopilotPanel } from "@/components/AICopilotPanel";
 import { routeConfig } from "@/config/routes";
 import { secureStorage } from "@/lib/secureStorage";
+import { ChatPanel } from "@/components/presence/ChatPanel";
+import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -273,6 +275,7 @@ function App() {
     <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
+        <GlobalAddons />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           {routeConfig.map((route) => (
@@ -289,6 +292,17 @@ function App() {
     </AuthProvider>
     </ThemeProvider>
   );
+}
+
+function GlobalAddons() {
+  const { token } = useAuth();
+  if (!token) return null;
+  return <AuthedAddons />;
+}
+
+function AuthedAddons() {
+  usePresenceHeartbeat();
+  return <ChatPanel />;
 }
 
 export default App;
