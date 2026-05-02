@@ -8,6 +8,34 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — Help Center + Atmosphere + @channel Broadcast)
+
+### 📚 Help Center Framework (NEW)
+- New router `chat_help.py` — CRUD for `db.help_articles` with auto-seed of 6 default articles (Getting Started · Tickets · Command Center · Insights Hub · Chat & Presence · Tech Profile). Supports search via `?q=`, slug-based fetch, admin upsert with optional screenshots[].
+- New page `/help` (also `/help/:slug`) — `HelpCenterPage.jsx` with searchable category sidebar, markdown article viewer (markdown-it), inline screenshot rendering, admin-only Edit/New/Re-seed buttons. Tactical-dark prose styling (zinc bg, violet links, IBM-Plex feel).
+- Linked in sidebar under **Reports & Comms → Help Center**.
+
+### 📢 @channel / @here / @everyone Chat Broadcast
+- `chat_presence.send_message()` now detects `@channel`, `@here`, `@everyone` mentions and notifies every channel member (or all active users if channel has no explicit member list). Per-user mentions still work, no double-notify.
+- Stamps `msg.broadcast=true` so frontend can style them differently later.
+- Companion auto-broadcast hooks in `chat_help.py`: `POST /api/chat/broadcast/sentiment-escalating`, `/sla-page`, `/tick` — scan for new escalations/auto-pages and post idempotent system messages with `@channel` into `#general`.
+
+### 🌌 Atmosphere Page (Phase 3 quirky bundle)
+- New page `/atmosphere` (`AtmospherePage.jsx`) — 6-tab consolidation of all Phase 3 ambient features:
+  - **Ambient** — weather-mode mood gradient banner (stormy/beach/rainy_monday/sunny/neutral) + open-critical/total/huntress/hour stats.
+  - **Friday Reel** — 5-scene Claude storyboard + week stats + top critical wins.
+  - **Threat Dragon** — security mood meter (kitten → raging dragon, sized by open Huntress alerts).
+  - **Launches** — recent celebratory rocket events + manual "Fire a launch" button.
+  - **Graveyard** — decommissioned device tombstones with auto-epitaphs and lifespan counts.
+  - **Client Cards** — picker → 6 mini-cards: Trading Card (rarity), Mood Ring, Password Pet, Birthday Radar, Slow-Internet Detective (run-on-demand), Family Tree.
+- All endpoints already lived in `quirky_features.py`; this page wires them up. Linked in sidebar under **Reports & Comms → Atmosphere**.
+- Static MOOD_GRADIENT class map prevents Tailwind JIT from purging the gradient classes.
+
+### Testing
+- `iteration_143.json`: **31/31 backend pass (100%) · 100% frontend pass.**
+- Only pre-existing Recharts width/height console warnings (P3) remain — tracked.
+
+
 ## Recent Updates (May 2, 2026 — War Room Auto-spawn + UI Consistency)
 
 ### 🚨 War Room Channel Auto-spawn
