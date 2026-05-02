@@ -8,6 +8,17 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — Zero-touch Automation Scheduler)
+
+### 🤖 Background scheduler live — chain reactions now fire automatically
+- New helper `run_chain_reactions()` in `power_features.py` runs 5 reactions in one pass: Apology Queue scan · SLA Auto-page · Promise Reconcile · Patch Broadcast.
+- New endpoints: `POST /api/ops/nightly-tick` (manual trigger), `GET /api/ops/tick-log` (history), `GET/PUT /api/ops/settings` (enable/disable + interval).
+- Background loop `_chain_reactions_loop()` wired in `server.py` — polls settings doc `{type: 'ops_scheduler'}` each cycle, defaults to enabled + 15 min interval (configurable 5-60 min).
+- Persists every tick to `db.ops_tick_log` with triggered_by, started_at, per-reaction result counts, errors, finished_at.
+- **New Automation tab** on Command Center (/command-center) — Running/Paused status, Run now button, interval quick-switches (5/15/30/60 min), recent-ticks table.
+- **Testing**: `iteration_141.json` — 12/12 backend · 100% frontend · scheduler auto-fires within 45 seconds of backend boot. Zero issues.
+
+
 ## Recent Updates (May 2, 2026 — 24-feature Power Compound Bundle)
 
 ### ⚡ Power Features — 24 compounding composites on top of Mega Bundle (iteration_140: 28/28 pass)
