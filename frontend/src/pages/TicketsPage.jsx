@@ -6,6 +6,7 @@ import DOMPurify from "dompurify";
 import CoPilotPanel from "@/components/CoPilotPanel";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
+import { SentimentBadge } from "@/components/ai/SentimentBadge";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1269,6 +1270,7 @@ export default function TicketsPage() {
             <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
             <WhyOnFireButton entityType="ticket" entityId={viewingTicket.id} />
+            <SentimentBadge ticketId={viewingTicket.id} />
             <Button
               variant="outline" size="sm"
               className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"

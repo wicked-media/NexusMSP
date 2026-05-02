@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="6" failures="8" skipped="0" tests="17" time="2.072" timestamp="2026-05-01T23:59:35.530390+00:00" hostname="agent-env-4a7f80d7-756c-4200-8991-71de3adaf3ec"><testcase classname="backend.tests.test_revenue_protection_ai.TestSLARadar" name="test_sla_radar_returns_200" time="0.505"><failure message="AssertionError: Expected 200, got 401: {&quot;detail&quot;:&quot;Invalid token&quot;}&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:42: in test_sla_radar_returns_200
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+E   AssertionError: Expected 200, got 401: {"detail":"Invalid token"}
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestSLARadar" name="test_sla_radar_requires_auth" time="0.095" /><testcase classname="backend.tests.test_revenue_protection_ai.TestSentimentTracker" name="test_sentiment_with_known_ticket" time="0.107"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:80: in test_sentiment_with_known_ticket
+    assert tickets_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestSentimentTracker" name="test_sentiment_404_for_invalid_ticket" time="0.078"><failure message="AssertionError: Expected 404, got 401&#10;assert 401 == 404&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:108: in test_sentiment_404_for_invalid_ticket
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 401
+E   assert 401 == 404
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestSentimentTracker" name="test_sentiment_requires_auth" time="0.083" /><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_create_payment_promise" time="0.082"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:126: in test_invoice
+    assert inv_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_list_payment_promises" time="0.119"><failure message="AssertionError: Expected 200, got 401: {&quot;detail&quot;:&quot;Invalid token&quot;}&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:174: in test_list_payment_promises
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+E   AssertionError: Expected 200, got 401: {"detail":"Invalid token"}
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_list_promises_with_status_filter" time="0.129"><failure message="AssertionError: Expected 200, got 401&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:190: in test_list_promises_with_status_filter
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+E   AssertionError: Expected 200, got 401
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_update_payment_promise_status" time="0.000"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:126: in test_invoice
+    assert inv_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_update_promise_invalid_status" time="0.000"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:126: in test_invoice
+    assert inv_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestPaymentPromiseTracker" name="test_promise_requires_text" time="0.000"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:126: in test_invoice
+    assert inv_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestEstimateFollowupAI" name="test_followup_draft_success" time="0.104"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:256: in test_estimate
+    assert est_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestEstimateFollowupAI" name="test_followup_draft_400_for_approved" time="0.072"><failure message="AttributeError: 'str' object has no attribute 'get'">backend/tests/test_revenue_protection_ai.py:316: in test_followup_draft_400_for_approved
+    if est.get("status") == "approved":
+       ^^^^^^^
+E   AttributeError: 'str' object has no attribute 'get'</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestEstimateFollowupAI" name="test_followup_draft_404_for_invalid" time="0.089"><failure message="AssertionError: Expected 404, got 401&#10;assert 401 == 404&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:347: in test_followup_draft_404_for_invalid
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 401
+E   assert 401 == 404
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestInvoiceExplainer" name="test_invoice_explainer_success" time="0.094"><error message="failed on setup with &quot;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code&quot;">backend/tests/test_revenue_protection_ai.py:359: in test_invoice
+    assert inv_resp.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestInvoiceExplainer" name="test_invoice_explainer_404_for_invalid" time="0.081"><failure message="AssertionError: Expected 404, got 401&#10;assert 401 == 404&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_revenue_protection_ai.py:408: in test_invoice_explainer_404_for_invalid
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 401
+E   assert 401 == 404
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_revenue_protection_ai.TestInvoiceExplainer" name="test_invoice_explainer_requires_auth" time="0.255" /></testsuite></testsuites>

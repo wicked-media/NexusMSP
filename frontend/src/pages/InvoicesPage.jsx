@@ -25,6 +25,8 @@ import {
   Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
+import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
+import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
@@ -644,6 +646,10 @@ export default function InvoicesPage() {
           <Badge className={STATUS_CONFIG[getEffectiveStatus(inv)]?.class}>{STATUS_CONFIG[getEffectiveStatus(inv)]?.label}</Badge>
           {isOverdue && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>}
           {inv.is_recurring && <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30"><RefreshCw className="w-3 h-3 mr-1" />Recurring</Badge>}
+          <div className="ml-auto flex gap-2">
+            <InvoiceExplainerButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
+            {balance > 0 && <PaymentPromiseButton invoiceId={inv.id} />}
+          </div>
         </div>
 
         {/* Payment Progress Bar */}

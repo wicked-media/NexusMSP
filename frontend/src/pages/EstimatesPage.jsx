@@ -19,6 +19,7 @@ import {
   History, AlertCircle, CircleDot, Zap, RefreshCw, X
 } from "lucide-react";
 import { format } from "date-fns";
+import { EstimateFollowupButton } from "@/components/ai/EstimateFollowupButton";
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30", icon: CircleDot, pulse: false },
@@ -192,6 +193,9 @@ export default function EstimatesPage() {
                 <Button size="sm" onClick={() => handleStatusChange(viewing.id, "approved")} className="bg-emerald-600 hover:bg-emerald-700" data-testid="approve-btn"><CheckCircle className="w-3 h-3 mr-1" />Approve</Button>
                 <Button size="sm" variant="outline" className="text-red-400 border-red-500/30" onClick={() => { const r = prompt("Decline reason?"); if (r !== null) handleStatusChange(viewing.id, "declined", r); }} data-testid="decline-btn"><XCircle className="w-3 h-3 mr-1" />Decline</Button>
               </>
+            )}
+            {viewing.status !== "approved" && viewing.status !== "draft" && (
+              <EstimateFollowupButton estimateId={viewing.id} estimateNumber={viewing.estimate_number} />
             )}
             {viewing.status === "approved" && !viewing.converted_to_invoice && <Button size="sm" onClick={() => handleConvert(viewing.id)} className="bg-purple-600 hover:bg-purple-700" data-testid="convert-btn"><Receipt className="w-3 h-3 mr-1" />Convert to Invoice</Button>}
             <Button size="sm" variant="outline" className="text-red-400" onClick={() => handleDelete(viewing.id)} data-testid="delete-estimate-btn"><Trash2 className="w-3 h-3" /></Button>
