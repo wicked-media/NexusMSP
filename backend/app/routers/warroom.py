@@ -121,6 +121,40 @@ async def create_warroom(data: dict, current_user: dict = Depends(get_current_us
     }
     await db.war_rooms.insert_one(doc)
     doc.pop("_id", None)
+
+    # Auto-spawn a private chat channel for this war room
+    try:
+        # Pull paged techs (already-paged + just-created) so we invite them in
+        paged = await db.war_room_pages.find({"war_room_id": wr_id}, {"_id": 0, "tech_id": 1}).to_list(50)
+        member_ids = list({p["tech_id"] for p in paged if p.get("tech_id")})
+        if current_user.get("id"):
+            member_ids.append(current_user.get("id"))
+        ch_name = f"warroom-{slug}"
+        ch_doc = {
+            "id": uuid.uuid4().hex,
+            "name": ch_name,
+            "kind": "warroom",
+            "member_ids": list(set(member_ids)),
+            "ref_warroom_id": wr_id,
+            "ref_ticket_id": data.get("ticket_id"),
+            "created_at": now,
+        }
+        existing = await db.chat_channels.find_one({"name": ch_name}, {"_id": 0})
+        if not existing:
+            await db.chat_channels.insert_one(dict(ch_doc))
+            await db.chat_messages.insert_one({
+                "id": uuid.uuid4().hex,
+                "channel_id": ch_doc["id"],
+                "user_id": "system",
+                "user_name": "NexusOps",
+                "is_system": True,
+                "body": f"🚨 War room opened: *{title[:120]}* · severity {doc['severity']}\nTicket {data.get('ticket_id') or '—'} · ETA {doc['eta'] or 'TBD'}\nUse this channel for the live response.",
+                "ts": now,
+                "reactions": {},
+            })
+    except Exception:
+        pass
+
     return {"success": True, "war_room": doc}
 
 

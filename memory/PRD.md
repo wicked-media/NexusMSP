@@ -8,6 +8,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — War Room Auto-spawn + UI Consistency)
+
+### 🚨 War Room Channel Auto-spawn
+- When `POST /api/warroom` creates an incident, it now also auto-creates a private chat channel `warroom-{slug}` and posts a system message linking the ticket + severity + ETA. All paged techs (existing + creator) are auto-invited as members.
+- Idempotent: re-creating doesn't duplicate the channel.
+- Tested live — creating a war room now spawns a `warroom-{slug}` chat channel within the same request.
+
+### 🎨 Tech Profile Page UI Consistency Pass
+- Refactored `/me` and `/team/:id` to match the global page pattern used across Command Center / Insights Hub:
+  - Standard kicker label (`text-[10px] uppercase tracking-widest text-violet-400`)
+  - Standard h1 (`text-2xl font-semibold tracking-tight`)
+  - Standard subtitle (`text-sm text-muted-foreground`)
+  - Hero stats moved into a standard `Card` component (no more bespoke styled div)
+  - Save button now uses the "Break button" outline style (`text-violet-400 border-violet-500/30 hover:bg-violet-500/10`)
+  - Stat tiles match the colour-tinted-uppercase-label pattern from Command Center
+
+
 ## Recent Updates (May 2, 2026 — Chat + Presence + Gamification + Quirky Features)
 
 ### 💬 Internal Staff Chat with LED Presence (NEW)

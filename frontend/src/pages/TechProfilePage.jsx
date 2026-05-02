@@ -60,27 +60,37 @@ export default function TechProfilePage() {
   return (
     <PageShell>
       <div className="space-y-4" data-testid="tech-profile-page">
-        <div className="rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-900/20 to-slate-900 p-6 flex items-center gap-5">
-          <div className="w-20 h-20 rounded-full bg-violet-500/20 border-2 border-violet-500/50 flex items-center justify-center text-3xl font-bold relative">
-            {profile.name?.charAt(0) || "?"}
-            <span className="absolute -bottom-1 -right-1"><PresenceDot led={presence?.led || "offline"} size={14} /></span>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
+            <Trophy className="w-3 h-3" />Tech Profile
           </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{profile.name}</h1>
-              <Badge variant="outline" className="text-violet-400 border-violet-500/40 bg-violet-500/10"><Trophy className="w-3 h-3 mr-1" />Level {profile.level}</Badge>
-              <Badge variant="outline" className="text-amber-400 border-amber-500/40">{achievements?.total_unlocked || 0}/{achievements?.total_available || 0} 🏆</Badge>
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">{profile.email}</div>
-            <div className="mt-3 flex items-center gap-3 text-xs">
-              <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${xpPct}%` }} />
-              </div>
-              <span className="font-mono">{profile.total_xp.toLocaleString()} XP</span>
-              <span className="text-muted-foreground">{profile.next_level_in} to next</span>
-            </div>
-          </div>
+          <h1 className="text-2xl font-semibold tracking-tight">{profile.name}</h1>
+          <p className="text-sm text-muted-foreground">{profile.email} · Level {profile.level} · {achievements?.total_unlocked || 0}/{achievements?.total_available || 0} achievements unlocked</p>
         </div>
+
+        <Card className="border-violet-500/30 bg-gradient-to-br from-violet-900/10 to-slate-900">
+          <CardContent className="p-6 flex items-center gap-5">
+            <div className="w-20 h-20 rounded-full bg-violet-500/20 border-2 border-violet-500/50 flex items-center justify-center text-3xl font-bold relative shrink-0">
+              {profile.name?.charAt(0) || "?"}
+              <span className="absolute -bottom-1 -right-1"><PresenceDot led={presence?.led || "offline"} size={14} /></span>
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className="text-violet-400 border-violet-500/40 bg-violet-500/10"><Trophy className="w-3 h-3 mr-1" />Level {profile.level}</Badge>
+                <Badge variant="outline" className="text-amber-400 border-amber-500/40 bg-amber-500/10">{achievements?.total_unlocked || 0}/{achievements?.total_available || 0} 🏆</Badge>
+                <Badge variant="outline" className="text-emerald-400 border-emerald-500/40 bg-emerald-500/10">{profile.closed_tickets} closed</Badge>
+                <Badge variant="outline" className="text-sky-400 border-sky-500/40 bg-sky-500/10">{profile.avg_resolve_hours ?? "—"}h avg</Badge>
+              </div>
+              <div className="mt-3 flex items-center gap-3 text-xs">
+                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${xpPct}%` }} />
+                </div>
+                <span className="font-mono">{profile.total_xp.toLocaleString()} XP</span>
+                <span className="text-muted-foreground">{profile.next_level_in} to next</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <Tabs defaultValue="overview">
           <TabsList>
@@ -170,7 +180,7 @@ export default function TechProfilePage() {
                 <CardContent>
                   <p className="text-xs text-muted-foreground mb-2">Only you can see this. Drop random fix notes, command snippets, ideas — AI can later mine it for runbook material if you choose to publish.</p>
                   <Textarea value={bucket} onChange={e => setBucket(e.target.value)} rows={14} className="font-mono text-xs" placeholder="Paste anything…" data-testid="brain-bucket-textarea" />
-                  <Button onClick={saveBucket} disabled={bucketLoading} variant="outline" size="sm" className="mt-2 text-violet-400 border-violet-500/30" data-testid="brain-bucket-save">
+                  <Button onClick={saveBucket} disabled={bucketLoading} variant="outline" size="sm" className="mt-2 text-violet-400 border-violet-500/30 hover:bg-violet-500/10" data-testid="brain-bucket-save">
                     {bucketLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1" />}Save
                   </Button>
                 </CardContent>
