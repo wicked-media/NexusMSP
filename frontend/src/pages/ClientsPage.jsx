@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
+import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -492,6 +493,7 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             { v: "contacts", l: "Contacts" },
             { v: "billing", l: "Billing" },
             { v: "blueprints", l: "Blueprints" },
+            { v: "ai", l: "AI Insights" },
             { v: "integrations", l: "Integrations" },
             { v: "cipp", l: "M365 / CIPP" },
             { v: "activity", l: "Activity" },
@@ -608,6 +610,10 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
 
           <TabsContent value="blueprints" className="mt-0">
             <ClientBlueprintsPanel clientId={client.id} />
+          </TabsContent>
+
+          <TabsContent value="ai" className="mt-0">
+            <ClientAIBundle clientId={client.id} />
           </TabsContent>
 
           <TabsContent value="integrations" className="mt-0 grid grid-cols-1 md:grid-cols-2 gap-3">

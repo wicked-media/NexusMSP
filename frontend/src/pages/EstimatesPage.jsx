@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { EstimateFollowupButton } from "@/components/ai/EstimateFollowupButton";
+import { EstimateAIBundle } from "@/components/ai/EstimateAIBundle";
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30", icon: CircleDot, pulse: false },
@@ -201,6 +202,8 @@ export default function EstimatesPage() {
             <Button size="sm" variant="outline" className="text-red-400" onClick={() => handleDelete(viewing.id)} data-testid="delete-estimate-btn"><Trash2 className="w-3 h-3" /></Button>
           </div>
         </div>
+
+        <EstimateAIBundle estimateId={viewing.id} />
 
         <div className="grid grid-cols-3 gap-4">
           <Card className="col-span-2">

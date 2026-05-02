@@ -7,6 +7,8 @@ import CoPilotPanel from "@/components/CoPilotPanel";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
 import { SentimentBadge } from "@/components/ai/SentimentBadge";
+import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
+import { TicketTimelineTab } from "@/components/ai/TicketTimelineTab";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1271,6 +1273,7 @@ export default function TicketsPage() {
             <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
             <WhyOnFireButton entityType="ticket" entityId={viewingTicket.id} />
             <SentimentBadge ticketId={viewingTicket.id} />
+            <TicketAIBundle ticket={viewingTicket} />
             <Button
               variant="outline" size="sm"
               className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
@@ -1499,7 +1502,7 @@ export default function TicketsPage() {
 
             {/* Tabs: Conversation first, then Suggestions, etc */}
             <Tabs defaultValue="conversation">
-              <TabsList className="w-full grid grid-cols-9">
+              <TabsList className="w-full grid grid-cols-10">
                 <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length + ticketSms.length})</TabsTrigger>
                 <TabsTrigger value="blueprint" data-testid="blueprint-tab"><Lightbulb className="w-3 h-3 mr-1" />{viewingTicket.blueprint_id ? "Worksheet" : "Blueprint"}</TabsTrigger>
                 <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
@@ -1509,6 +1512,7 @@ export default function TicketsPage() {
                 <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
                 <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
                 <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
+                <TabsTrigger value="timeline" data-testid="timeline-tab"><History className="w-3 h-3 mr-1" />Time Machine</TabsTrigger>
               </TabsList>
 
               {/* BLUEPRINT / WORKSHEET TAB */}
@@ -2052,6 +2056,10 @@ export default function TicketsPage() {
                   ))}
                   {!auditLog.length && <p className="text-center py-8 text-muted-foreground">No audit entries</p>}
                 </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="timeline">
+                <TicketTimelineTab ticketId={viewingTicket.id} />
               </TabsContent>
             </Tabs>
           </div>
