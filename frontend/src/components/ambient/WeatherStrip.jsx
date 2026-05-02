@@ -25,6 +25,7 @@ export default function WeatherStrip() {
 
   if (!mood) return null;
   const cfg = MOOD[mood] || MOOD.neutral;
+  const isStormy = mood === "stormy";
 
   return (
     <Link
@@ -33,11 +34,18 @@ export default function WeatherStrip() {
       title={`${cfg.label} — ${cfg.hint} · click for details`}
       data-testid="weather-strip"
     >
-      <div className={`h-1.5 rounded-full bg-gradient-to-r ${cfg.gradient} opacity-60 group-hover:opacity-90 transition-opacity`} />
+      <div className={`h-1.5 rounded-full bg-gradient-to-r ${cfg.gradient} opacity-60 group-hover:opacity-90 transition-opacity ${isStormy ? "weather-stormy-pulse" : ""}`} />
       <div className="flex items-center justify-between mt-1 px-1 text-[10px] uppercase tracking-widest text-muted-foreground">
-        <span>Weather: <span className="text-foreground/80">{cfg.label}</span></span>
+        <span>Weather: <span className={`text-foreground/80 ${isStormy ? "text-rose-400 animate-pulse" : ""}`}>{cfg.label}</span></span>
         <span className="opacity-70">{cfg.hint}</span>
       </div>
+      <style>{`
+        @keyframes weatherStormyPulse {
+          0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+          50%      { opacity: 0.95; box-shadow: 0 0 12px 1px rgba(244, 63, 94, 0.45); }
+        }
+        .weather-stormy-pulse { animation: weatherStormyPulse 2.4s ease-in-out infinite; }
+      `}</style>
     </Link>
   );
 }
