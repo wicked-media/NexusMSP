@@ -364,6 +364,14 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 ]
 
 
+# Extended seed lives in a sibling file to keep this file lean
+try:
+    from app.routers._help_seed_extended import EXTENDED_ARTICLES as _EXT
+    DEFAULT_ARTICLES = DEFAULT_ARTICLES + _EXT
+except Exception:
+    pass
+
+
 @router.get("/help/articles")
 async def list_help_articles(q: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     # Auto-seed if empty
@@ -444,3 +452,115 @@ async def reseed(current_user: dict = Depends(get_current_user)):
             "updated_at": _now_iso(),
         })
     return {"seeded": len(DEFAULT_ARTICLES)}
+
+
+# ═══════════════════════ HELP CO-PILOT (AI ask anything) ═══════════════════════
+
+@router.post("/help/copilot")
+async def help_copilot(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Ask anything — Claude answers using the article corpus as context."""
+    import os
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "question required")
+    if len(question) > 500:
+        raise HTTPException(400, "question too long")
+
+    # Pull top candidate articles by keyword overlap
+    rows = await db.help_articles.find({}, {"_id": 0, "slug": 1, "title": 1, "category": 1, "summary": 1, "body_md": 1}).to_list(500)
+    qlower = question.lower()
+    qwords = {w for w in re.findall(r"[a-z0-9]+", qlower) if len(w) > 3}
+
+    def score(a):
+        text = f"{a.get('title','')} {a.get('summary','')} {a.get('body_md','')}".lower()
+        s = sum(1 for w in qwords if w in text)
+        if any(w in (a.get("title","").lower()) for w in qwords): s += 5
+        return s
+    candidates = sorted([a for a in rows if score(a) > 0], key=score, reverse=True)[:6]
+
+    if not candidates:
+        return {
+            "answer": "I couldn't find any articles matching that. Try rephrasing or browse the sidebar.",
+            "citations": [],
+            "fallback": True,
+        }
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        # Fallback — return the candidates as a list with no AI synthesis
+        return {
+            "answer": f"Found {len(candidates)} relevant articles. Open one to read in full.",
+            "citations": [{"slug": c["slug"], "title": c["title"], "category": c.get("category")} for c in candidates],
+            "fallback": True,
+        }
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        corpus = "\n\n---\n\n".join([
+            f"# {a['title']} (slug: {a['slug']})\nCategory: {a.get('category','-')}\n{a.get('body_md','')[:2000]}"
+            for a in candidates
+        ])
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"help-copilot-{uuid.uuid4().hex[:8]}",
+            system_message=(
+                "You are the NexusOps Help Co-pilot. Answer the user's question using ONLY the provided article corpus. "
+                "Cite each article you use with its slug in parentheses, e.g. (clients-module). "
+                "If the corpus doesn't contain the answer, say so honestly. Keep answers under 250 words. "
+                "Use markdown for formatting. Use bullet lists when listing steps."
+            ),
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        msg = await chat.send_message(UserMessage(text=f"Question: {question}\n\nCorpus:\n{corpus}"))
+        return {
+            "answer": msg or "No response.",
+            "citations": [{"slug": c["slug"], "title": c["title"], "category": c.get("category")} for c in candidates],
+            "fallback": False,
+        }
+    except Exception as e:
+        return {
+            "answer": f"AI temporarily unavailable. Top relevant articles below.",
+            "citations": [{"slug": c["slug"], "title": c["title"], "category": c.get("category")} for c in candidates],
+            "fallback": True,
+            "error": str(e)[:200],
+        }
+
+
+# ═══════════════════════ SCREENSHOT UPLOAD ═══════════════════════
+
+@router.post("/help/upload-screenshot")
+async def upload_help_screenshot(
+    payload: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Accept a base64 data-URL image, save it under uploads/help/, return public URL.
+    Body: {data_url: 'data:image/png;base64,...', caption?: str}
+    """
+    import base64, pathlib
+    from app.database import UPLOADS_DIR
+    data_url = payload.get("data_url") or ""
+    if not data_url.startswith("data:image/"):
+        raise HTTPException(400, "expected base64 image data URL")
+    try:
+        header, b64 = data_url.split(",", 1)
+        ext = "png"
+        if "image/jpeg" in header or "image/jpg" in header: ext = "jpg"
+        elif "image/webp" in header: ext = "webp"
+        elif "image/gif" in header: ext = "gif"
+        raw = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(400, "could not decode image")
+
+    if len(raw) > 5 * 1024 * 1024:  # 5 MB cap
+        raise HTTPException(413, "image too large (max 5 MB)")
+
+    folder = pathlib.Path(UPLOADS_DIR) / "help"
+    folder.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}.{ext}"
+    fpath = folder / fname
+    fpath.write_bytes(raw)
+    public_url = f"/api/uploads/help/{fname}"
+    return {
+        "url": public_url,
+        "caption": payload.get("caption") or "",
+        "size_bytes": len(raw),
+    }

@@ -10,11 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BookOpen, Search, Loader2, Pencil, Plus, RefreshCw, ChevronRight, FileText } from "lucide-react";
+import { BookOpen, Search, Loader2, Pencil, Plus, RefreshCw, ChevronRight, FileText, Sparkles, Image as ImageIcon, Send } from "lucide-react";
 import { toast } from "sonner";
 import MarkdownIt from "markdown-it";
 
-const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
+const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
 function useApi(token) {
   return useMemo(() => ({
@@ -158,6 +158,8 @@ export default function HelpCenterPage() {
           <Button type="submit" variant="outline" size="sm" data-testid="help-search-btn">Search</Button>
         </form>
 
+        <CopilotBar api={api} onJump={(slug) => navigate(`/help/${slug}`)} />
+
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
           {/* SIDEBAR */}
           <Card className="lg:sticky lg:top-2 lg:self-start lg:max-h-[calc(100vh-180px)] overflow-hidden">
@@ -238,10 +240,12 @@ export default function HelpCenterPage() {
                     </div>
                   </header>
 
+                  <ArticleTOC body={active.body_md} />
+
                   <div
                     className="help-prose text-sm leading-relaxed"
                     data-testid="help-article-body"
-                    dangerouslySetInnerHTML={{ __html: md.render(active.body_md || "") }}
+                    dangerouslySetInnerHTML={{ __html: renderWithIds(active.body_md || "") }}
                   />
 
                   {Array.isArray(active.screenshots) && active.screenshots.length > 0 && (
@@ -363,6 +367,10 @@ function ArticleEditor({ open, onClose, initial, onSave }) {
               data-testid="help-edit-body"
             />
           </div>
+          <ScreenshotUploader
+            screenshots={draft.screenshots || []}
+            onChange={(arr) => update("screenshots", arr)}
+          />
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose} data-testid="help-edit-cancel">Cancel</Button>
@@ -378,5 +386,179 @@ function ArticleEditor({ open, onClose, initial, onSave }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/* ════════ Helpers + sub-components ════════ */
+
+function slugify(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function addSlugIds(md_text) {
+  // No-op pre-render — TOC anchoring is done post-render via renderWithIds()
+  return md_text || "";
+}
+
+function renderWithIds(md_text) {
+  const html = md.render(md_text || "");
+  // Add id="h-..." to every <h2>...</h2>
+  return html.replace(/<h2>([^<]+)<\/h2>/g, (m, t) => `<h2 id="h-${slugify(t.trim())}">${t}</h2>`);
+}
+
+function extractHeadings(md_text) {
+  const out = [];
+  const re = /^##\s+(.+)$/gm;
+  let m;
+  while ((m = re.exec(md_text || "")) !== null) {
+    const text = m[1].trim();
+    out.push({ id: `h-${slugify(text)}`, text });
+  }
+  return out;
+}
+
+function ArticleTOC({ body }) {
+  const headings = extractHeadings(body);
+  if (headings.length < 2) return null;
+  return (
+    <div className="rounded border border-border/40 bg-muted/20 p-3" data-testid="article-toc">
+      <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1">On this page</div>
+      <ul className="space-y-0.5 text-sm">
+        {headings.map((h) => (
+          <li key={h.id}>
+            <a href={`#${h.id}`} className="text-foreground/80 hover:text-violet-300">{h.text}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CopilotBar({ api, onJump }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const ask = async (e) => {
+    e?.preventDefault?.();
+    if (!q.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await api.post("/help/copilot", { question: q.trim() });
+      setResult(r);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="border-violet-500/30 bg-violet-500/5" data-testid="help-copilot">
+      <CardContent className="p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-400" />
+          <div className="text-[10px] uppercase tracking-widest text-violet-400">Help Co-pilot</div>
+        </div>
+        <form onSubmit={ask} className="flex items-center gap-2">
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Ask anything — 'how do I send an SMS reminder?' / 'what is mood ring?'"
+            data-testid="copilot-input"
+          />
+          <Button type="submit" size="sm" variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10" disabled={busy} data-testid="copilot-ask">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+          </Button>
+        </form>
+        {result && (
+          <div className="space-y-2 pt-1">
+            <div
+              className="help-prose text-sm leading-relaxed border-l-2 border-violet-500/50 pl-3"
+              data-testid="copilot-answer"
+              dangerouslySetInnerHTML={{ __html: md.render(result.answer || "") }}
+            />
+            {result.citations?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {result.citations.map((c) => (
+                  <button
+                    key={c.slug}
+                    onClick={() => onJump(c.slug)}
+                    className="text-[10px] px-2 py-1 rounded border border-violet-500/30 text-violet-300 hover:bg-violet-500/10"
+                    data-testid={`copilot-cite-${c.slug}`}
+                  >
+                    {c.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ScreenshotUploader({ screenshots, onChange }) {
+  const { token } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  const onPick = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setBusy(true);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+      const res = await axios.post(`${API}/help/upload-screenshot`, { data_url: dataUrl, caption: "" }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      onChange([...(screenshots || []), { url: res.data.url, caption: "" }]);
+      toast.success("Screenshot uploaded");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.message);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  };
+
+  const updateCaption = (idx, caption) => {
+    const next = [...screenshots];
+    next[idx] = { ...next[idx], caption };
+    onChange(next);
+  };
+  const remove = (idx) => onChange(screenshots.filter((_, i) => i !== idx));
+
+  return (
+    <div>
+      <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Screenshots</label>
+      <div className="mt-1 space-y-2">
+        {(screenshots || []).map((s, idx) => (
+          <div key={idx} className="flex items-center gap-2 p-2 rounded border border-border/40">
+            <img src={s.url} alt={s.caption} className="w-16 h-10 object-cover rounded" />
+            <Input
+              value={s.caption || ""}
+              onChange={(e) => updateCaption(idx, e.target.value)}
+              placeholder="Caption (optional)"
+              className="flex-1"
+              data-testid={`help-screenshot-caption-${idx}`}
+            />
+            <Button size="sm" variant="ghost" onClick={() => remove(idx)} className="text-rose-400">×</Button>
+          </div>
+        ))}
+        <label className="inline-flex items-center gap-2 text-xs text-violet-400 cursor-pointer hover:underline">
+          <ImageIcon className="w-3 h-3" />
+          {busy ? "Uploading…" : "Add screenshot"}
+          <input type="file" accept="image/*" onChange={onPick} className="hidden" data-testid="help-screenshot-upload" disabled={busy} />
+        </label>
+      </div>
+    </div>
   );
 }

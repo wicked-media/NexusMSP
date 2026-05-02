@@ -323,12 +323,25 @@ async def sla_auto_page(min_score: int = 85, current_user: dict = Depends(get_cu
             high_risk.append({"ticket": t, "score": score})
 
     paged = []
+    # Honour Change Freeze windows
+    try:
+        from app.routers.change_freezes import _is_frozen
+    except Exception:
+        _is_frozen = None
     for row in high_risk:
         t = row["ticket"]
         tid = t["id"]
         existing = await db.sla_auto_pages.find_one({"ticket_id": tid, "cleared": {"$ne": True}}, {"_id": 0})
         if existing:
             continue
+        # Skip if a freeze window blocks broadcasts for this client
+        if _is_frozen:
+            try:
+                state = await _is_frozen(client_id=t.get("client_id"), kind="broadcast")
+                if state.get("frozen"):
+                    continue
+            except Exception:
+                pass
         doc = {
             "id": uuid.uuid4().hex,
             "ticket_id": tid,

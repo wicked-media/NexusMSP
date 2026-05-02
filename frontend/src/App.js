@@ -11,6 +11,8 @@ import { routeConfig } from "@/config/routes";
 import { secureStorage } from "@/lib/secureStorage";
 import { ChatPanel } from "@/components/presence/ChatPanel";
 import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
+import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
+import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -302,7 +304,13 @@ function GlobalAddons() {
 
 function AuthedAddons() {
   usePresenceHeartbeat();
-  return <ChatPanel />;
+  return (
+    <>
+      <ChatPanel />
+      <KonamiCRT />
+      <ShortcutPalette />
+    </>
+  );
 }
 
 export default App;
