@@ -313,6 +313,12 @@ export const navGroups = [
         path: "/insights", icon: Sparkles, label: "Insights Hub"
       },
       {
+        path: "/help", icon: BookOpen, label: "Help Center"
+      },
+      {
+        path: "/atmosphere", icon: Sparkles, label: "Atmosphere"
+      },
+      {
         path: "/reports", icon: BarChart3, label: "Reports",
         children: [
           { path: "/reports", label: "Reports" },

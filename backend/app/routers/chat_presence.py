@@ -188,8 +188,10 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     if not ch:
         raise HTTPException(404, "channel not found")
 
-    # Detect mentions (@email or @name)
-    mentions = re.findall(r"@([\w._-]+)", body)
+    # Detect mentions (@email or @name) and special @channel / @here broadcasts
+    raw_mentions = re.findall(r"@([\w._-]+)", body)
+    broadcast = any(m.lower() in {"channel", "here", "everyone"} for m in raw_mentions)
+    mentions = [m for m in raw_mentions if m.lower() not in {"channel", "here", "everyone"}]
 
     msg = {
         "id": uuid.uuid4().hex,
@@ -198,6 +200,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         "user_name": current_user.get("name"),
         "body": body[:5000],
         "mentions": mentions,
+        "broadcast": broadcast,
         "ts": _now_iso(),
         "edited": False,
         "reactions": {},
@@ -205,13 +208,16 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     await db.chat_messages.insert_one(dict(msg))
     msg.pop("_id", None)
 
-    # Push notifications for mentioned users
+    notified_ids = set()
+
+    # Push notifications for explicit @user mentions
     for m in mentions:
         u = await db.users.find_one(
             {"$or": [{"email": {"$regex": f"^{m}@", "$options": "i"}}, {"name": {"$regex": m, "$options": "i"}}]},
             {"_id": 0, "id": 1, "name": 1},
         )
-        if u and u.get("id") != current_user.get("id"):
+        if u and u.get("id") and u.get("id") != current_user.get("id") and u["id"] not in notified_ids:
+            notified_ids.add(u["id"])
             await db.notifications.insert_one({
                 "id": uuid.uuid4().hex,
                 "type": "chat_mention",
@@ -220,6 +226,30 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
                 "ref_type": "chat_channel",
                 "ref_id": channel_id,
                 "target_user_id": u.get("id"),
+                "read": False,
+                "created_at": _now_iso(),
+            })
+
+    # @channel / @here / @everyone — notify every channel member
+    if broadcast:
+        member_ids = list(ch.get("member_ids") or [])
+        # If channel has no explicit member_ids (e.g. team channels), fall back to all active users
+        if not member_ids:
+            users = await db.users.find({"active": {"$ne": False}}, {"_id": 0, "id": 1}).to_list(500)
+            member_ids = [u.get("id") for u in users if u.get("id")]
+        ch_label = ch.get("name") or "channel"
+        for uid in member_ids:
+            if not uid or uid == current_user.get("id") or uid in notified_ids:
+                continue
+            notified_ids.add(uid)
+            await db.notifications.insert_one({
+                "id": uuid.uuid4().hex,
+                "type": "chat_broadcast",
+                "title": f"📢 {current_user.get('name')} pinged #{ch_label}",
+                "body": body[:200],
+                "ref_type": "chat_channel",
+                "ref_id": channel_id,
+                "target_user_id": uid,
                 "read": False,
                 "created_at": _now_iso(),
             })
