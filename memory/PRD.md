@@ -8,6 +8,24 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 1, 2026 — Revenue Protection AI Bundle SHIPPED)
+
+### 💸 Revenue Protection AI — All 5 features live
+- **Backend `/app/backend/app/routers/diff_features.py`** (already shipped in prior fork):
+  - `GET /api/sla-radar` — scores every open ticket by SLA-window usage + inactivity and flags danger zone.
+  - `GET /api/tickets/{id}/sentiment` — Claude scores conversation trajectory (improving / flat / worsening / escalating) with reasoning.
+  - `POST /api/invoices/{id}/promises` · `GET /api/payment-promises` · `PUT /api/payment-promises/{id}` — LLM extracts spoken/written payment-promise dates, auto-flags broken promises.
+  - `POST /api/estimates/{id}/followup-draft` — AI drafts a subject+body email tailored to the most likely objection (price/scope/timing).
+  - `GET /api/invoices/{id}/explainer` — plain-English, client-safe summary of what the invoice covers.
+- **Frontend wiring completed in this session**:
+  - `SLARadarTile.jsx` mounted on Dashboard (above Blueprints/Churn grid).
+  - `SentimentBadge.jsx` mounted in Ticket detail header toolbar next to "Why on fire".
+  - `PaymentPromiseButton.jsx` mounted on Invoice detail header (shown when balance > 0).
+  - `InvoiceExplainerButton.jsx` **(NEW)** — mounted on Invoice detail header; dialog with copy-to-clipboard.
+  - `EstimateFollowupButton.jsx` **(NEW)** — mounted on Estimate detail header for non-draft, non-approved estimates.
+- **Testing**: `iteration_137.json` — 100% backend + 100% frontend pass. Pytest suite at `/app/backend/tests/test_revenue_protection_ai.py`. Only noise: pre-existing Recharts console warnings (tracked P3).
+
+
 
 ## Recent Updates (May 1, 2026 — Escalation Ladder + Blueprints + Time-aware Standups)
 
