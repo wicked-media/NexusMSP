@@ -20,6 +20,7 @@ function useApi(token) {
   return useMemo(() => ({
     get: (path) => axios.get(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.data),
     post: (path, body) => axios.post(`${API}${path}`, body || {}, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.data),
+    put: (path, body) => axios.put(`${API}${path}`, body || {}, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.data),
   }), [token]);
 }
 
@@ -53,6 +54,7 @@ export default function CommandCenterPage() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex-wrap h-auto" data-testid="command-tabs">
             <TabsTrigger value="center" data-testid="tab-center"><Flame className="w-3 h-3 mr-1" />Right now</TabsTrigger>
+            <TabsTrigger value="automation" data-testid="tab-automation"><Zap className="w-3 h-3 mr-1" />Automation</TabsTrigger>
             <TabsTrigger value="risk" data-testid="tab-risk"><AlertTriangle className="w-3 h-3 mr-1" />Revenue at Risk</TabsTrigger>
             <TabsTrigger value="unbilled" data-testid="tab-unbilled"><DollarSign className="w-3 h-3 mr-1" />Unbilled Dollars</TabsTrigger>
             <TabsTrigger value="pricing" data-testid="tab-pricing"><AlertTriangle className="w-3 h-3 mr-1" />Pricing Compliance</TabsTrigger>
@@ -63,6 +65,7 @@ export default function CommandCenterPage() {
           </TabsList>
 
           <TabsContent value="center"><CommandView api={api} /></TabsContent>
+          <TabsContent value="automation"><AutomationView api={api} /></TabsContent>
           <TabsContent value="risk"><RiskView api={api} /></TabsContent>
           <TabsContent value="unbilled"><UnbilledView api={api} /></TabsContent>
           <TabsContent value="pricing"><PricingView api={api} /></TabsContent>
@@ -147,6 +150,99 @@ function StatTile({ label, value, tone = "sky", format }) {
     <div className={`rounded-xl border p-4 ${cls}`}>
       <div className="text-[10px] uppercase tracking-widest">{label}</div>
       <div className="text-3xl font-mono font-bold text-foreground mt-1">{format ? format(value) : value}</div>
+    </div>
+  );
+}
+
+/* ─ Automation scheduler ─ */
+function AutomationView({ api }) {
+  const [settings, setSettings] = useState(null);
+  const [log, setLog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [s, l] = await Promise.all([api.get("/ops/settings"), api.get("/ops/tick-log")]);
+      setSettings(s); setLog(l.ticks || []);
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+
+  const toggle = async (enabled) => {
+    try { const s = await api.put("/ops/settings", { ...settings, enabled }); setSettings(s); toast.success(`Scheduler ${enabled ? "enabled" : "paused"}`); }
+    catch (e) { toast.error(e.response?.data?.detail || e.message); }
+  };
+
+  const runNow = async () => {
+    setRunning(true);
+    try { const r = await api.post("/ops/nightly-tick"); toast.success(`Tick complete · ${Object.keys(r.results || {}).length} reactions ran`); reload(); }
+    catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setRunning(false); }
+  };
+
+  const setInterval_ = async (mins) => {
+    try { const s = await api.put("/ops/settings", { ...settings, interval_minutes: mins }); setSettings(s); toast.success(`Interval set to ${mins} min`); }
+    catch (e) { toast.error(e.response?.data?.detail || e.message); }
+  };
+
+  if (loading) return <Loader label="Loading scheduler…" />;
+
+  return (
+    <div className="space-y-3 mt-3" data-testid="automation-card">
+      <Card className="border-violet-500/30 bg-violet-500/[0.03]">
+        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Zap className="w-4 h-4 text-violet-400" />Zero-touch chain reactions</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Badge variant="outline" className={settings?.enabled ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" : "text-muted-foreground"} data-testid="automation-status">
+              {settings?.enabled ? "● Running" : "○ Paused"}
+            </Badge>
+            <span className="text-muted-foreground text-xs">Interval: <span className="font-mono text-foreground">{settings?.interval_minutes} min</span></span>
+            <div className="ml-auto flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => toggle(!settings?.enabled)} data-testid="automation-toggle-btn">{settings?.enabled ? "Pause" : "Resume"}</Button>
+              <Button size="sm" variant="outline" onClick={runNow} disabled={running} className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10" data-testid="automation-run-now-btn">
+                {running ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}Run now
+              </Button>
+            </div>
+          </div>
+          <div className="flex gap-1.5 items-center text-xs">
+            <span className="text-muted-foreground">Interval:</span>
+            {[5, 15, 30, 60].map(m => (
+              <Button key={m} size="sm" variant={settings?.interval_minutes === m ? "default" : "outline"} className="h-6 px-2 text-[11px]" onClick={() => setInterval_(m)}>{m}m</Button>
+            ))}
+          </div>
+          <div className="text-xs text-muted-foreground">Runs 5 reactions: Apology Queue scan · SLA Auto-page · Promise Reconcile · Patch Broadcast · (more coming). All run as '<span className="font-mono">auto-scheduler</span>' identity.</div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Recent ticks</CardTitle></CardHeader>
+        <CardContent>
+          {log.length === 0 ? <div className="text-sm text-muted-foreground text-center py-4">No tick history yet.</div> :
+            <Table>
+              <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Triggered by</TableHead><TableHead>Results</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {log.map((t, i) => (
+                  <TableRow key={`k-${i}`} data-testid={`tick-row-${i}`}>
+                    <TableCell className="font-mono text-xs">{(t.started_at || "").slice(0, 19).replace("T", " ")}</TableCell>
+                    <TableCell className="text-xs">{t.triggered_by}</TableCell>
+                    <TableCell className="text-xs">
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(t.results || {}).map(([k, v]) => (
+                          <Badge key={k} variant="outline" className="text-[10px]">{k}: {Object.values(v).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0)}</Badge>
+                        ))}
+                        {Object.keys(t.errors || {}).length > 0 && <Badge variant="outline" className="text-rose-400 border-rose-500/40 text-[10px]">{Object.keys(t.errors).length} error(s)</Badge>}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          }
+        </CardContent>
+      </Card>
     </div>
   );
 }

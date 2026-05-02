@@ -1334,3 +1334,92 @@ async def schedule_insurance_snapshot(payload: dict = Body(default={}), current_
 async def list_insurance_schedules(current_user: dict = Depends(get_current_user)):
     rows = await db.insurance_vault_schedule.find({"active": True}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return rows
+
+
+# ═══════════════════════ 25. OPS TICK — AUTOMATED CHAIN REACTIONS ═══════════════════════
+
+async def run_chain_reactions(triggered_by: str = "scheduler") -> dict:
+    """Run the 5 zero-touch chain reactions and return a compact summary."""
+    summary = {
+        "triggered_by": triggered_by,
+        "started_at": _now().isoformat(),
+        "results": {},
+        "errors": {},
+    }
+    system_user = {"name": f"auto-{triggered_by}"}
+
+    # 1) Apology queue scan
+    try:
+        r = await apology_queue_scan.__wrapped__(system_user) if hasattr(apology_queue_scan, "__wrapped__") else await apology_queue_scan(system_user)
+        summary["results"]["apology_queue"] = {"queued_new": r.get("queued_new", 0)}
+    except Exception as e:
+        summary["errors"]["apology_queue"] = str(e)[:200]
+
+    # 2) SLA auto-page
+    try:
+        r = await sla_auto_page(85, system_user)
+        summary["results"]["sla_auto_page"] = {"new_pages_fired": r.get("new_pages_fired", 0)}
+    except Exception as e:
+        summary["errors"]["sla_auto_page"] = str(e)[:200]
+
+    # 3) Payment promise reconcile
+    try:
+        r = await promise_reconcile(system_user)
+        summary["results"]["promise_reconcile"] = {"broken_count": r.get("broken_count", 0), "clients_bumped": r.get("clients_bumped", 0)}
+    except Exception as e:
+        summary["errors"]["promise_reconcile"] = str(e)[:200]
+
+    # 4) Patch anomaly broadcast — call directly from its router
+    try:
+        from app.routers.mega_features import broadcast_patch_anomalies
+        r = await broadcast_patch_anomalies(system_user)
+        summary["results"]["patch_broadcast"] = {"newly_broadcast": r.get("newly_broadcast", 0)}
+    except Exception as e:
+        summary["errors"]["patch_broadcast"] = str(e)[:200]
+
+    summary["finished_at"] = _now().isoformat()
+    # Persist the tick record
+    try:
+        await db.ops_tick_log.insert_one({
+            "id": uuid.uuid4().hex, **summary,
+        })
+    except Exception:
+        pass
+    return summary
+
+
+@router.post("/ops/nightly-tick")
+async def ops_nightly_tick(current_user: dict = Depends(get_current_user)):
+    """Manually trigger the automated chain-reaction sweep."""
+    return await run_chain_reactions(triggered_by=f"manual:{current_user.get('name','?')}")
+
+
+@router.get("/ops/tick-log")
+async def ops_tick_log(current_user: dict = Depends(get_current_user)):
+    rows = await db.ops_tick_log.find({}, {"_id": 0}).sort("started_at", -1).limit(25).to_list(25)
+    return {"ticks": rows, "count": len(rows)}
+
+
+@router.get("/ops/settings")
+async def ops_settings(current_user: dict = Depends(get_current_user)):
+    s = await db.settings.find_one({"type": "ops_scheduler"}, {"_id": 0}) or {}
+    return {
+        "enabled": bool(s.get("enabled", True)),
+        "interval_minutes": int(s.get("interval_minutes", 15)),
+    }
+
+
+@router.put("/ops/settings")
+async def update_ops_settings(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    await db.settings.update_one(
+        {"type": "ops_scheduler"},
+        {"$set": {
+            "type": "ops_scheduler",
+            "enabled": bool(payload.get("enabled", True)),
+            "interval_minutes": max(5, int(payload.get("interval_minutes") or 15)),
+            "updated_at": _now().isoformat(),
+            "updated_by": current_user.get("name"),
+        }},
+        upsert=True,
+    )
+    return await ops_settings(current_user)

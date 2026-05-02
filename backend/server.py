@@ -123,6 +123,7 @@ async def startup_event():
     # Start TRMM scheduled-broadcast runner
     asyncio.create_task(_trmm_scheduled_broadcast_loop())
     asyncio.create_task(_warroom_escalation_loop())
+    asyncio.create_task(_chain_reactions_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
@@ -224,6 +225,26 @@ async def _warroom_escalation_loop():
         except Exception as e:
             logger.debug(f"War Room escalation loop error: {e}")
         await asyncio.sleep(30)
+
+
+async def _chain_reactions_loop():
+    """Background loop that fires the 5 zero-touch chain reactions every N minutes."""
+    import asyncio
+    from app.database import db as _db
+    await asyncio.sleep(45)  # let app warm up
+    while True:
+        try:
+            s = await _db.settings.find_one({"type": "ops_scheduler"}, {"_id": 0}) or {}
+            enabled = bool(s.get("enabled", True))
+            interval_min = max(5, int(s.get("interval_minutes") or 15))
+            if enabled:
+                from app.routers.power_features import run_chain_reactions
+                summary = await run_chain_reactions(triggered_by="scheduler")
+                logger.info(f"Ops chain-reactions tick: {summary.get('results', {})}")
+            await asyncio.sleep(interval_min * 60)
+        except Exception as e:
+            logger.debug(f"Chain-reactions loop error: {e}")
+            await asyncio.sleep(60)
 
 
 async def _recurring_invoice_scheduler():
