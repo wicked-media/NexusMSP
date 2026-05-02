@@ -8,6 +8,35 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — Chat + Presence + Gamification + Quirky Features)
+
+### 💬 Internal Staff Chat with LED Presence (NEW)
+- New router `chat_presence.py` — heartbeat (15-20s), presence with auto-LED computation, channels (team/dm), messages, mentions → notifications, slash commands (`/help`, `/assign`, `/page`, `/summarize` via Claude), unread counts, reactions.
+- LED states: 🟢 active (pulse) · 🔴 busy (on-ticket auto-detected from URL) · 🟠 dnd · 🔵 break (pulse) · 🟡 away (pulse) · ⚫ offline.
+- Frontend: floating ChatPanel widget global to authenticated app (Cmd/Ctrl+K shortcut), `usePresenceHeartbeat()` hook detects busy_state from URL automatically. PresenceDot reusable LED component.
+
+### 🎮 Gamification Core (NEW)
+- New router `quirky_features.py` — Achievements engine (15 badges, common/rare/epic/legendary rarity), Tech Profile (level + XP bar + skills radar), Daily Quests (3 random per user/day, persisted), Friday Wrap-up reel (Claude storyboard).
+- New page `/me` and `/team/:id` (TechProfilePage) — header with LED avatar, level/XP bar, achievements grid, quests tab, private Brain Bucket (only visible to owner).
+
+### ✨ 13 Quirky / Ambient Features (NEW)
+- Trading Cards (legendary/epic/rare/common rarity with auto-tagline).
+- Mood Ring (30-day sentiment colour: emerald → rose).
+- Slow-Internet Detective (instant verdict: VPN bottleneck / Wi-Fi / ISP).
+- Device Graveyard with auto-epitaphs.
+- Device Family Tree (grouped by model+os).
+- Brain Bucket (private scratchpad).
+- Threat Dragon (size_pct + emoji based on Huntress alerts).
+- Password Pet (per-client hygiene avatar).
+- Birthday Radar (contacts + client anniversaries).
+- Weather Mode (ambient gradient signal: stormy / beach / rainy_monday / sunny / neutral).
+- Launch Events + Recent Launches (rocket-celebration triggers).
+
+### Testing
+- `iteration_142.json`: **37/37 backend pass · 100% frontend pass.**
+- One LOW-priority cosmetic noted: chat button position vs Emergent badge — fixed by moving to `bottom-20 right-4`.
+
+
 ## Recent Updates (May 2, 2026 — Zero-touch Automation Scheduler)
 
 ### 🤖 Background scheduler live — chain reactions now fire automatically

@@ -117,7 +117,7 @@ export function ChatPanel() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-20 z-50 bg-violet-600 hover:bg-violet-500 rounded-full w-12 h-12 flex items-center justify-center shadow-lg shadow-violet-500/40 transition-transform hover:scale-110"
+        className="fixed bottom-20 right-4 z-50 bg-violet-600 hover:bg-violet-500 rounded-full w-12 h-12 flex items-center justify-center shadow-lg shadow-violet-500/40 transition-transform hover:scale-110"
         data-testid="chat-toggle-btn"
       >
         <MessageCircle className="w-5 h-5 text-white" />
@@ -132,7 +132,7 @@ export function ChatPanel() {
   const myPresence = presenceById[user?.id];
 
   return (
-    <div className="fixed bottom-4 right-20 z-50 w-[640px] max-w-[95vw] h-[560px] max-h-[85vh] bg-background border border-border rounded-lg shadow-2xl shadow-violet-500/10 flex overflow-hidden" data-testid="chat-panel">
+    <div className="fixed bottom-20 right-4 z-50 w-[640px] max-w-[95vw] h-[560px] max-h-[85vh] bg-background border border-border rounded-lg shadow-2xl shadow-violet-500/10 flex overflow-hidden" data-testid="chat-panel">
       {/* Sidebar */}
       <div className="w-44 border-r border-border bg-muted/20 flex flex-col">
         <div className="p-3 border-b border-border flex items-center justify-between">
