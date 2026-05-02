@@ -27,6 +27,7 @@ import { ChurnRiskTile } from "@/components/ai/ChurnRiskTile";
 import { SLARadarTile } from "@/components/ai/SLARadarTile";
 import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
 import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
+import WeatherStrip from "@/components/ambient/WeatherStrip";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -142,6 +143,7 @@ export default function DashboardPage() {
 
   return (
     <PageShell>
+    <WeatherStrip />
     <MetricStrip columns={4}>
       <MetricTile label="Clients" value={stats.total_clients} trend={`$${stats.total_mrr?.toLocaleString() || 0} MRR`} trendColor="text-zinc-500" accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} testid="metric-clients" />
       <MetricTile label="Devices" value={devices.length} trend={`${onlineDevices.length} online${offlineDevices.length > 0 ? ` · ${offlineDevices.length} offline` : ""}`} trendColor={offlineDevices.length > 0 ? "text-rose-400" : "text-emerald-400"} accent="emerald" icon={<Monitor className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-devices" />
