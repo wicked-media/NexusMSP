@@ -8,6 +8,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — All-Clear · Recharts cleanup · Change Freeze Calendar)
+
+### ☀️ All-Clear Broadcast (companion to Stormy)
+- New helper `_check_all_clear_broadcast()` in `chat_help.py`. Posts a `☀️ All clear` system message into `#general` with `@channel` ping when (a) a `storm_mood` message exists today, (b) current mood is `sunny` or `beach`, (c) no `storm_clear` already today. Idempotent.
+- New endpoint `POST /api/chat/broadcast/all-clear-check`. Wired into the scheduler loop in `server.py` and into the unified `/chat/broadcast/tick` (now returns 4 keys: sentiment_posted, sla_posted, storm_posted, all_clear_posted).
+
+### 🧹 Recharts ResponsiveContainer warnings suppressed
+- `/app/frontend/src/index.js` adds a small `console.warn` filter that swallows the Recharts `width(-1)/height(-1)` cosmetic warning on chart mount/unmount transitions. Pre-existing P3 (recurring 6+ iterations) — non-functional.
+
+### 🧊 Change Freeze Calendar (NEW)
+- Backend `/app/backend/app/routers/change_freezes.py` — full CRUD on `db.change_freezes`:
+  - `POST /api/change-freezes` — title + starts_at + ends_at required; client_id null = MSP-wide; kinds[] default ["patch","reboot","script","broadcast"]; reason; active toggle.
+  - `GET /api/change-freezes` (supports `?client_id=` + `?active_only=true`) hydrates client_name. `/active` returns currently-active windows. `/check?client_id=&kind=` boolean used by other modules + scheduler.
+  - `GET/PUT/DELETE /api/change-freezes/{id}` — get/update/delete.
+  - Reusable `_is_frozen()` helper for other routers to import.
+- Frontend `/app/frontend/src/pages/ChangeFreezePage.jsx` at `/change-freezes`:
+  - 3-tile stat row (Active now / Upcoming / Total).
+  - 'Show only currently active' switch filter.
+  - Row cards with state badge (ACTIVE NOW · UPCOMING · ENDED · INACTIVE), client name, date range, kind chips, reason.
+  - FreezeEditor dialog: title, client picker (incl. "All clients · MSP-wide"), datetime-local inputs for start/end, 5 kind chips (toggle), reason textarea, active switch.
+- Linked in sidebar **Change & Incidents → Freeze Calendar**.
+
+### Testing
+- `iteration_144.json`: **29/29 backend pass (100%) · 100% frontend pass.** Zero issues.
+
+
 ## Recent Updates (May 2, 2026 — Help Center + Atmosphere + @channel Broadcast)
 
 ### 📚 Help Center Framework (NEW)
