@@ -108,12 +108,43 @@ async def broadcast_sla_page(current_user: dict = Depends(get_current_user)):
     return {"posted": len(posted), "items": posted}
 
 
-# Wire both into the existing scheduler tick by exposing a unified endpoint
+async def _check_storm_broadcast() -> Optional[dict]:
+    """Helper: post one storm warning per day when weather mode flips to stormy.
+    Idempotent via ref_id = YYYY-MM-DD."""
+    from app.routers.quirky_features import weather_mode  # reuse existing computation
+    try:
+        wm = await weather_mode(current_user={"id": "system"})
+    except Exception:
+        return None
+    if (wm or {}).get("mood") != "stormy":
+        return None
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    already = await db.chat_messages.find_one({"ref_type": "storm_mood", "ref_id": today}, {"_id": 0})
+    if already:
+        return None
+    stats = wm.get("stats") or {}
+    body = (
+        f"@channel  Mood just flipped to STORMY.\n"
+        f"Open critical: {stats.get('open_critical', 0)} · Open total: {stats.get('open_total', 0)} · Huntress: {stats.get('huntress_open', 0)}\n"
+        f"Triage mode — keep the cockpit busy."
+    )
+    return await _post_to_general("⛈️ Stormy mood", body, ref_type="storm_mood", ref_id=today)
+
+
+@router.post("/chat/broadcast/storm-check")
+async def broadcast_storm_check(current_user: dict = Depends(get_current_user)):
+    """Manual trigger for the once-a-day stormy mood broadcast."""
+    msg = await _check_storm_broadcast()
+    return {"posted": 1 if msg else 0, "msg_id": (msg or {}).get("id")}
+
+
+# Wire all broadcasts into the existing scheduler tick
 @router.post("/chat/broadcast/tick")
 async def broadcast_tick(current_user: dict = Depends(get_current_user)):
     a = await broadcast_sentiment_escalating(current_user=current_user)
     b = await broadcast_sla_page(current_user=current_user)
-    return {"sentiment_posted": a["posted"], "sla_posted": b["posted"]}
+    c = await _check_storm_broadcast()
+    return {"sentiment_posted": a["posted"], "sla_posted": b["posted"], "storm_posted": 1 if c else 0}
 
 
 # ═══════════════════════ HELP CENTER ═══════════════════════

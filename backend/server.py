@@ -241,6 +241,14 @@ async def _chain_reactions_loop():
                 from app.routers.power_features import run_chain_reactions
                 summary = await run_chain_reactions(triggered_by="scheduler")
                 logger.info(f"Ops chain-reactions tick: {summary.get('results', {})}")
+                # Once-a-day storm broadcast (idempotent)
+                try:
+                    from app.routers.chat_help import _check_storm_broadcast
+                    storm_msg = await _check_storm_broadcast()
+                    if storm_msg:
+                        logger.info(f"Storm mood broadcast posted: {storm_msg.get('id')}")
+                except Exception as _e:
+                    logger.debug(f"Storm broadcast skipped: {_e}")
             await asyncio.sleep(interval_min * 60)
         except Exception as e:
             logger.debug(f"Chain-reactions loop error: {e}")
