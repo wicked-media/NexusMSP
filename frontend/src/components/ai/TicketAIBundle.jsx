@@ -5,15 +5,15 @@ import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Copy, Users, Mail, BookPlus, Activity } from "lucide-react";
+import { Sparkles, Loader2, Copy, Users, Mail, BookPlus, Activity, UserCheck, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 /** Three buttons + dialogs for ticket detail toolbar:
- *  Doppelgänger · Apology · Promote-to-Runbook. (Timeline is its own tab.) */
+ *  Doppelgänger · Apology · Promote-to-Runbook · Smart Assign · Use Top Resolution. (Timeline is its own tab.) */
 export function TicketAIBundle({ ticket }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
-  const [view, setView] = useState(null); // null | "doppel" | "apology" | "runbook"
+  const [view, setView] = useState(null); // null | "doppel" | "apology" | "runbook" | "assign" | "resolution"
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
 
@@ -24,8 +24,11 @@ export function TicketAIBundle({ ticket }) {
       if (kind === "doppel") r = await axios.get(`${API}/tickets/${ticket.id}/doppelganger`, { headers });
       else if (kind === "apology") r = await axios.post(`${API}/tickets/${ticket.id}/apology-draft`, {}, { headers });
       else if (kind === "runbook") r = await axios.post(`${API}/runbooks/from-ticket/${ticket.id}`, { publish: true }, { headers });
+      else if (kind === "assign") r = await axios.post(`${API}/tickets/${ticket.id}/smart-assign`, {}, { headers });
+      else if (kind === "resolution") r = await axios.get(`${API}/tickets/${ticket.id}/doppelganger-resolution`, { headers });
       setData(r.data);
       if (kind === "runbook") toast.success(`Runbook published: ${r.data.title}`);
+      if (kind === "assign" && r.data?.top_pick) toast.info(`Recommended: ${r.data.top_pick.name}`);
     } catch (e) { toast.error(e.response?.data?.detail || e.message); setView(null); }
     finally { setLoading(false); }
   };
@@ -38,6 +41,14 @@ export function TicketAIBundle({ ticket }) {
       <Button variant="outline" size="sm" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
         onClick={() => open("doppel")} data-testid="ai-doppelganger-btn">
         <Users className="w-3.5 h-3.5 mr-1" />Doppelgänger
+      </Button>
+      <Button variant="outline" size="sm" className="text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/10"
+        onClick={() => open("resolution")} data-testid="ai-resolution-btn">
+        <Wand2 className="w-3.5 h-3.5 mr-1" />Suggest Resolution
+      </Button>
+      <Button variant="outline" size="sm" className="text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10"
+        onClick={() => open("assign")} data-testid="ai-smart-assign-btn">
+        <UserCheck className="w-3.5 h-3.5 mr-1" />Smart Assign
       </Button>
       <Button variant="outline" size="sm" className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
         onClick={() => open("apology")} data-testid="ai-apology-btn">
@@ -108,12 +119,57 @@ export function TicketAIBundle({ ticket }) {
             </div>
           )}
 
+          {!loading && view === "assign" && data && data.top_pick && (
+            <div className="space-y-3 text-sm" data-testid="smart-assign-panel">
+              <div className="border border-cyan-500/40 bg-cyan-500/10 rounded-md p-3">
+                <div className="text-[10px] uppercase text-cyan-400 tracking-widest">Top pick</div>
+                <div className="font-semibold text-lg">{data.top_pick.name}</div>
+                <div className="text-xs text-muted-foreground mt-1">{data.top_pick.reason}</div>
+              </div>
+              {data.alternatives?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground mb-1">Alternatives</div>
+                  <div className="space-y-1">
+                    {data.alternatives.map((a, i) => (
+                      <div key={`k-${i}`} className="text-xs border rounded p-2 flex items-center justify-between">
+                        <span>{a.name}</span>
+                        <span className="text-muted-foreground">XP {a.xp_for_category} · load {a.current_load}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!loading && view === "resolution" && data && (
+            <div className="space-y-3 text-sm" data-testid="suggested-resolution-panel">
+              {!data.suggestion ?
+                <div className="text-muted-foreground text-center py-6">{data.reason || "No similar resolved ticket found."}</div> :
+                <>
+                  <div className="flex items-center gap-2 text-xs">
+                    <Link to={`/tickets?ticket=${data.suggestion.ticket_id}`} className="font-mono hover:underline">{data.suggestion.ticket_number}</Link>
+                    <Badge variant="outline" className="text-indigo-400 border-indigo-500/40">{data.suggestion.similarity_score}% match</Badge>
+                    <span className="text-muted-foreground">{data.suggestion.title}</span>
+                  </div>
+                  <div className="border rounded-md p-3 bg-muted/20 whitespace-pre-wrap" data-testid="suggested-resolution-text">{data.suggestion.resolution_notes}</div>
+                </>
+              }
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setView(null)}>Close</Button>
             {view === "apology" && data && !loading && (
               <Button variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
                 onClick={() => copy(`Subject: ${data.subject}\n\n${data.body}`)} data-testid="apology-copy">
                 <Copy className="w-3.5 h-3.5 mr-1" />Copy Email
+              </Button>
+            )}
+            {view === "resolution" && data?.suggestion && !loading && (
+              <Button variant="outline" className="text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/10"
+                onClick={() => copy(data.suggestion.resolution_notes)} data-testid="resolution-copy">
+                <Copy className="w-3.5 h-3.5 mr-1" />Copy Resolution
               </Button>
             )}
           </DialogFooter>

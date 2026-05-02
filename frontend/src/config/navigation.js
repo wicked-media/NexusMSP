@@ -307,6 +307,9 @@ export const navGroups = [
     title: "Reports & Comms",
     items: [
       {
+        path: "/command-center", icon: Siren, label: "Command Center"
+      },
+      {
         path: "/insights", icon: Sparkles, label: "Insights Hub"
       },
       {
