@@ -8,6 +8,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — 24-feature Power Compound Bundle)
+
+### ⚡ Power Features — 24 compounding composites on top of Mega Bundle (iteration_140: 28/28 pass)
+
+**Backend** — single new router `/app/backend/app/routers/power_features.py`:
+
+**Chain reactions** (1-7): `POST /api/tickets/{id}/smart-assign`, `GET /tickets/{id}/doppelganger-resolution`, `POST /ai/apology-queue/scan`, `POST /sla-radar/auto-page`, `POST /payment-promises/reconcile`, `GET /team/{id}/rebalance-suggestions`, `POST /patches/anomalies/{kb}/pause-trmm`.
+
+**Revenue amplifiers** (8-10): `GET /finance/unbilled-dollars`, `GET /finance/revenue-at-risk`, `GET /finance/pricing-compliance`.
+
+**Unified screens** (11-13): `GET /command-center`, `GET /clients/{id}/dossier.pdf`, `GET /briefings/monday-prep`.
+
+**Gamification** (14-15): `GET /team/leaderboard`, `GET /team/streaks`.
+
+**Retention** (16-18): `GET /clients/{id}/monthly-recap`, `GET /clients/{id}/insurance-action-plan`, `GET /clients/{id}/pre-call-brief`.
+
+**AI extensions** (19-21): `GET /team/{id}/daily-briefing`, `GET /tickets/{id}/scope-drift`, `POST /tickets/quality-audit`.
+
+**Moonshots** (22-24): `GET /forecasting/capacity`, `GET /clients/{id}/benchmark`, `POST/GET /security/insurance-vault/schedule`.
+
+**Frontend**:
+- NEW `/command-center` page (`CommandCenterPage.jsx`) with 8 tabs — Right Now, Revenue at Risk, Unbilled Dollars, Pricing Compliance, Monday Prep, Leaderboard, Streaks, Capacity 90d. Linked in sidebar *Reports & Comms* group.
+- Extended `TicketAIBundle.jsx` → 5 buttons (added Smart Assign, Suggest Resolution).
+- Extended `ClientAIBundle.jsx` → 5 buttons (added Monthly Recap, Pre-call Brief, Insurance Plan, Dossier PDF).
+
+
 ## Recent Updates (May 2, 2026 — Proactive Alerts + Insurance PDF)
 
 ### 🚨 Patch Anomaly Broadcast
