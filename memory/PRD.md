@@ -8,6 +8,22 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — Proactive Alerts + Insurance PDF)
+
+### 🚨 Patch Anomaly Broadcast
+- `POST /api/patches/anomalies/broadcast` — scans for cross-tenant patch anomalies (3+ clients), de-dupes against `db.patch_broadcasts` so already-sent alerts aren't re-fired, dispatches Slack & Teams webhooks (reuses the TRMM notification settings doc), AND writes an in-app notification as always-on fallback.
+- Only fires again if `affected_clients` grew since the last broadcast.
+- Button wired on Insights Hub → Patch Anomalies tab.
+
+### 📄 Cyber Insurance Vault PDF
+- `GET /api/security/insurance-vault.pdf[?client_id=…]` — branded FPDF evidence pack (score, tier, control coverage bars, last restore drill, attestation footer). Safe for forwarding directly to insurers.
+- Snapshot metadata persisted to `db.insurance_vault_snapshots` for audit trail.
+- Download button wired on Insights Hub → Insurance Vault tab.
+
+### Testing
+- `iteration_139.json`: **10/10 backend tests PASS · 100% frontend pass**.
+
+
 ## Recent Updates (May 2, 2026 — 21-feature Mega Bundle SHIPPED)
 
 ### 🚀 21 differentiator features in one drop — 100% test pass (iteration_138)
