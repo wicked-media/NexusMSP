@@ -8,6 +8,49 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — 21-feature Mega Bundle SHIPPED)
+
+### 🚀 21 differentiator features in one drop — 100% test pass (iteration_138)
+
+**Backend** — single new router `/app/backend/app/routers/mega_features.py` with all 21 endpoints (auto-discovered).
+
+| # | Feature | Endpoint |
+|---|---------|----------|
+| 1 | Ticket Doppelgänger | `GET /api/tickets/{id}/doppelganger` |
+| 2 | Ticket Time Machine | `GET /api/tickets/{id}/timeline` |
+| 3 | Auto-Apology Composer | `POST /api/tickets/{id}/apology-draft` |
+| 4 | Tech Cognitive Load | `GET /api/team/cognitive-load` |
+| 5 | Client DNA Profile | `GET /api/clients/{id}/dna` |
+| 6 | LTV Forecast | `GET /api/clients/{id}/ltv-forecast` |
+| 7 | Client Anniversary AI | `GET /api/clients/{id}/anniversary-draft` |
+| 8 | Pre-Billing AI Auditor | `POST /api/invoices/{id}/audit` |
+| 9 | Smart Reminder Cadence | `GET /api/invoices/{id}/reminder-strategy` |
+| 10 | Aged AR Heatmap | `GET /api/aged-ar-heatmap` |
+| 11 | Estimate Win Probability | `GET /api/estimates/{id}/win-probability` |
+| 12 | Competitive Pricing Flags | `GET /api/estimates/{id}/pricing-flags` |
+| 13 | Device Health Trajectory | `GET /api/device-health-trajectory` |
+| 14 | Patch Anomaly Detector (cross-tenant) | `GET /api/patches/anomalies` |
+| 15 | Battery Health Wall | `GET /api/device-battery-wall` |
+| 16 | Restore Drill Scheduler | `POST/GET/PUT /api/backup/drills` |
+| 17 | Cyber Insurance Vault | `GET /api/security/insurance-vault` |
+| 18 | Skills XP Bank | `GET /api/team/xp` |
+| 19 | 1:1 Auto-Agenda | `GET /api/team/{tech_id}/1on1-agenda` |
+| 20 | MSP Voice Morning Brief | `POST /api/voice/morning-brief` |
+| 21 | Run-Book Marketplace | `POST /api/runbooks/from-ticket/{id}` · `GET /api/runbooks` |
+
+**Frontend** — consolidated wiring:
+- **NEW page** `/insights` (`InsightsHubPage.jsx`) — 9-tab dashboard for the aggregate views (Tech Load · Patch Anomalies · Device Trajectory · Battery Wall · Aged AR · Skills XP · Insurance Vault · Voice Brief · Runbooks). Linked from sidebar under *Reports & Comms*.
+- `TicketAIBundle.jsx` mounted on Ticket detail header — Doppelgänger / Apology AI / To Runbook buttons.
+- `TicketTimelineTab.jsx` — new "Time Machine" tab on every ticket.
+- `ClientAIBundle.jsx` — DNA + LTV cards + Anniversary AI button on a new "AI Insights" client tab.
+- `InvoiceAIBundle.jsx` — Pre-bill Audit + Smart Reminder buttons on Invoice detail header.
+- `EstimateAIBundle.jsx` — Win Probability + Pricing Flags panel on Estimate detail.
+
+**Routing collisions fixed**: `/devices/health-trajectory` and `/devices/battery-wall` were caught by `/devices/{id}` dynamic route → renamed to `/device-health-trajectory`, `/device-battery-wall`. Same for `/aged-ar-heatmap`.
+
+**Testing**: `iteration_138.json` — 22/22 backend tests pass · 100% frontend pass · zero issues.
+
+
 ## Recent Updates (May 1, 2026 — Revenue Protection AI Bundle SHIPPED)
 
 ### 💸 Revenue Protection AI — All 5 features live
