@@ -8,6 +8,38 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 2, 2026 — Help Center MEGA · Easter Eggs · Co-pilot · Konami)
+
+### 📚 Help Center massively expanded (48 articles total, 12 categories)
+- New `_help_seed_extended.py` — 42 additional articles seeded automatically:
+  - **Module guides (23)**: Dashboard · Tickets · Clients & Health · Devices/RMM · Backup/Acronis · Huntress SOC · Hudu · CIPP/M365 · UniFi · Pax8 · War Rooms · Blueprints · QBR · Invoicing · Patch Hub · Time Tracking · Communications · Scheduling · Change Freezes · Notifications · Integrations Overview · Mobile Tech · Runbooks · Keyboard Shortcuts.
+  - **Easter Eggs section (19)**: Overview · Konami CRT · Weather Mode · Threat Dragon · Friday Reel · Trading Cards · Mood Ring · Password Pet · Slow-Internet Detective · Device Graveyard · Family Tree · Brain Bucket · Daily Quests · Achievements · Storm Broadcast · All-Clear Broadcast · Launches · Birthday Radar · Tech of the Week. Each article documents the trigger, behaviour, exact file/function to tinker, and how to disable.
+
+### 🤖 Help Co-pilot (Claude-powered "Ask anything")
+- `POST /api/help/copilot` — keyword-scores articles, picks top 6 candidates, feeds them to Claude Sonnet 4.5 via `emergentintegrations` with strict-citation prompt. Returns `{answer, citations[{slug, title, category}], fallback}`.
+- Frontend `<CopilotBar>` mounted above the Help sidebar — search box → answer card with markdown-rendered response + clickable citation chips.
+- Live verified: question "How do I send an SMS reminder?" → cites `invoicing` + `communications` with step-by-step answer.
+
+### 🖼️ Screenshot upload in Help editor
+- `POST /api/help/upload-screenshot` — accepts base64 data URL (5 MB cap), saves to `UPLOADS_DIR/help/`, returns public `/api/uploads/help/{file}` URL.
+- `<ScreenshotUploader>` in admin editor — file picker → upload → preview row + caption input + remove.
+
+### 📑 Auto-TOC sidebar
+- H2 headings post-rendered with `id="h-..."` anchors; `<ArticleTOC>` lists them at top of every article (hidden when <2 H2s). Click jumps to section.
+
+### 🕹️ Konami code easter egg
+- `KonamiCRT.jsx` — listens for `↑↑↓↓←→←→BA`. Activates a 30s green-phosphor scanline overlay + flicker + "RETRO MODE" badge. Esc to exit. Mounted globally in `AuthedAddons`.
+
+### ⌨️ Keyboard Shortcut Palette
+- `ShortcutPalette.jsx` — `Cmd/Ctrl+/` opens a searchable modal listing every bound shortcut (Global, Tickets, Chat, Easter Eggs). Mounted globally.
+
+### 🧊 Change Freeze enforcement on chain reactions
+- `power_features.sla_auto_page()` now consults `_is_frozen(client_id, kind="broadcast")` per ticket and skips paged tickets whose client is in an active freeze window. Other reactions can be added the same way.
+
+### Testing
+- `iteration_145.json`: **30/30 backend pass (100%) · 100% frontend pass**. Zero issues.
+
+
 ## Recent Updates (May 2, 2026 — All-Clear · Recharts cleanup · Change Freeze Calendar)
 
 ### ☀️ All-Clear Broadcast (companion to Stormy)
