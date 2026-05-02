@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Brain, Battery, ShieldCheck, AlertOctagon, DollarSign,
-  Award, BookOpen, Mic, Loader2, RefreshCw, Server, Sparkles, ChevronRight,
+  Award, BookOpen, Mic, Loader2, RefreshCw, Server, Sparkles, ChevronRight, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -128,12 +128,30 @@ function CognitiveLoadView({ api }) {
 
 /* ─────────── 2. Patch Anomalies ─────────── */
 function PatchAnomaliesView({ api }) {
-  const { data, loading } = useFetch(api, "/patches/anomalies");
+  const { data, loading, reload } = useFetch(api, "/patches/anomalies");
+  const [broadcasting, setBroadcasting] = useState(false);
+  const broadcast = async () => {
+    setBroadcasting(true);
+    try {
+      const r = await api.post("/patches/anomalies/broadcast");
+      if (r.newly_broadcast === 0) toast.info("No new patch anomalies to broadcast.");
+      else toast.success(`Broadcast ${r.newly_broadcast} alert(s)${r.webhooks_configured ? "" : " (in-app only — configure Slack/Teams in TRMM settings for webhook delivery)"}`);
+      reload();
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setBroadcasting(false); }
+  };
   if (loading) return <Loader label="Scanning cross-tenant patch tickets…" />;
   const rows = data?.anomalies || [];
   return (
     <Card className="mt-3" data-testid="patch-anomalies-card">
-      <CardHeader className="pb-2"><CardTitle className="text-sm">Patches causing tickets at 3+ clients (last {data?.scan_window_days || 60}d)</CardTitle></CardHeader>
+      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm">Patches causing tickets at 3+ clients (last {data?.scan_window_days || 60}d)</CardTitle>
+        <Button variant="outline" size="sm" className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+          onClick={broadcast} disabled={broadcasting || rows.length === 0} data-testid="patch-broadcast-btn">
+          {broadcasting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <AlertOctagon className="w-3.5 h-3.5 mr-1" />}
+          Broadcast
+        </Button>
+      </CardHeader>
       <CardContent>
         {rows.length === 0 ? <div className="text-center py-8 text-sm text-emerald-400">No cross-client patch issues detected.</div> :
           <div className="space-y-3">
@@ -310,7 +328,24 @@ const TONE_CLASS = {
   rose: { bdr: "border-rose-500/40", txt: "text-rose-400", bg: "bg-rose-500/10" },
 };
 function InsuranceVaultView({ api }) {
+  const { token } = useAuth();
   const { data, loading, reload } = useFetch(api, "/security/insurance-vault");
+  const [downloading, setDownloading] = useState(false);
+  const downloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const r = await axios.get(`${API}/security/insurance-vault.pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `insurance-vault-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click(); URL.revokeObjectURL(url);
+      toast.success("Evidence pack downloaded");
+    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setDownloading(false); }
+  };
   if (loading) return <Loader label="Aggregating cyber-insurance evidence…" />;
   const c = data?.controls || {};
   const stats = [
@@ -327,7 +362,14 @@ function InsuranceVaultView({ api }) {
         <Badge variant="outline" className={`${tt.txt} ${tt.bdr} ${tt.bg} text-base px-4 py-1`}>
           <ShieldCheck className="w-4 h-4 mr-2" />Score {data?.score}/100 · {data?.tier}
         </Badge>
-        <Button size="sm" variant="ghost" onClick={reload}><RefreshCw className="w-3.5 h-3.5" /></Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+            onClick={downloadPdf} disabled={downloading} data-testid="vault-download-pdf-btn">
+            {downloading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1" />}
+            Download PDF
+          </Button>
+          <Button size="sm" variant="ghost" onClick={reload}><RefreshCw className="w-3.5 h-3.5" /></Button>
+        </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {stats.map((s) => (

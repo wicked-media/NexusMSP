@@ -10,12 +10,14 @@ Team:           skills XP bank, 1:1 auto-agenda
 Cross-cutting:  voice morning brief (text), runbook publish
 """
 from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import os
 import re
 import json
 import uuid
+import httpx
 from typing import Optional
 
 from app.database import db
@@ -1186,3 +1188,266 @@ async def list_runbooks(q: Optional[str] = None, current_user: dict = Depends(ge
         ]
     rows = await db.runbooks.find(qry, {"_id": 0}).sort("created_at", -1).to_list(100)
     return rows
+
+
+# ═══════════════════════ 22. PATCH ANOMALY BROADCAST ═══════════════════════
+
+def _slack_block_for_patch(a: dict) -> dict:
+    kb = a.get("patch_id")
+    return {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": f"🚨 Patch alert: DO NOT DEPLOY {kb}"}},
+            {"type": "section", "text": {"type": "mrkdwn",
+                "text": f"*{kb}* has caused issues at *{a.get('affected_clients')} clients* ({a.get('tickets_seen')} tickets).\n"
+                         f"Severity: `{a.get('severity')}`\n"
+                         f"Sample: _{(a.get('title_samples') or ['—'])[0]}_"}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": "Sent by NexusOps Patch Anomaly Detector"}]},
+        ]
+    }
+
+
+def _teams_card_for_patch(a: dict) -> dict:
+    kb = a.get("patch_id")
+    return {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "themeColor": "E11D48" if a.get("severity") == "critical" else "F59E0B",
+        "summary": f"Patch alert {kb}",
+        "title": f"🚨 DO NOT DEPLOY {kb}",
+        "sections": [{
+            "activityTitle": f"Affecting {a.get('affected_clients')} clients · {a.get('tickets_seen')} tickets",
+            "facts": [
+                {"name": "Severity", "value": a.get("severity") or "warning"},
+                {"name": "Sample issue", "value": (a.get("title_samples") or ["—"])[0]},
+            ],
+            "markdown": True,
+        }],
+    }
+
+
+@router.post("/patches/anomalies/broadcast")
+async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_user)):
+    """Detect NEW patch anomalies (3+ clients) and broadcast to Slack/Teams. Idempotent."""
+    since = (_now() - timedelta(days=60)).isoformat()
+    tx = await db.tickets.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "id": 1, "title": 1, "description": 1, "client_id": 1, "client_name": 1, "ticket_number": 1}
+    ).limit(2000).to_list(2000)
+
+    kb_pattern = re.compile(r"\bKB\d{6,8}\b", re.I)
+    by_kb = defaultdict(lambda: {"clients": set(), "tickets": [], "title_samples": set()})
+    for t in tx:
+        text = f"{t.get('title','')} {t.get('description','')}"
+        for kb in kb_pattern.findall(text):
+            kb = kb.upper()
+            e = by_kb[kb]
+            e["clients"].add(t.get("client_id"))
+            e["tickets"].append({"ticket_id": t["id"], "ticket_number": t.get("ticket_number"), "client_name": t.get("client_name")})
+            if t.get("title"):
+                e["title_samples"].add(t["title"][:80])
+
+    anomalies = []
+    for kb, e in by_kb.items():
+        if len(e["clients"]) >= 3:
+            anomalies.append({
+                "patch_id": kb,
+                "affected_clients": len(e["clients"]),
+                "tickets_seen": len(e["tickets"]),
+                "title_samples": list(e["title_samples"])[:3],
+                "severity": "critical" if len(e["clients"]) >= 5 else "warning",
+            })
+
+    existing_rows = await db.patch_broadcasts.find({}, {"_id": 0, "patch_id": 1, "last_client_count": 1}).to_list(500)
+    existing = {r["patch_id"]: int(r.get("last_client_count") or 0) for r in existing_rows}
+
+    settings_doc = await db.settings.find_one({"type": "tactical_rmm_notifications"}, {"_id": 0}) or {}
+    slack = settings_doc.get("slack_webhook_url")
+    teams = settings_doc.get("teams_webhook_url")
+
+    new_or_growing = [a for a in anomalies if a["affected_clients"] > existing.get(a["patch_id"], 0)]
+
+    dispatch_log = []
+    if new_or_growing and (slack or teams):
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            for a in new_or_growing:
+                entry = {"patch_id": a["patch_id"], "affected_clients": a["affected_clients"], "channels": []}
+                if slack:
+                    try:
+                        r = await http.post(slack, json=_slack_block_for_patch(a))
+                        entry["channels"].append({"slack": r.status_code})
+                    except Exception as ex:
+                        entry["channels"].append({"slack_error": str(ex)[:160]})
+                if teams:
+                    try:
+                        r = await http.post(teams, json=_teams_card_for_patch(a))
+                        entry["channels"].append({"teams": r.status_code})
+                    except Exception as ex:
+                        entry["channels"].append({"teams_error": str(ex)[:160]})
+                dispatch_log.append(entry)
+
+    for a in new_or_growing:
+        await db.patch_broadcasts.update_one(
+            {"patch_id": a["patch_id"]},
+            {"$set": {
+                "patch_id": a["patch_id"],
+                "last_client_count": a["affected_clients"],
+                "severity": a["severity"],
+                "last_broadcast_at": _now().isoformat(),
+                "last_broadcast_by": current_user.get("name"),
+                "webhook_dispatched": bool(slack or teams),
+            }},
+            upsert=True,
+        )
+        await db.notifications.insert_one({
+            "id": uuid.uuid4().hex,
+            "type": "patch_anomaly",
+            "title": f"🚨 DO NOT DEPLOY {a['patch_id']}",
+            "body": f"{a['affected_clients']} clients affected, {a['tickets_seen']} tickets. Severity: {a['severity']}.",
+            "ref_type": "patch",
+            "ref_id": a["patch_id"],
+            "read": False,
+            "created_at": _now().isoformat(),
+        })
+
+    return {
+        "scanned": len(anomalies),
+        "newly_broadcast": len(new_or_growing),
+        "webhooks_configured": bool(slack or teams),
+        "dispatch_log": dispatch_log,
+        "items": new_or_growing,
+    }
+
+
+# ═══════════════════════ 23. CYBER INSURANCE VAULT PDF ═══════════════════════
+
+def _safe_pdf_text(s) -> str:
+    if s is None:
+        return ""
+    return str(s).encode("latin-1", "replace").decode("latin-1")
+
+
+@router.get("/security/insurance-vault.pdf")
+async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    """Branded PDF evidence pack that a cyber insurer can accept."""
+    from fpdf import FPDF
+
+    q = {"client_id": client_id} if client_id else {}
+    devices = await db.devices.find(q, {"_id": 0}).limit(5000).to_list(5000)
+    total = len(devices) or 1
+    mfa_pct = round(sum(1 for d in devices if d.get("mfa_enabled")) / total * 100)
+    edr_pct = round(sum(1 for d in devices if d.get("edr_installed")) / total * 100)
+    enc_pct = round(sum(1 for d in devices if d.get("encryption_status") in ("enabled", True, "yes")) / total * 100)
+    cutoff_30 = (_now() - timedelta(days=30)).isoformat()
+    patched_30 = sum(1 for d in devices if (d.get("last_patch_date") or "") >= cutoff_30)
+    patch_pct = round(patched_30 / total * 100)
+
+    last_drill = await db.backup_drills.find_one(
+        {**q, "status": "completed"}, sort=[("completed_at", -1)], projection={"_id": 0}
+    )
+    huntress_alerts = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}, **q})
+    score = round((mfa_pct * 0.3 + edr_pct * 0.3 + enc_pct * 0.2 + patch_pct * 0.2))
+    tier = "insurable" if score >= 80 else "needs-improvement" if score >= 60 else "high-risk"
+
+    client_name = None
+    if client_id:
+        cdoc = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1}) or {}
+        client_name = cdoc.get("name")
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.add_page()
+
+    pdf.set_fill_color(15, 23, 42)
+    pdf.rect(0, 0, 210, 28, style="F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(12, 8)
+    pdf.cell(0, 8, _safe_pdf_text("Cyber Insurance Evidence Pack"), ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_x(12)
+    pdf.cell(0, 5, _safe_pdf_text(f"Generated {_now().strftime('%d %B %Y %H:%M UTC')} by NexusOps"), ln=True)
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(14)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, _safe_pdf_text(client_name or "All clients"), ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    tier_label = {"insurable": "Insurable", "needs-improvement": "Needs improvement", "high-risk": "High risk"}[tier]
+    pdf.cell(0, 6, _safe_pdf_text(f"Overall score: {score}/100  -  Tier: {tier_label}"), ln=True)
+    pdf.cell(0, 6, _safe_pdf_text(f"Devices counted: {total}  -  Open security alerts: {huntress_alerts}"), ln=True)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, _safe_pdf_text("Security control coverage"), ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    for label, pct in (("Multi-factor authentication", mfa_pct),
+                       ("Endpoint detection & response", edr_pct),
+                       ("Device encryption", enc_pct),
+                       ("Patched within 30 days", patch_pct)):
+        pdf.cell(80, 6, _safe_pdf_text(label))
+        x = pdf.get_x()
+        y = pdf.get_y()
+        pdf.set_fill_color(226, 232, 240)
+        pdf.rect(x, y + 1, 90, 4, style="F")
+        fill = max(2, pct * 0.9)
+        if pct >= 90:
+            pdf.set_fill_color(16, 185, 129)
+        elif pct >= 70:
+            pdf.set_fill_color(245, 158, 11)
+        else:
+            pdf.set_fill_color(225, 29, 72)
+        pdf.rect(x, y + 1, fill, 4, style="F")
+        pdf.set_xy(x + 92, y)
+        pdf.cell(0, 6, _safe_pdf_text(f"{pct}%"), ln=True)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, _safe_pdf_text("Last restore drill"), ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    if last_drill:
+        pdf.cell(0, 6, _safe_pdf_text(f"Date: {(last_drill.get('completed_at') or '')[:16]}  -  Scope: {last_drill.get('scope','-')}"), ln=True)
+        pdf.cell(0, 6, _safe_pdf_text(f"Outcome: {last_drill.get('outcome','-')}"), ln=True)
+        pdf.cell(0, 6, _safe_pdf_text(f"Completed by: {last_drill.get('completed_by','-')}"), ln=True)
+    else:
+        pdf.set_text_color(225, 29, 72)
+        pdf.cell(0, 6, _safe_pdf_text("No completed restore drill on record - insurer will flag this."), ln=True)
+        pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, _safe_pdf_text("Attestation"), ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    attest = (
+        "This evidence was produced from live tenant telemetry at the time of generation and represents "
+        "the current security posture for the scope specified. All figures are calculated directly from "
+        "managed device inventory, backup records, EDR telemetry, and unresolved security alerts."
+    )
+    pdf.multi_cell(0, 5, _safe_pdf_text(attest))
+    pdf.ln(6)
+
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(0, 5, _safe_pdf_text(f"Signed: {current_user.get('name','')} on behalf of NexusOps - {_now().strftime('%d %B %Y')}"), ln=True)
+
+    raw = pdf.output(dest="S")
+    if isinstance(raw, str):
+        raw = raw.encode("latin-1")
+    else:
+        raw = bytes(raw)
+    try:
+        await db.insurance_vault_snapshots.insert_one({
+            "id": uuid.uuid4().hex,
+            "client_id": client_id,
+            "client_name": client_name,
+            "score": score,
+            "tier": tier,
+            "generated_by": current_user.get("name"),
+            "generated_at": _now().isoformat(),
+            "size_bytes": len(raw),
+        })
+    except Exception:
+        pass
+
+    filename = f"insurance-vault-{(client_name or 'all').replace(' ','-').lower()}-{_now().strftime('%Y%m%d')}.pdf"
+    return Response(content=raw, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
