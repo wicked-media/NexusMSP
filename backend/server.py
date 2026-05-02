@@ -243,10 +243,13 @@ async def _chain_reactions_loop():
                 logger.info(f"Ops chain-reactions tick: {summary.get('results', {})}")
                 # Once-a-day storm broadcast (idempotent)
                 try:
-                    from app.routers.chat_help import _check_storm_broadcast
+                    from app.routers.chat_help import _check_storm_broadcast, _check_all_clear_broadcast
                     storm_msg = await _check_storm_broadcast()
                     if storm_msg:
                         logger.info(f"Storm mood broadcast posted: {storm_msg.get('id')}")
+                    clear_msg = await _check_all_clear_broadcast()
+                    if clear_msg:
+                        logger.info(f"All-clear broadcast posted: {clear_msg.get('id')}")
                 except Exception as _e:
                     logger.debug(f"Storm broadcast skipped: {_e}")
             await asyncio.sleep(interval_min * 60)

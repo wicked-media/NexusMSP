@@ -53,6 +53,7 @@ export const navGroups = [
         path: "/change-management", icon: GitBranch, label: "Change & Incidents",
         children: [
           { path: "/change-management", label: "Change Management" },
+          { path: "/change-freezes", label: "Freeze Calendar" },
           { path: "/incident-heatmap", label: "Incident Heatmap" },
           { path: "/postmortem", label: "Post-Mortems" },
           { path: "/alert-suppression", label: "Alert Suppression" },

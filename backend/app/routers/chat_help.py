@@ -138,13 +138,55 @@ async def broadcast_storm_check(current_user: dict = Depends(get_current_user)):
     return {"posted": 1 if msg else 0, "msg_id": (msg or {}).get("id")}
 
 
+async def _check_all_clear_broadcast() -> Optional[dict]:
+    """Helper: post a single 'storm passed' message when mood drops back to sunny/beach
+    AFTER a storm broadcast was posted earlier the same day. Idempotent."""
+    from app.routers.quirky_features import weather_mode
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Need a prior storm broadcast today
+    storm = await db.chat_messages.find_one({"ref_type": "storm_mood", "ref_id": today}, {"_id": 0})
+    if not storm:
+        return None
+    # Skip if already posted all-clear today
+    already = await db.chat_messages.find_one({"ref_type": "storm_clear", "ref_id": today}, {"_id": 0})
+    if already:
+        return None
+
+    try:
+        wm = await weather_mode(current_user={"id": "system"})
+    except Exception:
+        return None
+    if (wm or {}).get("mood") not in {"sunny", "beach"}:
+        return None
+
+    stats = wm.get("stats") or {}
+    body = (
+        f"@channel  Storm passed — mood is back to {wm.get('mood').upper()}.\n"
+        f"Open critical: {stats.get('open_critical', 0)} · Open total: {stats.get('open_total', 0)} · Huntress: {stats.get('huntress_open', 0)}\n"
+        f"Nice work team. Take a breath."
+    )
+    return await _post_to_general("☀️ All clear", body, ref_type="storm_clear", ref_id=today)
+
+
+@router.post("/chat/broadcast/all-clear-check")
+async def broadcast_all_clear(current_user: dict = Depends(get_current_user)):
+    """Manual trigger for the once-a-day storm-passed broadcast."""
+    msg = await _check_all_clear_broadcast()
+    return {"posted": 1 if msg else 0, "msg_id": (msg or {}).get("id")}
+
+
 # Wire all broadcasts into the existing scheduler tick
 @router.post("/chat/broadcast/tick")
 async def broadcast_tick(current_user: dict = Depends(get_current_user)):
     a = await broadcast_sentiment_escalating(current_user=current_user)
     b = await broadcast_sla_page(current_user=current_user)
     c = await _check_storm_broadcast()
-    return {"sentiment_posted": a["posted"], "sla_posted": b["posted"], "storm_posted": 1 if c else 0}
+    d = await _check_all_clear_broadcast()
+    return {
+        "sentiment_posted": a["posted"], "sla_posted": b["posted"],
+        "storm_posted": 1 if c else 0, "all_clear_posted": 1 if d else 0,
+    }
 
 
 # ═══════════════════════ HELP CENTER ═══════════════════════
