@@ -8,6 +8,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 3, 2026 — Ticket Module Audit + Finance Intel UI Wiring)
+
+### Connected Finance Intel features into the ticket workflow
+- **QuoteNudgeBanner** (`components/tickets/QuoteNudgeBanner.jsx`) auto-appears on ticket detail when quote-nudge score ≥ 50 (6+ comments, 120+ min logged, 3+ project keywords). "Draft quote now" button triggers AI auto-quote.
+- **KitPickerDialog** (`components/tickets/KitPickerDialog.jsx`) — Apply Kit button on Items tab. Lists available product bundles; one click attaches all products + labor via `POST /api/tickets/{id}/apply-kit/{kit_id}`.
+- **Pre-scan Risks (AI)** button on Invoice detail Actions sidebar — calls `/dispute-scan`, surfaces heuristic flags + Claude AI risks + per-line justifications BEFORE sending.
+
+### Help Center (55 articles now — preserving all previous)
+- `tickets-toolbar-reference` — complete Ticket module audit documenting every toolbar button + all 10 detail tabs + right-sidebar cards + pro tips + tinker paths.
+- `invoice-dispute-scan` — Pre-emptive Dispute Scan reference.
+- `quote-nudge-banner` — Easter Eggs section entry.
+
+### Testing
+- `iteration_148.json`: **18/18 backend (100%) + 100% frontend.** Zero issues.
+- Known: Full TicketsPage.jsx decomposition (4300+ lines) still P1 — didn't ship in this batch (too risky without dedicated round). Minor HuduSuggestionsPanel button-nesting warning flagged for future cleanup.
+
+
 ## Recent Updates (May 3, 2026 — TRMM Reliability · Sync · Outage Detective)
 
 ### 🛰️ Live TRMM Sync (core reliability fix)
