@@ -337,6 +337,7 @@ export default function DevicesPage() {
 
   return (
     <PageShell data-testid="devices-page">
+      <TrmmFreshnessStrip token={token} />
       <MetricStrip columns={6}>
         <MetricTile label="Total" value={stats.total || 0} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="devices-metric-total" />
         <MetricTile label="Online" value={stats.online || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="devices-metric-online" />
@@ -719,3 +720,55 @@ export default function DevicesPage() {
     </PageShell>
   );
 }
+
+function TrmmFreshnessStrip({ token }) {
+  const [status, setStatus] = useState(null);
+  const [outages, setOutages] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const load = useCallback(() => {
+    const headers = { Authorization: `Bearer ${token}` };
+    axios.get(`${API}/trmm-sync/status`, { headers }).then((r) => setStatus(r.data)).catch(() => {});
+    axios.get(`${API}/trmm-sync/outages`, { headers }).then((r) => setOutages(r.data?.outages || [])).catch(() => {});
+  }, [token]);
+  useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, [load]);
+
+  if (!status) return null;
+  const sec = status.staleness_seconds;
+  const color = sec == null ? "zinc" : sec < 180 ? "emerald" : sec < 900 ? "amber" : "rose";
+  const fmt = sec == null ? "never" : sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h`;
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      const r = await axios.post(`${API}/trmm-sync/run`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(`Synced · ${r.data.devices_updated} devices${r.data.outages_created ? ` · ${r.data.outages_created} outage(s)` : ""}`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSyncing(false); }
+  };
+
+  return (
+    <div className="px-6 pt-3 space-y-2" data-testid="trmm-freshness">
+      <div className="flex items-center gap-2 text-xs flex-wrap">
+        <Server className="w-3.5 h-3.5 text-violet-400" />
+        <span className="text-muted-foreground">TRMM sync:</span>
+        <Badge variant="outline" className={`text-${color}-400 border-${color}-500/40 text-[10px]`}>Updated {fmt} ago</Badge>
+        {status.demo_mode && <Badge variant="outline" className="text-amber-400 border-amber-500/40 text-[10px]">DEMO MODE</Badge>}
+        <span className="text-muted-foreground">· {status.agents_seen} agents · {status.transitions_count || 0} recent transitions</span>
+        <Button size="sm" variant="ghost" onClick={syncNow} disabled={syncing} data-testid="devices-sync-now" className="h-6 px-2 text-[11px]">
+          {syncing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync now
+        </Button>
+        <a href="/device-reliability" className="ml-auto text-violet-400 hover:underline text-[11px]">Reliability center →</a>
+      </div>
+      {outages.length > 0 && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded px-3 py-2 flex items-center gap-2 text-xs flex-wrap" data-testid="outage-banner">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+          <strong className="text-rose-300">{outages.length} active outage{outages.length > 1 ? "s" : ""}:</strong>
+          <span>{outages.slice(0, 3).map((o) => `${o.client_name} (${o.offline_count} offline)`).join(" · ")}</span>
+          <a href="/device-reliability" className="ml-auto text-rose-300 hover:underline">Review</a>
+        </div>
+      )}
+    </div>
+  );
+}
+

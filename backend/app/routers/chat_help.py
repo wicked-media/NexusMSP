@@ -364,12 +364,159 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 ]
 
 
+EXTENDED_ARTICLES = [
+    # ═══════════════════════ TRMM RELIABILITY (NEW) ═══════════════════════
+    {
+        "slug": "trmm-reliability",
+        "title": "TRMM Reliability & Sync",
+        "category": "Infrastructure",
+        "icon": "🛰️",
+        "order": 19,
+        "summary": "How live TRMM sync works, Demo Mode, outage detective, stale agents, bulk actions.",
+        "body_md": """## What it does
+The Reliability page at `/device-reliability` turns NexusOps into the source-of-truth for device state. A background job pulls live agent status from Tactical RMM every 3 minutes and pushes it into `db.devices` — so the main `/devices` page always reflects reality, not stale seed data.
+
+## Demo Mode vs Live
+| Mode | Trigger | What happens |
+|---|---|---|
+| **Live** | TRMM configured in Settings → Integrations → Tactical RMM (base_url + api_key present) | Real agents pulled, states written back |
+| **Demo** | TRMM not configured | Synthetic TRMM-shaped data generated from your existing devices so every flow works end-to-end immediately |
+
+The page shows a `DEMO` badge when demo mode is active. When you add real TRMM creds and save, the next tick automatically switches to Live — no restart needed.
+
+## The 4 tabs
+### Client health
+Per-client roll-up. Each card shows online/offline/warning counts, an online-% bar, and a status badge: HEALTHY · WARNING · PARTIAL OUTAGE · FULL OUTAGE.
+
+### Outages
+Live active outages from the Outage Detective. Each row shows client, device count, detected-at, auto-created ticket link, and a Resolve button.
+
+### Stale agents
+Devices linked to TRMM that haven't reported in >3 days. Likely need agent reinstall. Shows device + client + last-seen + agent ID.
+
+### Bulk actions
+Pick N devices, pick an action (Reboot / Install patches / Run checks). Executes via TRMM (or simulates in demo mode). **Change Freeze** windows are honoured automatically — frozen clients are skipped with `change_freeze_active` reason.
+
+## Sync Now button
+Top-right button forces an immediate sync. Runs the same tick the scheduler runs. Returns counts of devices updated + any newly-detected outages.
+
+## Freshness badge on /devices
+Top of the main Devices page shows a live TRMM sync strip:
+- Green "Updated 42s ago" — fresh
+- Amber "Updated 8m ago" — stale-ish
+- Rose "Updated 23m ago" — sync likely broken
+- `DEMO MODE` badge when no TRMM creds
+
+## Tinker
+- **Sync frequency**: `server.py` chain-reactions loop tick interval (defaults to whatever `ops_chain_reactions` setting says — typically 3-15 min). Change in Settings → Automation or edit `server.py` directly.
+- **Stale threshold**: `/api/trmm-sync/stale-agents?days=3` — change the `days` query param.
+- **Demo mode agent generation**: `tactical_rmm_sync.py` → `_fetch_demo_agents()`. Adjust the 82/10/5/3% probability distribution for online/offline/warning/stale.
+- **Outage Detective trigger**: 3+ devices offline within 5 min at the same client. In `tactical_rmm_sync.py` search for `len(offs) < 3: continue` to change the threshold.
+
+## Where state lives
+- `db.devices.status / last_seen / last_trmm_sync / trmm_agent_id` — live device state
+- `db.device_state_log` — every state transition (for "offline for 2h 14m" style labels, audit, patterns)
+- `db.outages` — active + resolved outages
+- `db.settings.trmm_sync_state` — last sync metadata
+""",
+    },
+
+    {
+        "slug": "outage-detective",
+        "title": "🔥 Outage Detective",
+        "category": "Easter Eggs",
+        "icon": "🔥",
+        "order": 220,
+        "summary": "Auto-detects client-wide outages from clustered device-offline events.",
+        "body_md": """## What it does
+When 3 or more devices at the *same client* transition to `offline` within 5 minutes, the Outage Detective:
+1. Creates a row in `db.outages` (idempotent per client per day).
+2. Auto-creates a **Priority: Critical** ticket with the offline device list + triage hints (ISP / WAN / UPS / UniFi gateway).
+3. Surfaces a red banner on `/devices` and `/device-reliability`.
+
+## Why it matters
+A single device offline = user walked away. 10 devices at the same client going dark together = ISP event or UPS failure. This distinction saves tickets like "PC won't turn on" from flooding the queue.
+
+## Where
+- Banner on `/devices` (top of page).
+- `/device-reliability` → Outages tab.
+- Ticket: `TKT-XXXXX` with `source=auto_outage`.
+
+## Resolve
+Click **Resolve** on the outage card. Marks `resolved=true`. Does NOT auto-resolve the ticket — that's still your job (so you can document the fix).
+
+## Tinker
+`tactical_rmm_sync.py` → `run_trmm_sync()`:
+- Change `len(offs) < 3: continue` to change min-device threshold.
+- Change the `five_min_ago = now - timedelta(minutes=5)` window.
+- Edit the auto-ticket body text.
+
+## Disable entirely
+Comment out the `# ───── Outage Detective ─────` block in `run_trmm_sync()`.
+""",
+    },
+
+    {
+        "slug": "stale-agent-radar",
+        "title": "📡 Stale Agent Radar",
+        "category": "Infrastructure",
+        "icon": "📡",
+        "order": 46,
+        "summary": "Find TRMM agents that stopped reporting — probably need reinstall.",
+        "body_md": """## What it is
+When a device is linked to a TRMM agent (`trmm_agent_id` present) but hasn't phoned home in >3 days, the agent is almost always broken — not the device. Normal offline = minutes or hours. Stale = days.
+
+## Where
+`/device-reliability` → Stale agents tab.
+
+## Tinker
+- Default threshold: 3 days. Call `/api/trmm-sync/stale-agents?days=7` for a different window.
+- Or edit the UI default in `DeviceReliabilityPage.jsx` → `StaleAgents`.
+
+## Next steps
+For each stale agent:
+1. Attempt bulk `run-checks` action (sometimes wakes them up).
+2. If no response in another 24h → queue an agent-reinstall runbook.
+3. Consider automating: add a scheduled job that auto-closes the TRMM agent + creates a ticket "Reinstall TRMM on DEVICENAME".
+""",
+    },
+
+    {
+        "slug": "bulk-trmm-actions",
+        "title": "⚡ Bulk TRMM Actions",
+        "category": "Infrastructure",
+        "icon": "⚡",
+        "order": 47,
+        "summary": "Reboot / patch / run-checks across selected devices in one go.",
+        "body_md": """## Where
+`/device-reliability` → Bulk actions tab.
+
+## How to use
+1. Check the devices you want to action (only TRMM-linked devices appear).
+2. Hit Reboot / Install patches / Run checks.
+3. Confirm the prompt.
+4. Results toast shows N succeeded, M failed. Any `change_freeze_active` skips are surfaced.
+
+## Safety rails
+- Only TRMM-linked devices show up (`trmm_agent_id` present).
+- Change Freeze windows auto-skip frozen clients — see **Change Freeze Calendar** article.
+- Every bulk action writes an audit row to `db.trmm_actions`.
+- Demo mode simulates the calls (no actual TRMM hit) — marked `simulated:true` in results.
+
+## Tinker
+- Add new action types in `tactical_rmm_sync.py` → `bulk_action()` endpoint + the `kind` map.
+- Replace the confirm prompt with a scheduled-execution picker if you want future-dated bulk actions.
+""",
+    },
+]
+
+
 # Extended seed lives in a sibling file to keep this file lean
 try:
     from app.routers._help_seed_extended import EXTENDED_ARTICLES as _EXT
-    DEFAULT_ARTICLES = DEFAULT_ARTICLES + _EXT
+    DEFAULT_ARTICLES = DEFAULT_ARTICLES + _EXT + EXTENDED_ARTICLES
 except Exception:
-    pass
+    DEFAULT_ARTICLES = DEFAULT_ARTICLES + EXTENDED_ARTICLES
 
 
 @router.get("/help/articles")

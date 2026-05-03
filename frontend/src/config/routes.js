@@ -44,6 +44,7 @@ export const routeConfig = [
   { path: "/atmosphere", component: page("AtmospherePage"), auth: true, layout: true },
   { path: "/change-freezes", component: page("ChangeFreezePage"), auth: true, layout: true },
   { path: "/finance-intel", component: page("FinanceIntelPage"), auth: true, layout: true },
+  { path: "/device-reliability", component: page("DeviceReliabilityPage"), auth: true, layout: true },
 
   // Integrations
   { path: "/pax8", component: page("Pax8CommandCenterPage"), auth: true, layout: true },

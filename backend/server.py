@@ -252,6 +252,18 @@ async def _chain_reactions_loop():
                         logger.info(f"All-clear broadcast posted: {clear_msg.get('id')}")
                 except Exception as _e:
                     logger.debug(f"Storm broadcast skipped: {_e}")
+
+                # TRMM live sync — every tick (fast/idempotent).
+                try:
+                    from app.routers.tactical_rmm_sync import run_trmm_sync
+                    sync_res = await run_trmm_sync()
+                    logger.info(
+                        f"TRMM sync: updated={sync_res.get('devices_updated')} "
+                        f"demo={sync_res.get('demo_mode')} transitions={len(sync_res.get('transitions') or [])} "
+                        f"outages={sync_res.get('outages_created')}"
+                    )
+                except Exception as _e:
+                    logger.warning(f"TRMM sync skipped: {_e}")
             await asyncio.sleep(interval_min * 60)
         except Exception as e:
             logger.debug(f"Chain-reactions loop error: {e}")
