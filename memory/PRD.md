@@ -8,6 +8,41 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 3, 2026 — TRMM Reliability · Sync · Outage Detective)
+
+### 🛰️ Live TRMM Sync (core reliability fix)
+- New `tactical_rmm_sync.py` — background sync pushes live TRMM agent state into `db.devices` every chain-reactions tick (3-15 min configurable). Main `/devices` page now shows reality instead of stale seed data.
+- **Demo Mode** — when TRMM not configured, generates realistic synthetic agents from existing devices (82% online, 10% offline, 5% warning, 3% stale distribution). Flips to Live automatically when creds added in Settings → Integrations → Tactical RMM.
+- **State transition log** — `db.device_state_log` captures every online↔offline transition with timestamps + client_id. Enables "offline for 2h 14m" labels, outage forensics, pattern detection.
+
+### 🔥 Outage Detective
+- When 3+ devices at same client go offline within 5 min → auto-creates a `db.outages` row + Priority:Critical ticket with triage hints (ISP/WAN/UPS/UniFi). Idempotent per client per day.
+- Live banner on `/devices` + full list on `/device-reliability` → Outages tab with Resolve button.
+
+### 📡 Stale Agent Radar
+- `GET /api/trmm-sync/stale-agents?days=3` — devices linked to TRMM but silent >N days. Next step: agent reinstall runbook.
+
+### 🎯 Per-Client Device Health Roll-up
+- `GET /api/trmm-sync/client-health` — returns every client with online/offline/warning/linked counts + online_pct progress bar + badge (HEALTHY · WARNING · PARTIAL OUTAGE · FULL OUTAGE).
+
+### ⚡ Bulk TRMM Actions
+- `POST /api/trmm-sync/bulk-action` body `{device_ids:[], action: 'reboot'|'install-patches'|'run-checks'}`. **Honours Change Freeze** — frozen clients auto-skipped with `change_freeze_active` reason. Demo mode simulates. Live dispatches to TRMM. All audited to `db.trmm_actions`.
+
+### 🖼️ Frontend
+- New `/device-reliability` page — 4 tabs (Client health · Outages · Stale agents · Bulk actions) + Sync now button + DEMO badge + freshness badge.
+- Main `/devices` page — thin freshness strip at top ("Updated 42s ago" green / 8m amber / 23m rose) + red outage banner when active. "Reliability center →" deep-link.
+- Sidebar: Devices → **Reliability & TRMM Sync**.
+
+### 📚 Help articles (4 new — 52 total now)
+- `trmm-reliability` (Infrastructure) — full architecture doc
+- `outage-detective` (Easter Eggs) — trigger + tinker
+- `stale-agent-radar` (Infrastructure) — threshold + next steps
+- `bulk-trmm-actions` (Infrastructure) — safety rails + freeze integration
+
+### Testing
+- `iteration_147.json`: **29/29 backend (100%) + 100% frontend.** Live-verified: 131 devices updated per sync, 48+ transitions logged, 5+ active outages with auto-created tickets (TKT-00069 through TKT-00075). Zero issues.
+
+
 ## Recent Updates (May 3, 2026 — Finance Intelligence: 9 Differentiators)
 
 ### Products & Invoices — killing the competition on revenue intelligence
