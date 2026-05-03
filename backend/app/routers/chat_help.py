@@ -365,6 +365,77 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 
 
 EXTENDED_ARTICLES = [
+    # ═══════════════════════ CLIENTS 360° ═══════════════════════
+    {
+        "slug": "clients-360",
+        "title": "Clients 360° — Full Profile Tabs",
+        "category": "Service Desk",
+        "icon": "🏢",
+        "order": 12,
+        "summary": "Everything about a customer on one screen: subscriptions, security, billing, assets.",
+        "body_md": """## What it is
+The Client detail view is a **full 360° profile** of a customer. 12 tabs surface every service, subscription, invoice, device, security posture, and relationship signal in one place.
+
+## The 12 tabs
+
+### Overview
+- **Next Best Action** — Claude-style recommendation (SMS reminder / QBR / upsell) based on current signals.
+- **Quick Actions** — New Ticket · New Invoice · SMS · Email · Start Timer.
+- **Health Score Breakdown** — 5-6 dimensions (Tickets/SLA/Devices/Payments/Contracts, +M365 when CIPP linked) with live progress bars.
+- **Recent Activity** — unified feed of tickets / invoices / events.
+
+### Tickets → Assets → Subscriptions *(new)* → Security *(new)* → Contacts → Billing *(enhanced)*
+
+### Subscriptions tab *(new)*
+Combines **every** subscription this customer has:
+- Pax8 CSP subscriptions (M365, Acronis-via-Pax8, etc.)
+- Acronis direct backup usage
+- NexusOps recurring invoices (managed services contracts)
+
+Summary strip: active count · total seats · **monthly $** · **annual $**.
+Table: source · product · qty · unit · monthly · cycle · status.
+
+Use this tab to answer "what are they paying me every month for?" in 2 seconds.
+
+### Security tab *(new)*
+- MFA coverage % (CIPP) with colour-coded badge (≥95 green, 80-94 amber, <80 rose)
+- CIPP 7-dimension hygiene score (bar per dimension)
+- Huntress agents count + open critical alerts
+- Active users · stale users · weak passwords
+- Deep-links to `/cipp` and `/huntress-dashboard`
+
+### Billing tab *(enhanced, inline)*
+- Open balance · Overdue 90+ · MRR · LTV
+- **AR Aging** card — Current / 30 / 60 / 90+ with colour bars
+- Payment Promises badge (kept/broken)
+- Recent 10 invoices table (invoice# · total · paid · due · status)
+- Link to full invoice list
+
+### Assets tab *(enhanced, inline)*
+- Total / Online / Offline counts
+- **Device Families** — devices grouped by model with count, avg age, online/offline breakdown, 4-device preview per family
+- Deep-link to full device list
+
+### Blueprints → AI Insights → Integrations → M365 / CIPP → Activity
+Unchanged — same as before.
+
+## AI Insights tab (recap)
+9 buttons: DNA Profile · LTV Forecast · Anniversary AI · Monthly Recap · Pre-call Brief · Insurance Plan · Dossier PDF · (plus churn reasons & sentiment) — see **Clients & Health Score** article.
+
+## Tinker
+- Add/remove tabs: `ClientsPage.jsx` → search for `{ v: "overview", l: "Overview" }`.
+- Adjust `_aggregate_subscriptions()` in `client_360.py` to pull from more SaaS sources (Dropbox, DocuSign, etc.) — just add another DB lookup + append to `subs[]`.
+- Health score weights: `clients.py` → `compute_health_score()`.
+
+## API endpoints
+- `GET /api/clients/{id}/full-profile` — kitchen-sink aggregator
+- `GET /api/clients/{id}/subscriptions` — combined subs roll-up
+- `GET /api/clients/{id}/security` — hygiene + Huntress combined
+- `GET /api/clients/{id}/billing-detail` — AR aging + invoices
+- `GET /api/clients/{id}/assets-detail` — device family grouping
+""",
+    },
+
     # ═══════════════════════ TICKET TOOLBAR & TABS AUDIT ═══════════════════════
     {
         "slug": "tickets-toolbar-reference",

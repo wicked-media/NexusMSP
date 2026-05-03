@@ -19,6 +19,7 @@ import {
 import { Link } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
+import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -411,6 +412,7 @@ export default function ClientsPage() {
 }
 
 function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab, loading }) {
+  const { token } = useAuth();
   const mrrData = client.mrr_trend || [];
   const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
 
@@ -490,6 +492,8 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             { v: "overview", l: "Overview" },
             { v: "tickets", l: "Tickets" },
             { v: "assets", l: "Assets" },
+            { v: "subscriptions", l: "Subscriptions" },
+            { v: "security", l: "Security" },
             { v: "contacts", l: "Contacts" },
             { v: "billing", l: "Billing" },
             { v: "blueprints", l: "Blueprints" },
@@ -588,10 +592,15 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
           </TabsContent>
 
           <TabsContent value="assets" className="mt-0">
-            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
-              <HardDrive className="w-8 h-8 mx-auto mb-3 opacity-40" />
-              <Link className="text-indigo-400 hover:underline" to={`/devices?clientId=${client.id}`}>Open {client.asset_count} devices</Link>
-            </div>
+            <Client360Assets clientId={client.id} token={token} />
+          </TabsContent>
+
+          <TabsContent value="subscriptions" className="mt-0">
+            <Client360Subscriptions clientId={client.id} token={token} />
+          </TabsContent>
+
+          <TabsContent value="security" className="mt-0">
+            <Client360Security clientId={client.id} token={token} />
           </TabsContent>
 
           <TabsContent value="contacts" className="mt-0">
@@ -602,10 +611,7 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
           </TabsContent>
 
           <TabsContent value="billing" className="mt-0 space-y-2">
-            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
-              <DollarSign className="w-8 h-8 mx-auto mb-3 opacity-40" />
-              <Link className="text-indigo-400 hover:underline" to={`/invoices?clientId=${client.id}`}>Open invoices & recurring</Link>
-            </div>
+            <Client360Billing clientId={client.id} token={token} />
           </TabsContent>
 
           <TabsContent value="blueprints" className="mt-0">
