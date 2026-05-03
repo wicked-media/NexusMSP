@@ -365,6 +365,251 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 
 
 EXTENDED_ARTICLES = [
+    # ═══════════════════════ MASS P2 MODULE AUDITS ═══════════════════════
+    {
+        "slug": "qbr-page-audit",
+        "title": "QBR Generator — Audit",
+        "category": "Reports & Comms",
+        "icon": "📊",
+        "order": 71,
+        "summary": "Quarterly Business Reviews: how to draft, edit and ship.",
+        "body_md": """## Page: `/qbr`
+3-column layout: Client picker (left) · Draft (center) · Actions (right).
+
+## Workflow
+1. Pick a client + quarter range.
+2. Click **Generate Draft** — Claude pulls tickets, devices, backups, alerts, spend, pattern hits → drafts 7 sections.
+3. Edit the inline rich-text editor for each section.
+4. **Save Draft** persists to `db.qbrs`. **Download PDF** prints branded fpdf with cover page + KPI strip + all sections.
+
+## The 7 sections
+Executive Summary · Key Wins · Incident Breakdown · Infrastructure Health · Risks & Recommendations · MSP Intelligence · Next Quarter Focus.
+
+## MSP Intelligence section
+Each pattern hit links to `/blueprints?pattern=...&t=...`. Click → opens Blueprint Library filtered to that pattern. This is your cross-tenant insight engine — competitors don't have this.
+
+## Tinker
+- Section list/order: `qbr.py` → `QBR_SECTIONS`.
+- AI prompt: `qbr.py` → `_generate_qbr_section()` system prompt.
+- PDF layout: `qbr.py` → `qbr_pdf_export()`.
+""",
+    },
+    {
+        "slug": "scheduling-audit",
+        "title": "Scheduling — Calendar / Smart / Roster Audit",
+        "category": "Service Desk",
+        "icon": "📅",
+        "order": 96,
+        "summary": "Three scheduling pages and how they relate.",
+        "body_md": """## Three pages
+
+### `/scheduling` — Calendar
+Drag-and-drop bookings. Each booking links to a ticket. Status colours: scheduled (sky) / in_progress (amber) / completed (emerald) / cancelled (zinc).
+
+### `/smart-scheduling` — AI Routing
+Claude reads tech skills + location + calendar + current load → recommends best assignment. **"Auto-assign"** button writes the assignment + emails the tech.
+
+### `/tech-roster` — On-Call & Skills
+Tier 1/2/3 columns + skills matrix table.
+- Each tech has: escalation_tier · preferred_channels (sms/slack/teams/email/in_app) · on_call · active.
+- Drives War Room paging — Tier-1 fires immediately, Tier-2/3 wait for grace expiry.
+
+## Tinker
+- Tech tier definitions: `tech_roster.py` → `TIER_DEFINITIONS`.
+- Smart-Scheduling weighting: `smart_scheduling.py` → `_score_assignment()`.
+- Calendar conflict detection: `scheduling.py` → `_check_conflicts()`.
+""",
+    },
+    {
+        "slug": "reports-hub-audit",
+        "title": "Reports Hub — Audit",
+        "category": "Reports & Comms",
+        "icon": "📈",
+        "order": 91,
+        "summary": "/reports-hub — every report card explained.",
+        "body_md": """## Page: `/reports-hub`
+Card grid. Each card is one report. Click → run with chosen date range → preview → download PDF/CSV/XLSX.
+
+## The reports
+- **MSP Performance** — tickets created/resolved/SLA % by tech.
+- **Client Profitability** — revenue − product costs − labor. Per client + roll-up.
+- **Backup Health** — Acronis success rate, drill compliance.
+- **Patch Compliance** — % of devices fully patched per client.
+- **Security Posture** — CIPP hygiene + Huntress alerts trend.
+- **Time Utilisation** — billable vs non-billable per tech.
+- **Recurring Revenue** — MRR / ARR + churn.
+- **Custom Report Builder** — drag-and-drop schema + filters.
+
+## Tinker
+- Add a report: `reports.py` → register in `REPORT_REGISTRY` + `_run_report()`.
+- Custom Report Builder: `reports_custom.py` → field schema + filter ops.
+""",
+    },
+    {
+        "slug": "insights-hub-audit",
+        "title": "Insights Hub — Audit",
+        "category": "Reports & Comms",
+        "icon": "🧠",
+        "order": 92,
+        "summary": "/insights — 21-feature mega bundle of AI signals.",
+        "body_md": """## Page: `/insights`
+Tabbed dashboard with proactive intelligence cards.
+
+## What's here
+- Blueprint Pattern Discovery
+- Cross-Tenant Pattern Hits
+- Sentiment Drift Radar
+- Churn Risk Radar
+- Revenue Protection Pulse
+- Client DNA Snapshots
+- Insurance Vault
+- LTV Forecasts
+- Anniversary AI Queue
+- Patch Anomalies
+- SLA Auto-Page Queue
+- Apology Queue
+- Payment Promise Watch
+- Estimate Win-Rate
+
+## Tinker
+All 21 endpoints live in `mega_features.py` — every card maps 1:1 to one endpoint.
+""",
+    },
+    {
+        "slug": "hudu-audit",
+        "title": "Hudu — Audit",
+        "category": "Knowledge",
+        "icon": "📚",
+        "order": 41,
+        "summary": "/hudu — Cross-search articles, assets, passwords.",
+        "body_md": """## Page: `/hudu`
+6 tabs: Companies · Articles · Assets · Procedures · Websites · Passwords. Each tab has its own filter bar (company / search).
+
+## Article + Procedure viewer
+HTML rendered inside a viewer dialog. Copy / open-in-Hudu.
+
+## Passwords tab
+Redacted by default. **Reveal** decrypts on-demand → audit-logged in `db.hudu_password_reveals`.
+
+## AI Suggestions panel on tickets
+Auto-runs on ticket open. Derives 3-6 keywords from title+description (stopword-filtered), queries Hudu, ranks via Claude with concrete fix steps.
+
+## Tinker
+- Sync interval: `hudu.py` → `_sync_articles()`.
+- Suggestion ranking: `hudu_suggestions.py` → `_rank_results()`.
+- Reveal audit retention: edit DB-side TTL.
+""",
+    },
+    {
+        "slug": "soc-audit",
+        "title": "SOC Dashboard — Audit",
+        "category": "Security",
+        "icon": "🛡️",
+        "order": 31,
+        "summary": "/soc — Huntress-led IR with audit trail.",
+        "body_md": """## Page: `/soc`
+6-tile metric strip (Agents · Offline · Critical · Open · Signals · Orgs) + Response Timeline + 3 incident lists.
+
+## Per-incident actions (... menu)
+- **Acknowledge / Add comment / Assign / Close**
+- **Isolate agent / Release agent**
+Each writes to `db.huntress_actions` (audit log shown in Response Timeline).
+
+## Identity Threats page
+`/identity-threats` — merges SOC identity-threats with Huntress incidents (impossible_travel / brute_force / mfa_fatigue / token_theft / password_spray / privilege_escalation). Huntress rows wear an orange `HNT` badge.
+
+## Endpoint Security
+`/endpoint-security` — merges live Huntress agents with demo endpoints.
+
+## Tinker
+- Action audit shape: `huntress.py` → `_record_action()`.
+- Incident severity merge: `soc.py` → `_normalise_severity()`.
+""",
+    },
+    {
+        "slug": "unifi-audit",
+        "title": "UniFi — Audit",
+        "category": "Infrastructure",
+        "icon": "📡",
+        "order": 51,
+        "summary": "/unifi — Hosted UniFi (api.ui.com) site management.",
+        "body_md": """## Page: `/unifi`
+5-metric strip (Sites · Devices online/total · Clients · Alerts · Linked %). 2 tabs: Sites · Linked Clients.
+
+## Per-site detail
+Master-detail. Sub-tabs: Devices · Clients · SSIDs · Alerts.
+- Device table — model, status, IP, uptime, firmware.
+- Client table — wired/wifi badges, signal, RX/TX.
+- SSID table.
+- Alerts feed.
+
+## Linking
+"Link to client" dialog on every site.
+
+## Tinker
+- API endpoint base: Settings → Integrations → UniFi (default `https://api.ui.com/ea`).
+- Refresh interval: `unifi.py` → `_sync_sites()`.
+""",
+    },
+    {
+        "slug": "cipp-audit",
+        "title": "CIPP — Audit",
+        "category": "Security",
+        "icon": "☁️",
+        "order": 46,
+        "summary": "/cipp — M365 management with hygiene scoring.",
+        "body_md": """## Page: `/cipp`
+3 tabs: Tenants · Linked Clients · Audit. Per-tenant detail shows users + SKU chips.
+
+## Per-user actions
+Create user · Manage licenses · Reset password · Block / Unblock sign-in · Offboard. Audited to `db.cipp_actions`.
+
+## Hygiene Digest (7 dimensions)
+| Dimension | Weight |
+|---|---|
+| License efficiency | 20 |
+| MFA coverage | 25 |
+| Stale users | 15 |
+| License waste | 15 |
+| Admin sprawl | 10 |
+| Guest posture | 10 |
+| Modern auth CA | 5 |
+
+"Send Digest" emails an HTML hygiene report via Resend.
+
+## Client Health integration
+M365 hygiene contributes 10% to linked client's Health Score.
+
+## Tinker
+- Dimension weights: `cipp.py` → `HYGIENE_DIMENSIONS`.
+- Email template: `cipp_hygiene_email.html`.
+""",
+    },
+    {
+        "slug": "pax8-audit",
+        "title": "Pax8 CSP — Audit",
+        "category": "Business",
+        "icon": "🛒",
+        "order": 56,
+        "summary": "/pax8 — Subscriptions + auto-billing flow.",
+        "body_md": """## Page: `/pax8`
+3 tabs: Companies · Subscriptions · Billing.
+
+## Linking
+"Link to client" on each Pax8 company. Once linked, recurring invoices with **Auto-attach Pax8** enabled pull live seat × unit price each generation.
+
+## Billing preview
+`/api/pax8/billing/preview` returns per-client MRR. "Link to Recurring Invoice" enables auto-attach OR scaffolds a new recurring invoice.
+
+## Subscription Drift detector
+Flags clients paying for more seats than they use. See **Finance Intelligence** article.
+
+## Tinker
+- OAuth: Settings → Integrations → Pax8 (Client ID + Secret).
+- Sync cron: `pax8.py` → `_sync_subscriptions()`.
+""",
+    },
+
     # ═══════════════════════ DEVICES UI AUDIT ═══════════════════════
     {
         "slug": "devices-page-audit",
