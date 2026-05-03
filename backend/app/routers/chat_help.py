@@ -365,6 +365,172 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 
 
 EXTENDED_ARTICLES = [
+    # ═══════════════════════ TICKET TOOLBAR & TABS AUDIT ═══════════════════════
+    {
+        "slug": "tickets-toolbar-reference",
+        "title": "Tickets — Every Button & Tab Explained",
+        "category": "Service Desk",
+        "icon": "🎫",
+        "order": 11,
+        "summary": "Complete reference of every toolbar button and every detail tab on the Ticket page.",
+        "body_md": """## Overview
+Open a ticket from `/tickets` and you land on the detail view. This doc explains every single button + tab so nothing is a mystery.
+
+## Top toolbar (left to right)
+
+### Primary actions row
+| Button | What it does |
+|---|---|
+| ← Back | Returns to the ticket list. Also calls `/stop-viewing` to release live presence. |
+| 🔴/🟢 status dot | Device online/offline indicator (if a device is linked). Colour-coded. |
+| Remote Connect | Opens `/remote-access?device={id}` in new tab (RDP/VNC/SSH picker). |
+| 🧠 AI Analysis | Claude analyses title + description + client history → returns suggested category/priority/next steps. Results appear in the `ai-analysis-panel` card. |
+| ▶ / ⏸ Timer | Start/stop the live work timer. Persists to `time_entries` on stop. |
+| Log Time | Manual time entry dialog (duration + billable flag + rate). |
+| Email | Opens email composer (RichTextEditor, signature-aware). |
+| Add Items | Opens the Add Items dialog — search + pick products + quantities. |
+| **Apply Kit** *(new)* | Opens Kit Picker — apply a pre-built bundle (e.g. "New Hire Setup") in one click. See **Product Kits** article. |
+| To Invoice (N) | Push unbilled ticket products to a draft invoice. |
+| PDF | Download a branded ticket-summary PDF. |
+| Child | Create a sub-ticket linked to this one. |
+| Merge | Merge this ticket into another (duplicates, etc). |
+
+### AI row
+| Widget | Purpose |
+|---|---|
+| SentimentBadge | Live sentiment pill (🟢 positive / 🟡 neutral / 🔴 frustrated). Click to log to history. |
+| TicketAIBundle | Action menu: To Runbook · Proofread · Summarize · Auto-respond · Add-child suggestion · Pre-call Brief. |
+| **Quote It** | Claude reads ticket + time + products → drafts a quote, console-logs the result. |
+| 🟢 **Quote Nudge Banner** *(new)* | Auto-appears when scope is expanding (score ≥ 50). Click "Draft quote now" to auto-generate. |
+
+### Progress Tracker
+5-stage card showing Open → In Progress → On Hold → Resolved → Closed. Each stage shows a circle with the stage number; the filled part shows how far along you are. Clicking any stage jumps the status.
+
+## The 10 tabs
+
+### 1. Conversation
+Unified feed — internal notes + outbound emails + inbound/outbound SMS. Compose new entry at the top (type selector switches between Note / Email / SMS forms).
+
+### 2. Blueprint / Worksheet
+When a blueprint is applied, this tab shows the typed fields + checklist. Completion gated if `require_completion=true`.
+
+### 3. Suggestions
+- **History suggestions**: past resolved tickets with similar keywords (scored).
+- **Hudu articles**: cross-ref to Hudu knowledge with click-to-insert fix steps.
+
+### 4. Worksheets (legacy free-form)
+Ad-hoc checklist when no blueprint. Tick boxes, add items.
+
+### 5. Files
+Attachment upload + preview. Images shown inline, PDFs as link.
+
+### 6. Items
+Billable products attached to the ticket. Shows qty × unit × line total. Actions: **Apply Kit** (bulk add), **Add Item** (single), **To Invoice** (push unbilled lines).
+
+### 7. Children
+Nested sub-tickets. Each shows its own status.
+
+### 8. Time
+All time_entries for this ticket. Billable/non-billable toggle per row. Total at bottom.
+
+### 9. Audit
+Every state change, every note add, every email/sms send. Immutable log.
+
+### 10. Time Machine (Timeline)
+Linear ticket history — who did what, when, in one scrolling column. Great for postmortems.
+
+## Right-sidebar cards (detail view)
+
+### Status & Priority
+Status picker · Priority picker · Assignee. Changes log to audit instantly.
+
+### Device
+If a device is linked, shows IP, OS, status. Click "View device" to deep-link. Quick AI + Quick Remote buttons mirror the top toolbar.
+
+### Run Scripts
+TRMM scripts (starred) — one-click run on the linked device. Results toast on completion. See **Devices & RMM** article.
+
+### Sentiment (live)
+Current sentiment score 1-5. Trend over the last 5 interactions.
+
+## Pro tips
+- Hit **T** from the detail view to open timer, **V** for Voice Journal, **A** to apply blueprint.
+- If the **Quote Nudge** banner appears, it's because your ticket has 6+ comments, 120+ minutes logged, or project keywords. You're about to give away free work — send a quote.
+- **Apply Kit** is the fastest way to add 5 products + labor in one click. Build kits at `/finance-intel` → Kits.
+
+## Tinker
+- Add/remove tabs: `TicketsPage.jsx` → find `<TabsList className="w-full grid grid-cols-10">`.
+- Add/remove toolbar buttons: same file around line 1260-1290.
+- Apply Kit logic: `components/tickets/KitPickerDialog.jsx` + backend `POST /api/tickets/{id}/apply-kit/{kit_id}`.
+- Quote Nudge threshold: `products_invoices_plus.py` → `quote_nudge()` — adjust the score weights.
+""",
+    },
+
+    {
+        "slug": "invoice-dispute-scan",
+        "title": "Invoice — Pre-Emptive Dispute Scan",
+        "category": "Business",
+        "icon": "🛡️",
+        "order": 76,
+        "summary": "AI-scan an invoice BEFORE you send it so client disputes never happen.",
+        "body_md": """## What it does
+On the Invoice detail → Actions sidebar → **Pre-scan Risks (AI)** button (rose). Claude + heuristics read every line item and flag anything a client could push back on:
+- Vague high-value lines ("Emergency support — $1,500" with no description)
+- Quantity × unit anomalies (10 × $150)
+- Emergency rate without after-hours justification
+
+## How it works
+1. Heuristic scan runs first — always free, always works.
+2. If `EMERGENT_LLM_KEY` is set, Claude scans too with context of the client's last 10 resolved tickets. Returns:
+   - `flags[]` — heuristic concerns
+   - `ai_risks[]` — per-line with severity + justification referencing actual ticket numbers
+   - `ai_summary` — one-paragraph exec summary
+
+## Output
+The button shows a toast + opens an alert with the full report. Future roadmap: side-panel viewer.
+
+## Tinker
+`products_invoices_plus.py` → `dispute_scan()`:
+- Change the heuristic thresholds (1500 default, qty > 5, etc).
+- Edit the Claude system prompt.
+
+## Paired with DisputeShield PDF
+DisputeShield PDF assembles evidence AFTER a dispute fires (proof pack). Dispute Scan prevents disputes BEFORE they fire. Use both.
+""",
+    },
+
+    {
+        "slug": "quote-nudge-banner",
+        "title": "💡 Quote Nudge Banner",
+        "category": "Easter Eggs",
+        "icon": "💡",
+        "order": 221,
+        "summary": "Auto-appears on tickets that are silently becoming projects.",
+        "body_md": """## Trigger
+A green banner appears at the top of a ticket when its **quote-nudge score ≥ 50**. Signals:
+- 6+ comments (scope expanding)
+- 120+ minutes already logged
+- 3+ project keywords in title/description (install / migrate / deploy / setup / onboard / upgrade / refresh / replace / procure / license / project)
+
+## What it does
+- Shows the score + the specific signals that triggered it.
+- "Draft quote now" button calls `POST /api/tickets/{id}/auto-quote` to generate a Claude-drafted quote from the conversation.
+- Dismiss (×) hides for this session.
+
+## Why it exists
+Tickets that start as "quick fix" often drift into scoped projects. Techs rarely notice until they've given away 4 hours of free work. The nudge fires exactly at the inflection point.
+
+## Tinker
+`products_invoices_plus.py` → `quote_nudge()`:
+- Score weights (30/30/30 for comments/time/keywords).
+- Keyword list.
+- Threshold (`score >= 50`).
+
+## Disable
+Comment out `<QuoteNudgeBanner />` in `TicketsPage.jsx`.
+""",
+    },
+
     # ═══════════════════════ TRMM RELIABILITY (NEW) ═══════════════════════
     {
         "slug": "trmm-reliability",

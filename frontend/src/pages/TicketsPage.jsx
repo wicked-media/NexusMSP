@@ -8,6 +8,8 @@ import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
 import { SentimentBadge } from "@/components/ai/SentimentBadge";
 import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
+import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
+import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import { TicketTimelineTab } from "@/components/ai/TicketTimelineTab";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +39,7 @@ import {
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
-  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks
+  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
@@ -89,6 +91,7 @@ export default function TicketsPage() {
   const [smsSending, setSmsSending] = useState(false);
   const [smsConfig, setSmsConfig] = useState({ signature: "", append_signature: true });
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [isKitPickerOpen, setIsKitPickerOpen] = useState(false);
   const [addItemProduct, setAddItemProduct] = useState("");
   const [addItemQty, setAddItemQty] = useState(1);
   const [allProducts, setAllProducts] = useState([]);
@@ -1297,6 +1300,9 @@ export default function TicketsPage() {
           </div>
         </div>
 
+        {/* Finance Intel: Quote Nudge banner */}
+        <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
+
         {/* Progress Tracker - Card Style */}
         {(() => {
           const stages = [
@@ -1961,7 +1967,10 @@ export default function TicketsPage() {
               <TabsContent value="items" className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">Billable products & items used on this ticket</p>
-                  <Button size="sm" onClick={() => setIsAddItemOpen(true)} data-testid="tab-add-item-btn"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setIsKitPickerOpen(true)} data-testid="apply-kit-btn"><Boxes className="w-3 h-3 mr-1" />Apply Kit</Button>
+                    <Button size="sm" onClick={() => setIsAddItemOpen(true)} data-testid="tab-add-item-btn"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                  </div>
                 </div>
                 {ticketProducts.length > 0 ? (
                   <Card>
@@ -2459,6 +2468,19 @@ export default function TicketsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* KIT PICKER DIALOG */}
+        <KitPickerDialog
+          open={isKitPickerOpen}
+          onClose={() => setIsKitPickerOpen(false)}
+          ticketId={viewingTicket?.id}
+          token={token}
+          onApplied={(res, kit) => {
+            toast.success(`Applied kit "${kit.name}" — ${res.attached_count} items added`);
+            // Reload ticket products
+            axios.get(`${API}/tickets/${viewingTicket.id}/products`, { headers }).then(r => setTicketProducts(r.data)).catch(() => {});
+          }}
+        />
 
         {/* PUSH TO INVOICE DIALOG */}
         <Dialog open={isPushInvoiceOpen} onOpenChange={setIsPushInvoiceOpen}>

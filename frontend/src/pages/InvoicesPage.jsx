@@ -22,7 +22,7 @@ import {
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
   Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
-  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone
+  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
@@ -835,6 +835,29 @@ export default function InvoicesPage() {
                   data-testid={`dispute-shield-btn-${inv.id}`}
                 >
                   <Shield className="w-4 h-4 mr-1" />Dispute Shield
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                  onClick={async () => {
+                    try {
+                      const r = await axios.post(`${API}/invoices/${inv.id}/dispute-scan`, {}, { headers: { Authorization: `Bearer ${token}` } });
+                      const total = (r.data.flags || []).length + (r.data.ai_risks || []).length;
+                      toast.success(`Scanned · ${total} risk(s) found`);
+                      console.log("Dispute scan:", r.data);
+                      window.alert(
+                        "DISPUTE SCAN\n\n" +
+                        "Heuristic flags: " + ((r.data.flags || []).map(f => `[${f.severity}] ${f.line}: ${f.risk}`).join("\n") || "none") +
+                        "\n\nAI risks: " + ((r.data.ai_risks || []).map(a => `[${a.severity}] ${a.line}: ${a.reason}\n   → ${a.justification}`).join("\n\n") || "none") +
+                        ((r.data.ai_summary) ? ("\n\nSummary: " + r.data.ai_summary) : "")
+                      );
+                    } catch (e) {
+                      toast.error(e.response?.data?.detail || e.message);
+                    }
+                  }}
+                  data-testid={`dispute-scan-btn-${inv.id}`}
+                >
+                  <Zap className="w-4 h-4 mr-1" />Pre-scan Risks (AI)
                 </Button>
                 <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => {
                   const client = clients.find(c => c.id === inv.client_id);
