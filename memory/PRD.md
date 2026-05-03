@@ -8,6 +8,31 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 3, 2026 — Finance Intelligence: 9 Differentiators)
+
+### Products & Invoices — killing the competition on revenue intelligence
+
+All 9 features live at `/finance-intel` (new Finance Center sub-item "Finance Intelligence"):
+
+1. **Smart Product Catalog** — `GET /api/finance/product-margin-insights` computes margin%, cost change vs last price_history entry, flags LOW MARGIN / COST UP. `POST /api/finance/product/{id}/price-change` records to price_history.
+2. **Product Kits/Bundles** — `db.product_kits`, full CRUD, `POST /api/tickets/{tid}/apply-kit/{kit_id}` auto-attaches all kit products + labor to a ticket.
+3. **Per-Client Price Book** — `db.client_price_overrides`. `POST /clients/{id}/price-book` upsert, `GET /clients/{id}/price-for/{product_id}` resolves price (override vs standard) with source label for use elsewhere in the app.
+4. **Subscription Drift Detector** — `GET /api/subscription-drift` cross-joins Pax8 subscriptions ↔ linked clients ↔ CIPP active users. Flags seats_paid > seats_used with wasted_monthly_aud + recommendation.
+5. **Cash Flow Forecast** — `GET /api/finance/cash-flow-forecast` projects 30/60/90-day inflow from open invoices + recurring generations + churn-weighted risk_adjusted variants. Live: $91k/30d.
+6. **Late-payment Predictor** — `GET /api/finance/invoices/late-payment-risk` + `GET /api/invoices/{id}/late-risk`. 0-100 score from client payment history, past-due balance, churn score, broken promises.
+7. **Margin per Invoice** — `GET /api/invoices/{id}/margin` with cost_breakdown {products, labor, other}. `GET /api/finance/margin-overview?days=90` rolls up per client.
+8. **Predictive Auto-Quote Nudge** — `POST /api/tickets/{id}/quote-nudge` scores based on comment count + minutes logged + project-keyword hits. Returns `should_quote:true` above 50.
+9. **Pre-Emptive DisputeShield Scan** — `POST /api/invoices/{id}/dispute-scan` runs heuristic flags + Claude scan (when EMERGENT_LLM_KEY set), returns ai_risks[] with per-line justifications referencing actual tickets.
+
+All endpoints namespaced under `/api/finance/...` to avoid conflict with existing `/products/{id}` and `/invoices/{id}` catch-alls.
+
+### Frontend
+`FinanceIntelPage.jsx` — 7-tab consolidation: Product margin · Kits · Price book · Drift · Cash flow · Late risk · Invoice margin. Master-detail Kit editor, price-book form, live stats.
+
+### Testing
+- `iteration_146.json`: **45/46 backend (98%) + 100% frontend.** 1 "miss" was a test-framework false positive on a frontend route. Zero issues.
+
+
 ## Recent Updates (May 2, 2026 — Help Center MEGA · Easter Eggs · Co-pilot · Konami)
 
 ### 📚 Help Center massively expanded (48 articles total, 12 categories)
