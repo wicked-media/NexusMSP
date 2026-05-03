@@ -24,6 +24,7 @@ import {
   Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
   Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap
 } from "lucide-react";
+import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
@@ -806,6 +807,15 @@ export default function InvoicesPage() {
                 {inv.paid_date && <><Separator /><div><span className="text-muted-foreground block">Paid Date</span><span className="font-medium text-green-500">{format(parseISO(inv.paid_date), "MMM d, yyyy")}</span></div></>}
                 {inv.last_emailed_to && <><Separator /><div><span className="text-muted-foreground block">Last Emailed</span><span className="font-medium text-blue-400">{inv.last_emailed_to}</span><span className="block text-xs text-muted-foreground">{inv.last_emailed_at ? format(new Date(inv.last_emailed_at), "MMM d, HH:mm") : ""}</span></div></>}
                 {inv.late_fee_applied && <><Separator /><div><span className="text-muted-foreground block">Late Fees</span><span className="font-medium text-amber-400">${(inv.total_late_fees || 0).toFixed(2)}</span></div></>}
+                {pStatus !== "paid" && (
+                  <>
+                    <Separator />
+                    <div>
+                      <span className="text-muted-foreground block mb-1">Late-payment risk</span>
+                      <LateRiskBadge invoiceId={inv.id} token={token} />
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
             <Card>

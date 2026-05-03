@@ -1,0 +1,100 @@
+{
+  "summary": "Iteration 150: Help Center Audit Articles + LateRiskBadge - All features tested and working. Backend: 11/11 tests passed. Frontend: LateRiskBadge displays correctly on unpaid invoices, 3 new help articles accessible.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration150_help_laterisk.py",
+    "/app/test_reports/pytest/pytest_results_iter150.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "LateRiskBadge.jsx is well-structured with proper cleanup on unmount (cancelled flag)",
+    "InvoicesPage.jsx correctly conditionally renders LateRiskBadge only when pStatus !== 'paid'"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration150_help_laterisk.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Help articles seeded via /api/help/seed (59 total articles)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 150 features fully working: 1) LateRiskBadge component renders on invoice detail right-sidebar for unpaid invoices showing score/100 + band (low/medium/high) with emerald/amber/rose colors, 2) Badge has data-testid='late-risk-{invoiceId}' for testing, 3) Three new help articles added: devices-page-audit, invoice-detail-audit, backup-page-audit, 4) Total help articles count is now 59 (was 56), 5) All regression tests pass for /clients (12 tabs), /tickets, /devices (TRMM strip), /dashboard (weather strip)",
+  "features_verified": {
+    "late_risk_badge": {
+      "status": "PASS",
+      "component": "LateRiskBadge.jsx",
+      "location": "Invoice detail right-sidebar Details card",
+      "data_testid": "late-risk-{invoiceId}",
+      "notes": "Shows 'Late risk: 30/100 · low' with emerald color for low risk. Only renders when pStatus !== 'paid'"
+    },
+    "help_articles": {
+      "total_count": 59,
+      "new_articles": [
+        {
+          "slug": "devices-page-audit",
+          "title": "Devices Page — Every Button & Filter Explained",
+          "category": "Infrastructure",
+          "status": "PASS"
+        },
+        {
+          "slug": "invoice-detail-audit",
+          "title": "Invoice Detail — Every Button Explained",
+          "category": "Business",
+          "status": "PASS"
+        },
+        {
+          "slug": "backup-page-audit",
+          "title": "Backup Center — Every Tab Explained",
+          "category": "Infrastructure",
+          "status": "PASS"
+        }
+      ]
+    },
+    "late_risk_endpoint": {
+      "status": "PASS",
+      "endpoint": "GET /api/invoices/{id}/late-risk",
+      "response_structure": {
+        "score": "0-100 numeric",
+        "band": "low|medium|high",
+        "reasons": "array of strings",
+        "on_time_history": "numeric",
+        "late_history": "numeric"
+      }
+    }
+  },
+  "regression_tests": {
+    "clients_page": {
+      "status": "PASS",
+      "tabs_found": 12,
+      "subscriptions_tab": "PASS",
+      "security_tab": "PASS"
+    },
+    "tickets_page": {
+      "status": "PASS",
+      "tickets_displayed": 72
+    },
+    "devices_page": {
+      "status": "PASS",
+      "trmm_freshness_strip": "PASS"
+    },
+    "dashboard": {
+      "status": "PASS",
+      "weather_strip": "PASS"
+    },
+    "help_center": {
+      "status": "PASS",
+      "copilot": "PASS"
+    }
+  }
+}

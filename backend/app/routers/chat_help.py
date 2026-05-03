@@ -365,6 +365,170 @@ Each tech has a profile at `/me` (or `/team/{your-id}`). It's your gamified care
 
 
 EXTENDED_ARTICLES = [
+    # ═══════════════════════ DEVICES UI AUDIT ═══════════════════════
+    {
+        "slug": "devices-page-audit",
+        "title": "Devices Page — Every Button & Filter Explained",
+        "category": "Infrastructure",
+        "icon": "💻",
+        "order": 21,
+        "summary": "Complete audit of the /devices page: toolbar, filters, table, bulk bar, detail view.",
+        "body_md": """## Top metric strip (6 tiles)
+| Tile | Source |
+|---|---|
+| Total | `db.devices` count |
+| Online | status="online" |
+| Offline | status="offline" |
+| Warning | status="warning" |
+| Avg CPU | mean of `cpu_usage` |
+| Need Patching | sum of `needs_patching` |
+
+## TRMM Freshness Strip (NEW)
+Top of page. Shows last sync timestamp, agent count, transition count, **Sync now** button + outage banner when active. See **TRMM Reliability** article.
+
+## Toolbar buttons (right-aligned)
+| Button | What it does |
+|---|---|
+| Refresh | Re-fetches `/api/devices` + `/api/devices/stats/summary` |
+| Discover | Opens network discovery (subnet scan / DNS sweep / Active Directory) |
+| Add Device | Manual device entry dialog |
+
+## Bulk Actions Bar
+Appears when 1+ devices are selected:
+- **Reboot** — TRMM `agents/{id}/reboot/` per selected device
+- **Scan** — Anti-malware scan
+- **Deploy Agent** dropdown — Windows PowerShell or Linux/macOS Bash one-liners
+- **Delete** — Removes from `db.devices`. Doesn't uninstall the agent.
+- **Clear** — Reset selection
+
+## Filters row
+- Search box: name / IP / OS / serial fuzzy match (client-side filter)
+- Status dropdown: All / Online / Offline / Warning
+- Type dropdown: All / Servers / Workstations / Laptops / Network
+- Client dropdown: All clients / specific client
+- View toggle: Table view / Grid view
+
+## Table columns
+Checkbox · Icon (with status dot + remote-viewer ring) · Device · Client · OS · IP · CPU · RAM · Disk · Compliance · Last Seen · Actions menu.
+
+The **remote-viewer ring** is a cyan pulse ring + Eye icon when a tech is currently remoted into this device. Hover for tech name(s).
+
+## Row actions (... menu)
+View Details · Connect (RDP/VNC/SSH picker) · Run Script · Restart · Run Patches · Delete.
+
+## Detail view (`/devices/{id}`)
+Tabs: Overview · Performance · Patches · Software · Sessions · Audit. See **Devices & RMM** article.
+
+## Tinker
+- Add a metric: `DevicesPage.jsx` line ~342, follow existing `<MetricTile />` pattern.
+- Add a filter chip: line ~388, copy a `<Select>` block.
+- Add a column: edit both `<TableHeader>` (line ~430) and the row map (line ~454).
+- Add a bulk action: edit the bar block (~365) and create a handler matching `handleBulkReboot`.
+""",
+    },
+
+    # ═══════════════════════ INVOICES DETAIL AUDIT ═══════════════════════
+    {
+        "slug": "invoice-detail-audit",
+        "title": "Invoice Detail — Every Button Explained",
+        "category": "Business",
+        "icon": "🧾",
+        "order": 77,
+        "summary": "Complete audit of the invoice detail right-sidebar, tabs and actions.",
+        "body_md": """## Top of detail
+- Invoice number + Status pill (draft / sent / paid / overdue / disputed / void)
+- Edit button (top right) — opens edit dialog
+- Print / Download PDF / Email shortcuts
+- Total · Paid · Balance summary card
+
+## Tabs
+- **Items** — line items table with edit/delete per row, add new line
+- **Activity** — chronological log: created · updated · payment_recorded · voided · emailed · SMS sent
+
+## Actions sidebar (right column)
+### Payment row (when not paid)
+- **Pay with Stripe** (green) — opens Stripe Checkout-hosted page
+- **Record Manual Payment** — internal record (cash/cheque/EFT/etc) with reference + notes
+
+### Document actions
+| Button | What it does |
+|---|---|
+| Preview PDF | Opens PDF in modal |
+| Download PDF | Saves locally |
+| **Dispute Shield** (amber) | Generates evidence-pack PDF with all tickets/time/products |
+| **Pre-scan Risks (AI)** (rose) *(NEW)* | Claude + heuristic dispute scan BEFORE sending. Returns flags + per-line justifications. |
+
+### Send actions
+- Email Invoice — opens Resend mail dialog with template
+- SMS Reminder (when not paid) — MobileMessage text with template
+
+### AI helpers
+- **Smart Reminder Strategy** — recommends cadence based on client behaviour
+- **Invoice Explainer** — plain-English client-safe summary (copy-paste-ready)
+- **Pre-bill Audit** — checks for missing time entries, mispriced items
+
+## Details card
+Client · Due Date (red when overdue) · Created · Paid Date · Last Emailed To · Late Fees applied.
+
+## Tinker
+- Add a sidebar action: `InvoicesPage.jsx` around line 815. Follow the `<Button variant="outline" className="w-full text-...">` pattern.
+- Action sidebar layout is in `InvoicesPage.jsx` → search for `Actions card`.
+- Stripe Checkout: backend `/api/invoices/{id}/create-checkout-session`. Live integration with the Stripe key in env.
+
+## Connection to Finance Intelligence
+- **Margin per invoice** — `GET /api/invoices/{id}/margin` returns revenue + cost + profit + margin% (cost_breakdown by products/labor/other). Roll-up: `GET /api/finance/margin-overview`.
+- **Late-payment risk** — `GET /api/invoices/{id}/late-risk` returns 0-100 score + reasons.
+""",
+    },
+
+    # ═══════════════════════ BACKUP / ACRONIS DETAIL ═══════════════════════
+    {
+        "slug": "backup-page-audit",
+        "title": "Backup Center — Every Tab Explained",
+        "category": "Infrastructure",
+        "icon": "💾",
+        "order": 26,
+        "summary": "Complete audit of the /backup page: tabs, drills, auto-billing.",
+        "body_md": """## Top metric strip (6 tiles)
+Tenants · Machines · Healthy · Failed · Warning · Alerts.
+
+## Tabs
+### Tenants
+- 50+ Acronis customer rows.
+- **Link to client** button on each — maps Acronis tenant_id → NexusOps client_id (writes to `db.acronis_tenant_links`).
+- Once linked, the tenant tile shows the linked client name + a deep-link to the Client detail.
+
+### Backup Status
+- 364 machines table.
+- Columns: machine name · client · plan · last backup · next backup · health.
+- Click a machine → drill-in panel with recent activities, resource usage, restore button.
+
+### Activities
+- Live Acronis activity feed — backup runs, restores, cleanups, failures.
+- Filter by status (success / warning / error).
+
+### Alerts
+- Acronis alert feed.
+- Acknowledge / Dismiss / Convert to Ticket.
+
+### Billing
+- Per-client storage usage + per-workload-type cost preview.
+- "Push to Recurring Invoice" — links Acronis usage to a recurring invoice for auto-billing each generation.
+
+## Restore Drills (sidebar)
+- Schedule a drill: pick machine, target date, lead tech.
+- Status: scheduled → in_progress → completed → archived.
+- Completion awards lead tech +50 XP and increments client restore-readiness score.
+
+## Configuration
+Settings → Integrations → Acronis Cyber Cloud. Stores Client ID + Secret + Data Centre URL. Test Connection validates within 3s.
+
+## Tinker
+- Cost engine for per-workload pricing: `acronis.py` → `compute_acronis_cost()`. Prices stored in `db.acronis_pricing`.
+- Drill XP weight: `quirky_features.py` → ACHIEVEMENTS list + drill resolver.
+""",
+    },
+
     # ═══════════════════════ CLIENTS 360° ═══════════════════════
     {
         "slug": "clients-360",
