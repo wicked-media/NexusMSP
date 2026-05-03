@@ -8,6 +8,28 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 3, 2026 — P2 Module Audits: Devices/Invoices/Backup)
+
+### What was audited
+- **Devices Page** — every metric tile, toolbar button (Refresh/Discover/Add Device), bulk-action bar (Reboot/Scan/Deploy Agent/Delete), filter row, table columns, row actions menu, detail tabs.
+- **Invoices Detail** — Items+Activity tabs, Stripe/manual payment buttons, PDF/Email/SMS actions, AI helpers (Smart Reminder/Explainer/Pre-bill Audit), DisputeShield + new Pre-scan Risks (AI), Details card.
+- **Backup Center** — 5 tabs (Tenants/Backup Status/Activities/Alerts/Billing), Restore Drills sidebar, auto-billing flow.
+
+### Functional addition
+- **LateRiskBadge** component on invoice detail Details card. Pulls `/api/invoices/{id}/late-risk`, shows coloured pill (low/medium/high) with score 0-100 + reasons tooltip. Hidden on paid invoices.
+
+### Documented (59 articles total)
+Three new audit articles preserved alongside all 56 previous:
+- `devices-page-audit` — Infrastructure
+- `invoice-detail-audit` — Business
+- `backup-page-audit` — Infrastructure
+
+Each includes a **Tinker** section pointing at the exact file + line for customisation.
+
+### Testing
+- `iteration_150.json`: **11/11 backend (100%) + 100% frontend.** Zero issues.
+
+
 ## Recent Updates (May 3, 2026 — Client 360° Full Profile)
 
 ### Every service the customer has — in one place
