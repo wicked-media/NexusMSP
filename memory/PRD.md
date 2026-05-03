@@ -8,6 +8,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (May 3, 2026 — Client 360° Full Profile)
+
+### Every service the customer has — in one place
+- New `client_360.py` router — 5 aggregator endpoints:
+  - `GET /api/clients/{id}/full-profile` — kitchen-sink (subs + security + billing + assets + tickets + integrations + churn + dna)
+  - `GET /api/clients/{id}/subscriptions` — Pax8 + Acronis + recurring invoices combined
+  - `GET /api/clients/{id}/security` — CIPP MFA% + 7-dim hygiene + Huntress agents + critical alerts
+  - `GET /api/clients/{id}/billing-detail` — AR aging + MRR + LTV + recent invoices
+  - `GET /api/clients/{id}/assets-detail` — device family grouping by model
+
+### Two new tabs + two enhanced
+- **Subscriptions** (NEW) — 4 stat tiles (Active subs · Total seats · Monthly $ · Annual $) + source badges + per-line table. Verified live: Acme Corporation = 4 subs / $13,895/mo / $166,740/yr.
+- **Security** (NEW) — MFA coverage %, CIPP 7-dimension hygiene bars, Huntress agent count + critical alerts, deep-links to /cipp + /huntress-dashboard.
+- **Billing** (enhanced inline) — open/overdue/MRR/LTV tiles, AR Aging buckets (Current/30/60/90+) coloured, payment promises kept/broken badges, recent 10 invoices table.
+- **Assets** (enhanced inline) — total/online/offline tiles, devices grouped by model (count, avg age, online/offline, 4-device preview).
+
+### New component library
+`/app/frontend/src/components/clients/Client360Tabs.jsx` — reusable Client360Subscriptions, Client360Security, Client360Billing, Client360Assets components with shared Stat/InfoTile/EmptyState helpers.
+
+### Help (56 articles total)
+- `clients-360` — full audit of all 12 tabs with tinker paths and API endpoint reference.
+
+### Testing
+- `iteration_149.json`: **27/27 backend (100%) + 100% frontend.** Zero issues.
+
+
 ## Recent Updates (May 3, 2026 — Ticket Module Audit + Finance Intel UI Wiring)
 
 ### Connected Finance Intel features into the ticket workflow
