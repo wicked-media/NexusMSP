@@ -8,6 +8,43 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Workspace Module + Multi-Device Linking)
+
+### Workspace Module — Per-tech "My Work" hub
+- **New page** at `/workspace` (sidebar entry "My Workspace" under Service Desk)
+- **5 tabs**: Pinned · My Tickets · Watched · Scratchpad · Recent
+- **Metric strip**: Pinned count · Watching count · My Open Tickets · My Critical
+- **Pin from any ticket** via Actions menu → "Pin to My Workspace" (toggle, with "Pinned" badge in detail header)
+- **Watch devices** for personal monitoring (UI hooks ready; device-page button to wire up later)
+- **Personal scratchpad** for snippets, notes, command bookmarks (persisted server-side)
+- **Recent activity feed** showing last 20 actions by the current user
+- **My Open Tickets** quick-list sorted by SLA due date
+
+Backend: `/app/backend/app/routers/workspace.py` with endpoints:
+- `GET /api/workspace` — hydrated dashboard data
+- `POST/DELETE /api/workspace/pin/ticket/{id}` + `GET .../status`
+- `POST/DELETE /api/workspace/watch/device/{id}`
+- `PUT /api/workspace/scratch-notes`
+
+### Multi-Device Linking on Tickets (Syncro-style)
+- Tickets can now link **multiple devices/assets** instead of just one
+- New chip-list UI in ticket sidebar (`TicketLinkedDevices.jsx`) with:
+  - Click chip name → open device page
+  - ⭐ on hover to promote a chip to **primary device** (legacy `device_id`)
+  - X to unlink (auto-promotes next chip to primary if needed)
+  - "+" dropdown to add another device (filtered to ticket's client)
+- Backward compat: legacy `device_id` field preserved as the primary device pointer; `device_ids[]` is the source of truth.
+
+Backend changes:
+- `Ticket` and `TicketCreate` models gained `device_ids: List[str]` and `device_names: List[str]`
+- New endpoints: `POST /api/tickets/{id}/devices` and `DELETE /api/tickets/{id}/devices/{device_id}`
+- Create-ticket flow auto-merges `device_id` into `device_ids` and resolves names
+
+### Testing
+- `iteration_152.json`: **100% backend (23/23) + 100% frontend.** All workspace + multi-device flows verified.
+
+---
+
 ## Recent Updates (Feb 2026 — Ticket Detail UX Redesign + Refactor)
 
 ### UX Redesign — "Less in your face" (per user feedback)
