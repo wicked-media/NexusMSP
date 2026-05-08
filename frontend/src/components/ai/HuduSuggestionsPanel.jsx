@@ -72,9 +72,16 @@ export function HuduSuggestionsPanel({ ticket }) {
             {picks.length > 0 && <Badge className="text-[10px] bg-indigo-500/20 text-indigo-400 border-indigo-500/30"><Sparkles className="w-2.5 h-2.5 mr-1" />AI picked {picks.length}</Badge>}
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); run(); }} data-testid="hudu-refresh-btn">
+            <span
+              role="button"
+              tabIndex={0}
+              className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer"
+              onClick={(e) => { e.stopPropagation(); run(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); run(); } }}
+              data-testid="hudu-refresh-btn"
+            >
               <RefreshCw className="w-3 h-3" />
-            </Button>
+            </span>
             {expanded ? <ChevronUp className="w-3 h-3 text-muted-foreground" /> : <ChevronDown className="w-3 h-3 text-muted-foreground" />}
           </div>
         </button>

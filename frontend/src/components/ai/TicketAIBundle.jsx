@@ -10,7 +10,7 @@ import { toast } from "sonner";
 
 /** Three buttons + dialogs for ticket detail toolbar:
  *  Doppelgänger · Apology · Promote-to-Runbook · Smart Assign · Use Top Resolution. (Timeline is its own tab.) */
-export function TicketAIBundle({ ticket }) {
+export function TicketAIBundle({ ticket, variant = "buttons", renderMenuItems }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
   const [view, setView] = useState(null); // null | "doppel" | "apology" | "runbook" | "assign" | "resolution"
@@ -35,6 +35,16 @@ export function TicketAIBundle({ ticket }) {
 
   const copy = (txt) => navigator.clipboard.writeText(txt).then(() => toast.success("Copied"));
   const isResolved = ["resolved", "closed"].includes(ticket?.status);
+
+  // Menu mode: parent renders triggers (DropdownMenuItem), we just provide the dialog + open() handler
+  if (variant === "menu" && typeof renderMenuItems === "function") {
+    return (
+      <>
+        {renderMenuItems({ open, isResolved })}
+        <TicketAIBundleDialog view={view} setView={setView} loading={loading} data={data} copy={copy} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -61,7 +71,14 @@ export function TicketAIBundle({ ticket }) {
         </Button>
       )}
 
-      <Dialog open={!!view} onOpenChange={(v) => !v && setView(null)}>
+      <TicketAIBundleDialog view={view} setView={setView} loading={loading} data={data} copy={copy} />
+    </>
+  );
+}
+
+function TicketAIBundleDialog({ view, setView, loading, data, copy }) {
+  return (
+    <Dialog open={!!view} onOpenChange={(v) => !v && setView(null)}>
         <DialogContent className="max-w-2xl" data-testid="ai-bundle-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -175,6 +192,5 @@ export function TicketAIBundle({ ticket }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
   );
 }

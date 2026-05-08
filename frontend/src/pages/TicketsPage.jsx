@@ -11,6 +11,21 @@ import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
 import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketProgressTracker from "@/components/tickets/TicketProgressTracker";
+import { TicketDetailHeader } from "@/components/tickets/TicketDetailHeader";
+import {
+  EmailDialog,
+  ChildTicketDialog,
+  MergeDialog,
+  LogTimeDialog,
+  NotifyClientDialog,
+  AddItemsDialog,
+  PushInvoiceDialog,
+} from "@/components/tickets/TicketDialogs";
+import {
+  CreateTicketDialog,
+  CreateWorkshopJobDialog,
+  CreateFieldJobDialog,
+} from "@/components/tickets/CreateDialogs";
 import { TicketTimelineTab } from "@/components/ai/TicketTimelineTab";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1229,166 +1244,138 @@ export default function TicketsPage() {
     return (
       <PageShell>
         <div className="p-6 space-y-4" data-testid="ticket-detail-view">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {}); setViewingTicket(null); }} data-testid="back-to-list"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <Badge className={priorityConfig[viewingTicket.priority]?.class}>{priorityConfig[viewingTicket.priority]?.label}</Badge>
-          <span className="text-sm text-muted-foreground font-mono">{viewingTicket.ticket_number}</span>
-          {viewingTicket.merged_into && <Badge variant="outline" className="text-red-400">Merged</Badge>}
-          {parent && <Badge variant="outline" className="text-indigo-400"><GitBranch className="w-3 h-3 mr-1" />Child of {parent.ticket_number}</Badge>}
-          <div className="ml-auto flex items-center gap-2">
-            {/* Device status */}
-            {viewingTicket.device_id && deviceStatus && (
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${
-                deviceStatus.status === "online" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" :
-                "bg-red-500/10 text-red-400 border-red-500/30"
-              }`} data-testid="device-status-indicator">
-                {deviceStatus.status === "online" ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                {deviceStatus.name} - {deviceStatus.status === "online" ? "Online" : "Offline"}
-              </div>
-            )}
-            {/* Remote Connect */}
-            {viewingTicket.device_id && (
-              <Button variant="outline" size="sm" className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10" 
-                onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}`, '_blank')} 
-                data-testid="remote-connect-btn">
-                <ExternalLink className="w-3 h-3 mr-1" />Remote
-              </Button>
-            )}
-            {/* AI Analysis */}
-            <Button variant="outline" size="sm" className="text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
-              onClick={handleAiAnalysis} disabled={aiAnalyzing} data-testid="ai-analysis-btn">
-              {aiAnalyzing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
-              AI Diagnose
-            </Button>
-            <TicketCopilotButton ticketId={viewingTicket.id} />
-            <ExplainErrorButton contextHint="app trace" />
-            <VoiceJournalButton ticketId={viewingTicket.id} onLogged={() => fetchTimeEntries?.(viewingTicket.id)} />
-            {/* Timer */}
-            <Button variant={isTimerRunning ? "destructive" : "outline"} size="sm" onClick={toggleTimer} data-testid="timer-btn">
-              {isTimerRunning ? <><Square className="w-3 h-3 mr-1" />{fmtTime(timerElapsed)}</> : <><Play className="w-3 h-3 mr-1" />Timer</>}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setIsTimeOpen(true)} data-testid="log-time-btn"><Timer className="w-4 h-4 mr-1" />Log Time</Button>
-            <Button variant="outline" size="sm" onClick={() => setIsEmailOpen(true)} data-testid="send-email-btn"><Mail className="w-4 h-4 mr-1" />Email</Button>
-            <Button variant="outline" size="sm" className="text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => setIsAddItemOpen(true)} data-testid="add-items-btn"><ShoppingCart className="w-4 h-4 mr-1" />Add Items</Button>
-            {ticketProducts.length > 0 && <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setInvoicesList([]); axios.get(`${API}/invoices`, { headers }).then(r => setInvoicesList(r.data)).catch(() => {}); setIsPushInvoiceOpen(true); }} data-testid="push-to-invoice-btn"><Receipt className="w-4 h-4 mr-1" />To Invoice ({ticketProducts.length})</Button>}
-            <Button variant="outline" size="sm" onClick={handleDownloadPdf} data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-1" />PDF</Button>
-            <Button variant="outline" size="sm" onClick={() => setIsChildOpen(true)} data-testid="add-child-btn"><GitBranch className="w-4 h-4 mr-1" />Child</Button>
-            <Button variant="outline" size="sm" onClick={() => setIsMergeOpen(true)} data-testid="merge-btn"><Merge className="w-4 h-4 mr-1" />Merge</Button>
-            <WhyOnFireButton entityType="ticket" entityId={viewingTicket.id} />
-            <SentimentBadge ticketId={viewingTicket.id} />
-            <TicketAIBundle ticket={viewingTicket} />
-            <Button
-              variant="outline" size="sm"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              onClick={async () => {
-                try {
-                  const r = await axios.post(`${API}/tickets/${viewingTicket.id}/auto-quote`, {}, { headers: { Authorization: `Bearer ${token}` } });
-                  toast.success(`Quote drafted: ${r.data?.line_items?.length || 0} items @ $${r.data?.total || 0}`);
-                  console.log("Auto-quote draft:", r.data);
-                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-              }}
-              data-testid="auto-quote-btn"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1" />Quote It
-            </Button>
-            {viewingTicket.blueprint_id && (
-              <Badge variant="outline" className="text-sky-400 border-sky-500/30 bg-sky-500/10 gap-1">
-                <Lightbulb className="w-3 h-3" />
-                {viewingTicket.blueprint_name || "Blueprint"}
-              </Badge>
-            )}
-          </div>
-        </div>
+        {/* Header with grouped menus */}
+        <TicketDetailHeader
+          viewingTicket={viewingTicket}
+          parent={parent}
+          deviceStatus={deviceStatus}
+          token={token}
+          handleAiAnalysis={handleAiAnalysis}
+          aiAnalyzing={aiAnalyzing}
+          isTimerRunning={isTimerRunning}
+          timerElapsed={timerElapsed}
+          toggleTimer={toggleTimer}
+          fmtTime={fmtTime}
+          setIsTimeOpen={setIsTimeOpen}
+          setIsEmailOpen={setIsEmailOpen}
+          setIsAddItemOpen={setIsAddItemOpen}
+          setIsKitPickerOpen={setIsKitPickerOpen}
+          setIsPushInvoiceOpen={setIsPushInvoiceOpen}
+          setIsChildOpen={setIsChildOpen}
+          setIsMergeOpen={setIsMergeOpen}
+          setInvoicesList={setInvoicesList}
+          ticketProducts={ticketProducts}
+          handleDownloadPdf={handleDownloadPdf}
+          onBack={() => {
+            if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {});
+            setViewingTicket(null);
+          }}
+        />
 
         {/* Finance Intel: Quote Nudge banner */}
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
 
-        {/* Progress Tracker - extracted */}
-        <TicketProgressTracker
-          status={viewingTicket.status}
-          onChange={(s) => handleUpdateTicket("status", s)}
-        />
+        {/* Title + Compact Progress side-by-side (saves vertical space) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* LEFT — Title card */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                {editingTitle ? (
+                  <Input
+                    value={titleDraft}
+                    onChange={e => setTitleDraft(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") { handleUpdateTicket("title", titleDraft); setEditingTitle(false); }
+                      if (e.key === "Escape") setEditingTitle(false);
+                    }}
+                    onBlur={() => { if (titleDraft !== viewingTicket.title) handleUpdateTicket("title", titleDraft); setEditingTitle(false); }}
+                    className="text-xl font-bold"
+                    autoFocus
+                    data-testid="edit-title-input"
+                  />
+                ) : (
+                  <CardTitle
+                    className="text-xl cursor-pointer hover:text-primary transition-colors"
+                    onClick={() => { setTitleDraft(viewingTicket.title); setEditingTitle(true); }}
+                    data-testid="ticket-title-editable"
+                    title="Click to edit"
+                  >
+                    {viewingTicket.title}
+                  </CardTitle>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+                {viewingTicket.client_name && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">{viewingTicket.client_name.charAt(0)}</span>
+                    {viewingTicket.client_name}
+                  </span>
+                )}
+                {viewingTicket.contact_name && (
+                  <>
+                    <span className="text-border">|</span>
+                    <span className="flex items-center gap-1"><User className="w-3 h-3" />{viewingTicket.contact_name}</span>
+                  </>
+                )}
+                {viewingTicket.contact_email && (
+                  <span className="text-xs text-muted-foreground/60">{viewingTicket.contact_email}</span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingTicket.description}</p>
+              {/* Tags */}
+              <div className="flex items-center gap-2 mt-4 flex-wrap">
+                <Tag className="w-4 h-4 text-muted-foreground" />
+                {(viewingTicket.tags || []).map(tag => (
+                  <Badge key={tag} variant="secondary" className="gap-1 cursor-pointer" onClick={() => handleRemoveTag(tag)}>
+                    {tag}<X className="w-3 h-3" />
+                  </Badge>
+                ))}
+                <Input className="w-24 h-6 text-xs" placeholder="Add tag" value={tagInput} onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleAddTag()} data-testid="tag-input" />
+              </div>
+              {/* SLA indicator */}
+              {slaHours !== null && (
+                <div className={`mt-3 flex items-center gap-2 text-sm ${slaHours < 2 ? 'text-red-500' : slaHours < 8 ? 'text-yellow-500' : 'text-green-500'}`}>
+                  <Clock className="w-4 h-4" />
+                  <span>SLA: {slaHours > 0 ? `${slaHours}h remaining` : `Overdue by ${Math.abs(slaHours)}h`}</span>
+                  <div className={`h-2 rounded-full flex-1 max-w-[200px] ${slaHours < 2 ? 'bg-red-500/20' : slaHours < 8 ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>
+                    <div className={`h-2 rounded-full transition-all ${slaHours < 2 ? 'bg-red-500' : slaHours < 8 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                      style={{ width: `${Math.max(5, Math.min(100, (1 - slaHours / 24) * 100))}%` }} />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* RIGHT — Compact progress + related-tickets quick chips */}
+          <div className="flex flex-col gap-3">
+            <TicketProgressTracker
+              status={viewingTicket.status}
+              onChange={(s) => handleUpdateTicket("status", s)}
+              compact
+            />
+            {/* Hudu KB Suggestions — moved here to fill space, collapsible */}
+            <details className="group">
+              <summary className="cursor-pointer list-none">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors text-xs">
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="font-semibold text-emerald-400">Hudu KB Suggestions</span>
+                  <ChevronDown className="w-3 h-3 ml-auto text-muted-foreground group-open:rotate-180 transition-transform" />
+                </div>
+              </summary>
+              <div className="mt-2">
+                <HuduSuggestionsPanel ticket={viewingTicket} />
+              </div>
+            </details>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2">
-                  {editingTitle ? (
-                    <Input
-                      value={titleDraft}
-                      onChange={e => setTitleDraft(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === "Enter") { handleUpdateTicket("title", titleDraft); setEditingTitle(false); }
-                        if (e.key === "Escape") setEditingTitle(false);
-                      }}
-                      onBlur={() => { if (titleDraft !== viewingTicket.title) handleUpdateTicket("title", titleDraft); setEditingTitle(false); }}
-                      className="text-xl font-bold"
-                      autoFocus
-                      data-testid="edit-title-input"
-                    />
-                  ) : (
-                    <CardTitle
-                      className="text-xl cursor-pointer hover:text-primary transition-colors"
-                      onClick={() => { setTitleDraft(viewingTicket.title); setEditingTitle(true); }}
-                      data-testid="ticket-title-editable"
-                      title="Click to edit"
-                    >
-                      {viewingTicket.title}
-                    </CardTitle>
-                  )}
-                </div>
-                {/* Company + Reporter */}
-                <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-                  {viewingTicket.client_name && (
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-5 h-5 rounded bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">{viewingTicket.client_name.charAt(0)}</span>
-                      {viewingTicket.client_name}
-                    </span>
-                  )}
-                  {viewingTicket.contact_name && (
-                    <>
-                      <span className="text-border">|</span>
-                      <span className="flex items-center gap-1"><User className="w-3 h-3" />{viewingTicket.contact_name}</span>
-                    </>
-                  )}
-                  {viewingTicket.contact_email && (
-                    <span className="text-xs text-muted-foreground/60">{viewingTicket.contact_email}</span>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingTicket.description}</p>
-                {/* Tags */}
-                <div className="flex items-center gap-2 mt-4 flex-wrap">
-                  <Tag className="w-4 h-4 text-muted-foreground" />
-                  {(viewingTicket.tags || []).map(tag => (
-                    <Badge key={tag} variant="secondary" className="gap-1 cursor-pointer" onClick={() => handleRemoveTag(tag)}>
-                      {tag}<X className="w-3 h-3" />
-                    </Badge>
-                  ))}
-                  <Input className="w-24 h-6 text-xs" placeholder="Add tag" value={tagInput} onChange={e => setTagInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleAddTag()} data-testid="tag-input" />
-                </div>
-                {/* SLA indicator */}
-                {slaHours !== null && (
-                  <div className={`mt-3 flex items-center gap-2 text-sm ${slaHours < 2 ? 'text-red-500' : slaHours < 8 ? 'text-yellow-500' : 'text-green-500'}`}>
-                    <Clock className="w-4 h-4" />
-                    <span>SLA: {slaHours > 0 ? `${slaHours}h remaining` : `Overdue by ${Math.abs(slaHours)}h`}</span>
-                    <div className={`h-2 rounded-full flex-1 max-w-[200px] ${slaHours < 2 ? 'bg-red-500/20' : slaHours < 8 ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>
-                      <div className={`h-2 rounded-full transition-all ${slaHours < 2 ? 'bg-red-500' : slaHours < 8 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                        style={{ width: `${Math.max(5, Math.min(100, (1 - slaHours / 24) * 100))}%` }} />
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Hudu KB Suggestions (AI-distilled fix steps) */}
-            <HuduSuggestionsPanel ticket={viewingTicket} />
-
             {/* AI ANALYSIS PANEL */}
             {aiAnalysis && (
               <Card className="border-purple-500/20 bg-purple-500/[0.02]" data-testid="ai-analysis-panel">
@@ -1452,6 +1439,37 @@ export default function TicketsPage() {
                       </div>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Related Tickets — promoted from sidebar to give better visibility */}
+            {enrichment?.merge_candidates?.length > 0 && (
+              <Card data-testid="related-tickets-banner" className="border-violet-500/20 bg-violet-500/[0.02]">
+                <CardContent className="pt-3 pb-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">Related Tickets</span>
+                    <span className="text-[10px] text-muted-foreground">({enrichment.merge_candidates.length} potential duplicates / related issues)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {enrichment.merge_candidates.map(mc => (
+                      <button
+                        key={mc.id}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-violet-500/30 hover:bg-violet-500/10 transition-colors text-[11px]"
+                        onClick={() => fetchTicketDetail(mc)}
+                        data-testid={`related-ticket-chip-${mc.id}`}
+                      >
+                        <span className="font-mono text-violet-400">{mc.ticket_number}</span>
+                        <span className="truncate max-w-[200px]">{mc.title}</span>
+                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          mc.priority === "critical" ? "bg-red-500/15 text-red-400" :
+                          mc.priority === "high" ? "bg-orange-500/15 text-orange-400" :
+                          "bg-muted text-muted-foreground"
+                        }`}>{mc.priority}</span>
+                      </button>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -2144,31 +2162,9 @@ export default function TicketsPage() {
               </Card>
             )}
 
-            {/* ── Enrichment: Sentiment + TTR Prediction ── */}
+            {/* ── Enrichment: TTR Prediction + Blast Radius (Sentiment removed per UX feedback) ── */}
             {enrichment && !enrichment.error && (
               <>
-                <Card data-testid="sentiment-card" className="overflow-hidden">
-                  <CardContent className="pt-4 pb-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Client Sentiment</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        enrichment.sentiment?.label === "frustrated" ? "bg-red-500/15 text-red-400 pulse-critical" :
-                        enrichment.sentiment?.label === "positive" ? "bg-emerald-500/15 text-emerald-400" :
-                        "bg-blue-500/15 text-blue-400"
-                      }`} data-testid="sentiment-badge">
-                        {enrichment.sentiment?.label === "frustrated" ? "Frustrated" : enrichment.sentiment?.label === "positive" ? "Happy" : "Neutral"}
-                      </span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${
-                        enrichment.sentiment?.label === "frustrated" ? "bg-red-500" :
-                        enrichment.sentiment?.label === "positive" ? "bg-emerald-500" : "bg-blue-500"
-                      }`} style={{ width: `${enrichment.sentiment?.score || 50}%` }} />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">{enrichment.sentiment?.reason}</p>
-                  </CardContent>
-                </Card>
-
                 <Card data-testid="ttr-card">
                   <CardContent className="pt-4 pb-3">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Resolution Prediction</span>
@@ -2247,177 +2243,50 @@ export default function TicketsPage() {
                   </CardContent>
                 </Card>
 
-                {/* Smart Merge Suggestions */}
-                {enrichment.merge_candidates?.length > 0 && (
-                  <Card data-testid="smart-merge-card">
-                    <CardContent className="pt-4 pb-3 space-y-2">
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Related Tickets</span>
-                      <p className="text-[10px] text-muted-foreground">Potential duplicates or related issues from this client</p>
-                      {enrichment.merge_candidates.map(mc => (
-                        <div key={mc.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => fetchTicketDetail(mc)}>
-                          <span className="font-mono text-[10px] text-primary">{mc.ticket_number}</span>
-                          <span className="text-[11px] truncate flex-1">{mc.title}</span>
-                          <span className={`px-1 py-0.5 rounded text-[9px] ${
-                            mc.priority === "critical" ? "bg-red-500/15 text-red-400" :
-                            mc.priority === "high" ? "bg-orange-500/15 text-orange-400" :
-                            "bg-muted text-muted-foreground"
-                          }`}>{mc.priority}</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
+                {/* Smart Merge Suggestions — relocated to top of detail view as Related Tickets banner */}
               </>
             )}
           </div>
         </div>
 
-        {/* EMAIL DIALOG */}
-        <Dialog open={isEmailOpen} onOpenChange={setIsEmailOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader><DialogTitle>Send Email from Ticket</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
-                <div><Label>To</Label><Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="email-to" /></div>
-                <div><Label>CC</Label><Input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="cc@email.com" data-testid="email-cc" /></div>
-                <div><Label>BCC</Label><Input value={emailForm.bcc} onChange={e => setEmailForm({ ...emailForm, bcc: e.target.value })} placeholder="bcc@email.com" data-testid="email-bcc" /></div>
-              </div>
-              <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="email-subject" /></div>
-              <div><Label>Body</Label><Textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6} data-testid="email-body" />
-                <div className="flex items-center gap-2 mt-1">
-                  <Button variant="outline" size="sm" className="h-7 text-[11px] text-cyan-400 border-cyan-500/30"
-                    onClick={() => handleProofread(emailForm.body, "email")} disabled={proofreadLoading || !emailForm.body} data-testid="proofread-email-btn">
-                    <SpellCheck className="w-3 h-3 mr-1" />Proofread Email
-                  </Button>
-                  {proofreadResult && proofreadResult.target === "email" && (
-                    <Button variant="outline" size="sm" className="h-7 text-[11px] text-green-400" 
-                      onClick={() => { setEmailForm({...emailForm, body: proofreadResult.corrected}); setProofreadResult(null); }}>
-                      Apply Corrections
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
-            </div>
-            <DialogFooter><Button onClick={handleSendEmail} data-testid="send-email-submit"><Send className="w-4 h-4 mr-1" />Send</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <EmailDialog
+          open={isEmailOpen} onOpenChange={setIsEmailOpen}
+          emailForm={emailForm} setEmailForm={setEmailForm}
+          emailSignature={emailSignature} handleSendEmail={handleSendEmail}
+          handleProofread={handleProofread} proofreadResult={proofreadResult}
+          setProofreadResult={setProofreadResult} proofreadLoading={proofreadLoading}
+        />
 
-        {/* CHILD TICKET DIALOG */}
-        <Dialog open={isChildOpen} onOpenChange={setIsChildOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create Child Ticket</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Title</Label><Input value={childForm.title} onChange={e => setChildForm({ ...childForm, title: e.target.value })} data-testid="child-title" /></div>
-              <div><Label>Description</Label><Textarea value={childForm.description} onChange={e => setChildForm({ ...childForm, description: e.target.value })} data-testid="child-desc" /></div>
-              <div><Label>Priority</Label>
-                <Select value={childForm.priority} onValueChange={v => setChildForm({ ...childForm, priority: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter><Button onClick={handleCreateChild} data-testid="create-child-submit"><GitBranch className="w-4 h-4 mr-1" />Create</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <ChildTicketDialog
+          open={isChildOpen} onOpenChange={setIsChildOpen}
+          childForm={childForm} setChildForm={setChildForm}
+          handleCreateChild={handleCreateChild}
+        />
 
-        {/* MERGE DIALOG */}
-        <Dialog open={isMergeOpen} onOpenChange={setIsMergeOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Merge Tickets Into This One</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">Select tickets to merge into {viewingTicket.ticket_number}. Their notes and emails will be combined.</p>
-            <ScrollArea className="h-[250px]">
-              {tickets.filter(t => t.id !== viewingTicket.id && t.status !== "closed").map(t => (
-                <div key={t.id} className="flex items-center gap-2 p-2 hover:bg-muted/50 rounded">
-                  <Checkbox checked={mergeIds.includes(t.id)} onCheckedChange={c => setMergeIds(c ? [...mergeIds, t.id] : mergeIds.filter(x => x !== t.id))} />
-                  <span className="font-mono text-sm">{t.ticket_number}</span>
-                  <span className="text-sm truncate">{t.title}</span>
-                </div>
-              ))}
-            </ScrollArea>
-            <DialogFooter><Button onClick={handleMerge} disabled={!mergeIds.length} data-testid="merge-submit"><Merge className="w-4 h-4 mr-1" />Merge {mergeIds.length} tickets</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <MergeDialog
+          open={isMergeOpen} onOpenChange={setIsMergeOpen}
+          viewingTicket={viewingTicket} tickets={tickets}
+          mergeIds={mergeIds} setMergeIds={setMergeIds} handleMerge={handleMerge}
+        />
 
-        {/* LOG TIME DIALOG */}
-        <Dialog open={isTimeOpen} onOpenChange={setIsTimeOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Log Time</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label>Minutes</Label><Input type="number" value={timeForm.minutes} onChange={e => setTimeForm({ ...timeForm, minutes: parseInt(e.target.value) || 0 })} data-testid="time-minutes" /></div>
-              <div><Label>Description</Label><Input value={timeForm.description} onChange={e => setTimeForm({ ...timeForm, description: e.target.value })} data-testid="time-desc" /></div>
-              <div className="flex items-center gap-2"><Checkbox checked={timeForm.billable} onCheckedChange={v => setTimeForm({ ...timeForm, billable: v })} id="billable" /><Label htmlFor="billable">Billable</Label></div>
-            </div>
-            <DialogFooter><Button onClick={handleAddTime} data-testid="log-time-submit"><Timer className="w-4 h-4 mr-1" />Log Time</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <LogTimeDialog
+          open={isTimeOpen} onOpenChange={setIsTimeOpen}
+          timeForm={timeForm} setTimeForm={setTimeForm} handleAddTime={handleAddTime}
+        />
 
-        {/* NOTIFY CLIENT DIALOG */}
-        <Dialog open={isClientNotifyOpen} onOpenChange={setIsClientNotifyOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Notify Client with PDF</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">Send an email notification to the client with a branded PDF of the conversation history attached.</p>
-            <div className="space-y-3">
-              <div><Label>Client Email</Label><Input value={notifyForm.email} onChange={e => setNotifyForm({ ...notifyForm, email: e.target.value })} placeholder="client@email.com" data-testid="notify-email" /></div>
-              <div><Label>Subject</Label><Input value={notifyForm.subject} onChange={e => setNotifyForm({ ...notifyForm, subject: e.target.value })} data-testid="notify-subject" /></div>
-              <div><Label>Message</Label><Textarea value={notifyForm.message} onChange={e => setNotifyForm({ ...notifyForm, message: e.target.value })} rows={3} data-testid="notify-message" /></div>
-            </div>
-            <DialogFooter><Button onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <NotifyClientDialog
+          open={isClientNotifyOpen} onOpenChange={setIsClientNotifyOpen}
+          notifyForm={notifyForm} setNotifyForm={setNotifyForm}
+          handleNotifyClient={handleNotifyClient}
+        />
 
-        {/* CANNED RESPONSE DIALOG - REMOVED, moved to Settings */}
-
-        {/* ADD ITEMS TO TICKET DIALOG */}
-        <Dialog open={isAddItemOpen} onOpenChange={setIsAddItemOpen}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle className="flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-cyan-400" />Add Billable Items</DialogTitle></DialogHeader>
-            <div className="space-y-4">
-              <p className="text-xs text-muted-foreground">Add products/items used on this ticket. Stock will be deducted automatically.</p>
-              <div className="flex items-center gap-2">
-                <Select value={addItemProduct || "__none"} onValueChange={v => setAddItemProduct(v === "__none" ? "" : v)}>
-                  <SelectTrigger className="flex-1" data-testid="add-item-product-select"><SelectValue placeholder="Select product..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Choose product...</SelectItem>
-                    {allProducts.filter(p => p.is_active !== false).map(p => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name} - ${p.retail_price?.toFixed(2)} ({p.quantity_in_stock} in stock)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input type="number" min="1" className="w-20" value={addItemQty} onChange={e => setAddItemQty(parseInt(e.target.value) || 1)} />
-                <Button onClick={handleAddItemToTicket} disabled={!addItemProduct} data-testid="confirm-add-item"><Plus className="w-4 h-4 mr-1" />Add</Button>
-              </div>
-              {ticketProducts.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Item</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead><TableHead></TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {ticketProducts.map(p => (
-                        <TableRow key={p.id}>
-                          <TableCell className="font-medium text-sm">{p.product_name}</TableCell>
-                          <TableCell className="text-right font-mono">{p.quantity}</TableCell>
-                          <TableCell className="text-right font-mono">${(p.unit_price || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono font-bold">${(p.total || 0).toFixed(2)}</TableCell>
-                          <TableCell><Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemoveItemFromTicket(p.id)}><Trash2 className="w-3 h-3" /></Button></TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow>
-                        <TableCell colSpan={3} className="text-right font-semibold">Total</TableCell>
-                        <TableCell className="text-right font-mono font-bold text-green-400">${ticketProducts.reduce((s, p) => s + (p.total || 0), 0).toFixed(2)}</TableCell>
-                        <TableCell></TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddItemOpen(false)}>Close</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <AddItemsDialog
+          open={isAddItemOpen} onOpenChange={setIsAddItemOpen}
+          allProducts={allProducts} addItemProduct={addItemProduct} setAddItemProduct={setAddItemProduct}
+          addItemQty={addItemQty} setAddItemQty={setAddItemQty}
+          handleAddItemToTicket={handleAddItemToTicket}
+          ticketProducts={ticketProducts} handleRemoveItemFromTicket={handleRemoveItemFromTicket}
+        />
 
         {/* KIT PICKER DIALOG */}
         <KitPickerDialog
@@ -2432,38 +2301,12 @@ export default function TicketsPage() {
           }}
         />
 
-        {/* PUSH TO INVOICE DIALOG */}
-        <Dialog open={isPushInvoiceOpen} onOpenChange={setIsPushInvoiceOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle className="flex items-center gap-2"><Receipt className="w-5 h-5 text-green-400" />Push Items to Invoice</DialogTitle></DialogHeader>
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Push {ticketProducts.length} item(s) totalling <span className="font-bold text-green-400">${ticketProducts.reduce((s, p) => s + (p.total || 0), 0).toFixed(2)}</span> to an invoice.
-              </p>
-              <div className="space-y-3">
-                <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handlePushToInvoice(null)} data-testid="create-new-invoice-btn">
-                  <Plus className="w-4 h-4 mr-1" />Create New Invoice
-                </Button>
-                {invoicesList.length > 0 && (
-                  <>
-                    <Separator />
-                    <Label>Or add to existing invoice:</Label>
-                    <Select value={pushToExisting || "__none"} onValueChange={v => setPushToExisting(v === "__none" ? "" : v)}>
-                      <SelectTrigger><SelectValue placeholder="Select invoice..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none">Choose...</SelectItem>
-                        {invoicesList.filter(inv => inv.status !== "paid" && inv.status !== "cancelled").map(inv => (
-                          <SelectItem key={inv.id} value={inv.id}>{inv.invoice_number} - {inv.client_name || "No client"} (${inv.total?.toFixed(2)})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {pushToExisting && <Button className="w-full" onClick={() => handlePushToInvoice(pushToExisting)} data-testid="push-to-existing-btn">Add to {invoicesList.find(i => i.id === pushToExisting)?.invoice_number}</Button>}
-                  </>
-                )}
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <PushInvoiceDialog
+          open={isPushInvoiceOpen} onOpenChange={setIsPushInvoiceOpen}
+          ticketProducts={ticketProducts} invoicesList={invoicesList}
+          pushToExisting={pushToExisting} setPushToExisting={setPushToExisting}
+          handlePushToInvoice={handlePushToInvoice}
+        />
 
         {/* VIP Whisper Rail — shows rich context on the requester */}
         {(viewingTicket.requester_email || viewingTicket.contact_email) && (
@@ -3986,270 +3829,26 @@ export default function TicketsPage() {
         )}
       </div>
 
-      {/* CREATE TICKET DIALOG - Syncro/SuperOps Style */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh]">
-          <DialogHeader><DialogTitle>Create New Ticket</DialogTitle></DialogHeader>
-          <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-1">
-            {/* Core Info */}
-            <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
-            <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
+      <CreateTicketDialog
+        open={isCreateOpen} onOpenChange={setIsCreateOpen}
+        formData={formData} setFormData={setFormData}
+        clients={clients} devices={devices} users={users} tickets={tickets}
+        handleAiTriage={handleAiTriage} triaging={triaging}
+        triageResult={triageResult} applyTriage={applyTriage}
+        handleCreateTicket={handleCreateTicket}
+      />
 
-            {/* AI Triage */}
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={handleAiTriage} disabled={triaging} className="text-cyan-400 border-cyan-500/30" data-testid="ai-triage-btn">
-                {triaging ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
-                AI Triage
-              </Button>
-              {triageResult?.triage && (
-                <>
-                  <Badge className="bg-cyan-500/20 text-cyan-400">{triageResult.triage.category_confidence}% match</Badge>
-                  <Badge className={triageResult.triage.priority === "critical" ? "bg-red-500/20 text-red-400" : triageResult.triage.priority === "high" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}>{triageResult.triage.priority}</Badge>
-                  <Badge variant="outline">{triageResult.triage.category}</Badge>
-                  {triageResult.triage.recommended_assignee && <Badge variant="outline">{triageResult.triage.recommended_assignee.tech_name}</Badge>}
-                  {triageResult.triage.tags?.length > 0 && triageResult.triage.tags.map(t => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
-                  <Button type="button" size="sm" onClick={applyTriage} className="bg-cyan-600 hover:bg-cyan-700 text-xs h-7" data-testid="apply-triage-btn">Apply</Button>
-                </>
-              )}
-            </div>
-            {triageResult?.triage?.priority_reason && (
-              <div className="p-2 rounded-lg bg-cyan-500/5 border border-cyan-500/20 text-xs">
-                <span className="font-bold text-cyan-400">AI Analysis: </span>
-                <span className="text-muted-foreground">{triageResult.triage.priority_reason}</span>
-                {triageResult.analysis?.infrastructure_impact && <Badge className="ml-2 bg-orange-500/20 text-orange-400 text-[9px]">Infrastructure Impact</Badge>}
-              </div>
-            )}
+      <CreateWorkshopJobDialog
+        open={wsDialog} onOpenChange={setWsDialog}
+        wsForm={wsForm} setWsForm={setWsForm} users={users}
+        handleCreateWsJob={handleCreateWsJob}
+      />
 
-            {/* Row 1: Client, Contact, Device */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Client *</Label>
-                <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "", device_id: "" })}>
-                  <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
-                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Contact</Label>
-                <Select value={formData.contact_id || "none"} onValueChange={v => setFormData({ ...formData, contact_id: v === "none" ? "" : v })}>
-                  <SelectTrigger data-testid="create-contact"><SelectValue placeholder="Select contact" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">-- No specific contact --</SelectItem>
-                    {formData.client_id && (clients.find(c => c.id === formData.client_id)?.contacts || []).map((ct, i) => (
-                      <SelectItem key={ct.id || i} value={ct.id || ct.name}>{ct.name} - {ct.email || ct.role || "General"}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Linked Device</Label>
-                <Select value={formData.device_id || "none"} onValueChange={v => setFormData({ ...formData, device_id: v === "none" ? "" : v })}>
-                  <SelectTrigger data-testid="create-device"><SelectValue placeholder="Select device" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">-- No device --</SelectItem>
-                    {devices.filter(d => !formData.client_id || d.client_id === formData.client_id).map(d => (
-                      <SelectItem key={d.id} value={d.id}>{d.name} ({d.os} - {d.ip_address || "No IP"})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Row 2: Type, Category, Source */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Ticket Type</Label>
-                <Select value={formData.ticket_type} onValueChange={v => setFormData({ ...formData, ticket_type: v })}>
-                  <SelectTrigger data-testid="create-type"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="incident">Incident</SelectItem>
-                    <SelectItem value="service_request">Service Request</SelectItem>
-                    <SelectItem value="problem">Problem</SelectItem>
-                    <SelectItem value="change_request">Change Request</SelectItem>
-                    <SelectItem value="alert">Alert / Monitoring</SelectItem>
-                    <SelectItem value="task">Task</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Category</Label>
-                <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="support">General Support</SelectItem>
-                    <SelectItem value="hardware">Hardware</SelectItem>
-                    <SelectItem value="software">Software</SelectItem>
-                    <SelectItem value="network">Network</SelectItem>
-                    <SelectItem value="security">Security</SelectItem>
-                    <SelectItem value="email">Email / O365</SelectItem>
-                    <SelectItem value="backup">Backup / DR</SelectItem>
-                    <SelectItem value="onboarding">Onboarding / Offboarding</SelectItem>
-                    <SelectItem value="project">Project Work</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Source</Label>
-                <Select value={formData.source} onValueChange={v => setFormData({ ...formData, source: v })}>
-                  <SelectTrigger data-testid="create-source"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="portal">Client Portal</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="phone">Phone Call</SelectItem>
-                    <SelectItem value="chat">Live Chat</SelectItem>
-                    <SelectItem value="monitoring">Monitoring Alert</SelectItem>
-                    <SelectItem value="walk_in">Walk-in</SelectItem>
-                    <SelectItem value="internal">Internal</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Row 3: Priority, Impact, Assigned To */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Priority</Label>
-                <Select value={formData.priority} onValueChange={v => setFormData({ ...formData, priority: v })}>
-                  <SelectTrigger data-testid="create-priority"><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Impact</Label>
-                <Select value={formData.impact} onValueChange={v => setFormData({ ...formData, impact: v })}>
-                  <SelectTrigger data-testid="create-impact"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low - Single user</SelectItem>
-                    <SelectItem value="medium">Medium - Department</SelectItem>
-                    <SelectItem value="high">High - Organization-wide</SelectItem>
-                    <SelectItem value="critical">Critical - Business down</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Assign To</Label>
-                <Select value={formData.assigned_to || "none"} onValueChange={v => setFormData({ ...formData, assigned_to: v === "none" ? "" : v })}>
-                  <SelectTrigger data-testid="create-assigned"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">-- Unassigned --</SelectItem>
-                    {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Row 4: Due Date, Estimated Hours */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Due Date</Label>
-                <Input type="date" value={formData.due_date || ""} onChange={e => setFormData({ ...formData, due_date: e.target.value })} data-testid="create-due-date" />
-              </div>
-              <div><Label>Estimated Hours</Label>
-                <Input type="number" step="0.5" value={formData.estimated_hours || ""} onChange={e => setFormData({ ...formData, estimated_hours: e.target.value })} placeholder="e.g. 2.5" data-testid="create-est-hours" />
-              </div>
-              <div><Label>Parent Ticket</Label>
-                <Select value={formData.parent_id || "none"} onValueChange={v => setFormData({ ...formData, parent_id: v === "none" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="None (standalone)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None (standalone ticket)</SelectItem>
-                    {tickets.filter(t => !t.parent_id).slice(0, 30).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title?.slice(0, 30)}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div><Label>Tags</Label>
-              <div className="flex gap-2 flex-wrap mb-2">{(formData.tags || []).map(t => (
-                <Badge key={t} variant="secondary" className="gap-1">{t}
-                  <button className="ml-1 text-xs hover:text-destructive" onClick={() => setFormData({ ...formData, tags: formData.tags.filter(tag => tag !== t) })}>x</button>
-                </Badge>
-              ))}</div>
-              <Input placeholder="Type a tag and press Enter" data-testid="create-tags"
-                onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) { e.preventDefault(); setFormData({ ...formData, tags: [...(formData.tags || []), e.target.value.trim()] }); e.target.value = ""; } }} />
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateTicket} data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1" />Create Ticket</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* CREATE WORKSHOP JOB DIALOG */}
-      <Dialog open={wsDialog} onOpenChange={setWsDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-purple-400" />New Workshop Job</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Customer Name</Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} data-testid="ws-customer" /></div>
-              <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} /></div>
-            </div>
-            <div><Label>Customer Email</Label><Input value={wsForm.customer_email} onChange={e => setWsForm({ ...wsForm, customer_email: e.target.value })} placeholder="customer@example.com" type="email" /></div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Device Type</Label>
-                <Select value={wsForm.device_type || "laptop"} onValueChange={v => setWsForm({ ...wsForm, device_type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="laptop">Laptop</SelectItem><SelectItem value="desktop">Desktop</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="tablet">Tablet</SelectItem><SelectItem value="printer">Printer</SelectItem><SelectItem value="network">Network Device</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label>Brand</Label><Input value={wsForm.device_brand} onChange={e => setWsForm({ ...wsForm, device_brand: e.target.value })} placeholder="Dell, HP..." /></div>
-              <div><Label>Model</Label><Input value={wsForm.device_model} onChange={e => setWsForm({ ...wsForm, device_model: e.target.value })} /></div>
-            </div>
-            <div><Label>Serial Number</Label><Input value={wsForm.serial_number} onChange={e => setWsForm({ ...wsForm, serial_number: e.target.value })} className="font-mono" /></div>
-            <div><Label>Fault Description</Label><Textarea value={wsForm.fault_description} onChange={e => setWsForm({ ...wsForm, fault_description: e.target.value })} rows={3} data-testid="ws-fault" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Priority</Label>
-                <Select value={wsForm.priority} onValueChange={v => setWsForm({ ...wsForm, priority: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label>Assign Tech</Label>
-                <Select value={wsForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setWsForm({ ...wsForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
-                  <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
-                  <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateWsJob} data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Create Job</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* CREATE FIELD JOB DIALOG */}
-      <Dialog open={fjDialog} onOpenChange={setFjDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Radio className="w-5 h-5 text-cyan-400" />New Cabling / WISP Job</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Customer Name</Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} data-testid="fj-customer" /></div>
-              <div><Label>Phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} /></div>
-            </div>
-            <div><Label>Service Address</Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} data-testid="fj-address" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Zone / Area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div>
-              <div><Label>Job Category</Label>
-                <Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site Survey</SelectItem></SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div><Label>Description</Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={2} data-testid="fj-description" /></div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div>
-              <div><Label>Time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div>
-              <div><Label>Duration (min)</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Priority</Label>
-                <Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label>Assign Tech</Label>
-                <Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
-                  <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
-                  <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={handleCreateFjJob} data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Create Cabling / WISP Job</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateFieldJobDialog
+        open={fjDialog} onOpenChange={setFjDialog}
+        fjForm={fjForm} setFjForm={setFjForm} users={users}
+        handleCreateFjJob={handleCreateFjJob}
+      />
 
       </div>
     </PageShell>

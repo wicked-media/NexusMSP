@@ -13,12 +13,64 @@ const STAGES = [
  *
  * Props:
  *   status: current ticket status string (open / in_progress / on_hold / resolved / closed)
- *   onChange: (newStatus) => void — invoked when user clicks a stage
+ *   onChange: (newStatus) => void
+ *   compact: bool — when true, renders a tight pill-rail layout (designed to sit beside title card)
  */
-export default function TicketProgressTracker({ status, onChange }) {
+export default function TicketProgressTracker({ status, onChange, compact = false }) {
   const currentIdx = STAGES.findIndex((s) => s.key === status);
   const activeIdx = currentIdx >= 0 ? currentIdx : 0;
   const progressPercent = Math.round((activeIdx / (STAGES.length - 1)) * 100);
+
+  if (compact) {
+    return (
+      <Card className="overflow-hidden h-full" data-testid="ticket-progress-bar">
+        <CardContent className="py-3 px-4 h-full flex flex-col">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Ticket Progress</span>
+            <span className="text-[10px] font-mono text-muted-foreground">{progressPercent}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-muted/50 mb-3 overflow-hidden">
+            <div
+              className={`h-full rounded-full bg-gradient-to-r ${STAGES[activeIdx].color} transition-all duration-700 ease-out`}
+              style={{ width: `${Math.max(5, progressPercent)}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-1 flex-1">
+            {STAGES.map((stage, i) => {
+              const isActive = i === activeIdx;
+              const isPast = i < activeIdx;
+              return (
+                <button
+                  key={stage.key}
+                  onClick={() => onChange?.(stage.key)}
+                  title={stage.label}
+                  className={`flex-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-medium transition-all border ${
+                    isActive
+                      ? `${stage.bg} ${stage.border} ${stage.text} shadow`
+                      : isPast
+                      ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400/70"
+                      : "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/30"
+                  }`}
+                  data-testid={`progress-stage-${stage.key}`}
+                >
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${
+                    isActive ? `bg-gradient-to-br ${stage.color} text-white` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground/70"
+                  }`}>
+                    {isPast ? (
+                      <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : stage.icon}
+                  </span>
+                  <span className="truncate">{stage.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="overflow-hidden" data-testid="ticket-progress-bar">
@@ -27,14 +79,12 @@ export default function TicketProgressTracker({ status, onChange }) {
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ticket Progress</span>
           <span className="text-xs font-mono text-muted-foreground">{progressPercent}% complete</span>
         </div>
-        {/* Bar */}
         <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
           <div
             className={`h-full rounded-full bg-gradient-to-r ${STAGES[activeIdx].color} transition-all duration-700 ease-out`}
             style={{ width: `${Math.max(5, progressPercent)}%` }}
           />
         </div>
-        {/* Stage cards */}
         <div className="grid grid-cols-5 gap-2">
           {STAGES.map((stage, i) => {
             const isActive = i === activeIdx;
