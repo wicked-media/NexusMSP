@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "../components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
+import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -314,6 +315,7 @@ export default function DeviceDetailPage() {
           <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="events">Events ({data.events?.length || 0})</TabsTrigger>
+          <TabsTrigger value="backups" data-testid="device-backups-tab">Backups</TabsTrigger>
           <TabsTrigger value="audit-log" data-testid="device-audit-tab">Audit Log</TabsTrigger>
         </TabsList>
 
@@ -897,6 +899,11 @@ export default function DeviceDetailPage() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* BACKUPS TAB */}
+        <TabsContent value="backups" className="mt-4">
+          <DeviceBackupPlansPanel deviceId={data.id} token={token} />
         </TabsContent>
 
         {/* AUDIT LOG TAB */}

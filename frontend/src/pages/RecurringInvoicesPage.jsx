@@ -20,6 +20,7 @@ import {
   Receipt, TrendingUp, Loader2, Copy, Send, Clock, FileText, Users,
   CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search, Cloud
 } from "lucide-react";
+import ReconcileDialog from "@/components/billing/ReconcileDialog";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
@@ -43,6 +44,7 @@ export default function RecurringInvoicesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(null);
   const [showHistory, setShowHistory] = useState(null);
+  const [showReconcile, setShowReconcile] = useState(null);
   const [showTemplateCreate, setShowTemplateCreate] = useState(false);
   const [showApplyTemplate, setShowApplyTemplate] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -323,6 +325,9 @@ export default function RecurringInvoicesPage() {
                       <TableCell>
                         <div className="flex gap-1 justify-end">
                           <Button size="sm" variant="ghost" title="Generate Now" onClick={() => generateNow(ri.id)} data-testid={`gen-${ri.id}`}><Zap className="w-3 h-3 text-amber-400" /></Button>
+                          <Button size="sm" variant="ghost" title="Reconcile (bill-shock check)" onClick={() => setShowReconcile(ri)} data-testid={`reconcile-${ri.id}`}>
+                            <DollarSign className="w-3 h-3 text-emerald-400" />
+                          </Button>
                           <Button size="sm" variant="ghost" title={ri.status === "active" ? "Pause" : "Activate"} onClick={() => toggleRI(ri.id)}>{ri.status === "active" ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}</Button>
                           <Button size="sm" variant="ghost" title="Edit" onClick={() => setShowEdit({ ...ri, tax_rate: String(ri.tax_rate || 10) })}><Edit className="w-3 h-3" /></Button>
                           <Button size="sm" variant="ghost" title="History" onClick={() => setShowHistory(ri)}><Eye className="w-3 h-3" /></Button>
@@ -684,6 +689,14 @@ export default function RecurringInvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReconcileDialog
+        open={!!showReconcile}
+        onOpenChange={v => { if (!v) setShowReconcile(null); }}
+        recurringInvoice={showReconcile}
+        token={token}
+        onUpdated={fetchData}
+      />
     </div>
   );
 }

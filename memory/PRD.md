@@ -8,6 +8,36 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Bill-Shock Reconciliation + Device Backup Plans)
+
+### 💰 Bill-Shock Reconciliation
+Per-line-item drift detection between billed quantities and actual Acronis-protected device count.
+- **Recurring invoices** can now link any line item to an **Acronis policy** via dropdown (99 plans available from live tenant)
+- **Reconcile button** ($ icon) on every recurring invoice opens dialog with:
+  - 4 summary stats: Line Items · Plan-Linked · Drift Detected · Bill Shock $/period
+  - Per-line-item table with Billed / Actual / Drift / Bill Shock columns
+  - Severity coding: critical (>5 abs or >20%), warning (>2 abs or >10%), minor, ok
+  - "You're under-billing by $X" / "over-billing" warning banner
+- Drift is computed by querying Acronis applications under that policy, intersecting with devices linked to the client (`device.acronis_resource_id` or `acronis_id`)
+
+### 📡 Device Backup Plans
+New **Backups** tab on every Device Detail page:
+- Acronis Resource link card — shows current link status (explicit / name_match / none) with manual link editor
+- Applied Backup Plans table — every plan currently assigned to this device in Acronis (name, type, state, enabled)
+- Recent Backup Activities table — last 20 activities for this resource
+- Auto-fallback: if no explicit `acronis_resource_id`, attempts name match against Acronis resource names
+
+### New backend endpoints (`billing_reconcile.py`)
+- `GET /api/billing/reconcile-recurring/{ri_id}`
+- `PUT /api/billing/recurring/{ri_id}/line-items/{idx}/link-policy`
+- `GET /api/devices/{device_id}/acronis`
+- `PUT /api/devices/{device_id}/acronis-link`
+
+### Testing
+- `iteration_156.json`: **21/21 backend + frontend reconcile flow verified.** 99 plans loadable, dropdown linking works, dialog stats display correctly.
+
+---
+
 ## Recent Updates (Feb 2026 — Acronis Backup Actions)
 
 ### Wired up everything Acronis exposes
