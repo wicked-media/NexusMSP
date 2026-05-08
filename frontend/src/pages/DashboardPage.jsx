@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
 import { ThreatRadarTicker } from "@/components/ai/ThreatRadarTicker";
@@ -151,6 +152,7 @@ export default function DashboardPage() {
       <MetricTile label="Revenue" value={`$${stats.total_mrr?.toLocaleString() || 0}`} trend="+12% MRR" accent="emerald" icon={<DollarSign className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-revenue" />
     </MetricStrip>
     <div className="flex-1 overflow-y-auto p-6 space-y-5" data-testid="dashboard-page">
+      <TeamPinsStrip />
       {/* Quick Search Modal */}
       {searchOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]" onClick={() => setSearchOpen(false)}>

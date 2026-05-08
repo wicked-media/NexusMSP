@@ -8,7 +8,7 @@ import {
 import {
   ArrowLeft, ChevronDown, Brain, Sparkles, GitBranch, Wifi, WifiOff, ExternalLink,
   Mail, Download, Play, Square, Timer, Loader2, Merge, ShoppingCart, Receipt,
-  Boxes, Lightbulb, Users, Wand2, UserCheck, MessageSquare, BookPlus, Activity, Pin, PinOff,
+  Boxes, Lightbulb, Users, Wand2, UserCheck, MessageSquare, BookPlus, Activity, Pin, PinOff, Siren,
 } from "lucide-react";
 import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
@@ -50,12 +50,16 @@ export function TicketDetailHeader({
 }) {
   const headers = { Authorization: `Bearer ${token}` };
   const [pinned, setPinned] = useState(false);
+  const [teamPin, setTeamPin] = useState({ team_pinned: false, can_unpin: false, pinned_by_name: null });
 
   useEffect(() => {
     if (!viewingTicket?.id) return;
     axios.get(`${API}/workspace/pin/ticket/${viewingTicket.id}/status`, { headers })
       .then(r => setPinned(!!r.data?.pinned))
       .catch(() => setPinned(false));
+    axios.get(`${API}/team-pins/ticket/${viewingTicket.id}/status`, { headers })
+      .then(r => setTeamPin(r.data || { team_pinned: false }))
+      .catch(() => setTeamPin({ team_pinned: false }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingTicket?.id]);
 
@@ -71,6 +75,25 @@ export function TicketDetailHeader({
         toast.success("Pinned to your workspace 📌");
       }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to toggle pin"); }
+  };
+
+  const toggleTeamPin = async () => {
+    try {
+      if (teamPin.team_pinned) {
+        await axios.delete(`${API}/team-pins/ticket/${viewingTicket.id}`, { headers });
+        setTeamPin({ team_pinned: false });
+        toast.success("Unpinned from team");
+      } else {
+        const note = window.prompt("Quick note for the team (optional):", "");
+        await axios.post(
+          `${API}/team-pins/ticket/${viewingTicket.id}`,
+          { note: note || "", reason: "outage" },
+          { headers }
+        );
+        setTeamPin({ team_pinned: true, can_unpin: true });
+        toast.success("Pinned for the team 🚨");
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to toggle team pin"); }
   };
 
   const handleAutoQuote = async () => {
@@ -91,6 +114,16 @@ export function TicketDetailHeader({
       {pinned && (
         <Badge variant="outline" className="text-violet-400 border-violet-500/40 bg-violet-500/10 gap-1" title="Pinned to your workspace">
           <Pin className="w-3 h-3" />Pinned
+        </Badge>
+      )}
+      {teamPin.team_pinned && (
+        <Badge
+          variant="outline"
+          className="text-red-300 border-red-500/50 bg-red-500/15 gap-1 animate-pulse"
+          title={`Pinned for team by ${teamPin.pinned_by_name || "?"}`}
+          data-testid="team-pinned-badge"
+        >
+          <Siren className="w-3 h-3" />TEAM
         </Badge>
       )}
       {viewingTicket.merged_into && <Badge variant="outline" className="text-red-400">Merged</Badge>}
@@ -214,6 +247,17 @@ export function TicketDetailHeader({
               {pinned
                 ? <><PinOff className="w-3.5 h-3.5 mr-2 text-violet-400" />Unpin from Workspace</>
                 : <><Pin className="w-3.5 h-3.5 mr-2 text-violet-400" />Pin to My Workspace</>}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={toggleTeamPin}
+              disabled={teamPin.team_pinned && !teamPin.can_unpin}
+              data-testid="actions-team-pin"
+            >
+              {teamPin.team_pinned
+                ? <><Siren className="w-3.5 h-3.5 mr-2 text-red-400" />
+                    {teamPin.can_unpin ? "Unpin from Team" : `Pinned by ${teamPin.pinned_by_name}`}
+                  </>
+                : <><Siren className="w-3.5 h-3.5 mr-2 text-red-400" />Pin for Team (NOC strip)</>}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
