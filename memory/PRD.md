@@ -8,6 +8,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Ticket Detail UX Redesign + Refactor)
+
+### UX Redesign — "Less in your face" (per user feedback)
+- **Header refactored** into Syncro-style grouped dropdown menus to reduce button clutter:
+  - **C.R.A.I.G** (purple) — AI Diagnose, Doppelgänger, Suggest Resolution, Smart Assign, Apology Draft, Promote to Runbook
+  - **Actions** — Start/Stop Timer, Log Time, Create Child, Merge Tickets
+  - **Billing** (emerald) — Add Items, Apply Kit, Push to Invoice, Auto-Quote
+- Hot buttons kept visible: Back, Remote, Copilot, Explain Error, Voice Journal, Email, PDF, Why on Fire
+- **Title card + Compact Progress Tracker** now sit side-by-side (50/50 grid). New `compact` mode on `TicketProgressTracker` — pill-rail layout shows all 5 stages clearly without taking full width.
+- **Hudu KB Suggestions** moved into a collapsible `<details>` toggle to free up vertical space.
+- **Related Tickets** promoted from sidebar to a chip-banner at the top of main content for one-click navigation to potential duplicates.
+- **Sentiment card removed** from the sidebar (per user request — was noisy and rarely actionable).
+
+### Tech-debt: TicketsPage decomposition (~3893→3857 lines, +5 new files)
+- `TicketDetailHeader.jsx` — new header with the 3 grouped dropdowns
+- `TicketDialogs.jsx` — extracted: Email, ChildTicket, Merge, LogTime, NotifyClient, AddItems, PushInvoice
+- `CreateDialogs.jsx` — extracted: CreateTicket, CreateWorkshopJob, CreateFieldJob
+- `JobDialogs.jsx` — created (12 workshop+field dialogs); not yet swapped in (deferred to next batch)
+- `TicketAIBundle` refactored to support `variant="menu"` + `renderMenuItems` for embedding inside a DropdownMenu
+- `TicketProgressTracker` gained `compact` prop
+
+### Testing
+- `iteration_151.json`: **100% frontend pass rate.** Testing agent fixed a minor nested-button HTML warning in `HuduSuggestionsPanel.jsx`. All dropdowns, layouts, and dialogs verified working.
+
+---
+
 ## Recent Updates (May 3, 2026 — P2 Module Audits: Devices/Invoices/Backup)
 
 ### What was audited
