@@ -393,20 +393,25 @@ export default function BackupCenterPage() {
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Device</TableHead><TableHead>Provider</TableHead><TableHead>Type</TableHead><TableHead>Size</TableHead><TableHead>Duration</TableHead><TableHead>Status</TableHead><TableHead>Time</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Tenant</TableHead><TableHead>Machine</TableHead><TableHead>Plan</TableHead><TableHead>Last Backup</TableHead><TableHead>Next Run</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
                 <TableBody>
+                  {(dashData?.backups || []).length === 0 && (
+                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+                      <Cloud className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">No backup data from Acronis yet.</p>
+                      <p className="text-[11px] mt-1 opacity-70">Once Acronis returns resource statuses, machines and their plans will appear here in real time.</p>
+                    </TableCell></TableRow>
+                  )}
                   {(dashData?.backups || []).filter(b => (statusFilter === "all" || b.status === statusFilter) && (!search || b.client_name?.toLowerCase().includes(search.toLowerCase()) || b.device_name?.toLowerCase().includes(search.toLowerCase()))).map((b, i) => {
                     const Ico = STATUS_ICON[b.status] || Clock;
                     return (
-                      <TableRow key={`k-${i}`}>
-                        <TableCell className="font-medium">{b.client_name}</TableCell>
-                        <TableCell className="text-sm">{b.device_name}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px]">{b.provider}</Badge></TableCell>
-                        <TableCell className="text-xs">{b.type}</TableCell>
-                        <TableCell className="text-xs font-mono">{b.size_gb}GB</TableCell>
-                        <TableCell className="text-xs">{b.duration_min}min</TableCell>
+                      <TableRow key={`k-${b.id || i}`} data-testid={`backup-row-${b.id || i}`}>
+                        <TableCell className="text-sm">{b.client_name || "—"}</TableCell>
+                        <TableCell className="font-medium">{b.device_name}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground truncate max-w-[260px]" title={b.plan_names || ""}>{b.plan_names || "—"}</TableCell>
+                        <TableCell className="text-xs">{b.last_run ? new Date(b.last_run).toLocaleString() : "Never"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{b.next_run ? new Date(b.next_run).toLocaleString() : "—"}</TableCell>
                         <TableCell><Badge className={`text-[10px] ${STATUS_COLOR[b.status] || ""}`}><Ico className="w-3 h-3 mr-1" />{b.status}</Badge></TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{new Date(b.completed_at || b.started_at).toLocaleString()}</TableCell>
                       </TableRow>
                     );
                   })}

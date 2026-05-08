@@ -8,6 +8,15 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Backup Centre Live Data Fix)
+
+### 🔧 Backup Centre — Live Acronis Data
+Removed legacy mock-seeding from `/api/backup-dashboard/overview` and `/api/backup-verify/overview`. Dashboard tab now synthesises rows directly from `acronis_service.get_resource_statuses()` when no local jobs exist, returning real machines/tenants (e.g. `FSMC-HOST`@forbesservicesclub, `MP-SERVER`@midpro — 364 machines from live tenant).
+- Removed `_seed_backup_data()` and `_seed_tests()` (auto-creating Acme/TechStart/Veeam fakes)
+- Frontend dashboard table columns updated: Tenant · Machine · Plan · Last Backup · Next Run · Status
+- Verify tab shows clean empty state until real verifications are recorded
+- Purged 37 fake `backup_jobs` + 20 fake `backup_verifications` from MongoDB
+
 ## Recent Updates (Feb 2026 — Bill-Shock Reconciliation + Device Backup Plans)
 
 ### 💰 Bill-Shock Reconciliation
