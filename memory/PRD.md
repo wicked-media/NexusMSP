@@ -8,6 +8,37 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Backup Center Modernization + Acronis Orphan Hunter)
+
+### Modern Backup Command Center (`/backup-center`)
+Massively redesigned to feel "like you're inside Acronis" with live data and animations.
+
+**Hero**: gradient icon, status pill ("X running" pulsing), Open Acronis Cloud + Refresh buttons
+**6 glow metric tiles** (Total Backups, Successful, Failed, Running, Online Agents, Active Alerts) with animated count-up
+
+**6 tabs**:
+- **Dashboard** — backup jobs table with filter & search
+- **Live** — running backups with **animated SVG progress rings**, pulsing ping dots, shimmer progress bars, CRT-style stats (📦 transferred · ⚡ MB/s · 🏢 tenant); auto-refreshes every 5s; recent activity table
+- **Acronis Console** — Quick Actions (Open Acronis Cloud, Refresh Live, Sync Agents, Run Orphan Scan), Agent Health card (Online / Offline / Stale >24h), Active Acronis Alerts list with severity badges + ArrowUpRight (open in console) + Dismiss buttons
+- **Orphans** — "Orphan & Zombie Hunter" violet card with Run Scan button → 4 summary tiles + detail tables (Unprotected, Stale, Zombie Plans, Offline Agents)
+- **Compliance** — existing device backup status
+- **Verify** — existing restore verification tests
+
+### New Backend Endpoints (`acronis_advanced.py`)
+- `GET /api/acronis/orphans?stale_days=30` — 4-way orphan detection (unprotected resources, stale-but-billing, zombie plans pointing to deleted resources, long-offline agents still consuming)
+- `GET /api/acronis/agents/health` — categorized agent health (online/offline/stale)
+- `POST /api/acronis/alerts/{id}/dismiss` — mark alert handled in Acronis
+- `GET /api/acronis/console-link` — build deep-link URL into Acronis Cloud UI
+- `GET /api/acronis/live-activities` — running + recent activities with progress %, transferred/total bytes, speed
+
+### Live Acronis Data Verification
+Real Acronis instance returned 169 orphan items (89 unprotected, 80 zombie plans) and 200 active alerts on first scan — feature is operating against the live API.
+
+### Testing
+- `iteration_154.json`: **100% backend (18/18) + 100% frontend.**
+
+---
+
 ## Recent Updates (Feb 2026 — Team Pins / NOC Strip)
 
 ### Shared Team Pins (Outage Room mode)
