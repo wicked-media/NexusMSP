@@ -8,6 +8,28 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Acronis Backup Actions)
+
+### Wired up everything Acronis exposes
+After researching the Acronis Cyber Cloud public API, the following are supported and now usable from NexusOps without leaving the page:
+
+**✅ Run backup now** — `POST /api/acronis/backup/run` (existing endpoint, also exposed in Apply Plan dialog as "Run immediately after applying")
+**✅ Cancel running backup** — `POST /api/acronis/backup/cancel` (state: stopped). Stop button on every running activity card in Live tab.
+**✅ List backup plans** — `GET /api/acronis/policies` returns 98 real backup-only policies (filtered to `policy.backup.*`)
+**✅ Apply / change plan** — `POST /api/acronis/policies/apply` with optional `run_now`. ChangePlanDialog with search + run-now checkbox. Per-row action on every Unprotected resource and bulk action for multi-select.
+**✅ Remove plan binding** — `DELETE /api/acronis/applications/{id}`
+**✅ List a resource's plans** — `GET /api/acronis/resources/{id}/applications`
+
+### Honest about API limitations
+Amber info banner on Acronis Console tab explains:
+- **Pause/Resume is NOT in Acronis's public API** — only stop/run
+- **Per-run scheduling is NOT in the API** — schedules are baked into the policy itself; users either edit the policy in Acronis Cloud or apply a different plan from here
+
+### Testing
+- `iteration_155.json`: **100% backend (25/25) + 100% frontend.** Verified against live Acronis tenant — 98 backup plans, 89 Apply Plan buttons, bulk action working.
+
+---
+
 ## Recent Updates (Feb 2026 — Backup Center Modernization + Acronis Orphan Hunter)
 
 ### Modern Backup Command Center (`/backup-center`)
