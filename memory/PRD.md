@@ -8,6 +8,22 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Team Pins / NOC Strip)
+
+### Shared Team Pins (Outage Room mode)
+- New `/api/team-pins` endpoints — anyone can pin a ticket for the whole team; only the original pinner or an admin can unpin.
+- **Dashboard NOC Strip** at top of Dashboard with red animated pulse stripe — auto-refreshes every 30s, hidden when no active pins.
+- Each card shows ticket #, priority, status, client, age since pin, optional note + who pinned it.
+- **Ticket Detail header**: red pulsing "TEAM" badge (with Siren icon) appears when team-pinned.
+- **Actions menu**: "Pin for Team (NOC strip)" toggles. When pinned by another user, shows "Pinned by {Name}" and disables (only that user or an admin can unpin).
+
+Backend: `/app/backend/app/routers/team_pins.py` with 4 endpoints (list, pin, unpin, status).
+
+### Testing
+- `iteration_153.json`: **100% backend (14/14) + 100% frontend.**
+
+---
+
 ## Recent Updates (Feb 2026 — Workspace Module + Multi-Device Linking)
 
 ### Workspace Module — Per-tech "My Work" hub
