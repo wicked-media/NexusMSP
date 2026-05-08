@@ -25,6 +25,7 @@ export const routeConfig = [
   { path: "/suped", component: page("SupedCommandCenterPage"), auth: true, layout: true },
   { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },
   { path: "/morning-checks", component: page("MorningChecksPage"), auth: true, layout: true },
+  { path: "/workspace", component: page("WorkspacePage"), auth: true, layout: true },
   { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
   { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },
   { path: "/devices/:deviceId", component: page("DeviceDetailPage"), auth: true, layout: true },

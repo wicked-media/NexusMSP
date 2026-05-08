@@ -15,7 +15,7 @@ import {
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles
+  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark
 } from "lucide-react";
 
 /*
@@ -30,6 +30,7 @@ export const navGroups = [
     title: "Service Desk",
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+      { path: "/workspace", icon: Bookmark, label: "My Workspace" },
       { path: "/morning-checks", icon: Activity, label: "Morning Checks" },
       {
         path: "/tickets", icon: Ticket, label: "Tickets",

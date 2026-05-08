@@ -8,7 +8,7 @@ import {
 import {
   ArrowLeft, ChevronDown, Brain, Sparkles, GitBranch, Wifi, WifiOff, ExternalLink,
   Mail, Download, Play, Square, Timer, Loader2, Merge, ShoppingCart, Receipt,
-  Boxes, Lightbulb, Users, Wand2, UserCheck, MessageSquare, BookPlus, Activity,
+  Boxes, Lightbulb, Users, Wand2, UserCheck, MessageSquare, BookPlus, Activity, Pin, PinOff,
 } from "lucide-react";
 import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
 import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
@@ -17,6 +17,7 @@ import { VoiceJournalButton } from "@/components/ai/VoiceJournalButton";
 import { priorityConfig } from "@/config/ticketConfig";
 import { toast } from "sonner";
 import { API } from "@/App";
+import { useState, useEffect } from "react";
 
 /**
  * Compact, menu-driven detail header (Syncro-style).
@@ -48,6 +49,29 @@ export function TicketDetailHeader({
   fetchTimeEntries,
 }) {
   const headers = { Authorization: `Bearer ${token}` };
+  const [pinned, setPinned] = useState(false);
+
+  useEffect(() => {
+    if (!viewingTicket?.id) return;
+    axios.get(`${API}/workspace/pin/ticket/${viewingTicket.id}/status`, { headers })
+      .then(r => setPinned(!!r.data?.pinned))
+      .catch(() => setPinned(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingTicket?.id]);
+
+  const togglePin = async () => {
+    try {
+      if (pinned) {
+        await axios.delete(`${API}/workspace/pin/ticket/${viewingTicket.id}`, { headers });
+        setPinned(false);
+        toast.success("Removed from your workspace");
+      } else {
+        await axios.post(`${API}/workspace/pin/ticket/${viewingTicket.id}`, {}, { headers });
+        setPinned(true);
+        toast.success("Pinned to your workspace 📌");
+      }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to toggle pin"); }
+  };
 
   const handleAutoQuote = async () => {
     try {
@@ -64,6 +88,11 @@ export function TicketDetailHeader({
       </Button>
       <Badge className={priorityConfig[viewingTicket.priority]?.class}>{priorityConfig[viewingTicket.priority]?.label}</Badge>
       <span className="text-sm text-muted-foreground font-mono">{viewingTicket.ticket_number}</span>
+      {pinned && (
+        <Badge variant="outline" className="text-violet-400 border-violet-500/40 bg-violet-500/10 gap-1" title="Pinned to your workspace">
+          <Pin className="w-3 h-3" />Pinned
+        </Badge>
+      )}
       {viewingTicket.merged_into && <Badge variant="outline" className="text-red-400">Merged</Badge>}
       {parent && <Badge variant="outline" className="text-indigo-400"><GitBranch className="w-3 h-3 mr-1" />Child of {parent.ticket_number}</Badge>}
       {viewingTicket.blueprint_id && (
@@ -178,6 +207,13 @@ export function TicketDetailHeader({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setIsMergeOpen(true)} data-testid="actions-merge">
               <Merge className="w-3.5 h-3.5 mr-2" />Merge Tickets
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest">Workspace</DropdownMenuLabel>
+            <DropdownMenuItem onClick={togglePin} data-testid="actions-pin">
+              {pinned
+                ? <><PinOff className="w-3.5 h-3.5 mr-2 text-violet-400" />Unpin from Workspace</>
+                : <><Pin className="w-3.5 h-3.5 mr-2 text-violet-400" />Pin to My Workspace</>}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

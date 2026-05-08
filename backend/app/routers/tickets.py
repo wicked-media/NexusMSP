@@ -86,11 +86,21 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}
     sla_due = datetime.now(timezone.utc) + timedelta(hours=sla_hours.get(ticket_data.priority, 8))
     
-    # Resolve device name
+    # Resolve device name(s)
     device_name = None
     if ticket_data.device_id:
         device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1})
         device_name = device['name'] if device else None
+
+    # Multi-device: ensure device_id is included in device_ids, and resolve device_names parallel array
+    device_ids = list(ticket_data.device_ids or [])
+    if ticket_data.device_id and ticket_data.device_id not in device_ids:
+        device_ids.insert(0, ticket_data.device_id)
+    device_names = []
+    if device_ids:
+        cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1})
+        async for d in cursor:
+            device_names.append(d.get("name") or d.get("id"))
     
     # Generate ticket number using configurable scheme
     from app.routers.ticket_suggestions import generate_ticket_number
@@ -104,6 +114,9 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         device_name=device_name,
         sla_due=sla_due
     )
+    # Override with normalized multi-device arrays
+    ticket.device_ids = device_ids
+    ticket.device_names = device_names
     doc = ticket.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     doc['updated_at'] = doc['updated_at'].isoformat()
@@ -188,6 +201,81 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
             await ticket_audit(ticket_id, current_user, "updated", "; ".join(changes))
             await log_activity(current_user, "updated", "ticket", ticket_id, old_ticket.get("title", ""), "; ".join(changes), changes=change_dict)
     return {"message": "Ticket updated"}
+
+@router.post("/tickets/{ticket_id}/devices")
+async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Depends(get_current_user)):
+    """Link an additional device to a ticket (Syncro-style multi-asset linking)."""
+    device_id = (body or {}).get("device_id")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "name": 1, "id": 1})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device_ids = list(ticket.get("device_ids") or [])
+    # Backfill from legacy device_id field
+    if ticket.get("device_id") and ticket["device_id"] not in device_ids:
+        device_ids.append(ticket["device_id"])
+    if device_id in device_ids:
+        return {"message": "Device already linked", "device_ids": device_ids}
+    device_ids.append(device_id)
+    # Refresh names parallel array
+    cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1})
+    id_to_name = {}
+    async for d in cursor:
+        id_to_name[d["id"]] = d.get("name") or d["id"]
+    device_names = [id_to_name.get(did, did) for did in device_ids]
+    update = {
+        "device_ids": device_ids,
+        "device_names": device_names,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Promote to primary if no primary yet
+    if not ticket.get("device_id"):
+        update["device_id"] = device_id
+        update["device_name"] = device.get("name") or device_id
+    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await ticket_audit(ticket_id, current_user, "device_linked", f"Linked device {device.get('name') or device_id}")
+    return {"message": "Device linked", "device_ids": device_ids, "device_names": device_names}
+
+
+@router.delete("/tickets/{ticket_id}/devices/{device_id}")
+async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dict = Depends(get_current_user)):
+    """Unlink a device from a ticket."""
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    device_ids = list(ticket.get("device_ids") or [])
+    if ticket.get("device_id") and ticket["device_id"] not in device_ids:
+        device_ids.append(ticket["device_id"])
+    if device_id not in device_ids:
+        raise HTTPException(status_code=404, detail="Device not linked to this ticket")
+    device_ids = [d for d in device_ids if d != device_id]
+    cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1}) if device_ids else None
+    id_to_name = {}
+    if cursor:
+        async for d in cursor:
+            id_to_name[d["id"]] = d.get("name") or d["id"]
+    device_names = [id_to_name.get(did, did) for did in device_ids]
+    update = {
+        "device_ids": device_ids,
+        "device_names": device_names,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # If primary was removed, promote the first remaining device
+    if ticket.get("device_id") == device_id:
+        if device_ids:
+            update["device_id"] = device_ids[0]
+            update["device_name"] = id_to_name.get(device_ids[0], device_ids[0])
+        else:
+            update["device_id"] = None
+            update["device_name"] = None
+    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await ticket_audit(ticket_id, current_user, "device_unlinked", f"Unlinked device {device_id}")
+    return {"message": "Device unlinked", "device_ids": device_ids, "device_names": device_names}
+
 
 @router.delete("/tickets/{ticket_id}")
 async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):

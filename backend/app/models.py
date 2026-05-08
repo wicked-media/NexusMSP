@@ -105,6 +105,7 @@ class TicketCreate(BaseModel):
     source: str = "portal"
     asset_id: Optional[str] = None
     device_id: Optional[str] = None
+    device_ids: List[str] = []  # Multi-device linking (Syncro-style); device_id kept for backward compat as primary
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -131,6 +132,8 @@ class Ticket(BaseModel):
     asset_id: Optional[str] = None
     device_id: Optional[str] = None
     device_name: Optional[str] = None
+    device_ids: List[str] = []  # Multi-device linking; device_id remains as primary for compat
+    device_names: List[str] = []  # parallel array, populated for UI convenience
     tags: List[str] = []
     cc: List[str] = []
     watchers: List[str] = []

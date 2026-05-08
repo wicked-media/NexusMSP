@@ -11,6 +11,7 @@ import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
 import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketProgressTracker from "@/components/tickets/TicketProgressTracker";
+import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
 import { TicketDetailHeader } from "@/components/tickets/TicketDetailHeader";
 import {
   EmailDialog,
@@ -2083,43 +2084,44 @@ export default function TicketsPage() {
                   )}
                 </div>
                 <Separator />
-                <div><Label className="text-xs text-muted-foreground">Linked Device</Label>
+                <TicketLinkedDevices
+                  ticket={viewingTicket}
+                  devices={devices}
+                  token={token}
+                  onChange={(updated) => {
+                    setViewingTicket(prev => prev ? { ...prev, ...updated } : prev);
+                  }}
+                />
+                <div className="hidden">{/* legacy device select hidden, use chip-list above */}
                   <Select value={viewingTicket.device_id || "none"} onValueChange={v => handleUpdateTicket("device_id", v === "none" ? "" : v)}>
-                    <SelectTrigger data-testid="device-select"><SelectValue placeholder="No device linked" /></SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">-- No device --</SelectItem>
-                      {devices.filter(d => !viewingTicket.client_id || d.client_id === viewingTicket.client_id).map(d => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
+                      {devices.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {viewingTicket.device_id && viewingTicket.device_name && (
-                    <Button variant="link" size="sm" className="px-0 h-6 text-xs" onClick={() => window.location.href = `/devices/${viewingTicket.device_id}`} data-testid="view-device-link">
-                      View {viewingTicket.device_name} details
-                    </Button>
-                  )}
-                  {/* Device info panel */}
-                  {deviceStatus && (
-                    <div className="mt-2 p-2 rounded-lg bg-muted/30 border border-border/50 space-y-1" data-testid="device-info-panel">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <MonitorCheck className="w-3.5 h-3.5 text-muted-foreground" />
-                          <span className="text-xs font-medium">{deviceStatus.name}</span>
-                        </div>
-                        <div className={`flex items-center gap-1 text-[10px] ${deviceStatus.status === "online" ? "text-emerald-400" : "text-red-400"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${deviceStatus.status === "online" ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
-                          {deviceStatus.status}
-                        </div>
+                </div>
+                {/* Device info panel (primary device) */}
+                {deviceStatus && (
+                  <div className="mt-2 p-2 rounded-lg bg-muted/30 border border-border/50 space-y-1" data-testid="device-info-panel">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <MonitorCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-xs font-medium">{deviceStatus.name}</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-3 text-[10px] text-muted-foreground">
-                        <span>OS: {deviceStatus.os_name || "N/A"}</span>
-                        <span>IP: {deviceStatus.ip_address || "N/A"}</span>
-                        <span>Type: {deviceStatus.device_type || "N/A"}</span>
-                        {deviceStatus.last_seen && <span>Seen: {formatDistanceToNow(new Date(deviceStatus.last_seen), { addSuffix: true })}</span>}
+                      <div className={`flex items-center gap-1 text-[10px] ${deviceStatus.status === "online" ? "text-emerald-400" : "text-red-400"}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${deviceStatus.status === "online" ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
+                        {deviceStatus.status}
                       </div>
                     </div>
-                  )}
-                </div>
+                    <div className="grid grid-cols-2 gap-x-3 text-[10px] text-muted-foreground">
+                      <span>OS: {deviceStatus.os_name || "N/A"}</span>
+                      <span>IP: {deviceStatus.ip_address || "N/A"}</span>
+                      <span>Type: {deviceStatus.device_type || "N/A"}</span>
+                      {deviceStatus.last_seen && <span>Seen: {formatDistanceToNow(new Date(deviceStatus.last_seen), { addSuffix: true })}</span>}
+                    </div>
+                  </div>
+                )}
                 {/* Quick Actions */}
                 <Separator />
                 <div className="space-y-2">
