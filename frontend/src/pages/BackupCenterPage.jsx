@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
 const STATUS_COLOR = { success: "text-emerald-400 bg-emerald-500/10", failed: "text-red-400 bg-red-500/10", running: "text-blue-400 bg-blue-500/10", warning: "text-amber-400 bg-amber-500/10" };
@@ -184,6 +185,7 @@ export default function BackupCenterPage() {
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [planTargets, setPlanTargets] = useState([]);
   const [selectedOrphans, setSelectedOrphans] = useState([]);
+  const [cancelTarget, setCancelTarget] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -259,7 +261,12 @@ export default function BackupCenterPage() {
       toast.error("Missing policy or resource id — cannot cancel");
       return;
     }
-    if (!window.confirm(`Stop backup for "${activity.resource_name}"?\nNote: Acronis only supports stop, not pause.`)) return;
+    setCancelTarget(activity);
+  };
+
+  const confirmCancelBackup = async () => {
+    const activity = cancelTarget;
+    if (!activity) return;
     try {
       await axios.post(
         `${API}/acronis/backup/cancel`,
@@ -269,6 +276,7 @@ export default function BackupCenterPage() {
       toast.success(`Stopping backup for ${activity.resource_name}`);
       setTimeout(fetchLive, 2000);
     } catch (e) { toast.error(e.response?.data?.detail || "Cancel failed"); }
+    finally { setCancelTarget(null); }
   };
 
   const openApplyPlan = (resources) => {
@@ -904,6 +912,32 @@ export default function BackupCenterPage() {
           if (orphans) handleScanOrphans();
         }}
       />
+
+      {/* Cancel Backup Confirmation */}
+      <Dialog open={!!cancelTarget} onOpenChange={v => !v && setCancelTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <StopCircle className="w-5 h-5 text-rose-400" />
+              Stop Running Backup?
+            </DialogTitle>
+            <DialogDescription>
+              You're about to stop the backup of <strong>{cancelTarget?.resource_name}</strong>.
+              <br /><br />
+              <span className="text-amber-300 text-xs">
+                ⚠️ Acronis only supports stop, not pause. The current run will be cancelled and any partial data discarded.
+                The next scheduled run will proceed normally.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelTarget(null)}>Keep Running</Button>
+            <Button className="bg-rose-600 hover:bg-rose-700" onClick={confirmCancelBackup} data-testid="confirm-cancel-backup">
+              <StopCircle className="w-4 h-4 mr-2" />Stop Backup
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

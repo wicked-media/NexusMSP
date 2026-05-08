@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "../components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
+import WatchDeviceButton from "../components/devices/WatchDeviceButton";
 import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
 import { toast } from "sonner";
 
@@ -247,6 +248,7 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
           <RemoteAccessButton
             device={dev}
             status={rdLiveStatus || dev.status}

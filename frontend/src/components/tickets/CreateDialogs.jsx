@@ -63,16 +63,75 @@ export function CreateTicketDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Linked Device</Label>
-              <Select value={formData.device_id || "none"} onValueChange={v => setFormData({ ...formData, device_id: v === "none" ? "" : v })}>
-                <SelectTrigger data-testid="create-device"><SelectValue placeholder="Select device" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-- No device --</SelectItem>
-                  {devices.filter(d => !formData.client_id || d.client_id === formData.client_id).map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name} ({d.os} - {d.ip_address || "No IP"})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div><Label>Linked Devices</Label>
+              <div className="space-y-1.5">
+                <Select
+                  value="__add"
+                  onValueChange={v => {
+                    if (v && v !== "__add" && v !== "__none") {
+                      const ids = formData.device_ids || (formData.device_id ? [formData.device_id] : []);
+                      if (!ids.includes(v)) {
+                        const next = [...ids, v];
+                        setFormData({
+                          ...formData,
+                          device_ids: next,
+                          device_id: formData.device_id || v,
+                        });
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger data-testid="create-device"><SelectValue placeholder="+ Link a device..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__add" disabled>Choose device to link...</SelectItem>
+                    {devices
+                      .filter(d => !formData.client_id || d.client_id === formData.client_id)
+                      .filter(d => !(formData.device_ids || []).includes(d.id) && d.id !== formData.device_id)
+                      .map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name} ({d.os || "OS?"})</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                {/* Chip list */}
+                {((formData.device_ids?.length || 0) > 0 || formData.device_id) && (
+                  <div className="flex flex-wrap gap-1">
+                    {(formData.device_ids?.length ? formData.device_ids : (formData.device_id ? [formData.device_id] : [])).map(did => {
+                      const d = devices.find(x => x.id === did);
+                      const isPrimary = did === formData.device_id || (!formData.device_id && did === formData.device_ids?.[0]);
+                      return (
+                        <span
+                          key={did}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] ${
+                            isPrimary
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                              : "border-border bg-muted/30"
+                          }`}
+                          title={isPrimary ? "Primary device" : "Click ⭐ to make primary"}
+                        >
+                          {isPrimary && <span className="text-amber-400">⭐</span>}
+                          <span className="truncate max-w-[120px]">{d?.name || did}</span>
+                          {!isPrimary && (
+                            <button
+                              type="button"
+                              className="text-[9px] hover:text-amber-300 px-0.5"
+                              onClick={() => setFormData({ ...formData, device_id: did })}
+                            >★</button>
+                          )}
+                          <button
+                            type="button"
+                            className="text-[10px] hover:text-rose-400 px-0.5"
+                            onClick={() => {
+                              const filtered = (formData.device_ids || []).filter(x => x !== did);
+                              const newPrimary = formData.device_id === did ? (filtered[0] || "") : formData.device_id;
+                              setFormData({ ...formData, device_ids: filtered, device_id: newPrimary });
+                            }}
+                          >×</button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

@@ -18,6 +18,7 @@ import { priorityConfig } from "@/config/ticketConfig";
 import { toast } from "sonner";
 import { API } from "@/App";
 import { useState, useEffect } from "react";
+import TeamPinDialog from "@/components/tickets/TeamPinDialog";
 
 /**
  * Compact, menu-driven detail header (Syncro-style).
@@ -51,6 +52,7 @@ export function TicketDetailHeader({
   const headers = { Authorization: `Bearer ${token}` };
   const [pinned, setPinned] = useState(false);
   const [teamPin, setTeamPin] = useState({ team_pinned: false, can_unpin: false, pinned_by_name: null });
+  const [teamPinDialogOpen, setTeamPinDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!viewingTicket?.id) return;
@@ -84,16 +86,22 @@ export function TicketDetailHeader({
         setTeamPin({ team_pinned: false });
         toast.success("Unpinned from team");
       } else {
-        const note = window.prompt("Quick note for the team (optional):", "");
-        await axios.post(
-          `${API}/team-pins/ticket/${viewingTicket.id}`,
-          { note: note || "", reason: "outage" },
-          { headers }
-        );
-        setTeamPin({ team_pinned: true, can_unpin: true });
-        toast.success("Pinned for the team 🚨");
+        // Open the dialog instead of window.prompt
+        setTeamPinDialogOpen(true);
       }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to toggle team pin"); }
+  };
+
+  const confirmTeamPin = async ({ reason, note }) => {
+    try {
+      await axios.post(
+        `${API}/team-pins/ticket/${viewingTicket.id}`,
+        { note: note || "", reason },
+        { headers }
+      );
+      setTeamPin({ team_pinned: true, can_unpin: true });
+      toast.success("Pinned for the team 🚨");
+    } catch (e) { toast.error(e.response?.data?.detail || "Pin failed"); throw e; }
   };
 
   const handleAutoQuote = async () => {
@@ -311,6 +319,13 @@ export function TicketDetailHeader({
         </Button>
         <WhyOnFireButton entityType="ticket" entityId={viewingTicket.id} />
       </div>
+
+      <TeamPinDialog
+        open={teamPinDialogOpen}
+        onOpenChange={setTeamPinDialogOpen}
+        ticketTitle={viewingTicket.ticket_number}
+        onConfirm={confirmTeamPin}
+      />
     </div>
   );
 }

@@ -273,3 +273,234 @@ async def link_device_to_acronis(device_id: str, body: dict, current_user: dict 
     update = {"acronis_resource_id": resource_id, "updated_at": datetime.now(timezone.utc).isoformat()}
     await db.devices.update_one({"id": device_id}, {"$set": update})
     return {"message": "Linked" if resource_id else "Unlinked", "acronis_resource_id": resource_id}
+
+
+# ============================================================================
+# Bulk Auto-Link: Match NexusOps devices to Acronis resources by name
+# ============================================================================
+
+@router.post("/devices/auto-link-acronis")
+async def auto_link_devices_to_acronis(body: dict | None = None, current_user: dict = Depends(get_current_user)):
+    """Bulk job: match NexusOps devices to Acronis resources by name (case-insensitive).
+    Body (optional): {"client_id": "..." to scope to a single client, "force": true to re-link already-linked}
+    """
+    body = body or {}
+    client_id = body.get("client_id")
+    force = bool(body.get("force", False))
+
+    # Pull all Acronis resources
+    try:
+        r = await acronis_service.get_resources()
+        acronis_items = r.get("items", []) if isinstance(r, dict) else []
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Acronis fetch failed: {str(e)}")
+
+    # Build lookup: name -> id (lowercased)
+    name_to_id = {}
+    for res in acronis_items:
+        if not isinstance(res, dict):
+            continue
+        rname = (res.get("name") or "").lower().strip()
+        rid = res.get("id")
+        if rname and rid:
+            name_to_id.setdefault(rname, rid)
+
+    # Get devices in scope
+    query = {} if not client_id else {"client_id": client_id}
+    if not force:
+        query["$or"] = [{"acronis_resource_id": {"$in": [None, ""]}}, {"acronis_resource_id": {"$exists": False}}]
+    devices = await db.devices.find(query, {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "acronis_resource_id": 1}).to_list(5000)
+
+    matched = []
+    skipped = []
+    no_match = []
+
+    for d in devices:
+        candidates = []
+        for field in ("name", "hostname"):
+            v = (d.get(field) or "").lower().strip()
+            if v:
+                candidates.append(v)
+        rid = None
+        for c in candidates:
+            if c in name_to_id:
+                rid = name_to_id[c]
+                break
+        if rid:
+            await db.devices.update_one(
+                {"id": d["id"]},
+                {"$set": {"acronis_resource_id": rid, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            matched.append({"device_id": d["id"], "device_name": d.get("name"), "acronis_resource_id": rid})
+        else:
+            no_match.append({"device_id": d["id"], "device_name": d.get("name")})
+
+    return {
+        "scanned": len(devices),
+        "matched": len(matched),
+        "no_match": len(no_match),
+        "skipped": len(skipped),
+        "matched_devices": matched[:50],
+        "unmatched_devices": no_match[:50],
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ============================================================================
+# Drift Watchtower: scan every recurring invoice for bill-shock drift
+# ============================================================================
+
+@router.get("/billing/drift-watchtower")
+async def drift_watchtower(min_drift: int = 1, current_user: dict = Depends(get_current_user)):
+    """Scan every active recurring invoice for drift, return summary + worst offenders.
+    `min_drift` filters out invoices with drift count below threshold.
+    """
+    invoices = await db.recurring_invoices.find(
+        {"status": {"$ne": "cancelled"}},
+        {"_id": 0}
+    ).to_list(500)
+
+    rows = []
+    total_drift_invoices = 0
+    total_bill_shock = 0.0
+    total_line_items_drifting = 0
+
+    for inv in invoices:
+        ri_id = inv.get("id")
+        if not ri_id:
+            continue
+        client_id = inv.get("client_id")
+        line_items = inv.get("line_items", []) or []
+        inv_drift_count = 0
+        inv_bill_shock = 0.0
+        drift_line_items = []
+        for li in line_items:
+            if not isinstance(li, dict):
+                continue
+            policy_id = li.get("acronis_policy_id")
+            if not policy_id:
+                continue
+            billed = int(li.get("quantity") or 0)
+            unit_price = float(li.get("unit_price") or 0)
+            counts = await _count_devices_under_policy(policy_id, client_id)
+            actual = counts.get("mapped_count", 0)
+            drift = actual - billed
+            if drift != 0:
+                inv_drift_count += 1
+                inv_bill_shock += drift * unit_price
+                drift_line_items.append({
+                    "description": li.get("description"),
+                    "billed": billed,
+                    "actual": actual,
+                    "drift": drift,
+                    "bill_shock": round(drift * unit_price, 2),
+                })
+        if inv_drift_count >= min_drift:
+            total_drift_invoices += 1
+            total_bill_shock += inv_bill_shock
+            total_line_items_drifting += inv_drift_count
+            rows.append({
+                "recurring_invoice_id": ri_id,
+                "client_id": client_id,
+                "client_name": inv.get("client_name", ""),
+                "description": inv.get("description"),
+                "drift_count": inv_drift_count,
+                "bill_shock_amount": round(inv_bill_shock, 2),
+                "drift_line_items": drift_line_items,
+                "currency": inv.get("currency", "AUD"),
+            })
+
+    rows.sort(key=lambda r: abs(r["bill_shock_amount"]), reverse=True)
+
+    return {
+        "scanned_invoices": len(invoices),
+        "drift_invoices": total_drift_invoices,
+        "drifting_line_items": total_line_items_drifting,
+        "total_bill_shock_per_period": round(total_bill_shock, 2),
+        "annualized_bill_shock_estimate": round(total_bill_shock * 12, 2),
+        "currency": "AUD",
+        "top_offenders": rows[:20],
+        "all_rows": rows,
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/billing/drift-watchtower/create-tickets")
+async def create_drift_tickets(body: dict | None = None, current_user: dict = Depends(get_current_user)):
+    """Auto-create a ticket for every recurring invoice with drift above threshold.
+    Body: {"min_pct": 10, "min_abs": 2}
+    """
+    body = body or {}
+    min_pct = float(body.get("min_pct", 10))
+    min_abs = int(body.get("min_abs", 2))
+
+    watchtower = await drift_watchtower(min_drift=1, current_user=current_user)
+    created = []
+    skipped = []
+
+    for row in watchtower.get("all_rows", []):
+        # Find a worst-case line item that exceeds threshold
+        worst = None
+        for li in row.get("drift_line_items", []):
+            billed = li.get("billed") or 0
+            drift = abs(li.get("drift") or 0)
+            pct = (drift / billed * 100) if billed else 100
+            if drift >= min_abs or pct >= min_pct:
+                if not worst or drift > abs(worst.get("drift") or 0):
+                    worst = li
+        if not worst:
+            skipped.append(row["recurring_invoice_id"])
+            continue
+        # Skip if a ticket was already auto-created in last 7 days
+        recent = await db.tickets.find_one({
+            "client_id": row.get("client_id"),
+            "tags": {"$in": ["bill-shock", "auto-generated"]},
+            "created_at": {"$gte": (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=7)).isoformat()},
+        })
+        if recent:
+            skipped.append(row["recurring_invoice_id"])
+            continue
+
+        from app.routers.ticket_suggestions import generate_ticket_number
+        bs = row.get("bill_shock_amount", 0)
+        bs_word = "under-billing" if bs > 0 else "over-billing"
+        title = f"Bill-shock detected: {row.get('client_name', 'client')} ({bs_word} ${abs(bs)}/period)"
+        description = (
+            f"Drift Watchtower auto-detected drift on recurring invoice {row.get('description')}.\n\n"
+            f"Worst-case: {worst.get('description')} — billed {worst.get('billed')}, actual {worst.get('actual')} "
+            f"(drift {worst.get('drift'):+d}, ${worst.get('bill_shock'):+.2f}/period).\n\n"
+            f"{row.get('drift_count')} line item(s) drifting. Total bill shock: ${bs:+.2f}/period (~${bs * 12:+.2f}/year)."
+        )
+        ticket_number = await generate_ticket_number("incident")
+        new_ticket = {
+            "id": __import__("uuid").uuid4().hex,
+            "ticket_number": ticket_number,
+            "title": title,
+            "description": description,
+            "client_id": row.get("client_id"),
+            "client_name": row.get("client_name"),
+            "priority": "high" if abs(bs) > 100 else "medium",
+            "status": "open",
+            "category": "billing",
+            "ticket_type": "task",
+            "impact": "medium",
+            "source": "internal",
+            "tags": ["bill-shock", "auto-generated", "drift-watchtower"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": {
+                "recurring_invoice_id": row.get("recurring_invoice_id"),
+                "bill_shock_per_period": bs,
+                "drift_line_items": row.get("drift_line_items"),
+            },
+        }
+        await db.tickets.insert_one(new_ticket.copy())
+        created.append({"ticket_id": new_ticket["id"], "ticket_number": ticket_number, "client_name": row.get("client_name")})
+
+    return {
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "created": created,
+        "thresholds": {"min_pct": min_pct, "min_abs": min_abs},
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }

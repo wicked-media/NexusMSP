@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -355,6 +355,21 @@ export default function DevicesPage() {
         </div>
         <div className="flex gap-2">
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button
+            variant="outline" size="sm"
+            className="text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/10"
+            onClick={async () => {
+              try {
+                const r = await axios.post(`${API}/devices/auto-link-acronis`, {}, { headers: { Authorization: `Bearer ${token}` } });
+                toast.success(`Auto-linked ${r.data.matched}/${r.data.scanned} devices to Acronis (${r.data.no_match} no match)`);
+                fetchData();
+              } catch (e) { toast.error(e.response?.data?.detail || "Auto-link failed"); }
+            }}
+            data-testid="auto-link-acronis-btn"
+            title="Match device names to Acronis resources"
+          >
+            <Cloud className="w-4 h-4 mr-1" />Auto-link Acronis
+          </Button>
           <Button variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn"><Radar className="w-4 h-4 mr-1" />Discover</Button>
           <Button onClick={openCreate} data-testid="add-device-btn"><Plus className="w-4 h-4 mr-1" />Add Device</Button>
         </div>
