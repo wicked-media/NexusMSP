@@ -212,6 +212,7 @@ export const routeConfig = [
   // Phase E: Security
   { path: "/dark-web-monitor", component: page("DarkWebMonitorPage"), auth: true, layout: true },
   { path: "/phishing-sim", component: page("PhishingSimPage"), auth: true, layout: true },
+  { path: "/backup-center", component: page("BackupCenterPage"), auth: true, layout: true },
   { path: "/backup-verify", component: page("BackupCenterPage"), auth: true, layout: true },
   { path: "/compliance-frameworks", component: page("ComplianceCenterPage"), auth: true, layout: true },
 
