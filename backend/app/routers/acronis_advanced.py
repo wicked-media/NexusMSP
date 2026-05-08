@@ -40,7 +40,6 @@ async def detect_acronis_orphans(stale_days: int = 30, current_user: dict = Depe
         # Build maps
         resource_map = {r.get("id"): r for r in resources if isinstance(r, dict)}
         status_map = {s.get("id"): s for s in statuses if isinstance(s, dict)}
-        agent_map = {a.get("id"): a for a in agents if isinstance(a, dict)}
 
         # Map: resource_id -> active backup applications
         backup_apps_by_resource = {}
@@ -71,7 +70,6 @@ async def detect_acronis_orphans(stale_days: int = 30, current_user: dict = Depe
             apps = backup_apps_by_resource.get(rid, [])
             status = status_map.get(rid, {})
             last_backup = status.get("last_successful_run") or status.get("last_run")
-            policy_status = status.get("policy_status", {}) or {}
 
             if not apps:
                 unprotected.append({
@@ -292,9 +290,11 @@ async def get_live_acronis_activities(current_user: dict = Depends(get_current_u
                 "id": a.get("idString", a.get("uuid", "")),
                 "state": a.get("state", ""),
                 "phase": ctx.get("phase") or progress_obj.get("currentStepName") or "",
+                "resource_id": ctx.get("id") or ctx.get("resourceId"),
                 "resource_name": ctx.get("resourceName", ""),
                 "resource_type": ctx.get("resourceKind", ""),
                 "activity_type": ctx.get("activityType", ""),
+                "policy_id": policy.get("id") or ctx.get("policyId"),
                 "plan_name": policy.get("name", ctx.get("policyName", "")),
                 "tenant_name": tenant.get("name", ""),
                 "started_at": a.get("startedAt", ""),
@@ -325,3 +325,205 @@ async def get_live_acronis_activities(current_user: dict = Depends(get_current_u
         }
     except Exception as e:
         return {"running": [], "recent": [], "stats": {}, "error": str(e)}
+
+
+# ============================================================================
+# Backup operations: Run / Cancel / Apply Plan / Remove Plan / List Policies
+# ============================================================================
+
+@router.post("/acronis/backup/run")
+async def run_backup_now(body: dict, current_user: dict = Depends(get_current_user)):
+    """Run a backup plan now for the given resources.
+    Body: {"policy_id": "...", "resource_ids": ["..."]}
+    """
+    policy_id = (body or {}).get("policy_id")
+    resource_ids = (body or {}).get("resource_ids") or []
+    if not policy_id or not resource_ids:
+        raise HTTPException(status_code=400, detail="policy_id and resource_ids required")
+    try:
+        results = await acronis_service.run_applications([{"policy_id": policy_id, "resource_ids": resource_ids}])
+        ok = bool(results) and (results[0].get("status_code") in (200, 202, 204))
+        return {"status": "started" if ok else "failed", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Run failed: {str(e)}")
+
+
+@router.post("/acronis/backup/cancel")
+async def cancel_backup(body: dict, current_user: dict = Depends(get_current_user)):
+    """Stop a running backup plan for the given resources.
+    Body: {"policy_id": "...", "resource_ids": ["..."]}
+    Acronis only supports stopping (no pause). Same endpoint as run, with state: stopped.
+    """
+    policy_id = (body or {}).get("policy_id")
+    resource_ids = (body or {}).get("resource_ids") or []
+    if not policy_id or not resource_ids:
+        raise HTTPException(status_code=400, detail="policy_id and resource_ids required")
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        url = f"{api_url}/api/policy_management/v4/applications/run"
+        payload = {"items": resource_ids, "state": "stopped", "policy_id": policy_id}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.put(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code in (200, 202, 204):
+                return {"status": "cancelled", "policy_id": policy_id, "resource_count": len(resource_ids)}
+            raise HTTPException(status_code=resp.status_code, detail=f"Acronis: {resp.text[:300]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cancel failed: {str(e)}")
+
+
+@router.get("/acronis/policies")
+async def list_acronis_policies(policy_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    """List backup policies (plans) available in this Acronis tenant.
+    Optional filter: policy_type=policy.backup.machine, policy.backup.virtual_machine, etc.
+    """
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        url = f"{api_url}/api/policy_management/v4/policies?include_settings=true"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code != 200:
+                return {"items": [], "error": f"{resp.status_code}: {resp.text[:200]}"}
+            data = resp.json()
+            raw_items = data.get("items", [])
+            # Acronis wraps each policy under a "policy" array
+            backup_items = []
+            for wrapper in raw_items:
+                if not isinstance(wrapper, dict):
+                    continue
+                policy_list = wrapper.get("policy")
+                # Some endpoints return policy as a list; some as direct dict
+                policies = policy_list if isinstance(policy_list, list) else [wrapper]
+                for p in policies:
+                    if not isinstance(p, dict):
+                        continue
+                    ptype = p.get("type", "") or ""
+                    if policy_type and ptype != policy_type:
+                        continue
+                    # Default: only show real backup plans (not security scanning, EDR, etc.)
+                    if not policy_type and not ptype.startswith("policy.backup."):
+                        continue
+                    if not p.get("name"):
+                        continue  # skip unnamed sub-plans like CDP shadow records
+                    backup_items.append({
+                        "id": p.get("id"),
+                        "name": p.get("name"),
+                        "type": ptype,
+                        "tenant_id": p.get("tenant_id"),
+                        "tenant_name": p.get("tenant_name", ""),
+                        "enabled": p.get("enabled", True),
+                        "created_at": p.get("created_at"),
+                        "updated_at": p.get("updated_at"),
+                    })
+            return {"items": backup_items, "count": len(backup_items)}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
+@router.post("/acronis/policies/apply")
+async def apply_acronis_policy(body: dict, current_user: dict = Depends(get_current_user)):
+    """Apply (assign) a backup policy to one or more resources.
+    Body: {"policy_id": "...", "resource_ids": ["..."], "run_now": false}
+    Creates an application binding via POST /api/policy_management/v4/applications.
+    Optionally triggers an immediate run.
+    """
+    policy_id = (body or {}).get("policy_id")
+    resource_ids = (body or {}).get("resource_ids") or []
+    run_now = bool((body or {}).get("run_now", False))
+    if not policy_id or not resource_ids:
+        raise HTTPException(status_code=400, detail="policy_id and resource_ids required")
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        url = f"{api_url}/api/policy_management/v4/applications"
+        results = []
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for rid in resource_ids:
+                payload = {"policy_id": policy_id, "context": {"id": rid}, "enabled": True}
+                resp = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+                results.append({
+                    "resource_id": rid,
+                    "status_code": resp.status_code,
+                    "body": resp.text[:300] if resp.status_code >= 400 else "ok",
+                    "application_id": (resp.json() or {}).get("id") if resp.status_code in (200, 201) else None,
+                })
+
+        ok_count = sum(1 for r in results if r["status_code"] in (200, 201))
+
+        # Optionally trigger an immediate run
+        run_result = None
+        if run_now and ok_count > 0:
+            run_result = await acronis_service.run_applications([{"policy_id": policy_id, "resource_ids": resource_ids}])
+
+        return {
+            "status": "applied" if ok_count == len(resource_ids) else "partial",
+            "applied_count": ok_count,
+            "total": len(resource_ids),
+            "results": results,
+            "run_result": run_result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Apply policy failed: {str(e)}")
+
+
+@router.delete("/acronis/applications/{application_id}")
+async def remove_acronis_application(application_id: str, current_user: dict = Depends(get_current_user)):
+    """Remove (unassign) a backup plan from a resource."""
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.delete(
+                f"{api_url}/api/policy_management/v4/applications/{application_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code in (200, 202, 204):
+                return {"status": "removed", "application_id": application_id}
+            raise HTTPException(status_code=resp.status_code, detail=f"Acronis: {resp.text[:300]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Remove failed: {str(e)}")
+
+
+@router.get("/acronis/resources/{resource_id}/applications")
+async def get_resource_applications(resource_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all backup plans currently assigned to a resource."""
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{api_url}/api/policy_management/v4/applications?context_id={resource_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {"items": [], "error": f"{resp.status_code}: {resp.text[:200]}"}
+            data = resp.json()
+            items = []
+            for app in data.get("items", []):
+                if not isinstance(app, dict):
+                    continue
+                policy = app.get("policy", {}) or {}
+                items.append({
+                    "application_id": app.get("id"),
+                    "policy_id": policy.get("id"),
+                    "policy_name": policy.get("name"),
+                    "policy_type": policy.get("type"),
+                    "enabled": app.get("enabled", True),
+                    "state": app.get("state"),
+                })
+            return {"items": items, "count": len(items)}
+    except Exception as e:
+        return {"items": [], "error": str(e)}

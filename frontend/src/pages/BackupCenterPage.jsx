@@ -14,9 +14,10 @@ import {
   HardDrive, CheckCircle, XCircle, Clock, AlertTriangle, Search, RefreshCw, Loader2,
   Shield, Database, Play, Activity, ExternalLink, Zap, Cloud, Wifi, WifiOff,
   Ghost, Skull, AlertCircle, Sparkles, Pause, RotateCw, Eye, Settings,
-  Server, ArrowUpRight, Trash2, FileQuestion, Bell,
+  Server, ArrowUpRight, Trash2, FileQuestion, Bell, StopCircle, Wand2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
 const STATUS_COLOR = { success: "text-emerald-400 bg-emerald-500/10", failed: "text-red-400 bg-red-500/10", running: "text-blue-400 bg-blue-500/10", warning: "text-amber-400 bg-amber-500/10" };
@@ -46,11 +47,12 @@ function AnimatedCounter({ value, suffix = "", duration = 800 }) {
 }
 
 /** ── Live running-backup card with animated progress ring + shimmer ── */
-function RunningBackupCard({ activity }) {
+function RunningBackupCard({ activity, onCancel }) {
   const pct = Math.max(0, Math.min(100, Math.round(activity.progress || 0)));
   const transferred = activity.transferred_bytes ? (activity.transferred_bytes / 1e9).toFixed(2) : null;
   const total = activity.total_bytes ? (activity.total_bytes / 1e9).toFixed(2) : null;
   const speedMB = activity.speed_bps ? (activity.speed_bps / 1e6).toFixed(1) : null;
+  const canCancel = activity.policy_id && (activity.resource_id || (activity.context && activity.context.id));
 
   return (
     <Card className="relative overflow-hidden border-cyan-500/40 bg-gradient-to-br from-cyan-500/[0.06] via-blue-500/[0.04] to-violet-500/[0.06]" data-testid={`running-backup-${activity.id}`}>
@@ -115,6 +117,21 @@ function RunningBackupCard({ activity }) {
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse" />
               </div>
             </div>
+
+            {/* Action buttons */}
+            <div className="mt-2 flex items-center justify-end gap-1">
+              {canCancel && onCancel && (
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-6 px-2 text-[10px] text-rose-300 hover:bg-rose-500/15 hover:text-rose-200"
+                  onClick={() => onCancel(activity)}
+                  title="Stop this backup (Acronis: cancel run)"
+                  data-testid={`cancel-backup-${activity.id}`}
+                >
+                  <StopCircle className="w-3 h-3 mr-1" />Stop
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </CardContent>
@@ -164,6 +181,9 @@ export default function BackupCenterPage() {
   const [scanning, setScanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [planTargets, setPlanTargets] = useState([]);
+  const [selectedOrphans, setSelectedOrphans] = useState([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -232,6 +252,41 @@ export default function BackupCenterPage() {
       if (r.data?.url) window.open(r.data.url, "_blank");
       else toast.error("Acronis console URL not available");
     } catch { toast.error("Failed to open console"); }
+  };
+
+  const handleCancelBackup = async (activity) => {
+    if (!activity.policy_id || !activity.resource_id) {
+      toast.error("Missing policy or resource id — cannot cancel");
+      return;
+    }
+    if (!window.confirm(`Stop backup for "${activity.resource_name}"?\nNote: Acronis only supports stop, not pause.`)) return;
+    try {
+      await axios.post(
+        `${API}/acronis/backup/cancel`,
+        { policy_id: activity.policy_id, resource_ids: [activity.resource_id] },
+        { headers },
+      );
+      toast.success(`Stopping backup for ${activity.resource_name}`);
+      setTimeout(fetchLive, 2000);
+    } catch (e) { toast.error(e.response?.data?.detail || "Cancel failed"); }
+  };
+
+  const openApplyPlan = (resources) => {
+    if (!resources || resources.length === 0) {
+      toast.error("No resources selected");
+      return;
+    }
+    setPlanTargets(resources);
+    setPlanDialogOpen(true);
+  };
+
+  const toggleOrphanSelection = (resource) => {
+    setSelectedOrphans(prev => {
+      const exists = prev.find(r => (r.resource_id || r.id) === (resource.resource_id || resource.id));
+      return exists
+        ? prev.filter(r => (r.resource_id || r.id) !== (resource.resource_id || resource.id))
+        : [...prev, resource];
+    });
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -384,7 +439,7 @@ export default function BackupCenterPage() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {liveActivities.running.map(a => <RunningBackupCard key={a.id} activity={a} />)}
+              {liveActivities.running.map(a => <RunningBackupCard key={a.id} activity={a} onCancel={handleCancelBackup} />)}
             </div>
           )}
 
@@ -431,6 +486,19 @@ export default function BackupCenterPage() {
 
         {/* ACRONIS CONSOLE */}
         <TabsContent value="acronis" className="mt-4 space-y-4">
+          <Card className="border-amber-500/20 bg-amber-500/[0.03]">
+            <CardContent className="py-2.5 px-4 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-xs font-medium text-amber-300">Acronis API limitations</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Acronis Cyber Cloud's public API supports <strong>Run Now</strong>, <strong>Stop running backup</strong>, and <strong>Apply / change backup plan</strong> — but
+                  does <strong>not</strong> expose Pause/Resume or one-off scheduling. Schedules are baked into the policy itself; to change cadence, edit the policy in Acronis Cloud or apply a different plan from here.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Quick Actions panel */}
             <Card className="lg:col-span-1 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 border-cyan-500/20">
@@ -586,22 +654,80 @@ export default function BackupCenterPage() {
               {orphans.unprotected?.length > 0 && (
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2"><FileQuestion className="w-4 h-4 text-rose-400" />Unprotected Resources ({orphans.unprotected.length})</CardTitle>
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span className="flex items-center gap-2"><FileQuestion className="w-4 h-4 text-rose-400" />Unprotected Resources ({orphans.unprotected.length})</span>
+                      <div className="flex gap-2">
+                        {selectedOrphans.length > 0 && (
+                          <Button
+                            size="sm" variant="outline"
+                            className="h-7 text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10"
+                            onClick={() => openApplyPlan(selectedOrphans)}
+                            data-testid="apply-plan-bulk-btn"
+                          >
+                            <Wand2 className="w-3 h-3 mr-1" />
+                            Apply Plan to {selectedOrphans.length} selected
+                          </Button>
+                        )}
+                        {selectedOrphans.length > 0 && (
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedOrphans([])}>
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
                     <ScrollArea className="h-[280px]">
                       <Table>
-                        <TableHeader><TableRow><TableHead>Resource</TableHead><TableHead>Type</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-8"></TableHead>
+                            <TableHead>Resource</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Tenant</TableHead>
+                            <TableHead>Severity</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
                         <TableBody>
-                          {orphans.unprotected.map(u => (
-                            <TableRow key={u.resource_id}>
-                              <TableCell className="font-medium text-sm">{u.resource_name}</TableCell>
-                              <TableCell className="text-xs capitalize">{u.resource_type}</TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{u.tenant_name || "-"}</TableCell>
-                              <TableCell><Badge variant="destructive" className="text-[10px]">{u.severity}</Badge></TableCell>
-                              <TableCell><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => handleOpenAcronis(u.resource_id)}><ExternalLink className="w-3 h-3" /></Button></TableCell>
-                            </TableRow>
-                          ))}
+                          {orphans.unprotected.map(u => {
+                            const isSelected = selectedOrphans.find(s => s.resource_id === u.resource_id);
+                            return (
+                              <TableRow key={u.resource_id} className={isSelected ? "bg-cyan-500/5" : ""}>
+                                <TableCell className="px-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!isSelected}
+                                    onChange={() => toggleOrphanSelection(u)}
+                                    className="w-3.5 h-3.5 rounded border-border"
+                                    data-testid={`orphan-select-${u.resource_id}`}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium text-sm">{u.resource_name}</TableCell>
+                                <TableCell className="text-xs capitalize">{u.resource_type}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">{u.tenant_name || "-"}</TableCell>
+                                <TableCell><Badge variant="destructive" className="text-[10px]">{u.severity}</Badge></TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost" size="sm"
+                                    className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10"
+                                    onClick={() => openApplyPlan([u])}
+                                    title="Apply backup plan to this resource"
+                                    data-testid={`apply-plan-${u.resource_id}`}
+                                  >
+                                    <Wand2 className="w-3 h-3 mr-1" />Apply Plan
+                                  </Button>
+                                  <Button
+                                    variant="ghost" size="sm" className="h-7 w-7 p-0"
+                                    onClick={() => handleOpenAcronis(u.resource_id)}
+                                    title="Open in Acronis"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </ScrollArea>
@@ -766,6 +892,18 @@ export default function BackupCenterPage() {
           </>}
         </TabsContent>
       </Tabs>
+
+      <ChangePlanDialog
+        open={planDialogOpen}
+        onOpenChange={setPlanDialogOpen}
+        token={token}
+        resources={planTargets}
+        onApplied={() => {
+          setSelectedOrphans([]);
+          // Re-scan orphans after apply
+          if (orphans) handleScanOrphans();
+        }}
+      />
     </div>
   );
 }
