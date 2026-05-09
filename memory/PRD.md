@@ -8,6 +8,26 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Service Catalog wiring + Notify Channels + Chat Pro overhaul)
+
+### 🧩 Service Catalog wired into ticket creation
+- `TicketCreate.service_code` field; backend looks up `service_catalog`, applies priority + SLA + billing/category to ticket
+- Frontend Create Ticket dialog gains Service Catalog dropdown (`/api/pro-pack/service-catalog`), auto-fills priority + category from service definition
+- Wired in `/app/frontend/src/pages/TicketsPage.jsx` (services state + fetch) and `CreateDialogs.jsx` (selector)
+
+### 📡 Notify Channels event publisher
+- New service `app/services/notify_publish.py` — fire-and-forget Slack/Teams/Discord webhook poster
+- Hooked into `/api/tickets` POST → `ticket_created` event published with priority emoji, ticket #, client, title
+- Channels subscribed via `events: [...]` array fire automatically; failures are logged, never block ticket creation
+
+### 💬 Chat Pro — full Slack-style internal team chat (`/team-chat`)
+**New backend endpoints (`/api/chat/*`):** reactions toggle · thread replies + retrieve · edit message · soft-delete · pin/unpin + list pinned · search (regex) · file upload (base64, ≤10 MB) · typing indicator (5s window).
+
+**New frontend page `/app/frontend/src/pages/TeamChatPage.jsx`:** 3-pane layout — sidebar (channels + DMs + team), main feed with hover action toolbar (react/reply/pin/edit/delete), thread sidebar, emoji picker, file paperclip, search, typing indicator, member list. Full-featured Slack-equivalent.
+
+### Tested
+- `iteration_161.json` — 17/17 backend tests pass · frontend Team Chat + Service Catalog dropdown verified · 0 issues.
+
 ## Recent Updates (Feb 2026 — Pro Pack: IA cleanup + 20 new feature pages)
 
 ### 🧹 Information Architecture Cleanup
