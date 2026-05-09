@@ -273,11 +273,66 @@ async def _chain_reactions_loop():
 async def _recurring_invoice_scheduler():
     """Background loop that checks for due recurring invoices and auto-generates them."""
     import asyncio
+    import uuid as _uuid
+    from datetime import timedelta
     while True:
         try:
             await asyncio.sleep(300)  # Check every 5 minutes
             now = datetime.now(timezone.utc)
             today_str = now.strftime("%Y-%m-%d")
+
+            # === Auto CPI/Annual Indexation tick ===
+            try:
+                idx_due = await db.recurring_invoices.find({
+                    "indexation.enabled": True,
+                    "status": "active",
+                    "indexation.next_apply": {"$lte": today_str},
+                }, {"_id": 0}).to_list(200)
+                for ri in idx_due:
+                    idx = ri.get("indexation", {})
+                    pct = float(idx.get("pct", 0) or 0)
+                    if pct == 0:
+                        continue
+                    new_lines = []
+                    old_total = 0.0
+                    for li in ri.get("line_items", []):
+                        old_rate = float(li.get("rate", 0) or 0)
+                        qty = float(li.get("quantity", 1) or 1)
+                        new_rate = round(old_rate * (1 + pct / 100), 2)
+                        new_amount = round(qty * new_rate, 2)
+                        old_total += float(li.get("amount", 0) or 0)
+                        new_lines.append({**li, "rate": new_rate, "amount": new_amount})
+                    subtotal = sum(li["amount"] for li in new_lines)
+                    tax_rate = float(ri.get("tax_rate", 0))
+                    tax_amount = round(subtotal * tax_rate / 100, 2)
+                    try:
+                        anniv_dt = datetime.fromisoformat(idx.get("next_apply")).replace(tzinfo=timezone.utc)
+                        new_next = anniv_dt.replace(year=anniv_dt.year + 1).date().isoformat()
+                    except Exception:
+                        new_next = (now + timedelta(days=365)).date().isoformat()
+                    await db.recurring_invoices.update_one(
+                        {"id": ri["id"]},
+                        {"$set": {
+                            "line_items": new_lines, "subtotal": subtotal,
+                            "tax_amount": tax_amount, "amount": round(subtotal + tax_amount, 2),
+                            "indexation.next_apply": new_next,
+                            "indexation.last_applied": today_str,
+                            "updated_at": now.isoformat(),
+                        }}
+                    )
+                    await db.recurring_indexation_log.insert_one({
+                        "id": f"idx-{_uuid.uuid4().hex[:8]}",
+                        "ri_id": ri["id"],
+                        "client_name": ri.get("client_name"),
+                        "applied_at": now.isoformat(),
+                        "pct": pct,
+                        "old_total": round(old_total, 2),
+                        "new_total": round(subtotal, 2),
+                        "delta": round(subtotal - old_total, 2),
+                    })
+                    logger.info(f"Indexation applied (+{pct}%) → {ri.get('client_name')}: ${old_total:.2f} → ${subtotal:.2f}")
+            except Exception as _ie:
+                logger.debug(f"Indexation tick error: {_ie}")
 
             # Find active recurring invoices that are due today or overdue
             due_invoices = await db.recurring_invoices.find({

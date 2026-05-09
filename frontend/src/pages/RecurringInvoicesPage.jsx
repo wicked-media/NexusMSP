@@ -110,7 +110,18 @@ export default function RecurringInvoicesPage() {
     if (!showEdit) return;
     setSaving(true);
     try {
-      const data = { ...showEdit, tax_rate: parseFloat(showEdit.tax_rate) || 0, line_items: showEdit.line_items?.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
+      const data = {
+        ...showEdit,
+        tax_rate: parseFloat(showEdit.tax_rate) || 0,
+        line_items: showEdit.line_items?.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 }))
+      };
+      if (data.indexation?.enabled) {
+        // Persist via dedicated endpoint so next_apply is bootstrapped
+        await axios.post(`${API}/billing-pro/recurring/${showEdit.id}/set-indexation`, {
+          enabled: true, pct: parseFloat(data.indexation.pct) || 0,
+          anniversary_date: data.indexation.anniversary_date,
+        }, { headers });
+      }
       await axios.put(`${API}/recurring-invoices/${showEdit.id}`, data, { headers });
       toast.success("Updated");
       setShowEdit(null);
@@ -577,6 +588,27 @@ export default function RecurringInvoicesPage() {
                     <p className="text-[10px] text-muted-foreground">Live seat × unit-price subs attached each generation.</p>
                   </div>
                 </div>
+              </div>
+              <div className="flex items-center gap-4 p-3 rounded-lg border bg-emerald-500/[0.03] border-emerald-500/20">
+                <Switch
+                  checked={!!showEdit.indexation?.enabled}
+                  onCheckedChange={v => setShowEdit(p => ({ ...p, indexation: { ...(p.indexation || {}), enabled: v, pct: p.indexation?.pct ?? 3, anniversary_date: p.indexation?.anniversary_date || p.start_date || new Date().toISOString().slice(0, 10) } }))}
+                  data-testid="ri-edit-indexation-toggle"
+                />
+                <div className="flex-1 flex items-start gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Auto CPI / Annual Indexation</p>
+                    <p className="text-[10px] text-muted-foreground">Auto-bump unit prices on each anniversary.</p>
+                  </div>
+                </div>
+                {showEdit.indexation?.enabled && (
+                  <div className="flex items-center gap-2">
+                    <Input type="number" step="0.1" className="w-20 h-8" value={showEdit.indexation?.pct ?? 3} onChange={e => setShowEdit(p => ({ ...p, indexation: { ...(p.indexation || {}), pct: parseFloat(e.target.value) || 0 } }))} data-testid="ri-indexation-pct" />
+                    <span className="text-xs">%/yr</span>
+                    <Input type="date" className="w-36 h-8" value={(showEdit.indexation?.anniversary_date || "").slice(0, 10)} onChange={e => setShowEdit(p => ({ ...p, indexation: { ...(p.indexation || {}), anniversary_date: e.target.value } }))} />
+                  </div>
+                )}
               </div>
               <div><Label>Notes</Label><Textarea value={showEdit.notes || ""} onChange={e => setShowEdit(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
             </div>

@@ -340,6 +340,8 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
     tax_rate: float = 0.0
+    discount_pct: float = 0.0
+    discount_amount: float = 0.0
     is_recurring: bool = False
     recurring_interval: str = "monthly"
     recurring_start_date: Optional[str] = None

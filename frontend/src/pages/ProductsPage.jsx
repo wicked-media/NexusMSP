@@ -19,7 +19,7 @@ import {
   Plus, Search, Loader2, Package, Edit, Trash2, DollarSign, Tag,
   BarChart3, AlertTriangle, ArrowUpDown, ShoppingCart, RefreshCw,
   Box, Layers, Archive, Printer, QrCode, ArrowDown, ArrowUp,
-  History, Copy, ChevronRight, Link2, Truck, Unlink
+  History, Copy, ChevronRight, Link2, Truck, Unlink, Calculator
 } from "lucide-react";
 
 const CATEGORIES = ["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"];
@@ -110,7 +110,8 @@ export default function ProductsPage() {
       tax_rate: String(p.tax_rate || 0), quantity_in_stock: String(p.quantity_in_stock),
       reorder_level: String(p.reorder_level || 5), unit: p.unit || "each",
       is_active: p.is_active !== false, is_taxable: p.is_taxable !== false,
-      is_recurring: p.is_recurring || false, billing_cycle: p.billing_cycle || "monthly"
+      is_recurring: p.is_recurring || false, billing_cycle: p.billing_cycle || "monthly",
+      pricing_tiers: p.pricing_tiers || []
     });
     setIsFormOpen(true);
   };
@@ -120,12 +121,21 @@ export default function ProductsPage() {
     const payload = { ...form, cost_price: parseFloat(form.cost_price) || 0, retail_price: parseFloat(form.retail_price) || 0, tax_rate: parseFloat(form.tax_rate) || 0, quantity_in_stock: parseInt(form.quantity_in_stock) || 0, reorder_level: parseInt(form.reorder_level) || 5 };
     if (!editing && payload.sku) payload.barcode = payload.sku;
     try {
+      let savedId = editing?.id;
       if (editing) {
         await axios.put(`${API}/products/${editing.id}`, payload, { headers });
         toast.success("Product updated");
       } else {
-        await axios.post(`${API}/products`, payload, { headers });
+        const r = await axios.post(`${API}/products`, payload, { headers });
+        savedId = r.data?.id;
         toast.success("Product created");
+      }
+      // Save tier pricing separately to dedicated endpoint
+      if (savedId && Array.isArray(form.pricing_tiers)) {
+        await axios.put(`${API}/billing-pro/products/${savedId}/pricing-tiers`,
+          { tiers: form.pricing_tiers.filter(t => t.min_qty && t.unit_price >= 0) },
+          { headers }
+        ).catch(() => null);
       }
       setIsFormOpen(false); fetchProducts();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
@@ -281,7 +291,25 @@ export default function ProductsPage() {
           <Separator />
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Cost Price ($)</Label><Input type="number" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} data-testid="product-cost" /></div>
-            <div><Label>Retail Price ($)</Label><Input type="number" step="0.01" value={form.retail_price} onChange={e => setForm({ ...form, retail_price: e.target.value })} data-testid="product-price" /></div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1"><Label>Retail Price ($)</Label><Input type="number" step="0.01" value={form.retail_price} onChange={e => setForm({ ...form, retail_price: e.target.value })} data-testid="product-price" /></div>
+              <Button
+                type="button" size="sm" variant="outline" className="mb-0.5"
+                onClick={async () => {
+                  const cost = parseFloat(form.cost_price) || 0;
+                  if (cost <= 0) { toast.error("Set cost price first"); return; }
+                  try {
+                    const r = await axios.post(`${API}/billing-pro/products/suggest-retail`, { cost_price: cost, target_margin_pct: 35 }, { headers });
+                    setForm(p => ({ ...p, retail_price: String(r.data.suggested_retail) }));
+                    toast.success(`Retail set for ~35% margin (markup ${r.data.markup_pct}%)`);
+                  } catch { toast.error("Suggest failed"); }
+                }}
+                data-testid="suggest-retail-btn"
+                title="Auto-set retail for 35% margin"
+              >
+                <Calculator className="w-3.5 h-3.5" />
+              </Button>
+            </div>
             <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -297,6 +325,28 @@ export default function ProductsPage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          {/* Quantity-Break Tier Pricing */}
+          <Separator />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Quantity-Break Pricing (Tiers)</Label>
+              <Button type="button" size="sm" variant="ghost"
+                onClick={() => setForm(p => ({ ...p, pricing_tiers: [...(p.pricing_tiers || []), { min_qty: 1, unit_price: parseFloat(p.retail_price) || 0 }] }))}
+                data-testid="add-tier-btn"
+              ><Plus className="w-3.5 h-3.5 mr-1" />Add Tier</Button>
+            </div>
+            {(form.pricing_tiers || []).length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">No tiers — flat price applies. Add tiers like: 1+=$100, 10+=$90, 50+=$80.</p>
+            ) : (form.pricing_tiers || []).map((t, i) => (
+              <div key={i} className="flex items-center gap-2" data-testid={`tier-${i}`}>
+                <Label className="text-xs w-12">Min Qty</Label>
+                <Input type="number" className="w-24" value={t.min_qty} onChange={e => setForm(p => { const t2 = [...p.pricing_tiers]; t2[i] = { ...t2[i], min_qty: parseInt(e.target.value) || 1 }; return { ...p, pricing_tiers: t2 }; })} />
+                <Label className="text-xs">Unit Price $</Label>
+                <Input type="number" step="0.01" className="w-32" value={t.unit_price} onChange={e => setForm(p => { const t2 = [...p.pricing_tiers]; t2[i] = { ...t2[i], unit_price: parseFloat(e.target.value) || 0 }; return { ...p, pricing_tiers: t2 }; })} />
+                <Button type="button" size="sm" variant="ghost" onClick={() => setForm(p => ({ ...p, pricing_tiers: p.pricing_tiers.filter((_, ii) => ii !== i) }))}><Trash2 className="w-3.5 h-3.5 text-rose-400" /></Button>
+              </div>
+            ))}
           </div>
           <Separator />
           <div className="flex items-center gap-6">

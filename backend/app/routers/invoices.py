@@ -74,32 +74,109 @@ async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends
 async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depends(get_current_user)):
     client = await db.clients.find_one({"id": invoice_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
-    
-    subtotal = sum(item.get('total', item.get('quantity', 1) * item.get('unit_price', 0)) for item in invoice_data.line_items)
-    tax_rate = invoice_data.tax_rate or 0.0
-    tax = subtotal * (tax_rate / 100)
-    total = subtotal + tax
-    
-    invoice = Invoice(
+
+    # ---- Calculate totals supporting per-line tax + per-line discount + invoice-level discount ----
+    payload = invoice_data.model_dump()
+    line_items = payload.get("line_items", []) or []
+    invoice_tax_rate = float(payload.get("tax_rate") or 0.0)
+    inv_discount_pct = float(payload.get("discount_pct") or 0.0)
+    inv_discount_amt = float(payload.get("discount_amount") or 0.0)
+
+    subtotal = 0.0
+    line_tax_total = 0.0
+    enriched_lines = []
+    for li in line_items:
+        qty = float(li.get("quantity", 1) or 1)
+        unit = float(li.get("unit_price", li.get("rate", 0)) or 0)
+        line_disc_pct = float(li.get("discount_pct", 0) or 0)
+        line_total_pre = qty * unit
+        line_disc_amt = round(line_total_pre * line_disc_pct / 100, 2)
+        line_total = round(line_total_pre - line_disc_amt, 2)
+        line_tax_pct = float(li.get("tax_rate", invoice_tax_rate) or 0)
+        line_tax = round(line_total * line_tax_pct / 100, 2)
+        subtotal += line_total
+        line_tax_total += line_tax
+        enriched_lines.append({**li, "quantity": qty, "unit_price": unit, "discount_pct": line_disc_pct,
+                               "discount_amount": line_disc_amt, "tax_rate": line_tax_pct,
+                               "tax_amount": line_tax, "total": line_total})
+
+    # Apply invoice-level discount
+    if inv_discount_pct:
+        inv_discount_amt = round(subtotal * inv_discount_pct / 100, 2)
+    discounted_subtotal = max(0, round(subtotal - inv_discount_amt, 2))
+
+    # If line items had per-line tax, use that. Otherwise apply flat tax rate to discounted subtotal.
+    if line_tax_total > 0:
+        # Recalculate per-line tax against discounted subtotal proportionally if invoice-level discount
+        if inv_discount_amt and subtotal:
+            ratio = discounted_subtotal / subtotal
+            tax = round(line_tax_total * ratio, 2)
+        else:
+            tax = round(line_tax_total, 2)
+    else:
+        tax = round(discounted_subtotal * invoice_tax_rate / 100, 2)
+
+    total = round(discounted_subtotal + tax, 2)
+
+    # Smart numbering (optional override)
+    invoice_number = None
+    cfg = await db.settings.find_one({"key": "invoice_numbering"}, {"_id": 0}) or {}
+    cfg_val = cfg.get("value") or {}
+    if cfg_val.get("format"):
+        from datetime import datetime as _dt
+        now = _dt.now(timezone.utc)
+        fy_start = int(cfg_val.get("fy_start_month", 7))
+        fy = now.year if now.month >= fy_start else now.year - 1
+        seq_doc = await db.settings.find_one_and_update(
+            {"key": "invoice_seq"},
+            {"$inc": {"value": 1}},
+            upsert=True,
+            return_document=True,
+        ) or {"value": 1}
+        seq = int(seq_doc.get("value") or 1)
+        client_prefix = (client_name or "INV").upper().replace(" ", "")[:4]
+        try:
+            invoice_number = cfg_val["format"].format(
+                YYYY=now.year, YY=str(now.year)[-2:],
+                MM=f"{now.month:02d}", FY=fy, CLIENT=client_prefix, SEQ=seq,
+            )
+        except Exception:
+            invoice_number = None
+
+    # Approval workflow
+    approval_cfg = await db.settings.find_one({"key": "invoice_approval"}, {"_id": 0}) or {}
+    approval_val = approval_cfg.get("value") or {}
+    needs_approval = bool(approval_val.get("enabled")) and total >= float(approval_val.get("threshold", 5000))
+    initial_status = "pending_approval" if needs_approval else "draft"
+
+    invoice_kwargs = dict(
         client_id=invoice_data.client_id,
         client_name=client_name,
         contract_id=invoice_data.contract_id,
         due_date=invoice_data.due_date,
         notes=invoice_data.notes,
-        line_items=invoice_data.line_items,
+        line_items=enriched_lines,
         subtotal=subtotal,
         tax=tax,
-        tax_rate=tax_rate,
+        tax_rate=invoice_tax_rate,
         total=total,
         payment_status="unpaid",
+        status=initial_status,
         is_recurring=invoice_data.is_recurring,
         recurring_interval=invoice_data.recurring_interval,
         recurring_start_date=invoice_data.recurring_start_date,
         recurring_end_date=invoice_data.recurring_end_date,
         recurring_next_date=invoice_data.recurring_start_date,
     )
+    if invoice_number:
+        invoice_kwargs["invoice_number"] = invoice_number
+    invoice = Invoice(**invoice_kwargs)
     doc = invoice.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    # Persist enrichment fields not in the base model
+    doc["discount_pct"] = inv_discount_pct
+    doc["discount_amount"] = inv_discount_amt
+    doc["needs_approval"] = needs_approval
     await db.invoices.insert_one(doc)
     doc.pop("_id", None)
     await log_activity(current_user, "created", "invoice", invoice.id, invoice.invoice_number, f"Created invoice {invoice.invoice_number} for {client_name}", metadata={"client_name": client_name, "total": total})

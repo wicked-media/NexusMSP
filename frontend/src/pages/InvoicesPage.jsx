@@ -22,7 +22,7 @@ import {
   CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
   Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
-  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap
+  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap, FileSpreadsheet, CheckSquare
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -87,9 +87,11 @@ export default function InvoicesPage() {
   const [agingReport, setAgingReport] = useState(null);
   const [revenueAnalytics, setRevenueAnalytics] = useState(null);
   const [topView, setTopView] = useState("list"); // list | aging | revenue
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", due_date: "", notes: "",
-    line_items: [], tax_rate: "0",
+    line_items: [], tax_rate: "0", discount_pct: "0", discount_amount: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
   });
@@ -184,12 +186,55 @@ export default function InvoicesPage() {
   const removeLineItem = (idx) => setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
   const calcSubtotal = () => form.line_items.reduce((s, li) => s + ((li.quantity || 0) * (li.unit_price || 0)), 0);
 
+  const handleBulkAction = async (action) => {
+    if (selectedIds.size === 0) return;
+    const confirmMsg = action === "delete" ? `Delete ${selectedIds.size} invoice(s)? This cannot be undone.` :
+                       action === "void" ? `Void ${selectedIds.size} invoice(s)?` : null;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBulkBusy(true);
+    try {
+      const res = await axios.post(`${API}/billing-pro/invoices/bulk-action`, { invoice_ids: [...selectedIds], action }, { headers });
+      const n = res.data.updated ?? res.data.deleted ?? 0;
+      toast.success(`${action.replace("_", " ")} → ${n} invoice(s)`);
+      setSelectedIds(new Set());
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
+    finally { setBulkBusy(false); }
+  };
+
+  const handleExportCsv = async () => {
+    setBulkBusy(true);
+    try {
+      const ids = [...selectedIds];
+      const res = await axios.post(`${API}/billing-pro/invoices/export-csv`,
+        ids.length > 0 ? { invoice_ids: ids } : { filter: { status: filterStatus } },
+        { headers });
+      const blob = new Blob([res.data.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = res.data.filename || "invoices.csv"; a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${res.data.count} invoice(s)`);
+    } catch { toast.error("Export failed"); }
+    finally { setBulkBusy(false); }
+  };
+
   const handleSave = async () => {
     if (!form.client_id) { toast.error("Client is required"); return; }
     if (!form.due_date) { toast.error("Due date is required"); return; }
     const payload = {
-      ...form, tax_rate: parseFloat(form.tax_rate) || 0,
-      line_items: form.line_items.map(li => ({ ...li, total: (li.quantity || 0) * (li.unit_price || 0) }))
+      ...form,
+      tax_rate: parseFloat(form.tax_rate) || 0,
+      discount_pct: parseFloat(form.discount_pct) || 0,
+      discount_amount: parseFloat(form.discount_amount) || 0,
+      line_items: form.line_items.map(li => {
+        const q = li.quantity || 0;
+        const u = li.unit_price || 0;
+        const dpct = parseFloat(li.discount_pct) || 0;
+        const tpct = parseFloat(li.tax_rate) || 0;
+        const lineTotal = q * u * (1 - dpct / 100);
+        return { ...li, discount_pct: dpct, tax_rate: tpct, total: lineTotal };
+      })
     };
     try {
       if (editing) {
@@ -1105,12 +1150,39 @@ export default function InvoicesPage() {
         </Select>
       </div>
 
+      {/* Bulk Actions Toolbar (visible when items selected) */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-cyan-500/10 border border-cyan-500/30" data-testid="bulk-toolbar">
+          <CheckSquare className="w-4 h-4 text-cyan-400" />
+          <span className="text-sm font-medium text-cyan-300">{selectedIds.size} selected</span>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="h-7">Clear</Button>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("mark_sent")} data-testid="bulk-mark-sent" className="h-7"><Send className="w-3 h-3 mr-1" />Mark Sent</Button>
+            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("mark_paid")} data-testid="bulk-mark-paid" className="h-7"><DollarSign className="w-3 h-3 mr-1" />Mark Paid</Button>
+            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={handleExportCsv} data-testid="bulk-export-csv" className="h-7"><FileSpreadsheet className="w-3 h-3 mr-1" />Export CSV</Button>
+            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("void")} className="h-7 border-amber-500/30 text-amber-300"><Ban className="w-3 h-3 mr-1" />Void</Button>
+            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("delete")} className="h-7 border-rose-500/30 text-rose-300"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
+          </div>
+        </div>
+      )}
+
       {/* Invoice Table */}
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(inv => selectedIds.has(inv.id))}
+                    onChange={e => {
+                      if (e.target.checked) setSelectedIds(new Set(filtered.map(i => i.id)));
+                      else setSelectedIds(new Set());
+                    }}
+                    data-testid="bulk-select-all"
+                  />
+                </TableHead>
                 <TableHead>Invoice #</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead>
                 <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Paid</TableHead>
                 <TableHead className="text-right">Balance</TableHead><TableHead>Payment</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
@@ -1118,7 +1190,7 @@ export default function InvoicesPage() {
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
               ) : filtered.map(inv => {
                 const pStatus = inv.payment_status || "unpaid";
                 const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
@@ -1127,6 +1199,18 @@ export default function InvoicesPage() {
                 const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
                 return (
                   <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => viewInvoiceDetail(inv)} data-testid={`invoice-row-${inv.id}`}>
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(inv.id)}
+                        onChange={e => {
+                          const next = new Set(selectedIds);
+                          if (e.target.checked) next.add(inv.id); else next.delete(inv.id);
+                          setSelectedIds(next);
+                        }}
+                        data-testid={`select-${inv.id}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">{inv.client_name}

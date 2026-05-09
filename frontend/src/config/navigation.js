@@ -190,6 +190,7 @@ export const navGroups = [
           { path: "/billing-portal", label: "Billing Portal" },
           { path: "/proposals", label: "Proposals & Quotes" },
           { path: "/invoice-templates", label: "PDF Templates" },
+          { path: "/billing-pro", label: "Billing Pro Settings" },
           { path: "/finance-intel", label: "Finance Intelligence" },
           { path: "/late-payment", label: "Late Payment AI" },
           { path: "/pricing-calc", label: "Pricing Calculator" },
