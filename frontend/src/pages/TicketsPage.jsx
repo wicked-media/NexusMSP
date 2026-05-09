@@ -13,6 +13,8 @@ import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketProgressTracker from "@/components/tickets/TicketProgressTracker";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
 import { TicketDetailHeader } from "@/components/tickets/TicketDetailHeader";
+import TicketEnrichmentRail from "@/components/tickets/TicketEnrichmentRail";
+import TicketConversationTab from "@/components/tickets/TicketConversationTab";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -1675,224 +1677,16 @@ export default function TicketsPage() {
 
               {/* UNIFIED CONVERSATION TAB */}
               <TabsContent value="conversation" className="space-y-3">
-                {/* Message Type Selector */}
-                <div className="flex items-center gap-3 pb-2 border-b border-border/50">
-                  <Select value={conversationType} onValueChange={setConversationType}>
-                    <SelectTrigger className="w-[200px]" data-testid="conversation-type-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="note"><div className="flex items-center gap-2"><MessageSquare className="w-3 h-3" />Internal Note</div></SelectItem>
-                      <SelectItem value="email"><div className="flex items-center gap-2"><Mail className="w-3 h-3" />Public Email</div></SelectItem>
-                      <SelectItem value="sms"><div className="flex items-center gap-2"><PhoneCall className="w-3 h-3" />SMS</div></SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span className="text-xs text-muted-foreground">
-                    {conversationType === "note" ? "Internal notes are only visible to your team" : conversationType === "email" ? "Emails will be sent to the client" : "SMS will be sent via MobileMessage to the client's mobile"}
-                  </span>
-                </div>
-
-                {/* Internal Note Form */}
-                {conversationType === "note" && (
-                  <div className="space-y-2">
-                    <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" />
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
-                      {/* Quick Template Picker */}
-                      {cannedResponses.length > 0 && (
-                        <Select value="" onValueChange={v => { const tmpl = cannedResponses.find(c => c.id === v); if (tmpl) setNewNote(prev => prev ? `${prev}\n${tmpl.content}` : tmpl.content); }}>
-                          <SelectTrigger className="w-[180px] h-8 text-xs" data-testid="quick-template-picker"><SelectValue placeholder="Insert template..." /></SelectTrigger>
-                          <SelectContent>
-                            {cannedResponses.map(cr => (
-                              <SelectItem key={cr.id} value={cr.id}>
-                                <div className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-amber-400" /><span>{cr.title}</span></div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Inline Email Form */}
-                {conversationType === "email" && (
-                  <div className="space-y-3 p-3 rounded-lg border bg-blue-500/[0.02] border-blue-500/20">
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <Label className="text-xs">To</Label>
-                        <div className="relative">
-                          <Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="inline-email-to" list="contact-emails" />
-                          <datalist id="contact-emails">
-                            {clientContacts.map(c => c.email && <option key={c.id} value={c.email}>{c.name} ({c.email})</option>)}
-                          </datalist>
-                        </div>
-                      </div>
-                      <div><Label className="text-xs">CC</Label><Input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="cc@email.com" /></div>
-                      <div><Label className="text-xs">BCC</Label><Input value={emailForm.bcc} onChange={e => setEmailForm({ ...emailForm, bcc: e.target.value })} placeholder="bcc@email.com" /></div>
-                    </div>
-                    <div><Label className="text-xs">Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} data-testid="inline-email-subject" /></div>
-                    <div>
-                      <Label className="text-xs">Body</Label>
-                      <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="320px" />
-                    </div>
-                    {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={handleSendEmail} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Inline SMS Form */}
-                {conversationType === "sms" && (
-                  <div className="space-y-3 p-3 rounded-lg border bg-emerald-500/[0.03] border-emerald-500/20" data-testid="sms-form">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-xs">Mobile Number</Label>
-                        <Input
-                          value={smsForm.to}
-                          onChange={e => setSmsForm({ ...smsForm, to: e.target.value })}
-                          placeholder="04xx xxx xxx or +614xx..."
-                          data-testid="sms-to-input"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Template (optional)</Label>
-                        <Select value={smsForm.template_key || ""} onValueChange={applySmsTemplate}>
-                          <SelectTrigger data-testid="sms-template-picker">
-                            <SelectValue placeholder="Pick template..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {smsTemplates.map(t => (
-                              <SelectItem key={t.id || t.key} value={t.key}>{t.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs flex items-center justify-between">
-                        <span>Message</span>
-                        {(() => {
-                          const sig = (smsConfig.append_signature && smsConfig.signature) ? smsConfig.signature : "";
-                          const effLen = smsForm.message.length + (sig && !smsForm.message.toLowerCase().includes(sig.toLowerCase()) ? sig.length + 2 : 0);
-                          return (
-                            <span className={`text-[10px] ${effLen > 160 ? "text-amber-400" : "text-muted-foreground"}`}>
-                              {effLen} chars · {Math.max(1, Math.ceil(effLen / 160))} segment{effLen > 160 ? "s" : ""}
-                            </span>
-                          );
-                        })()}
-                      </Label>
-                      <Textarea
-                        value={smsForm.message}
-                        onChange={e => setSmsForm({ ...smsForm, message: e.target.value })}
-                        placeholder="Hi, update on your ticket..."
-                        rows={4}
-                        maxLength={1600}
-                        data-testid="sms-message-input"
-                      />
-                      {smsConfig.append_signature && smsConfig.signature && !smsForm.message.toLowerCase().includes(smsConfig.signature.toLowerCase()) && (
-                        <p className="text-[10px] text-muted-foreground mt-1">
-                          Signature auto-appended: <span className="font-mono text-emerald-400">"{smsConfig.signature}"</span>
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-muted-foreground">Replies from this number will appear inline in this conversation.</span>
-                      <Button size="sm" onClick={handleSendSms} disabled={smsSending} data-testid="send-sms-btn">
-                        {smsSending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
-                        Send SMS
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Unified Conversation Timeline */}
-                <div className="border rounded-lg overflow-hidden" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "200px" }}>
-                  {(() => {
-                    const allItems = [
-                      ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
-                      ...ticketEmails.map(e => ({ ...e, _type: "email", _sort: e.created_at })),
-                      ...ticketSms.map(s => ({ ...s, _type: "sms", _sort: s.sent_at || s.received_at })),
-                    ].sort((a, b) => (b._sort || "").localeCompare(a._sort || ""));
-
-                    if (allItems.length === 0) return <p className="text-center py-8 text-muted-foreground">No conversation items yet</p>;
-
-                    return allItems.map(item => {
-                      if (item._type === "note") {
-                        const isInternal = item.is_internal;
-                        return (
-                          <div key={`note-${item.id}`} className={`p-3 rounded-lg mb-2 ${isInternal ? 'bg-amber-400/10 border-l-4 border-l-amber-400/60 border border-amber-400/20 shadow-sm' : 'bg-muted/30 border border-border rounded-lg'}`} data-testid={`note-${item.id}`}>
-                            <div className="flex justify-between items-start mb-1">
-                              <div className="flex items-center gap-2">
-                                {isInternal ? (
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500/80 bg-amber-400/15 px-1.5 py-0.5 rounded">Internal Note</span>
-                                ) : (
-                                  <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
-                                )}
-                                <User className="w-3 h-3" /><span className="text-sm font-medium">{item.user_name}</span>
-                              </div>
-                              <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
-                            </div>
-                            {item.content && /<[a-z][\s\S]*>/i.test(item.content) ? (
-                              <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.content) }} />
-                            ) : (
-                              <p className="text-sm whitespace-pre-wrap">{item.content}</p>
-                            )}
-                          </div>
-                        );
-                      } else if (item._type === "email") {
-                        return (
-                          <div key={`email-${item.id}`} className="p-3 rounded-lg mb-2 border bg-blue-500/[0.03] border-blue-500/20" data-testid={`email-${item.id}`}>
-                            <div className="flex justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                <Mail className="w-3 h-3 text-blue-400" />
-                                <span className="text-sm font-medium">{item.subject}</span>
-                                <Badge variant="outline" className="text-blue-400 text-[10px] h-4">Email</Badge>
-                              </div>
-                              <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">To: {item.to_addresses?.join(", ")}</p>
-                            {item.body && /<[a-z][\s\S]*>/i.test(item.body) ? (
-                              <div className="text-sm prose prose-sm prose-invert max-w-none mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.body) }} />
-                            ) : (
-                              <p className="text-sm mt-1 whitespace-pre-wrap">{item.body?.substring(0, 200)}</p>
-                            )}
-                          </div>
-                        );
-                      } else {
-                        // SMS item — inbound or outbound
-                        const inbound = item.direction === "inbound";
-                        const ts = item.sent_at || item.received_at;
-                        const statusColor = item.status === "delivered" ? "text-emerald-400" : item.status === "failed" ? "text-red-400" : "text-muted-foreground";
-                        return (
-                          <div key={`sms-${item.id}`} className={`p-3 rounded-lg mb-2 border ${inbound ? "bg-emerald-500/[0.06] border-emerald-500/30 border-l-4 border-l-emerald-500/70" : "bg-emerald-500/[0.02] border-emerald-500/20"}`} data-testid={`sms-${item.id}`}>
-                            <div className="flex justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                <PhoneCall className={`w-3 h-3 ${inbound ? "text-emerald-400" : "text-emerald-500/80"}`} />
-                                <Badge variant="outline" className="text-emerald-400 text-[10px] h-4">
-                                  {inbound ? "SMS Reply" : "SMS"}
-                                </Badge>
-                                <span className="text-xs text-muted-foreground">
-                                  {inbound ? `from ${item.sender || item.from}` : `to ${item.to}`}
-                                </span>
-                                {!inbound && item.user_name && <span className="text-[10px] text-muted-foreground">by {item.user_name}</span>}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {!inbound && <span className={`text-[10px] uppercase ${statusColor}`}>{item.status || "sent"}</span>}
-                                <span className="text-xs text-muted-foreground">{ts && formatDistanceToNow(new Date(ts), { addSuffix: true })}</span>
-                              </div>
-                            </div>
-                            <p className="text-sm whitespace-pre-wrap">{item.message}</p>
-                            {item.failed_reason && (
-                              <p className="text-[11px] text-red-400 mt-1">Failed: {item.failed_reason}</p>
-                            )}
-                          </div>
-                        );
-                      }
-                    });
-                  })()}
-                </div>
+                <TicketConversationTab
+                  conversationType={conversationType} setConversationType={setConversationType}
+                  newNote={newNote} setNewNote={setNewNote} handleAddNote={handleAddNote} cannedResponses={cannedResponses}
+                  emailForm={emailForm} setEmailForm={setEmailForm} handleSendEmail={handleSendEmail}
+                  emailSignature={emailSignature} clientContacts={clientContacts}
+                  smsForm={smsForm} setSmsForm={setSmsForm} handleSendSms={handleSendSms}
+                  applySmsTemplate={applySmsTemplate} smsTemplates={smsTemplates}
+                  smsConfig={smsConfig} smsSending={smsSending}
+                  ticketNotes={ticketNotes} ticketEmails={ticketEmails} ticketSms={ticketSms}
+                />
               </TabsContent>
 
               {/* ATTACHMENTS TAB */}
@@ -2167,90 +1961,8 @@ export default function TicketsPage() {
               </Card>
             )}
 
-            {/* ── Enrichment: TTR Prediction + Blast Radius (Sentiment removed per UX feedback) ── */}
-            {enrichment && !enrichment.error && (
-              <>
-                <Card data-testid="ttr-card">
-                  <CardContent className="pt-4 pb-3">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Resolution Prediction</span>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-bold text-primary">
-                        {enrichment.ttr_prediction?.predicted_minutes >= 60
-                          ? `${Math.round(enrichment.ttr_prediction.predicted_minutes / 60)}h ${enrichment.ttr_prediction.predicted_minutes % 60}m`
-                          : `${enrichment.ttr_prediction?.predicted_minutes}m`}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">estimated</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <div className="h-1 flex-1 rounded-full bg-muted/50 overflow-hidden">
-                        <div className="h-full rounded-full bg-primary/60" style={{ width: `${(enrichment.ttr_prediction?.confidence || 0) * 100}%` }} />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground">{Math.round((enrichment.ttr_prediction?.confidence || 0) * 100)}% conf.</span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">{enrichment.ttr_prediction?.based_on}</p>
-                  </CardContent>
-                </Card>
-
-                {/* Blast Radius */}
-                {enrichment.blast_radius?.affected_users > 0 && (
-                  <Card data-testid="blast-radius-card" className={enrichment.blast_radius.affected_users > 10 ? "pulse-warning" : ""}>
-                    <CardContent className="pt-4 pb-3">
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Impact Blast Radius</span>
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
-                          <span className="text-sm font-bold text-orange-400">{enrichment.blast_radius.affected_users}</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">Users Affected</p>
-                          {enrichment.blast_radius.device_name && (
-                            <p className="text-[10px] text-muted-foreground">{enrichment.blast_radius.device_name} ({enrichment.blast_radius.device_type})</p>
-                          )}
-                        </div>
-                      </div>
-                      {enrichment.blast_radius.affected_services?.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {enrichment.blast_radius.affected_services.map((s, i) => (
-                            <span key={`k-${i}`} className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20">{s}</span>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Client Context */}
-                <Card data-testid="client-context-card">
-                  <CardContent className="pt-4 pb-3 space-y-2.5">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Client Health</span>
-                    <div className="flex items-center gap-3">
-                      <div className="relative w-11 h-11">
-                        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                          <circle cx="18" cy="18" r="15.9" fill="none" stroke="hsl(var(--muted))" strokeWidth="2.5" opacity="0.3" />
-                          <circle cx="18" cy="18" r="15.9" fill="none"
-                            stroke={enrichment.client_context?.health_score >= 80 ? "#10b981" : enrichment.client_context?.health_score >= 60 ? "#f97316" : "#ef4444"}
-                            strokeWidth="2.5" strokeDasharray={`${enrichment.client_context?.health_score} ${100 - (enrichment.client_context?.health_score || 0)}`} strokeLinecap="round" />
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{enrichment.client_context?.health_score}</span>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">{enrichment.client_context?.name}</p>
-                        <p className="text-[10px] text-muted-foreground capitalize">{enrichment.client_context?.contract_status} &middot; ${enrichment.client_context?.contract_value?.toLocaleString()}/mo</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                      <div className="flex justify-between"><span className="text-muted-foreground">Open Tickets</span><span className="font-medium">{enrichment.client_context?.open_tickets}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Lifetime</span><span className="font-medium">{enrichment.client_context?.total_tickets_lifetime}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Devices</span><span className="font-medium">{enrichment.client_context?.total_devices}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Offline</span><span className="font-medium text-red-400">{enrichment.client_context?.offline_devices}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">NPS</span><span className="font-medium">{enrichment.client_context?.nps_score}/10</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">CSAT</span><span className="font-medium">{enrichment.client_context?.avg_satisfaction}/5</span></div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Smart Merge Suggestions — relocated to top of detail view as Related Tickets banner */}
-              </>
-            )}
+            {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
+            <TicketEnrichmentRail enrichment={enrichment} />
           </div>
         </div>
 
