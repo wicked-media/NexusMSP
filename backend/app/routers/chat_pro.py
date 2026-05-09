@@ -197,6 +197,100 @@ async def download_file(file_id: str, current_user: dict = Depends(get_current_u
     return f
 
 
+@router.put("/chat/channels/{channel_id}/members")
+async def update_members(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Body: {member_ids: [...]} — replaces channel membership."""
+    members = payload.get("member_ids") or []
+    if current_user.get("id") not in members:
+        members.append(current_user.get("id"))
+    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"member_ids": members, "updated_at": _now()}})
+    return {"ok": True, "member_ids": members}
+
+
+@router.delete("/chat/channels/{channel_id}")
+async def delete_channel(channel_id: str, current_user: dict = Depends(get_current_user)):
+    ch = await db.chat_channels.find_one({"id": channel_id}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Not found")
+    # Only created_by or admin can delete
+    if ch.get("created_by") and ch.get("created_by") != current_user.get("id") and current_user.get("role") not in ("admin", "owner"):
+        raise HTTPException(403, "Cannot delete this channel")
+    await db.chat_channels.delete_one({"id": channel_id})
+    await db.chat_messages.delete_many({"channel_id": channel_id})
+    return {"ok": True}
+
+
+@router.post("/chat/group-dm")
+async def create_group_dm(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Body: {member_ids: [...], name?}. Creates a private group chat with multiple members."""
+    members = payload.get("member_ids") or []
+    if current_user.get("id") not in members:
+        members.append(current_user.get("id"))
+    if len(members) < 2:
+        raise HTTPException(400, "Need at least 2 members for a group chat")
+    # Build deterministic ID from sorted members so same group resolves to same channel
+    sig = "-".join(sorted(members))
+    existing = await db.chat_channels.find_one({"group_signature": sig}, {"_id": 0})
+    if existing:
+        return existing
+    name = (payload.get("name") or "").strip()
+    if not name:
+        # Build name from member names
+        users = await db.users.find({"id": {"$in": members}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+        names = [u["name"].split()[0] for u in users if u.get("id") != current_user.get("id")]
+        name = ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "")
+    doc = {
+        "id": uuid.uuid4().hex,
+        "name": name,
+        "kind": "group_dm",
+        "is_private": True,
+        "is_dm": True,
+        "is_group_dm": True,
+        "member_ids": members,
+        "group_signature": sig,
+        "created_by": current_user.get("id"),
+        "created_at": _now(),
+    }
+    await db.chat_channels.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/chat/channels-preview")
+async def channels_preview(current_user: dict = Depends(get_current_user)):
+    """Returns channels with last-message preview + unread count for sidebar rich rendering."""
+    uid = current_user.get("id")
+    channels = await db.chat_channels.find(
+        {"$or": [{"kind": "team", "member_ids": {"$size": 0}}, {"member_ids": uid}]},
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(200)
+    results = []
+    for ch in channels:
+        last_msg = await db.chat_messages.find_one(
+            {"channel_id": ch["id"], "thread_id": {"$exists": False}, "deleted": {"$ne": True}},
+            {"_id": 0}, sort=[("ts", -1)]
+        )
+        read_state = await db.chat_read_state.find_one({"user_id": uid, "channel_id": ch["id"]}, {"_id": 0})
+        last_read_ts = (read_state or {}).get("last_read_ts") or "1970-01-01T00:00:00+00:00"
+        unread = await db.chat_messages.count_documents({
+            "channel_id": ch["id"],
+            "thread_id": {"$exists": False},
+            "ts": {"$gt": last_read_ts},
+            "user_id": {"$ne": uid},
+            "deleted": {"$ne": True},
+        })
+        results.append({
+            **ch,
+            "last_message": {
+                "body": (last_msg.get("body") or "")[:120] if last_msg else "",
+                "user_name": last_msg.get("user_name") if last_msg else "",
+                "ts": last_msg.get("ts") if last_msg else None,
+            } if last_msg else None,
+            "unread_count": unread,
+        })
+    return results
+
+
 # ============================================================================
 # TICKET ↔ CHAT BIDIRECTIONAL LINKING
 # ============================================================================
