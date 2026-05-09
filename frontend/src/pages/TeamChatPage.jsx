@@ -141,6 +141,20 @@ export default function TeamChatPage() {
     const body = input.trim();
     if (!body || !activeId) return;
     setInput("");
+    // Detect slash commands; /ticket T-XXX alone stays as a regular message (renders inline TicketCard)
+    const firstToken = body.split(/\s+/)[0].slice(1).toLowerCase();
+    const slashCmds = new Set(["assign", "ticket", "close", "sla", "note", "summarize", "page", "help"]);
+    const isMentionOnly = /^\/ticket\s+[\w-]+\s*$/i.test(body);
+    if (body.startsWith("/") && slashCmds.has(firstToken) && !isMentionOnly) {
+      try {
+        await axios.post(`${API}/chat/slash`, { raw: body, channel_id: activeId }, { headers });
+        refreshMessages();
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Slash command failed");
+        setInput(body);
+      }
+      return;
+    }
     try { await axios.post(`${API}/chat/channels/${activeId}/messages`, { body }, { headers }); refreshMessages(); }
     catch { toast.error("Send failed"); setInput(body); }
   };
@@ -348,11 +362,23 @@ export default function TeamChatPage() {
 
             {/* Composer */}
             <div className="p-3 border-t border-border/40 bg-card/30 backdrop-blur-xl">
+              {input.startsWith("/") && (
+                <div className="mb-2 px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/30 text-[11px] text-violet-200/90 font-mono leading-relaxed" data-testid="slash-hint">
+                  <span className="font-semibold text-violet-300">Slash commands:</span>{" "}
+                  <code className="bg-black/20 px-1 rounded">/ticket TKT-### status closed</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/close TKT-###</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/assign @user TKT-###</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/sla TKT-###</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/note TKT-### text</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/summarize</code>{" · "}
+                  <code className="bg-black/20 px-1 rounded">/help</code>
+                </div>
+              )}
               <div className="flex items-end gap-2">
                 <input ref={fileRef} type="file" className="hidden" onChange={onUpload} />
                 <Button size="sm" variant="ghost" className="rounded-full h-10 w-10 p-0 hover:bg-violet-500/10" onClick={() => fileRef.current?.click()} title="Attach"><Paperclip className="w-4 h-4" /></Button>
                 <div className="flex-1 relative">
-                  <Input value={input} onChange={e => { setInput(e.target.value); sendTyping(); }} onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} placeholder={`Message ${activeChannel?.name || ""}…  use @ to mention or /ticket T-XXX`} className="rounded-full pl-4 pr-12 h-10 bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40" data-testid="chat-input" />
+                  <Input value={input} onChange={e => { setInput(e.target.value); sendTyping(); }} onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} placeholder={`Message ${activeChannel?.name || ""}…  type / for commands or @ to mention`} className="rounded-full pl-4 pr-12 h-10 bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40" data-testid="chat-input" />
                   <Button size="sm" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full h-8 w-8 p-0 hover:bg-violet-500/10" title="Emoji" onClick={() => { const em = COMMON_EMOJIS[Math.floor(Math.random() * COMMON_EMOJIS.length)]; setInput(p => p + em); }}><Smile className="w-4 h-4" /></Button>
                 </div>
                 <Button onClick={send} disabled={!input.trim()} className="rounded-full h-10 w-10 p-0 bg-gradient-to-br from-violet-500 to-cyan-500 hover:from-violet-600 hover:to-cyan-600 shadow-lg shadow-violet-500/25" data-testid="chat-send"><Send className="w-4 h-4" /></Button>

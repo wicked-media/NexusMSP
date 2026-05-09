@@ -338,6 +338,82 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             return await _post_system_msg(channel_id, f"✅ {ticket_no} assigned to {u.get('name')}")
         return await _post_system_msg(channel_id, f"❌ Couldn't assign — user or ticket not found")
 
+    if cmd == "ticket" and len(args) >= 3:
+        # /ticket TKT-001 status closed     |   /ticket TKT-001 priority high
+        ticket_no = args[0]
+        field = args[1].lower()
+        value = " ".join(args[2:]).lower().replace(" ", "_")
+        valid = {
+            "status": {"open", "in_progress", "on_hold", "resolved", "closed", "pending"},
+            "priority": {"low", "medium", "high", "critical"},
+        }
+        if field not in valid:
+            return await _post_system_msg(channel_id, f"❌ Unknown field '{field}'. Use: status | priority")
+        if value not in valid[field]:
+            return await _post_system_msg(channel_id, f"❌ Invalid {field} '{value}'. Allowed: {', '.join(sorted(valid[field]))}")
+        t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
+        if not t:
+            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await db.tickets.update_one({"id": t["id"]}, {"$set": {field: value, "updated_at": _now_iso()}})
+        emoji = {"closed": "🔒", "resolved": "✅", "in_progress": "🟡", "on_hold": "⏸️", "open": "🔓", "pending": "⏳",
+                 "critical": "🚨", "high": "🔥", "medium": "🟦", "low": "🟢"}.get(value, "🔧")
+        return await _post_system_msg(channel_id, f"{emoji} {ticket_no} — {field} → **{value}** by {current_user.get('name')}")
+
+    if cmd == "close" and args:
+        ticket_no = args[0]
+        t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
+        if not t:
+            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await db.tickets.update_one({"id": t["id"]}, {"$set": {"status": "closed", "updated_at": _now_iso()}})
+        return await _post_system_msg(channel_id, f"🔒 {ticket_no} closed by {current_user.get('name')}")
+
+    if cmd == "sla" and args:
+        ticket_no = args[0]
+        t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
+        if not t:
+            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        from datetime import datetime, timezone as _tz
+        def _fmt_left(due_iso):
+            if not due_iso:
+                return "—"
+            try:
+                due = datetime.fromisoformat(due_iso.replace("Z", "+00:00"))
+            except Exception:
+                return "—"
+            mins = int((due - datetime.now(_tz.utc)).total_seconds() / 60)
+            if mins <= 0:
+                return f"⛔ breached by {abs(mins)}m"
+            if mins < 60:
+                return f"⏱️ {mins}m left"
+            return f"⏱️ {mins // 60}h {mins % 60}m left"
+        resp = _fmt_left(t.get("sla_response_due"))
+        res = _fmt_left(t.get("sla_resolution_due"))
+        body = (
+            f"📊 **SLA — {ticket_no}** ({t.get('priority', 'medium')})\n"
+            f"• Response: {resp}\n"
+            f"• Resolution: {res}\n"
+            f"• Status: {t.get('status', 'open')}"
+        )
+        return await _post_system_msg(channel_id, body)
+
+    if cmd == "note" and len(args) >= 2:
+        # /note TKT-001 the rest of the message becomes the internal note
+        ticket_no = args[0]
+        note_body = " ".join(args[1:])
+        t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
+        if not t:
+            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await db.ticket_notes.insert_one({
+            "id": uuid.uuid4().hex,
+            "ticket_id": t["id"],
+            "user_id": current_user.get("id"),
+            "user_name": current_user.get("name"),
+            "content": note_body,
+            "is_internal": True,
+            "created_at": _now_iso(),
+        })
+        return await _post_system_msg(channel_id, f"📝 Note added to {ticket_no} by {current_user.get('name')}: _{note_body[:80]}{'…' if len(note_body) > 80 else ''}_")
+
     if cmd == "summarize":
         # AI summary of recent channel messages
         msgs = await db.chat_messages.find({"channel_id": channel_id}, {"_id": 0}).sort("ts", -1).limit(40).to_list(40)
@@ -369,7 +445,18 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         return await _post_system_msg(channel_id, f"📟 Team paged: {sev}")
 
     if cmd == "help":
-        return await _post_system_msg(channel_id, "Slash commands: /assign @user TKT-### · /summarize · /page <severity> · /help")
+        return await _post_system_msg(channel_id, (
+            "🛠️ **Slash commands**\n"
+            "• `/ticket TKT-### status <open|in_progress|on_hold|resolved|closed>` — change status\n"
+            "• `/ticket TKT-### priority <low|medium|high|critical>` — change priority\n"
+            "• `/close TKT-###` — quick close\n"
+            "• `/assign @user TKT-###` — assign ticket\n"
+            "• `/sla TKT-###` — show SLA timers\n"
+            "• `/note TKT-### <body>` — add internal note\n"
+            "• `/summarize` — AI summary of last 40 messages\n"
+            "• `/page <severity>` — page the team\n"
+            "• `/help` — this list"
+        ))
 
     return await _post_system_msg(channel_id, f"Unknown command: /{cmd}. Try /help.")
 
