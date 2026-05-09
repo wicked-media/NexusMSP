@@ -8,14 +8,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
-## Recent Updates (Feb 2026 — Backup Centre Live Data Fix)
+## Recent Updates (Feb 2026 — Backup Centre Merge & Live Data)
+
+### 🧩 Backup Centre — Single Unified Page
+Merged the legacy `/backup-dashboard` "Acronis Tenants & Billing" page into the modernized Backup Command Center at `/backup-center`. Now ONE page with **9 tabs**: Dashboard · Live · Tenants · Backup Status · Acronis Console · Orphans · Compliance · Billing · Verify.
+- New components: `TenantsTab.jsx` (83 tenants + link/unlink dialog), `BackupStatusTab.jsx` (364 machines + per-machine Run / bulk Run on filtered status), `BillingTab.jsx` (pricing config + per-client preview + auto-bill toggle).
+- Old `BackupCommandCenterPage.jsx` deleted; `/backup-dashboard` and `/backup-compliance` now redirect to merged page.
+- Sidebar: "Backup Command Center" promoted to top-level (no children).
 
 ### 🔧 Backup Centre — Live Acronis Data
-Removed legacy mock-seeding from `/api/backup-dashboard/overview` and `/api/backup-verify/overview`. Dashboard tab now synthesises rows directly from `acronis_service.get_resource_statuses()` when no local jobs exist, returning real machines/tenants (e.g. `FSMC-HOST`@forbesservicesclub, `MP-SERVER`@midpro — 364 machines from live tenant).
+Removed legacy mock-seeding from `/api/backup-dashboard/overview` and `/api/backup-verify/overview`. Dashboard tab now synthesises rows directly from `acronis_service.get_resource_statuses()` returning real machines/tenants (e.g. `FSMC-HOST`@forbesservicesclub, `MP-SERVER`@midpro — 364 machines from live tenant).
 - Removed `_seed_backup_data()` and `_seed_tests()` (auto-creating Acme/TechStart/Veeam fakes)
 - Frontend dashboard table columns updated: Tenant · Machine · Plan · Last Backup · Next Run · Status
 - Verify tab shows clean empty state until real verifications are recorded
 - Purged 37 fake `backup_jobs` + 20 fake `backup_verifications` from MongoDB
+
+### Testing
+- `iteration_158.json`: **All 9 tabs verified rendering live Acronis data — no regressions.**
 
 ## Recent Updates (Feb 2026 — Bill-Shock Reconciliation + Device Backup Plans)
 
