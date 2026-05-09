@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +46,7 @@ const STATUS_CONFIG = {
 
 export default function InvoicesPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [invoices, setInvoices] = useState([]);
   const [clients, setClients] = useState([]);
@@ -436,7 +437,7 @@ export default function InvoicesPage() {
         <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>{editing ? `Edit ${editing.invoice_number}` : "New Invoice"}</DialogTitle></DialogHeader>
           <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <div>
                 <Label>Client *</Label>
                 <Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}>
@@ -446,12 +447,34 @@ export default function InvoicesPage() {
               </div>
               <div><Label>Due Date *</Label><Input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="invoice-due-date" /></div>
               <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
+              <div><Label>Discount %</Label><Input type="number" step="0.1" value={form.discount_pct} onChange={e => setForm({ ...form, discount_pct: e.target.value })} data-testid="invoice-discount-pct" /></div>
             </div>
             <Separator />
             <div>
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-base font-semibold">Line Items</Label>
-                <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-inv-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                <div className="flex items-center gap-1.5">
+                  {form.client_id && (
+                    <Button
+                      variant="outline" size="sm"
+                      className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10"
+                      onClick={async () => {
+                        try {
+                          const r = await axios.get(`${API}/billing-pro/invoices/smart-suggest?client_id=${form.client_id}&days=30`, { headers });
+                          if (!r.data.suggestions?.length) { toast.info("No un-invoiced billable activity in last 30 days"); return; }
+                          const newLines = r.data.suggestions.map(s => ({
+                            name: s.description, description: "", quantity: s.quantity,
+                            unit_price: s.unit_price, total: s.total, product_id: s.product_id || ""
+                          }));
+                          setForm(p => ({ ...p, line_items: [...p.line_items, ...newLines] }));
+                          toast.success(`Added ${newLines.length} suggested line(s) — $${r.data.total.toFixed(2)}`);
+                        } catch { toast.error("Suggest failed"); }
+                      }}
+                      data-testid="ai-smart-suggest"
+                    ><Zap className="w-3 h-3 mr-1" />AI Smart-Suggest</Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-inv-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                </div>
               </div>
               {form.line_items.length === 0 ? (
                 <div className="text-center py-6 border rounded-lg border-dashed text-muted-foreground text-sm"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No items. Add from product catalog or manually.</div>
@@ -459,24 +482,38 @@ export default function InvoicesPage() {
                 <div className="space-y-2">
                   {form.line_items.map((li, idx) => (
                     <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
-                      <div className="col-span-4">
+                      <div className="col-span-3">
                         {idx === 0 && <Label className="text-xs">Product / Item</Label>}
                         <Select value={li.product_id || ""} onValueChange={v => updateLineItem(idx, "product_id", v)}>
-                          <SelectTrigger><SelectValue placeholder="Select or type below" /></SelectTrigger>
+                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                           <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price?.toFixed(2)}</SelectItem>)}</SelectContent>
                         </Select>
                       </div>
                       <div className="col-span-2">{idx === 0 && <Label className="text-xs">Name</Label>}<Input value={li.name} onChange={e => updateLineItem(idx, "name", e.target.value)} placeholder="Item name" /></div>
-                      <div className="col-span-1">{idx === 0 && <Label className="text-xs">Qty</Label>}<Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} /></div>
+                      <div className="col-span-1">{idx === 0 && <Label className="text-xs">Qty</Label>}<Input type="number" min="1" step="0.01" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseFloat(e.target.value) || 0)} /></div>
                       <div className="col-span-2">{idx === 0 && <Label className="text-xs">Unit Price</Label>}<Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} /></div>
-                      <div className="col-span-2 text-right">{idx === 0 && <Label className="text-xs block">Total</Label>}<p className="font-mono text-sm font-medium py-2">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</p></div>
+                      <div className="col-span-1">{idx === 0 && <Label className="text-xs">Disc %</Label>}<Input type="number" step="0.1" value={li.discount_pct || 0} onChange={e => updateLineItem(idx, "discount_pct", parseFloat(e.target.value) || 0)} data-testid={`line-disc-${idx}`} /></div>
+                      <div className="col-span-1">{idx === 0 && <Label className="text-xs">Tax %</Label>}<Input type="number" step="0.1" value={li.tax_rate || ""} onChange={e => updateLineItem(idx, "tax_rate", parseFloat(e.target.value) || 0)} placeholder="—" data-testid={`line-tax-${idx}`} /></div>
+                      <div className="col-span-1 text-right">{idx === 0 && <Label className="text-xs block">Total</Label>}<p className="font-mono text-sm font-medium py-2">${(((li.quantity || 0) * (li.unit_price || 0)) * (1 - (parseFloat(li.discount_pct) || 0) / 100)).toFixed(2)}</p></div>
                       <div className="col-span-1 text-right"><Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)}><Trash2 className="w-3 h-3" /></Button></div>
                     </div>
                   ))}
                   <div className="flex flex-col items-end gap-1 text-sm mt-2">
-                    <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${calcSubtotal().toFixed(2)}</span></div>
-                    <div className="flex gap-8"><span className="text-muted-foreground">Tax ({form.tax_rate || 0}%)</span><span className="font-mono">${(calcSubtotal() * (parseFloat(form.tax_rate) || 0) / 100).toFixed(2)}</span></div>
-                    <div className="flex gap-8 text-base font-semibold"><span>Total</span><span className="font-mono text-green-500">${(calcSubtotal() * (1 + (parseFloat(form.tax_rate) || 0) / 100)).toFixed(2)}</span></div>
+                    {(() => {
+                      const sub = form.line_items.reduce((s, li) => s + ((li.quantity || 0) * (li.unit_price || 0)) * (1 - (parseFloat(li.discount_pct) || 0) / 100), 0);
+                      const dpct = parseFloat(form.discount_pct) || 0;
+                      const dAmt = sub * dpct / 100;
+                      const after = Math.max(0, sub - dAmt);
+                      const tax = after * ((parseFloat(form.tax_rate) || 0) / 100);
+                      return (
+                        <>
+                          <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">${sub.toFixed(2)}</span></div>
+                          {dpct > 0 && <div className="flex gap-8 text-amber-400"><span>Discount ({dpct}%)</span><span className="font-mono">-${dAmt.toFixed(2)}</span></div>}
+                          <div className="flex gap-8"><span className="text-muted-foreground">Tax ({form.tax_rate || 0}%)</span><span className="font-mono">${tax.toFixed(2)}</span></div>
+                          <div className="flex gap-8 text-base font-semibold"><span>Total</span><span className="font-mono text-green-500">${(after + tax).toFixed(2)}</span></div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -1118,6 +1155,7 @@ export default function InvoicesPage() {
           <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{invoices.length} invoices</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10" data-testid="goto-billing-pro"><Zap className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
           <Button variant="outline" size="sm" onClick={() => { setTopView("aging"); setAgingReport(null); }} data-testid="aging-report-btn">
             <Timer className="w-4 h-4 mr-1" />Aging Report
           </Button>

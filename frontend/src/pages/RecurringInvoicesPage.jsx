@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emera
 
 export default function RecurringInvoicesPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const headers = { Authorization: `Bearer ${token}` };
   const [invoices, setInvoices] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -248,6 +250,7 @@ export default function RecurringInvoicesPage() {
           <p className="text-muted-foreground mt-1">Manage recurring invoices, templates, and automated billing</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} data-testid="goto-billing-pro" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
           <Button variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><FileText className="w-4 h-4 mr-1" />New Template</Button>
           <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Recurring Invoice</Button>
         </div>

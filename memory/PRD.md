@@ -8,6 +8,39 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Billing Pro: best-in-class billing)
+
+### 💎 Billing Pro Suite (beats Syncro/HaloPSA/Ninja)
+**New backend router** `/app/backend/app/routers/billing_pro.py` (~700 LOC) exposes 25+ new endpoints. **New frontend page** `/billing-pro` with 9 settings/dashboard tabs. Existing pages enhanced inline.
+
+**Implemented (all P0 + P1 + most P2):**
+- ✅ Smart invoice numbering (`{YYYY}/{FY}/{CLIENT}/{SEQ:05d}` token format · FY-aware reset · live preview)
+- ✅ Per-line-item tax rate + per-line discount % + invoice-level discount % on `/api/invoices` create
+- ✅ Bulk invoice actions: mark sent/paid, void, delete, **CSV export** with checkbox toolbar in InvoicesPage
+- ✅ AI Smart-Suggest line items from un-invoiced billable time + tickets (button in invoice form)
+- ✅ Approval workflow (threshold-based) — invoices ≥ $X auto-flagged `pending_approval`, request/approve/reject endpoints
+- ✅ Deposits / progress invoicing — `POST /create-deposit` generates child invoice w/ N% of parent
+- ✅ Tax-invoice compliance settings (AU ABN / NZ NZBN, GST %, bank details, "Tax Invoice" label)
+- ✅ Multi-warehouse stock locations + stock transfers between locations
+- ✅ Auto-PO from low-stock — one-click vendor PO generation, draft → sent → received with auto-stock-in
+- ✅ Quantity-break (tier) pricing per product + price-for-qty resolver
+- ✅ Bulk product CSV import (column mapping, upsert by SKU, error report)
+- ✅ Margin calculator — suggest retail price for target margin %
+- ✅ CPI / Annual Indexation — auto-bump unit prices on each anniversary, integrated into recurring scheduler tick (server.py)
+- ✅ Mid-cycle proration calculator
+- ✅ Generation calendar — 3-month forecast of recurring invoice events
+- ✅ MRR analytics dashboard — current/new/paused/cancelled MRR + 13-month trend
+- ✅ Inventory month-end snapshot (totals, by-category, low-stock detail)
+- ✅ Live FX conversion (exchangerate-api.com)
+- ✅ Retainer / pre-paid hours — top-up, draw-down, full transaction history
+- ✅ Customer invoice portal comments + dispute thread
+
+**Files:**
+- Backend: `app/routers/billing_pro.py` (NEW), `app/routers/invoices.py` (extended create), `app/models.py` (InvoiceCreate.discount_pct/amount), `server.py` (indexation cron)
+- Frontend: `pages/BillingProPage.jsx` (NEW · 9 tabs), `pages/InvoicesPage.jsx` (bulk toolbar · per-line tax/discount · AI suggest), `pages/ProductsPage.jsx` (margin calc · tier pricing), `pages/RecurringInvoicesPage.jsx` (CPI indexation toggle)
+
+**Tested:** `iteration_159.json` — 25 backend tests + frontend UI: **100% pass**.
+
 ## Recent Updates (Feb 2026 — Backup Centre Merge & Live Data)
 
 ### 🧩 Backup Centre — Single Unified Page
