@@ -15,9 +15,13 @@ import {
   Shield, Database, Play, Activity, ExternalLink, Zap, Cloud, Wifi, WifiOff,
   Ghost, Skull, AlertCircle, Sparkles, Pause, RotateCw, Eye, Settings,
   Server, ArrowUpRight, Trash2, FileQuestion, Bell, StopCircle, Wand2,
+  Users, DollarSign,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
+import TenantsTab from "@/components/backups/TenantsTab";
+import BackupStatusTab from "@/components/backups/BackupStatusTab";
+import BillingTab from "@/components/backups/BillingTab";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
@@ -186,6 +190,7 @@ export default function BackupCenterPage() {
   const [planTargets, setPlanTargets] = useState([]);
   const [selectedOrphans, setSelectedOrphans] = useState([]);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [backupStatuses, setBackupStatuses] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -348,13 +353,19 @@ export default function BackupCenterPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid grid-cols-6 max-w-3xl">
+        <TabsList className="flex flex-wrap h-auto gap-1 max-w-full">
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">
             <Database className="w-3.5 h-3.5 mr-1" />Dashboard
           </TabsTrigger>
           <TabsTrigger value="live" data-testid="tab-live" className="relative">
             <Activity className="w-3.5 h-3.5 mr-1" />Live
             {liveCount > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+          </TabsTrigger>
+          <TabsTrigger value="tenants" data-testid="tab-tenants">
+            <Users className="w-3.5 h-3.5 mr-1" />Tenants
+          </TabsTrigger>
+          <TabsTrigger value="status" data-testid="tab-status">
+            <Server className="w-3.5 h-3.5 mr-1" />Backup Status
           </TabsTrigger>
           <TabsTrigger value="acronis" data-testid="tab-acronis">
             <Cloud className="w-3.5 h-3.5 mr-1" />Acronis Console
@@ -367,6 +378,9 @@ export default function BackupCenterPage() {
           </TabsTrigger>
           <TabsTrigger value="compliance" data-testid="tab-compliance">
             <Shield className="w-3.5 h-3.5 mr-1" />Compliance
+          </TabsTrigger>
+          <TabsTrigger value="billing" data-testid="tab-billing">
+            <DollarSign className="w-3.5 h-3.5 mr-1" />Billing
           </TabsTrigger>
           <TabsTrigger value="verify" data-testid="tab-verify">
             <CheckCircle className="w-3.5 h-3.5 mr-1" />Verify
@@ -495,6 +509,16 @@ export default function BackupCenterPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* TENANTS */}
+        <TabsContent value="tenants" className="mt-4">
+          <TenantsTab token={token} backupStatuses={backupStatuses} />
+        </TabsContent>
+
+        {/* BACKUP STATUS (per-machine) */}
+        <TabsContent value="status" className="mt-4">
+          <BackupStatusTab token={token} onDataChange={setBackupStatuses} />
         </TabsContent>
 
         {/* ACRONIS CONSOLE */}
@@ -873,6 +897,11 @@ export default function BackupCenterPage() {
               </CardContent>
             </Card>
           </>}
+        </TabsContent>
+
+        {/* BILLING */}
+        <TabsContent value="billing" className="mt-4">
+          <BillingTab token={token} />
         </TabsContent>
 
         {/* VERIFICATION */}

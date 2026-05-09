@@ -128,11 +128,7 @@ export const navGroups = [
         ]
       },
       {
-        path: "/backup-center", icon: HardDrive, label: "Backup Center",
-        children: [
-          { path: "/backup-center", label: "Backup Command Center" },
-          { path: "/backup-dashboard", label: "Acronis Tenants & Billing" },
-        ]
+        path: "/backup-center", icon: HardDrive, label: "Backup Command Center",
       },
       {
         path: "/vault", icon: KeyRound, label: "Security Tools",
