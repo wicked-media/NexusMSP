@@ -10,6 +10,15 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 ## Recent Updates (Feb 2026 — Team Chat Redesign + Slash Commands + Tickets Refactor)
 
+### 🪄 Global Command Palette (`⌘K` / `Ctrl+K`)
+- New `/app/frontend/src/components/CommandPalette.jsx` — mounted globally in `App.js → AuthedAddons` so ⌘K opens it from ANY authenticated route
+- Unified search across **tickets · clients · devices · people · pages** with 180 ms debounce (backed by `GET /api/command-palette/search`)
+- Slash mode: typing `/` shows all 8 chat slash commands (`/ticket /close /assign /sla /note /summarize /page /help`) with icons + arg hints. Commands without args (e.g. `/help`, `/summarize`, `/page`) execute immediately via `POST /api/command-palette/run`; commands with args (e.g. `/ticket`, `/close`, `/sla`) fill the input so the user can complete arguments
+- Smart navigation on select: tickets → `/tickets?ticket=NUM`, clients → `/clients?id=ID`, devices → `/devices/ID`, pages → path
+- Backend `/api/command-palette/run` auto-resolves to `#ops` or `#general` channel so slash commands are always auditable in chat history (single source of truth — delegates to existing `chat_presence.slash`)
+- Keyboard: ArrowUp/Down navigate · Enter run · Esc close · click also works
+- **Tested:** `iteration_165` — Backend 15/15 PASS · Frontend keyboard, search, slash mode, navigation all verified working
+
 ### 💬 Team Chat — WhatsApp/Teams-quality redesign (`/team-chat`)
 - Full UI rewrite at `/app/frontend/src/pages/TeamChatPage.jsx` (modular sub-components)
 - New `NewChatDialog` with 3 tabs: **DM · Group · Channel** — create direct messages, multi-person group chats, or named channels (public/private with invite-only members)

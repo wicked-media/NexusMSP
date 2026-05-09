@@ -5,7 +5,7 @@ import { Keyboard } from "lucide-react";
 
 const SHORTCUTS = [
   { group: "Global", items: [
-    { keys: ["Cmd/Ctrl", "K"], label: "Toggle chat panel" },
+    { keys: ["Cmd/Ctrl", "K"], label: "Open command palette" },
     { keys: ["Cmd/Ctrl", "/"], label: "Open this shortcut palette" },
     { keys: ["/"], label: "Focus search (Clients / Tickets)" },
     { keys: ["j"], label: "Next row in dense lists" },

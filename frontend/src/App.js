@@ -13,6 +13,7 @@ import { ChatPanel } from "@/components/presence/ChatPanel";
 import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
+import CommandPalette from "@/components/CommandPalette";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -309,6 +310,7 @@ function AuthedAddons() {
       <ChatPanel />
       <KonamiCRT />
       <ShortcutPalette />
+      <CommandPalette />
     </>
   );
 }
