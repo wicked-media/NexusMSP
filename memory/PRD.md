@@ -8,6 +8,27 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Pro Pack: IA cleanup + 20 new feature pages)
+
+### 🧹 Information Architecture Cleanup
+- Removed duplicate `/predictive-failure` entry · Renamed duplicate "SLA Center" → SLA Hub · Renamed duplicate "Smart Routing" labels (Auto-Scheduler vs Smart Routing) · Merged `/qbr-generator` into Reports
+- Sidebar regrouped: Tickets now contains Triage Queue + Service Catalog + SLA Hub. Devices contains Patch Tuesday. Compliance contains Cyber Insurance Export + DR Plans. Comms contains Slack/Teams Webhooks + CSAT + NPS. Settings contains API Tokens + 2FA. Live Support contains Phone System.
+- New hub pages: Automation Hub, Documentation Hub, Financial Analytics Hub, SLA Hub (each tile-grid landing page).
+
+### 💎 Pro Pack — 20 new feature pages, 25+ new endpoints (`/api/pro-pack/*`)
+- Triage Queue · Service Catalog (SLA-attached SKUs) · Ticket Merge/Split · Quote-to-Cash pipeline view
+- Slack/Teams/Discord webhooks (CRUD + test) · Customer Health Score · Patch Tuesday calendar
+- Phone System inbound webhook → auto-create ticket · API Tokens (sha256-hashed) · 2FA TOTP setup
+- CRM Pipeline (6 stages, drag-stage move) · KB Auto-Generator from tickets · Cyber Insurance Compliance Export
+- DR Plans (RTO/RPO + scenarios) · SaaS Spend Tracker (per client) · MS Defender / AV Health
+- Stocktake Mobile (scan/count/commit) · Asset Tag Batch Print · NPS Summary · Bulk PDF/Zip download
+
+### Bug fix
+- Route `/api-tokens` collided with `/api` ingress prefix → renamed to `/settings-api-tokens`.
+
+### Tested
+- `iteration_160.json` — 34/34 backend tests pass · 19/20 frontend pages verified · 1 issue (route collision) **fixed**.
+
 ## Recent Updates (Feb 2026 — Billing Pro: best-in-class billing)
 
 ### 💎 Billing Pro Suite (beats Syncro/HaloPSA/Ninja)

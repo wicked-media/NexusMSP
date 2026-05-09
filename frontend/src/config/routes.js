@@ -244,6 +244,28 @@ export const routeConfig = [
   { path: "/proposals", component: page("ProposalBuilderPage"), auth: true, layout: true },
   { path: "/alert-rules", component: page("AlertRulesPage"), auth: true, layout: true },
 
+  // Pro-Pack pages (P0 + P1 + P2 from IA audit)
+  { path: "/triage-queue", component: page("TriageQueuePage"), auth: true, layout: true },
+  { path: "/service-catalog", component: page("ServiceCatalogPage"), auth: true, layout: true },
+  { path: "/customer-health", component: page("CustomerHealthPage"), auth: true, layout: true },
+  { path: "/quote-to-cash", component: page("QuoteToCashPage"), auth: true, layout: true },
+  { path: "/notify-channels", component: page("NotifyChannelsPage"), auth: true, layout: true },
+  { path: "/patch-tuesday", component: page("PatchTuesdayPage"), auth: true, layout: true },
+  { path: "/settings-api-tokens", component: page("ApiTokensPage"), auth: true, layout: true },
+  { path: "/security-2fa", component: page("Security2FAPage"), auth: true, layout: true },
+  { path: "/saas-spend", component: page("SaasSpendPage"), auth: true, layout: true },
+  { path: "/defender-health", component: page("DefenderHealthPage"), auth: true, layout: true },
+  { path: "/stocktake-mobile", component: page("StocktakeMobilePage"), auth: true, layout: true },
+  { path: "/crm-pipeline", component: page("CrmPipelinePage"), auth: true, layout: true },
+  { path: "/dr-plans", component: page("DRPlansPage"), auth: true, layout: true },
+  { path: "/cyber-insurance", component: page("CyberInsurancePage"), auth: true, layout: true },
+  { path: "/asset-print-batch", component: page("AssetPrintBatchPage"), auth: true, layout: true },
+  { path: "/automation-hub", component: page("AutomationHubPage"), auth: true, layout: true },
+  { path: "/documentation-hub", component: page("DocumentationHubPage"), auth: true, layout: true },
+  { path: "/financial-analytics", component: page("FinancialAnalyticsHubPage"), auth: true, layout: true },
+  { path: "/sla-hub", component: page("SlaHubPage"), auth: true, layout: true },
+  { path: "/phone-integration", component: page("PhoneIntegrationPage"), auth: true, layout: true },
+
   // Auth callback (no auth, no layout)
   { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
   { path: "/notifications", component: page("NotificationsPage"), auth: true, layout: true },

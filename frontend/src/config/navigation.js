@@ -1,3 +1,4 @@
+// Cleaned-up navigation: bugs fixed, duplicates removed, mergers applied.
 import {
   LayoutDashboard, Ticket, Monitor, Package, Users, FileText,
   Receipt, Clock, BookOpen, Cloud, Network, Laptop, BarChart3,
@@ -10,20 +11,15 @@ import {
   FileBarChart, History, ShieldAlert, Target, MapPin, Map, Award,
   CheckSquare, RefreshCw, FileSearch, Star, BarChart, Calculator,
   TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
-  ShoppingBag, Globe, PatchCheck, Lock, BellOff, Layers,
-  Gauge, WifiIcon, Eye, Bug, FileWarning, ClipboardList, Kanban,
+  ShoppingBag, Globe, Lock, BellOff, Layers,
+  Gauge, Eye, Bug, FileWarning, ClipboardList, Kanban,
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark
+  LayoutGrid, Building, Smartphone, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark,
+  Inbox, Briefcase, ShieldOff, KeySquare, BellRing
 } from "lucide-react";
 
-/*
- * CONSOLIDATED NAVIGATION
- * ~35 top-level items (down from 130+)
- * Items with `children` expand on click to reveal sub-pages
- * Items without `children` navigate directly
- */
 export const navGroups = [
   {
     id: "service_desk",
@@ -36,9 +32,11 @@ export const navGroups = [
         path: "/tickets", icon: Ticket, label: "Tickets",
         children: [
           { path: "/tickets", label: "All Tickets" },
+          { path: "/triage-queue", label: "Triage Queue" },
           { path: "/kanban-tickets", label: "Kanban Board" },
-          { path: "/sla-timer", label: "SLA Center" },
+          { path: "/sla-hub", label: "SLA Hub" },
           { path: "/blueprints", label: "Blueprints" },
+          { path: "/service-catalog", label: "Service Catalog" },
         ]
       },
       {
@@ -55,13 +53,12 @@ export const navGroups = [
         children: [
           { path: "/change-management", label: "Change Management" },
           { path: "/change-freezes", label: "Freeze Calendar" },
-          { path: "/incident-heatmap", label: "Incident Heatmap" },
           { path: "/postmortem", label: "Post-Mortems" },
           { path: "/alert-suppression", label: "Alert Suppression" },
         ]
       },
       {
-        path: "/technicians", icon: UserCog, label: "Team Management",
+        path: "/technicians", icon: UserCog, label: "Team",
         children: [
           { path: "/technicians", label: "Technicians" },
           { path: "/tech-roster", label: "On-Call Roster" },
@@ -74,8 +71,7 @@ export const navGroups = [
         path: "/scheduling", icon: CalendarDays, label: "Scheduling",
         children: [
           { path: "/scheduling", label: "Calendar" },
-          { path: "/smart-scheduling", label: "Smart Routing" },
-          { path: "/maintenance-scheduler", label: "Maintenance" },
+          { path: "/smart-scheduling", label: "Auto-Scheduler" },
         ]
       },
       {
@@ -84,8 +80,10 @@ export const navGroups = [
           { path: "/live-chat", label: "Live Chat" },
           { path: "/voice-ticket", label: "Voice to Ticket" },
           { path: "/script-ticket", label: "Script-to-Ticket" },
+          { path: "/phone-integration", label: "Phone System (PBX)" },
         ]
       },
+      { path: "/onboarding", icon: ClipboardList, label: "Client Onboarding" },
       { path: "/approvals", icon: CheckSquare, label: "Approvals" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
       { path: "/mobile-tech", icon: Smartphone, label: "Mobile Tech" },
@@ -102,6 +100,8 @@ export const navGroups = [
           { path: "/device-reliability", label: "Reliability & TRMM Sync" },
           { path: "/bulk-actions", label: "Bulk Actions" },
           { path: "/tactical-rmm", label: "Remote & Patching (TRMM)" },
+          { path: "/maintenance-scheduler", label: "Maintenance" },
+          { path: "/patch-tuesday", label: "Patch Tuesday" },
           { path: "/custom-monitors", label: "Custom Monitors" },
         ]
       },
@@ -121,25 +121,30 @@ export const navGroups = [
         children: [
           { path: "/assets", label: "All Assets" },
           { path: "/qr-assets", label: "QR Asset Tags" },
-          { path: "/asset-lifecycle", label: "Lifecycle" },
+          { path: "/asset-print-batch", label: "Print Batch" },
+          { path: "/asset-lifecycle", label: "Lifecycle & Warranty" },
           { path: "/asset-depreciation", label: "Depreciation" },
-          { path: "/warranty-tracker", label: "Warranty" },
           { path: "/procurement-planner", label: "Procurement" },
         ]
       },
+      { path: "/backup-center", icon: HardDrive, label: "Backup Command Center" },
       {
-        path: "/backup-center", icon: HardDrive, label: "Backup Command Center",
+        path: "/automation-hub", icon: Workflow, label: "Automation",
+        children: [
+          { path: "/automation-hub", label: "Overview" },
+          { path: "/runbooks", label: "Runbooks" },
+          { path: "/scripting", label: "Scripts Library" },
+          { path: "/git-scripts", label: "Git Scripts Sync" },
+          { path: "/workflow-automation", label: "Workflow Builder" },
+          { path: "/alert-rules", label: "Alert Rules Engine" },
+        ]
       },
       {
-        path: "/vault", icon: KeyRound, label: "Security Tools",
+        path: "/vault", icon: KeyRound, label: "Vault & Tools",
         children: [
           { path: "/vault", label: "Password Vault" },
-          { path: "/runbooks", label: "Runbook Automation" },
-          { path: "/scripting", label: "Scripting" },
           { path: "/doc-scanner", label: "Document Scanner" },
-          { path: "/workflow-automation", label: "Workflow Builder" },
           { path: "/device-terminal", label: "Live Terminal" },
-          { path: "/alert-rules", label: "Alert Rules Engine" },
         ]
       },
     ]
@@ -152,13 +157,13 @@ export const navGroups = [
         path: "/clients", icon: Users, label: "Clients",
         children: [
           { path: "/clients", label: "All Clients" },
-          { path: "/client-health", label: "Health" },
+          { path: "/customer-health", label: "Customer Health" },
+          { path: "/client-health", label: "RMM Health" },
           { path: "/client-timeline", label: "Timeline" },
+          { path: "/comms-timeline", label: "Comms Timeline" },
           { path: "/client-compare", label: "Compare" },
           { path: "/client-risk", label: "Risk" },
           { path: "/sentiment", label: "Sentiment" },
-          { path: "/csat-surveys", label: "CSAT Surveys" },
-          { path: "/onboarding", label: "Onboarding" },
         ]
       },
       {
@@ -169,51 +174,56 @@ export const navGroups = [
         ]
       },
       {
-        path: "/leads", icon: UserPlus, label: "Leads & CRM",
+        path: "/leads", icon: UserPlus, label: "CRM",
         children: [
           { path: "/leads", label: "Leads" },
+          { path: "/crm-pipeline", label: "Pipeline" },
           { path: "/campaigns", label: "Campaigns" },
           { path: "/loyalty", label: "Loyalty & Renewals" },
           { path: "/upsell", label: "Upsell Detector" },
         ]
       },
       {
-        path: "/xero", icon: Receipt, label: "Finance Center",
+        path: "/billing-pro", icon: Receipt, label: "Billing & Finance",
         children: [
-          { path: "/xero", label: "Overview" },
+          { path: "/billing-pro", label: "Billing Pro Hub" },
           { path: "/invoices", label: "Invoices" },
           { path: "/estimates", label: "Estimates" },
           { path: "/recurring-invoices", label: "Recurring" },
+          { path: "/quote-to-cash", label: "Quote → Cash" },
           { path: "/billing-dashboard", label: "Billing Command" },
           { path: "/billing-recon", label: "Reconciliation" },
           { path: "/usage-billing", label: "Usage Billing" },
-          { path: "/billing-portal", label: "Billing Portal" },
+          { path: "/billing-portal", label: "Stripe Portal" },
           { path: "/proposals", label: "Proposals & Quotes" },
           { path: "/invoice-templates", label: "PDF Templates" },
-          { path: "/billing-pro", label: "Billing Pro Settings" },
           { path: "/finance-intel", label: "Finance Intelligence" },
           { path: "/late-payment", label: "Late Payment AI" },
           { path: "/pricing-calc", label: "Pricing Calculator" },
+          { path: "/xero", label: "Xero Sync" },
         ]
       },
       {
-        path: "/financial-reports", icon: DollarSign, label: "Financial Analytics",
+        path: "/financial-analytics", icon: DollarSign, label: "Financial Analytics",
         children: [
+          { path: "/financial-analytics", label: "Hub" },
           { path: "/financial-reports", label: "Financial Reports" },
           { path: "/revenue-forecast", label: "Revenue Forecast" },
-          { path: "/rpe-dashboard", label: "Revenue/Endpoint" },
+          { path: "/rpe-dashboard", label: "Revenue / Endpoint" },
           { path: "/contract-profit", label: "Contract Profit" },
           { path: "/profitability-heatmap", label: "Profitability Map" },
-          { path: "/cost-per-ticket", label: "Cost/Ticket" },
+          { path: "/cost-per-ticket", label: "Cost / Ticket" },
           { path: "/roi-reports", label: "ROI Reports" },
-          { path: "/revenue-tracker", label: "Revenue Analytics" },
+          { path: "/revenue-tracker", label: "Revenue Tracker" },
+          { path: "/saas-spend", label: "SaaS Spend" },
         ]
       },
       {
         path: "/products", icon: Package, label: "Products & Inventory",
         children: [
           { path: "/products", label: "Products" },
-          { path: "/stocktake", label: "Stocktake" },
+          { path: "/stocktake", label: "Stocktake (Desktop)" },
+          { path: "/stocktake-mobile", label: "Stocktake (Mobile)" },
           { path: "/rentals", label: "Phone Rentals" },
         ]
       },
@@ -246,6 +256,7 @@ export const navGroups = [
           { path: "/soc-realtime", label: "Smart Automation" },
           { path: "/threat-timeline", label: "Threat Timeline" },
           { path: "/identity-threats", label: "Identity Threats" },
+          { path: "/defender-health", label: "Defender / AV Health" },
         ]
       },
       {
@@ -265,12 +276,14 @@ export const navGroups = [
           { path: "/ransomware-canary", label: "Canary" },
           { path: "/ransomware-tabletop", label: "Tabletop" },
           { path: "/remediation-playbooks", label: "Remediation" },
+          { path: "/dr-plans", label: "DR Plans" },
         ]
       },
       {
-        path: "/compliance", icon: ShieldAlert, label: "Compliance Center",
+        path: "/compliance", icon: ShieldAlert, label: "Compliance",
         children: [
           { path: "/compliance", label: "Compliance Center" },
+          { path: "/cyber-insurance", label: "Cyber Insurance Export" },
           { path: "/mfa-management", label: "MFA Management" },
           { path: "/password-rotation", label: "Password Rotation" },
           { path: "/audit-trail", label: "Audit Trail" },
@@ -289,16 +302,17 @@ export const navGroups = [
           { path: "/ai-resolution", label: "Auto-Resolve" },
           { path: "/self-healing", label: "Self-Healing" },
           { path: "/predictive-failure", label: "Predictive Intelligence" },
-          { path: "/predictive-failure", label: "Predictive Intelligence" },
         ]
       },
       { path: "/dashboard-builder", icon: LayoutGrid, label: "Dashboard Builder" },
       {
-        path: "/knowledge-base", icon: BookOpen, label: "Knowledge & Docs",
+        path: "/documentation-hub", icon: BookOpen, label: "Knowledge & Docs",
         children: [
+          { path: "/documentation-hub", label: "Docs Hub" },
           { path: "/knowledge-base", label: "Knowledge Base" },
           { path: "/documentation", label: "IT Docs" },
           { path: "/auto-documentation", label: "Auto-Docs" },
+          { path: "/help", label: "Help Center" },
           { path: "/capacity-planner", label: "Capacity Planner" },
         ]
       },
@@ -308,27 +322,18 @@ export const navGroups = [
     id: "reports",
     title: "Reports & Comms",
     items: [
-      {
-        path: "/command-center", icon: Siren, label: "Command Center"
-      },
-      {
-        path: "/insights", icon: Sparkles, label: "Insights Hub"
-      },
-      {
-        path: "/help", icon: BookOpen, label: "Help Center"
-      },
-      {
-        path: "/atmosphere", icon: Sparkles, label: "Atmosphere"
-      },
+      { path: "/command-center", icon: Siren, label: "Command Center" },
+      { path: "/insights", icon: Sparkles, label: "Insights Hub" },
+      { path: "/atmosphere", icon: Sparkles, label: "Atmosphere" },
       {
         path: "/reports", icon: BarChart3, label: "Reports",
         children: [
           { path: "/reports", label: "Reports" },
           { path: "/executive-reports", label: "Executive" },
           { path: "/client-reports", label: "Client Reports" },
-          { path: "/sla-report-gen", label: "SLA Center" },
           { path: "/qbr-generator", label: "QBR Generator" },
           { path: "/it-roadmap", label: "IT Roadmap" },
+          { path: "/incident-heatmap", label: "Incident Heatmap" },
           { path: "/scheduled-reports", label: "Scheduled Emails" },
         ]
       },
@@ -337,7 +342,9 @@ export const navGroups = [
         children: [
           { path: "/email", label: "Email" },
           { path: "/o365-setup", label: "O365 Mailbox" },
-          { path: "/comms-timeline", label: "Timeline" },
+          { path: "/notify-channels", label: "Slack/Teams Webhooks" },
+          { path: "/csat-surveys", label: "CSAT Surveys" },
+          { path: "/nps-tracker", label: "NPS Tracker" },
         ]
       },
     ]
@@ -354,6 +361,8 @@ export const navGroups = [
           { path: "/ticket-ping-settings", label: "Ping & Escalation" },
           { path: "/white-label", label: "White Label" },
           { path: "/channel-mode", label: "Channel / MSP Mode" },
+          { path: "/settings-api-tokens", label: "API Tokens" },
+          { path: "/security-2fa", label: "2FA / Security" },
         ]
       },
       {
@@ -361,7 +370,6 @@ export const navGroups = [
         children: [
           { path: "/health-radar", label: "Health Radar" },
           { path: "/benchmarking", label: "Benchmarking" },
-          { path: "/nps-tracker", label: "NPS Tracker" },
           { path: "/expiry-tracker", label: "Expiry Tracker" },
           { path: "/geo-map", label: "Geo Map" },
           { path: "/hardware-refresh", label: "HW Refresh" },
@@ -369,9 +377,9 @@ export const navGroups = [
         ]
       },
       {
-        path: "/proxmox", icon: Server, label: "Integrations",
+        path: "/integrations", icon: Server, label: "Integrations",
         children: [
-          { path: "/integrations", label: "Overview" },
+          { path: "/integrations", label: "Overview & Marketplace" },
           { path: "/proxmox", label: "Proxmox" },
           { path: "/domotz", label: "Domotz" },
           { path: "/acronis", label: "Acronis" },
@@ -379,17 +387,14 @@ export const navGroups = [
           { path: "/hudu", label: "Hudu" },
           { path: "/cipp", label: "CIPP" },
           { path: "/unifi", label: "UniFi" },
-          { path: "/tactical-rmm", label: "Tactical RMM" },
           { path: "/suped", label: "Suped" },
           { path: "/webhook-builder", label: "Webhook Builder" },
-          { path: "/git-scripts", label: "Git Scripts Sync" },
         ]
       },
     ]
   },
 ];
 
-// Flat list of all items for search/routing
 export function getAllNavItems() {
   const items = [];
   for (const group of navGroups) {
@@ -405,13 +410,12 @@ export function getAllNavItems() {
   return items;
 }
 
-// Module group IDs for toggle (what admins can enable/disable per tech)
 export const MODULE_GROUPS = [
   { id: "service_desk", label: "Service Desk", description: "Tickets, dispatch, scheduling, live support" },
-  { id: "infrastructure", label: "Infrastructure", description: "Devices, network, assets, backups, patching" },
-  { id: "business", label: "Business", description: "Clients, invoicing, billing, financials" },
-  { id: "security", label: "Security", description: "SOC, endpoint security, compliance" },
+  { id: "infrastructure", label: "Infrastructure", description: "Devices, network, assets, backups, automation" },
+  { id: "business", label: "Business", description: "Clients, billing, finance, products, projects" },
+  { id: "security", label: "Security", description: "SOC, endpoint, compliance, DR" },
   { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
-  { id: "reports", label: "Reports & Comms", description: "Reports, email, communications" },
+  { id: "reports", label: "Reports & Comms", description: "Reports, email, comms" },
   { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
 ];

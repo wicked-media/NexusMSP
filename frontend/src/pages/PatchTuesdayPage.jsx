@@ -1,0 +1,1 @@
+export { PatchTuesdayPage as default } from "./pro-pack/index.jsx";
