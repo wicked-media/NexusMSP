@@ -198,8 +198,58 @@ async def download_file(file_id: str, current_user: dict = Depends(get_current_u
 
 
 # ============================================================================
-# TYPING INDICATOR
+# TICKET ↔ CHAT BIDIRECTIONAL LINKING
 # ============================================================================
+@router.get("/chat/ticket-card/{ticket_number}")
+async def ticket_card(ticket_number: str, current_user: dict = Depends(get_current_user)):
+    """Lightweight ticket info for inline embeds in chat (mentions like /ticket T-XXX)."""
+    t = await db.tickets.find_one({"$or": [{"ticket_number": ticket_number}, {"id": ticket_number}]}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Ticket not found")
+    return {
+        "id": t.get("id"),
+        "ticket_number": t.get("ticket_number"),
+        "title": t.get("title"),
+        "status": t.get("status"),
+        "priority": t.get("priority"),
+        "client_name": t.get("client_name"),
+        "assigned_to_name": t.get("assigned_to_name"),
+        "service_name": t.get("service_name"),
+        "created_at": t.get("created_at"),
+    }
+
+
+@router.post("/chat/discuss-ticket/{ticket_number}")
+async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Post a 'Discuss this ticket' message into a channel. Body: {channel_id?}.
+    If no channel given, posts to #ops or first public channel. Returns the message."""
+    t = await db.tickets.find_one({"$or": [{"ticket_number": ticket_number}, {"id": ticket_number}]}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Ticket not found")
+    channel_id = payload.get("channel_id")
+    if not channel_id:
+        ch = await db.chat_channels.find_one({"$or": [{"name": "ops"}, {"name": "general"}], "is_private": {"$ne": True}}, {"_id": 0})
+        if not ch:
+            ch = await db.chat_channels.find_one({"is_private": {"$ne": True}, "is_dm": {"$ne": True}}, {"_id": 0})
+        if not ch:
+            raise HTTPException(400, "No public channel available — create one first")
+        channel_id = ch["id"]
+    body = f"💬 Let's discuss /ticket {t.get('ticket_number')} — *{t.get('title')}* ({t.get('priority')}, {t.get('client_name')})"
+    msg = {
+        "id": uuid.uuid4().hex,
+        "channel_id": channel_id,
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name"),
+        "body": body,
+        "ts": _now(),
+        "edited": False,
+        "reactions": {},
+        "ticket_refs": [t.get("ticket_number")],
+    }
+    await db.chat_messages.insert_one(dict(msg))
+    msg.pop("_id", None)
+    return {"channel_id": channel_id, "message_id": msg["id"], "message": msg}
+
 @router.post("/chat/channels/{channel_id}/typing")
 async def typing(channel_id: str, current_user: dict = Depends(get_current_user)):
     await db.chat_typing.update_one(

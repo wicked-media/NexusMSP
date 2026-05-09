@@ -8,6 +8,14 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Bidirectional Ticket↔Chat linking)
+
+### 🔗 Tickets ⇄ Chat
+- **Backend:** `GET /api/chat/ticket-card/{ticket_number}` returns embed payload · `POST /api/chat/discuss-ticket/{ticket_number}` posts a "Let's discuss" message into #ops/general (auto-detects).
+- **Chat side:** Messages mentioning `/ticket T-XXX` auto-render an inline ticket card showing status/priority/client/assignee/service — clickable to jump into the ticket.
+- **Ticket side:** "Discuss in Team Chat" item added to the Ticket Actions dropdown — one click posts to chat & navigates there.
+- Result: NexusOps becomes a single hub teams never leave.
+
 ## Recent Updates (Feb 2026 — Service Catalog wiring + Notify Channels + Chat Pro overhaul)
 
 ### 🧩 Service Catalog wired into ticket creation

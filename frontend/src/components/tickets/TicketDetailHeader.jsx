@@ -267,10 +267,21 @@ export function TicketDetailHeader({
                   </>
                 : <><Siren className="w-3.5 h-3.5 mr-2 text-red-400" />Pin for Team (NOC strip)</>}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={async () => {
+                try {
+                  const headers = { Authorization: `Bearer ${localStorage.getItem("token")}` };
+                  const r = await axios.post(`${API}/chat/discuss-ticket/${viewingTicket.ticket_number}`, {}, { headers });
+                  toast.success("Posted to team chat");
+                  window.location.href = "/team-chat";
+                } catch (e) { toast.error(e.response?.data?.detail || "Post failed"); }
+              }}
+              data-testid="actions-discuss-chat"
+            >
+              <MessageSquare className="w-3.5 h-3.5 mr-2 text-cyan-400" />Discuss in Team Chat
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {/* Billing menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

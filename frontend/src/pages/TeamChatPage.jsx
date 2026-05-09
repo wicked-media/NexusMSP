@@ -15,6 +15,58 @@ import {
 
 const COMMON_EMOJIS = ["👍", "❤️", "🎉", "🚀", "✅", "🔥", "👏", "😂", "😮", "🙏", "💯", "👀"];
 
+/* ========== Ticket Card (inline embed for /ticket TXXX mentions) ========== */
+const TICKET_REGEX = /\/ticket\s+([\w-]+)/gi;
+function TicketCard({ ticketNumber, headers }) {
+  const [card, setCard] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/chat/ticket-card/${ticketNumber}`, { headers })
+      .then(r => alive && setCard(r.data))
+      .catch(() => alive && setErr(true));
+    return () => { alive = false; };
+  }, [ticketNumber]); // eslint-disable-line
+  if (err) return null;
+  if (!card) return null;
+  const prio = card.priority || "medium";
+  const prioColor = prio === "critical" ? "bg-rose-500/15 border-rose-500/30 text-rose-300" : prio === "high" ? "bg-amber-500/15 border-amber-500/30 text-amber-300" : prio === "low" ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300" : "bg-cyan-500/15 border-cyan-500/30 text-cyan-300";
+  return (
+    <a href={`/tickets?id=${card.id}`} className="block mt-2 p-2.5 rounded-md border bg-muted/30 hover:bg-muted/50 transition w-full max-w-md">
+      <div className="flex items-center gap-2 mb-1">
+        <code className="text-[10px] font-mono bg-black/20 px-1.5 py-0.5 rounded">{card.ticket_number}</code>
+        <Badge variant="outline" className={`text-[9px] capitalize ${prioColor}`}>{prio}</Badge>
+        <Badge variant="outline" className="text-[9px] capitalize">{card.status?.replace("_", " ")}</Badge>
+      </div>
+      <p className="text-sm font-medium truncate">{card.title}</p>
+      <p className="text-[11px] text-muted-foreground mt-0.5">
+        {card.client_name}{card.assigned_to_name ? ` · ${card.assigned_to_name}` : ""}{card.service_name ? ` · ${card.service_name}` : ""}
+      </p>
+    </a>
+  );
+}
+
+function renderBodyWithTicketCards(body, headers) {
+  if (!body) return null;
+  const matches = [...body.matchAll(TICKET_REGEX)];
+  if (matches.length === 0) return <span className="whitespace-pre-wrap">{body}</span>;
+  const parts = [];
+  let last = 0;
+  matches.forEach((m, i) => {
+    if (m.index > last) parts.push(<span key={`t${i}`}>{body.slice(last, m.index)}</span>);
+    parts.push(<code key={`c${i}`} className="bg-violet-500/10 text-violet-300 px-1 rounded text-xs">{m[0]}</code>);
+    last = m.index + m[0].length;
+  });
+  if (last < body.length) parts.push(<span key="end">{body.slice(last)}</span>);
+  const ticketNumbers = [...new Set(matches.map(m => m[1]))];
+  return (
+    <>
+      <span className="whitespace-pre-wrap">{parts}</span>
+      {ticketNumbers.map(n => <TicketCard key={n} ticketNumber={n} headers={headers} />)}
+    </>
+  );
+}
+
 export default function TeamChatPage() {
   const { token, user } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -292,6 +344,7 @@ export default function TeamChatPage() {
             <div className="space-y-1">
               {messages.filter(m => !m.thread_id).map(m => (
                 <MessageBubble key={m.id} msg={m} isOwn={m.user_id === user?.id}
+                  headers={headers}
                   onReact={(em) => toggleReaction(m.id, em)}
                   onThread={() => openThread(m)}
                   onEdit={() => startEdit(m)}
@@ -342,9 +395,9 @@ export default function TeamChatPage() {
         <aside className="w-96 border-l flex flex-col" data-testid="thread-panel">
           <div className="p-3 border-b flex items-center justify-between"><h3 className="text-sm font-semibold flex items-center gap-1.5"><CornerDownRight className="w-4 h-4" />Thread</h3><Button size="sm" variant="ghost" onClick={() => setThread(null)}><X className="w-3.5 h-3.5" /></Button></div>
           <div className="flex-1 overflow-auto p-3">
-            <MessageBubble msg={thread.parent} isOwn={thread.parent.user_id === user?.id} compact />
+            <MessageBubble msg={thread.parent} isOwn={thread.parent.user_id === user?.id} headers={headers} compact />
             <div className="my-3 border-t pt-3 space-y-2">
-              {thread.replies.map(r => <MessageBubble key={r.id} msg={r} isOwn={r.user_id === user?.id} compact />)}
+              {thread.replies.map(r => <MessageBubble key={r.id} msg={r} isOwn={r.user_id === user?.id} headers={headers} compact />)}
             </div>
           </div>
           <div className="p-3 border-t flex gap-2">
@@ -368,7 +421,7 @@ export default function TeamChatPage() {
 }
 
 /* ========== Message Bubble Component ========== */
-function MessageBubble({ msg, isOwn, onReact, onThread, onEdit, onDelete, onPin, onSetEmojiTarget, emojiOpen, onCloseEmoji, editing, editingText, setEditingText, onSaveEdit, onCancelEdit, compact }) {
+function MessageBubble({ msg, isOwn, headers, onReact, onThread, onEdit, onDelete, onPin, onSetEmojiTarget, emojiOpen, onCloseEmoji, editing, editingText, setEditingText, onSaveEdit, onCancelEdit, compact }) {
   const [showActions, setShowActions] = useState(false);
   return (
     <div className={`group relative px-2 py-1.5 rounded hover:bg-muted/30 ${msg.deleted ? "opacity-50" : ""} ${msg.pinned ? "border-l-2 border-amber-500/50 bg-amber-500/[0.02]" : ""}`} onMouseEnter={() => setShowActions(true)} onMouseLeave={() => setShowActions(false)}>
@@ -385,7 +438,7 @@ function MessageBubble({ msg, isOwn, onReact, onThread, onEdit, onDelete, onPin,
           <Button size="sm" variant="ghost" onClick={onCancelEdit} className="h-8">Cancel</Button>
         </div>
       ) : (
-        <p className="text-sm whitespace-pre-wrap mt-0.5">{msg.body}</p>
+        <div className="text-sm mt-0.5">{renderBodyWithTicketCards(msg.body, headers)}</div>
       )}
       {msg.attachment?.is_image && (
         <a href={`${API}/chat/files/${msg.attachment.file_id}`} target="_blank" rel="noopener" className="block mt-2"><div className="text-xs text-cyan-400 underline">📎 {msg.attachment.filename}</div></a>
