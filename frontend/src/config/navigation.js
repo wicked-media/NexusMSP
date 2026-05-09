@@ -77,7 +77,8 @@ export const navGroups = [
       {
         path: "/live-chat", icon: MessageSquare, label: "Live Support",
         children: [
-          { path: "/live-chat", label: "Live Chat" },
+          { path: "/team-chat", label: "Team Chat 💬" },
+          { path: "/live-chat", label: "Live Chat (Customers)" },
           { path: "/voice-ticket", label: "Voice to Ticket" },
           { path: "/script-ticket", label: "Script-to-Ticket" },
           { path: "/phone-integration", label: "Phone System (PBX)" },

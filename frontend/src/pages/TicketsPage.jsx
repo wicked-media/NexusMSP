@@ -66,6 +66,7 @@ export default function TicketsPage() {
   const { token, user } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [clients, setClients] = useState([]);
+  const [services, setServices] = useState([]);
   const [users, setUsers] = useState([]);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -220,7 +221,7 @@ export default function TicketsPage() {
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, wsSRes, fjRes, fjSRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, wsSRes, fjRes, fjSRes, svcRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
@@ -232,6 +233,7 @@ export default function TicketsPage() {
         axios.get(`${API}/workshop/stats`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/field-jobs`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/field-jobs/stats/summary`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/pro-pack/service-catalog`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTickets(tRes.data);
       setClients(cRes.data);
@@ -244,6 +246,7 @@ export default function TicketsPage() {
       setWorkshopStats(wsSRes.data || {});
       setFieldJobs(fjRes.data || []);
       setFieldStats(fjSRes.data || {});
+      setServices(svcRes.data || []);
       // Fetch active viewers for tickets
       try {
         const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
@@ -3835,6 +3838,7 @@ export default function TicketsPage() {
         open={isCreateOpen} onOpenChange={setIsCreateOpen}
         formData={formData} setFormData={setFormData}
         clients={clients} devices={devices} users={users} tickets={tickets}
+        services={services}
         handleAiTriage={handleAiTriage} triaging={triaging}
         triageResult={triageResult} applyTriage={applyTriage}
         handleCreateTicket={handleCreateTicket}

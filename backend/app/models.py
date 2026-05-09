@@ -106,6 +106,7 @@ class TicketCreate(BaseModel):
     asset_id: Optional[str] = None
     device_id: Optional[str] = None
     device_ids: List[str] = []  # Multi-device linking (Syncro-style); device_id kept for backward compat as primary
+    service_code: Optional[str] = None  # Service Catalog SKU — auto-attaches SLA, priority, billing
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")

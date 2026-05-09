@@ -84,6 +84,21 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         assigned_name = user['name'] if user else None
     
     sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}
+
+    # ── Service Catalog wiring: if service_code on payload, override priority/SLA/category/assignee
+    service_code = (ticket_data.model_dump().get("service_code") or "").strip()
+    service_doc = None
+    if service_code:
+        service_doc = await db.service_catalog.find_one({"$or": [{"code": service_code}, {"id": service_code}], "is_active": {"$ne": False}}, {"_id": 0})
+        if service_doc:
+            # Override priority if not explicitly set in the request
+            if ticket_data.priority == "medium":
+                ticket_data.priority = service_doc.get("default_priority", "medium")
+            # Use service-defined SLA
+            sla_resp = float(service_doc.get("sla_response_hours") or 0)
+            sla_resolve = float(service_doc.get("sla_resolve_hours") or 0)
+            sla_hours[ticket_data.priority] = sla_resolve or sla_hours.get(ticket_data.priority, 8)
+
     sla_due = datetime.now(timezone.utc) + timedelta(hours=sla_hours.get(ticket_data.priority, 8))
     
     # Resolve device name(s)
@@ -146,6 +161,29 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         logger.warning(f"Failed to auto-apply blueprint: {e}")
 
     await log_activity(current_user, "created", "ticket", ticket.id, ticket.title, f"Created ticket {ticket_number} for {client_name}", metadata={"ticket_number": ticket_number, "client_name": client_name, "priority": ticket_data.priority})
+
+    # Persist service catalog metadata on the ticket if it was applied
+    if service_doc:
+        await db.tickets.update_one(
+            {"id": ticket.id},
+            {"$set": {
+                "service_code": service_doc.get("code"),
+                "service_name": service_doc.get("name"),
+                "service_id": service_doc.get("id"),
+                "billable_unit_price": float(service_doc.get("billing_unit_price") or 0),
+                "billable_unit": service_doc.get("billing_unit", "each"),
+                "sla_response_hours": float(service_doc.get("sla_response_hours") or 0),
+                "sla_resolve_hours": float(service_doc.get("sla_resolve_hours") or 0),
+            }}
+        )
+
+    # Notify subscribed Slack/Teams/Discord channels
+    try:
+        from app.services.notify_publish import fire
+        prio_emoji = {"critical": "🚨", "high": "⚠️", "medium": "📋", "low": "🟢"}.get(ticket_data.priority, "📋")
+        fire("ticket_created", f"{prio_emoji} *New {ticket_data.priority} ticket* {ticket_number}\n*{client_name}* — {ticket.title}")
+    except Exception as e:
+        logger.warning(f"notify_publish failed: {e}")
     
     # Auto-ping relevant team members
     try:

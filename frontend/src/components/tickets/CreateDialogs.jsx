@@ -11,7 +11,7 @@ import { priorityConfig } from "@/config/ticketConfig";
 
 export function CreateTicketDialog({
   open, onOpenChange, formData, setFormData, clients, devices, users, tickets,
-  handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket,
+  handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket, services,
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -20,6 +20,37 @@ export function CreateTicketDialog({
         <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-1">
           <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
           <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
+
+          {(services?.length > 0) && (
+            <div className="p-3 rounded-lg border border-violet-500/30 bg-violet-500/[0.04]">
+              <Label className="text-xs uppercase text-violet-300 flex items-center gap-1"><Wrench className="w-3 h-3" />Service Catalog (auto-attaches SLA & billing)</Label>
+              <Select
+                value={formData.service_code || "__none"}
+                onValueChange={v => {
+                  if (v === "__none") {
+                    setFormData({ ...formData, service_code: "", service_name: "" });
+                    return;
+                  }
+                  const svc = services.find(s => s.code === v);
+                  setFormData({
+                    ...formData,
+                    service_code: v,
+                    service_name: svc?.name,
+                    priority: svc?.default_priority || formData.priority,
+                    category: svc?.category || formData.category,
+                  });
+                }}
+              >
+                <SelectTrigger data-testid="create-service-code"><SelectValue placeholder="No service / manual" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">— No service / manual —</SelectItem>
+                  {services.filter(s => s.is_active !== false).map(s => (
+                    <SelectItem key={s.id} value={s.code}>{s.code} · {s.name} (SLA: {s.sla_resolve_hours}h · ${s.billing_unit_price}/{s.billing_unit})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleAiTriage} disabled={triaging} className="text-cyan-400 border-cyan-500/30" data-testid="ai-triage-btn">

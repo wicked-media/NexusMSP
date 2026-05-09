@@ -251,6 +251,7 @@ export const routeConfig = [
   { path: "/quote-to-cash", component: page("QuoteToCashPage"), auth: true, layout: true },
   { path: "/notify-channels", component: page("NotifyChannelsPage"), auth: true, layout: true },
   { path: "/patch-tuesday", component: page("PatchTuesdayPage"), auth: true, layout: true },
+  { path: "/team-chat", component: page("TeamChatPage"), auth: true, layout: true },
   { path: "/settings-api-tokens", component: page("ApiTokensPage"), auth: true, layout: true },
   { path: "/security-2fa", component: page("Security2FAPage"), auth: true, layout: true },
   { path: "/saas-spend", component: page("SaasSpendPage"), auth: true, layout: true },
