@@ -18,6 +18,19 @@ import {
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "😮", "🙏", "👀"];
 const TICKET_REGEX = /\/ticket\s+([\w-]+)/gi;
 
+// Slash command catalog — single source of truth for autocomplete + send() routing
+const SLASH_COMMANDS = [
+  { cmd: "ticket",    args: "TKT-### status|priority <value>", desc: "Change ticket status or priority", icon: "🎟️" },
+  { cmd: "close",     args: "TKT-###",                          desc: "Close a ticket",                  icon: "🔒" },
+  { cmd: "assign",    args: "@user TKT-###",                    desc: "Assign ticket to a user",         icon: "👤" },
+  { cmd: "sla",       args: "TKT-###",                          desc: "Show SLA timers",                 icon: "📊" },
+  { cmd: "note",      args: "TKT-### <body>",                   desc: "Add internal note from chat",     icon: "📝" },
+  { cmd: "summarize", args: "",                                  desc: "AI summary of last 40 messages", icon: "🤖" },
+  { cmd: "page",      args: "<severity>",                        desc: "Page the team",                   icon: "📟" },
+  { cmd: "help",      args: "",                                  desc: "List all slash commands",         icon: "❓" },
+];
+const SLASH_CMD_NAMES = new Set(SLASH_COMMANDS.map(c => c.cmd));
+
 // ============== Helpers ==============
 const formatRelativeTime = (ts) => {
   if (!ts) return "";
@@ -71,10 +84,28 @@ export default function TeamChatPage() {
   const [editingText, setEditingText] = useState("");
   const [typingUsers, setTypingUsers] = useState([]);
   const [showInfo, setShowInfo] = useState(false);
+  const [slashIdx, setSlashIdx] = useState(0);
   const fileRef = useRef(null);
   const scrollRef = useRef(null);
 
   const activeChannel = channels.find(c => c.id === activeId);
+
+  // Compute slash autocomplete suggestions on every render based on the input
+  const slashSuggestions = useMemo(() => {
+    if (!input.startsWith("/")) return [];
+    const firstSpace = input.indexOf(" ");
+    if (firstSpace !== -1) return []; // user is typing args, not picking command
+    const q = input.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter(c => c.cmd.startsWith(q));
+  }, [input]);
+
+  // Reset highlighted index when suggestion list shrinks
+  useEffect(() => { if (slashIdx >= slashSuggestions.length) setSlashIdx(0); }, [slashSuggestions.length, slashIdx]);
+
+  const pickSlashSuggestion = (cmd) => {
+    setInput(`/${cmd.cmd}${cmd.args ? " " : ""}`);
+    setSlashIdx(0);
+  };
 
   // Initial load + presence + users
   useEffect(() => {
@@ -141,11 +172,11 @@ export default function TeamChatPage() {
     const body = input.trim();
     if (!body || !activeId) return;
     setInput("");
+    setSlashIdx(0);
     // Detect slash commands; /ticket T-XXX alone stays as a regular message (renders inline TicketCard)
     const firstToken = body.split(/\s+/)[0].slice(1).toLowerCase();
-    const slashCmds = new Set(["assign", "ticket", "close", "sla", "note", "summarize", "page", "help"]);
     const isMentionOnly = /^\/ticket\s+[\w-]+\s*$/i.test(body);
-    if (body.startsWith("/") && slashCmds.has(firstToken) && !isMentionOnly) {
+    if (body.startsWith("/") && SLASH_CMD_NAMES.has(firstToken) && !isMentionOnly) {
       try {
         await axios.post(`${API}/chat/slash`, { raw: body, channel_id: activeId }, { headers });
         refreshMessages();
@@ -362,23 +393,59 @@ export default function TeamChatPage() {
 
             {/* Composer */}
             <div className="p-3 border-t border-border/40 bg-card/30 backdrop-blur-xl">
-              {input.startsWith("/") && (
-                <div className="mb-2 px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/30 text-[11px] text-violet-200/90 font-mono leading-relaxed" data-testid="slash-hint">
-                  <span className="font-semibold text-violet-300">Slash commands:</span>{" "}
-                  <code className="bg-black/20 px-1 rounded">/ticket TKT-### status closed</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/close TKT-###</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/assign @user TKT-###</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/sla TKT-###</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/note TKT-### text</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/summarize</code>{" · "}
-                  <code className="bg-black/20 px-1 rounded">/help</code>
+              {/* Slash autocomplete dropdown */}
+              {slashSuggestions.length > 0 && (
+                <div className="mb-2 rounded-xl border border-violet-500/30 bg-card/95 backdrop-blur-xl shadow-2xl shadow-violet-500/10 overflow-hidden" data-testid="slash-autocomplete">
+                  <div className="px-3 py-1.5 border-b border-border/40 text-[10px] uppercase tracking-widest font-semibold text-muted-foreground flex items-center justify-between">
+                    <span>Slash commands</span>
+                    <span className="font-mono normal-case tracking-normal">↑↓ navigate · ↵ select · esc close</span>
+                  </div>
+                  <div className="max-h-64 overflow-auto">
+                    {slashSuggestions.map((c, i) => (
+                      <button
+                        key={c.cmd}
+                        onClick={() => pickSlashSuggestion(c)}
+                        onMouseEnter={() => setSlashIdx(i)}
+                        className={`w-full flex items-start gap-3 px-3 py-2 text-left transition-colors ${i === slashIdx ? "bg-violet-500/15" : "hover:bg-muted/30"}`}
+                        data-testid={`slash-suggestion-${c.cmd}`}
+                      >
+                        <span className="text-base leading-none mt-0.5">{c.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline gap-2">
+                            <code className="text-sm font-mono font-semibold text-violet-300">/{c.cmd}</code>
+                            {c.args && <span className="text-[11px] text-muted-foreground/80 font-mono truncate">{c.args}</span>}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">{c.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="flex items-end gap-2">
                 <input ref={fileRef} type="file" className="hidden" onChange={onUpload} />
                 <Button size="sm" variant="ghost" className="rounded-full h-10 w-10 p-0 hover:bg-violet-500/10" onClick={() => fileRef.current?.click()} title="Attach"><Paperclip className="w-4 h-4" /></Button>
                 <div className="flex-1 relative">
-                  <Input value={input} onChange={e => { setInput(e.target.value); sendTyping(); }} onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} placeholder={`Message ${activeChannel?.name || ""}…  type / for commands or @ to mention`} className="rounded-full pl-4 pr-12 h-10 bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40" data-testid="chat-input" />
+                  <Input
+                    value={input}
+                    onChange={e => { setInput(e.target.value); sendTyping(); setSlashIdx(0); }}
+                    onKeyDown={e => {
+                      if (slashSuggestions.length > 0) {
+                        if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx(i => (i + 1) % slashSuggestions.length); return; }
+                        if (e.key === "ArrowUp")   { e.preventDefault(); setSlashIdx(i => (i - 1 + slashSuggestions.length) % slashSuggestions.length); return; }
+                        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                          e.preventDefault();
+                          pickSlashSuggestion(slashSuggestions[slashIdx]);
+                          return;
+                        }
+                        if (e.key === "Escape") { e.preventDefault(); setInput(""); return; }
+                      }
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+                    }}
+                    placeholder={`Message ${activeChannel?.name || ""}…  type / for commands or @ to mention`}
+                    className="rounded-full pl-4 pr-12 h-10 bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40"
+                    data-testid="chat-input"
+                  />
                   <Button size="sm" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full h-8 w-8 p-0 hover:bg-violet-500/10" title="Emoji" onClick={() => { const em = COMMON_EMOJIS[Math.floor(Math.random() * COMMON_EMOJIS.length)]; setInput(p => p + em); }}><Smile className="w-4 h-4" /></Button>
                 </div>
                 <Button onClick={send} disabled={!input.trim()} className="rounded-full h-10 w-10 p-0 bg-gradient-to-br from-violet-500 to-cyan-500 hover:from-violet-600 hover:to-cyan-600 shadow-lg shadow-violet-500/25" data-testid="chat-send"><Send className="w-4 h-4" /></Button>
