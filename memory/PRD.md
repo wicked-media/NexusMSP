@@ -11,7 +11,7 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 ## Recent Updates (Feb 2026 — Team Chat Redesign + Slash Commands + Tickets Refactor)
 
 ### 💬 Team Chat — WhatsApp/Teams-quality redesign (`/team-chat`)
-- Full UI rewrite at `/app/frontend/src/pages/TeamChatPage.jsx` (732 lines, modular sub-components)
+- Full UI rewrite at `/app/frontend/src/pages/TeamChatPage.jsx` (modular sub-components)
 - New `NewChatDialog` with 3 tabs: **DM · Group · Channel** — create direct messages, multi-person group chats, or named channels (public/private with invite-only members)
 - Modernized message bubbles (gradient for own, muted for others), date separators, hover toolbar (react/reply/pin/edit/delete), inline emoji picker, typing indicator, presence dots, info side panel with member list, thread sidebar, search, pinned strip
 - Wires `POST /api/chat/dm/{user_id}`, `POST /api/chat/group-dm`, `POST /api/chat/channels` (with member_ids for private channels)
@@ -24,18 +24,18 @@ Extended `chat_presence.slash` with full ticket workflow:
 - `/close TKT-###` — quick close shortcut
 - `/sla TKT-###` — show response & resolution SLA timers (live countdown / breach state)
 - `/note TKT-### <body>` — add internal note from chat
-- `/assign @user TKT-###` — already existed
-- `/summarize` · `/page <severity>` · `/help`
-- Frontend `send()` auto-detects slash commands and routes to `/api/chat/slash` instead of regular message; mention-only `/ticket T-XXX` still renders the inline TicketCard
-- Live slash hint UI appears above composer the moment user types `/`
-- **Tested:** all paths via curl — valid status update, invalid value rejection, ticket-not-found, /sla, /note, /close, /help
+- `/assign @user TKT-###` · `/summarize` · `/page <severity>` · `/help`
+- Frontend `send()` auto-detects slash commands and routes to `/api/chat/slash`; mention-only `/ticket T-XXX` still renders the inline TicketCard
+- **Slash Autocomplete Dropdown** (`SLASH_COMMANDS` catalog at top of TeamChatPage): typing `/` shows a Slack/Notion-style filtered dropdown with icons, args hints, and descriptions. Full keyboard nav: `ArrowUp/Down` to highlight, `Tab/Enter` to pick, `Esc` to clear. Mouse click also works. Hides automatically once user types a space (args mode).
+- **Tested:** `iteration_164.json` — 100% PASS (filter, keyboard nav, click, send-on-Enter-when-hidden, mention-only carve-out)
 
 ### 🧹 TicketsPage.jsx decomposition (P1 refactor)
-- `TicketsPage.jsx`: 3862 → 3574 lines (-288 lines, ~7.5% reduction in monolith size)
+- Final size: **3431 lines (was 3862, -431 lines, -11%)**
 - New `TicketEnrichmentRail.jsx` (99 lines) — TTR Prediction + Blast Radius + Client Health cards
 - New `TicketConversationTab.jsx` (223 lines) — full Conversation tab (Note/Email/SMS forms + unified timeline)
+- New `TicketSecondaryTabs.jsx` (262 lines) — exports 6 tab components: Worksheets, Attachments, Items, Children, Time, Audit
 - All state remains in parent — children are pure presentational
-- **Tested:** `iteration_163.json` — 100% PASS, no regressions
+- **Tested:** `iteration_163.json` + `iteration_164.json` — 100% PASS, no regressions
 
 ## Recent Updates (Feb 2026 — Bidirectional Ticket↔Chat linking)
 
