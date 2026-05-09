@@ -344,9 +344,9 @@ export default function BackupCenterPage() {
 
       {/* Hero metric strip */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroMetric label="Total Backups" value={ds.total || 0} icon={Database} glow="cyan" subtitle="all sources" />
+        <HeroMetric label="Total Backups" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle="all machines · Acronis" />
         <HeroMetric label="Successful" value={ds.successful || 0} icon={CheckCircle} glow="emerald" subtitle={`${ds.success_rate || 0}% success rate`} />
-        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle="last 24h" />
+        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "needs attention" : "all healthy"} />
         <HeroMetric label="Running" value={liveCount} icon={Activity} glow="violet" subtitle="live now" />
         <HeroMetric label="Online Agents" value={ah.online || 0} icon={Wifi} glow="emerald" subtitle={`${ah.online_pct || 0}% of ${ah.total || 0}`} />
         <HeroMetric label="Active Alerts" value={acronisAlerts.length} icon={Bell} glow={acronisAlerts.length > 0 ? "amber" : "cyan"} subtitle={acronisUsage?.critical_alerts ? `${acronisUsage.critical_alerts} critical` : "Acronis"} />
