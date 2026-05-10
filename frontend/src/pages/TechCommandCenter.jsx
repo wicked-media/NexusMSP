@@ -16,8 +16,25 @@ import { formatDistanceToNow } from "date-fns";
 import {
   Sparkles, Search, Loader2, Users, Shield, AlertTriangle, Zap, Activity,
   Crown, Lock, Unlock, History, Clock, Target, ChevronRight, RefreshCw,
-  TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame,
+  TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
+  Network, Calendar, Trophy, BarChart3,
 } from "lucide-react";
+
+// Lazy-load embedded pages so they only initialise when their tab is opened
+import { lazy, Suspense } from "react";
+const TechniciansPage = lazy(() => import("@/pages/TechniciansPage"));
+const TechRosterPage = lazy(() => import("@/pages/TechRosterPage"));
+const SkillsMatrixPage = lazy(() => import("@/pages/SkillsMatrixPage"));
+const TechUtilizationPage = lazy(() => import("@/pages/TechUtilizationPage"));
+const LeaderboardPage = lazy(() => import("@/pages/LeaderboardPage"));
+
+function LazyPanel({ children }) {
+  return (
+    <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>}>
+      {children}
+    </Suspense>
+  );
+}
 
 // ---------- Skill radar (CSS-only, 8 axes) -----------------------------------
 const SKILL_AXES = ["networking", "cloud", "security", "endpoints", "backup", "m365", "voip", "hardware"];
@@ -691,7 +708,7 @@ function AuditTimelineTab({ headers }) {
 export default function TechCommandCenter() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [tab, setTab] = useState("find");
+  const [tab, setTab] = useState("directory");
   const [capacity, setCapacity] = useState(null);
   const [presets, setPresets] = useState({});
 
@@ -714,36 +731,57 @@ export default function TechCommandCenter() {
   return (
     <div className="space-y-6 p-6" data-testid="tech-command-center">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Tech Command Center
+            <Sparkles className="w-6 h-6 text-violet-400" />Team Command Center
           </h1>
-          <p className="text-sm text-zinc-500">Smart Finder · Capacity · Permissions · Drift · JIT · Audit</p>
+          <p className="text-sm text-zinc-500">One place for everything: directory · invites · capacity · permissions · skills · utilisation · leaderboard · audit</p>
         </div>
-        <Button size="sm" variant="ghost" onClick={loadCapacity} className="h-8 text-xs"><RefreshCw className="w-3 h-3 mr-1" />Refresh capacity</Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10"
+            onClick={() => setTab("directory")}
+            data-testid="tcc-invite-btn"
+          >
+            <UserPlus className="w-3 h-3 mr-1" />Invite / Add Tech
+          </Button>
+          <Button size="sm" variant="ghost" onClick={loadCapacity} className="h-8 text-xs" data-testid="tcc-refresh-btn"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-2 p-0 h-auto">
+        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
           {[
+            { v: "directory",  l: "Directory",       Icon: Users },
             { v: "find",       l: "Smart Finder",    Icon: Sparkles },
             { v: "capacity",   l: "Capacity",        Icon: Activity },
+            { v: "roster",     l: "On-Call",         Icon: Calendar },
+            { v: "skills",     l: "Skills",          Icon: Network },
+            { v: "utilization", l: "Utilisation",    Icon: BarChart3 },
+            { v: "leaderboard", l: "Leaderboard",    Icon: Trophy },
             { v: "matrix",     l: "Permissions",     Icon: Shield },
             { v: "drift",      l: "Role Drift",      Icon: Target },
-            { v: "jit",        l: "JIT Elevation",   Icon: Zap },
-            { v: "audit",      l: "Audit Timeline",  Icon: History },
+            { v: "jit",        l: "JIT",             Icon: Zap },
+            { v: "audit",      l: "Audit",           Icon: History },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
-              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider"
+              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
               data-testid={`tcc-tab-${t.v}`}>
               <t.Icon className="w-3 h-3 mr-1" />{t.l}
             </TabsTrigger>
           ))}
         </TabsList>
 
+        <TabsContent value="directory" className="mt-4"><LazyPanel><TechniciansPage /></LazyPanel></TabsContent>
         <TabsContent value="find" className="mt-4"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
         <TabsContent value="capacity" className="mt-4"><CapacityCockpitTab capacity={capacity} /></TabsContent>
+        <TabsContent value="roster" className="mt-4"><LazyPanel><TechRosterPage /></LazyPanel></TabsContent>
+        <TabsContent value="skills" className="mt-4"><LazyPanel><SkillsMatrixPage /></LazyPanel></TabsContent>
+        <TabsContent value="utilization" className="mt-4"><LazyPanel><TechUtilizationPage /></LazyPanel></TabsContent>
+        <TabsContent value="leaderboard" className="mt-4"><LazyPanel><LeaderboardPage /></LazyPanel></TabsContent>
         <TabsContent value="matrix" className="mt-4"><PermissionMatrixTab headers={headers} presets={presets} /></TabsContent>
         <TabsContent value="drift" className="mt-4"><RoleDriftTab headers={headers} /></TabsContent>
         <TabsContent value="jit" className="mt-4"><JITElevationTab headers={headers} capacity={capacity} presets={presets} onAfterChange={loadCapacity} /></TabsContent>

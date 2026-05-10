@@ -60,12 +60,7 @@ export const navGroups = [
       {
         path: "/tech-command", icon: UserCog, label: "Team",
         children: [
-          { path: "/tech-command", label: "Command Center ⚡" },
-          { path: "/technicians", label: "Technicians" },
-          { path: "/tech-roster", label: "On-Call Roster" },
-          { path: "/skills-matrix", label: "Skills Matrix" },
-          { path: "/tech-utilization", label: "Utilization" },
-          { path: "/leaderboard", label: "Leaderboard" },
+          { path: "/tech-command", label: "Team Command Center ⚡" },
         ]
       },
       {

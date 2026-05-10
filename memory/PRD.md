@@ -8,6 +8,23 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Team Command Center consolidation)
+Renamed "Tech Command Center" → **Team Command Center**. All Team module pages folded into a single 11-tab hub at `/tech-command`:
+- **Directory** (default) — embeds the full `TechniciansPage` (invite, add, edit, archive, profiles)
+- **Smart Finder** — NL search
+- **Capacity** — workload cockpit
+- **On-Call** — embeds `TechRosterPage` (tier 1/2/3 escalation roster)
+- **Skills** — embeds `SkillsMatrixPage`
+- **Utilisation** — embeds `TechUtilizationPage`
+- **Leaderboard** — embeds `LeaderboardPage`
+- **Permissions** — heatmap + diff
+- **Role Drift** — AI alignment alerts
+- **JIT** — elevation grants + break-glass
+- **Audit** — timeline of permission events
+- "Invite / Add Tech" + "Refresh" buttons in header
+- Embedded pages lazy-loaded via `React.lazy` so only initialise when their tab is opened — no perf hit.
+- Sidebar `Team` group collapsed to a single "Team Command Center ⚡" entry. Old routes (`/technicians`, `/tech-roster`, `/skills-matrix`, `/tech-utilization`, `/leaderboard`) remain alive for direct deep-linking.
+
 ## Recent Updates (Feb 2026 — Tech Command Center + Outlook-Grade Signatures)
 
 ### 🚀 Tech Command Center (`/tech-command`) — outclasses Syncro/HaloPSA/CW/Ninja
