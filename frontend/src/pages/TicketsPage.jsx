@@ -27,6 +27,7 @@ import {
   GroupBySelector, useGroupedTickets,
 } from "@/components/tickets/TicketRow";
 import AICopilotStrip from "@/components/tickets/AICopilotStrip";
+import SavedViewsBar from "@/components/SavedViewsBar";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -92,6 +93,35 @@ export default function TicketsPage() {
     try { return localStorage.getItem("nexus.tickets.groupBy") || "age"; } catch { return "age"; }
   });
   useEffect(() => { try { localStorage.setItem("nexus.tickets.groupBy", groupBy); } catch {} }, [groupBy]);
+  const [activeViewId, setActiveViewId] = useState(null);
+
+  const applyView = (v) => {
+    if (!v) { setActiveViewId(null); return; }
+    setActiveViewId(v.id);
+    const f = v.filters || {};
+    if (f.status != null) setStatusFilter(f.status);
+    if (f.priority != null) setPriorityFilter(f.priority);
+    if (f.search != null) setSearchQuery(f.search);
+    if (v.group_by) setGroupBy(v.group_by);
+    if (v.density) setDensity(v.density);
+  };
+  const currentSnapshot = {
+    filters: { status: statusFilter, priority: priorityFilter, search: searchQuery },
+    group_by: groupBy, density, sort: "created_desc",
+  };
+
+  // Pickup a view passed from another page (e.g. Workspace)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("nexus.tickets.applyView");
+      if (raw) {
+        const v = JSON.parse(raw);
+        applyView(v);
+        localStorage.removeItem("nexus.tickets.applyView");
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
@@ -3226,11 +3256,20 @@ export default function TicketsPage() {
 
       {/* Density + Group toolbar */}
       {(typeFilter === "all" || typeFilter === "sla") && (
-        <div className="flex items-center gap-1 px-1 -mb-1">
-          <DensityToggle density={density} setDensity={setDensity} />
-          <span className="text-zinc-700">·</span>
-          <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
-        </div>
+        <>
+          <SavedViewsBar
+            scope="tickets" headers={headers}
+            currentSnapshot={currentSnapshot}
+            activeViewId={activeViewId}
+            onApply={applyView}
+            onClearActive={() => applyView(null)}
+          />
+          <div className="flex items-center gap-1 px-1 -mb-1">
+            <DensityToggle density={density} setDensity={setDensity} />
+            <span className="text-zinc-700">·</span>
+            <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
+          </div>
+        </>
       )}
 
       {/* Dense ticket list (Linear/Plain.com inspired) */}

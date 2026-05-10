@@ -199,6 +199,44 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
             resolutions.append((b - a).total_seconds() / 3600)
     avg_resolve_hrs = round(sum(resolutions) / len(resolutions), 1) if resolutions else None
 
+    # ─── New: CSAT score (avg of responded surveys assigned to this tech) ───
+    csat_avg = None
+    csat_count = 0
+    try:
+        csat_pipeline = [
+            {"$match": {"$or": [{"assigned_to": u["id"]}, {"assigned_to_name": name}], "score": {"$gte": 1, "$lte": 5}}},
+            {"$group": {"_id": None, "avg": {"$avg": "$score"}, "n": {"$sum": 1}}},
+        ]
+        cur = db.csat_surveys.aggregate(csat_pipeline)
+        async for row in cur:
+            csat_avg = round(row.get("avg") or 0, 2)
+            csat_count = row.get("n") or 0
+    except Exception:
+        pass
+
+    # ─── New: 5 most recent closed tickets ───
+    recent_closed = await db.tickets.find(
+        {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
+    ).sort("resolved_at", -1).limit(5).to_list(5)
+
+    # ─── New: 7-day x 24-hour activity heatmap from ticket activity (created_at + resolved_at) ───
+    heatmap = [[0] * 24 for _ in range(7)]
+    for t in closed_tx[-500:]:
+        for key in ("created_at", "resolved_at"):
+            d = _parse_iso(t.get(key))
+            if d:
+                heatmap[d.weekday()][d.hour] += 1
+
+    # ─── New: Specialties / Certifications (editable via PUT /technicians/{id}/profile) ───
+    tech_doc = await db.technician_profiles.find_one({"user_id": u["id"]}, {"_id": 0}) or {}
+    specialties = tech_doc.get("specialties") or []
+    certifications = tech_doc.get("certifications") or []
+    bio = tech_doc.get("bio") or ""
+    timezone = tech_doc.get("timezone") or ""
+    on_call = bool(tech_doc.get("on_call", False))
+    working_hours = tech_doc.get("working_hours") or "09:00–17:00"
+
     return {
         "tech_id": u["id"],
         "name": name,
@@ -212,6 +250,16 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
         "skills_radar": radar,
         "achievements_earned": len(earned),
         "achievements_total": len(ACHIEVEMENTS),
+        "csat_avg": csat_avg,
+        "csat_count": csat_count,
+        "recent_closed": recent_closed,
+        "activity_heatmap": heatmap,
+        "specialties": specialties,
+        "certifications": certifications,
+        "bio": bio,
+        "timezone": timezone,
+        "on_call": on_call,
+        "working_hours": working_hours,
         "generated_at": _now_iso(),
     }
 

@@ -16,6 +16,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { priorityConfig } from "@/config/ticketConfig";
+import SavedViewsBar from "@/components/SavedViewsBar";
 
 export default function WorkspacePage() {
   const { token, user } = useAuth();
@@ -197,6 +198,13 @@ export default function WorkspacePage() {
 
           {/* My Open Tickets */}
           <TabsContent value="my-tickets" className="space-y-2">
+            <SavedViewsBar
+              scope="tickets" headers={headers}
+              onApply={(v) => {
+                try { localStorage.setItem("nexus.tickets.applyView", JSON.stringify(v)); } catch {}
+                navigate("/tickets");
+              }}
+            />
             {(!data?.my_open_tickets || data.my_open_tickets.length === 0) ? (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">

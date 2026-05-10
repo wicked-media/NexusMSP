@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -75,6 +76,7 @@ const SETTINGS_INDEX = [
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("branding");
   const [settingSearch, setSettingSearch] = useState("");
   const [highlightAnchor, setHighlightAnchor] = useState("");
@@ -407,7 +409,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex gap-1 mb-6 border-b border-border/50 pb-px overflow-x-auto" data-testid="settings-tabs">
+      <div className="flex gap-1 mb-3 border-b border-border/50 pb-px overflow-x-auto" data-testid="settings-tabs">
         {TABS.map(tab => {
           const Icon = tab.icon;
           return (
@@ -418,6 +420,30 @@ export default function SettingsPage() {
             </button>
           );
         })}
+      </div>
+
+      {/* Other settings hub — quick-access cards to dedicated settings sub-pages */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-6" data-testid="settings-hub-row">
+        <button onClick={() => navigate("/tickets/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-violet-500/40 p-3 transition-all" data-testid="hub-ticket-settings">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-violet-300/80 font-mono mb-1">Ticket Settings</div>
+          <div className="text-sm font-medium">SLA · Workflows · Templates</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Configure ticket numbering, SLA tiers, workflows</div>
+        </button>
+        <button onClick={() => navigate("/ticket-ping/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-cyan-500/40 p-3 transition-all" data-testid="hub-ticket-ping">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 font-mono mb-1">Ticket Ping</div>
+          <div className="text-sm font-medium">Live alerts · Sound</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Notification rules &amp; sounds</div>
+        </button>
+        <button onClick={() => navigate("/tech/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-amber-500/40 p-3 transition-all" data-testid="hub-tech-settings">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80 font-mono mb-1">Tech Settings</div>
+          <div className="text-sm font-medium">Per-user prefs</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Density · views · personal toggles</div>
+        </button>
+        <button onClick={() => navigate("/profile")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-emerald-500/40 p-3 transition-all" data-testid="hub-tech-profile">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80 font-mono mb-1">My Profile</div>
+          <div className="text-sm font-medium">Bio · Skills · CSAT · Achievements</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Public tech profile &amp; gamification</div>
+        </button>
       </div>
 
       <style>{`

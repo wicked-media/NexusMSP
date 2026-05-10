@@ -28,6 +28,34 @@ Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/
 - New files: `TicketRow.jsx`, `AICopilotStrip.jsx`
 - **Tested:** `iteration_167` — all visual + interaction tests PASS; AI summary object-render bug fixed (single-line patch in generateSummary)
 
+## Recent Updates (Feb 2026 — Saved Views + Tech Profile Richness + Settings Hub)
+
+### ⭐ Saved Views (Linear-style pinned filter+grouping presets)
+- New backend: `/app/backend/app/routers/saved_views.py` — full CRUD scoped to user (`/api/saved-views`)
+- Stores: name, scope (tickets/workspace/devices/clients), filters, group_by, density, sort, color, icon, pinned, shared
+- New frontend component: `/app/frontend/src/components/SavedViewsBar.jsx` — pinned chips at top of list with star/edit/delete + save dialog (color picker, pin/share toggles)
+- **Wired into `/tickets`**: applies view in-place (sets filters + group_by + density)
+- **Wired into `/workspace` "My Open Tickets" tab**: clicking a chip stores view in localStorage and navigates to `/tickets`, where it auto-applies on mount
+- Each user gets their own private views; can opt-in to share with team
+
+### 👤 Tech Profile (TechProfilePage.jsx) — feature-rich rebuild
+- **Backend**: `/api/team/{id}/profile` extended with `csat_avg`, `csat_count`, `recent_closed` (last 5), `activity_heatmap` (7×24), `specialties`, `certifications`, `bio`, `timezone`, `on_call`, `working_hours`
+- **Backend**: PUT `/api/technicians/{id}/profile` now mirrors extras to `db.technician_profiles` so the profile read pulls live data
+- **Frontend**:
+  - 4-card stat strip: Closed · Open · Avg resolve · **CSAT score** (avg/5 + response count)
+  - 2-column overview: Skills radar **+** Recent closed tickets clickable list
+  - **Activity heatmap** (7 days × 24 hours violet density grid)
+  - New **About tab** — editable bio, timezone, working hours, **on-call toggle**, specialties chips, certifications chips (only owner can edit)
+
+### ⚙️ Settings Hub
+- Added a quick-access card row at the top of `/settings` linking to all dedicated settings sub-pages: Ticket Settings · Ticket Ping · Tech Settings · My Profile
+- Settings page already had searchable index + 7 tabs — kept intact
+
+### 💡 Customisation status (per user request)
+- **Already in platform**: per-user density mode, group-by preference, dashboard widgets, theme/branding tab, ticket numbering format, custom fields, automation rules, hotkey palette (⌘K)
+- **Now added**: Saved Views (per-user pinned presets), tech profile editable specialties/certs/bio/on-call
+- **Future smart features ideas**: Co-Pilot suggestions everywhere (already on tickets), per-page saved layouts, custom row columns, saved kanban swimlanes
+
 ## Recent Updates (Feb 2026 — Team Chat Redesign + Slash Commands + Tickets Refactor)
 
 ### 🎮 Ticket → Live Device Cockpit (A + B + C)

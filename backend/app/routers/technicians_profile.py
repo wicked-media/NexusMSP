@@ -60,6 +60,16 @@ async def update_tech_profile(tech_id: str, data: dict, current_user: dict = Dep
     update = {k: v for k, v in data.items() if k in allowed_fields}
     if update:
         await db.users.update_one({"id": tech_id}, {"$set": update})
+
+    # Mirror profile-extras to technician_profiles (the source of truth for /team/{id}/profile)
+    extra_fields = {"specialties", "certifications", "bio", "timezone", "on_call", "working_hours"}
+    extras = {k: v for k, v in data.items() if k in extra_fields}
+    if extras:
+        extras["user_id"] = tech_id
+        extras["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.technician_profiles.update_one(
+            {"user_id": tech_id}, {"$set": extras}, upsert=True,
+        )
     return {"message": "Profile updated"}
 
 # ============== TECHNICIAN STATUS / HOVER CARD ==============
