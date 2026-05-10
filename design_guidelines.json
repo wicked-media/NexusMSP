@@ -1,99 +1,141 @@
 {
-  "theme": "dark",
-  "archetype": "Archetype 4: Swiss & High-Contrast (Dark Tactical Variant)",
-  "rationale": "Enterprise MSP dashboard requiring extreme data density, F-pattern scanning, and an operational 'control room' feel. Linear/Superhuman aesthetic demands high contrast, 1px borders, and removal of soft shadows.",
-  "colors": {
-    "background": "bg-zinc-950",
-    "surface": "bg-zinc-900/50",
-    "surface_active": "bg-zinc-800/80",
-    "border": "border-zinc-800",
-    "primary_accent": "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
-    "secondary_accent": "text-sky-400 bg-sky-500/10 border-sky-500/20",
-    "tertiary_accent": "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
-    "health_high": "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-    "health_medium": "text-amber-400 bg-amber-500/10 border-amber-500/20",
-    "health_low": "text-rose-400 bg-rose-500/10 border-rose-500/20",
-    "text_primary": "text-zinc-100",
-    "text_secondary": "text-zinc-400",
-    "text_tertiary": "text-zinc-500"
-  },
+  "theme": "Archetype 4 (Swiss & High-Contrast) - Dark Theme",
+  "archetype_reasoning": "RMM/PSA software requires intense authority, clarity, and precision. We are discarding standard SaaS blue and adopting a deep Obsidian black background, pure white data points, and tactical Violet/Cyan accents for high-visibility triggers and AI presence. This echoes Linear/Plain.com's hyper-functional, developer-centric aesthetic.",
   "typography": {
-    "font_family": {
-      "headings": "'Manrope', sans-serif",
-      "body": "'IBM Plex Sans', sans-serif",
-      "mono": "'JetBrains Mono', monospace"
-    },
+    "strategy": "Swiss Brutalist Tech (Sterile & Sharp)",
+    "headings_font": "JetBrains Mono or IBM Plex Mono (for ticket numbers and technical headers)",
+    "body_font": "Inter or IBM Plex Sans (highly legible geometric sans)",
     "hierarchy": {
-      "h1": "text-2xl font-semibold tracking-tight text-zinc-100",
-      "h2": "text-lg font-medium tracking-tight text-zinc-100",
-      "h3": "text-sm font-medium uppercase tracking-widest text-zinc-500",
-      "body": "text-sm text-zinc-300 leading-relaxed",
-      "metric_value": "text-3xl font-light tracking-tighter text-zinc-100",
-      "micro_label": "text-[11px] font-medium uppercase tracking-widest text-zinc-500"
-    }
-  },
-  "layout_strategy": {
-    "overall": "Master-Detail F-Pattern layout. A fixed top navigation/metric strip, followed by a left-side client list (35% width) and a right-side persistent detail pane (65% width).",
-    "top_strip": "grid grid-cols-4 gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-20",
-    "master_list": "flex flex-col border-r border-zinc-800 h-[calc(100vh-80px)] overflow-y-auto w-[35%] bg-zinc-950",
-    "detail_pane": "flex flex-col h-[calc(100vh-80px)] overflow-y-auto w-[65%] bg-zinc-900/30",
-    "spacing_scale": "Extremely dense. p-2 to p-4 max inside widgets. Use gap-2 for metadata."
-  },
-  "components": {
-    "top_strip_metrics": {
-      "style": "Minimal bento. No background, just a left border `border-l-2 border-indigo-500 pl-4`. Includes tiny sparklines.",
-      "anatomy": "Micro label (uppercase) + Large metric value + subtle trend indicator (e.g., '+2.4%')."
+      "H1": "text-2xl sm:text-3xl tracking-tight font-medium (Calm, not oversized)",
+      "H2": "text-xl sm:text-2xl tracking-tight",
+      "Overlines_Labels": "text-[10px] uppercase tracking-[0.2em] font-mono",
+      "Ticket_Numbers": "text-sm font-mono text-muted-foreground",
+      "Body": "text-sm leading-relaxed"
     },
-    "client_list_card": {
-      "style": "Rectangle, no border-radius rounding, 1px border-b border-zinc-800. Hover state: `bg-zinc-900 cursor-pointer transition-colors`.",
-      "anatomy": "Logo (rounded-md, not full circle for B2B) + Client Name + Industry Tag + Status Dot. Right aligned: MRR with micro-sparkline. Bottom row: Integration micro-dots (sky, indigo, cyan) + Health Score Badge."
-    },
-    "health_score_dial": {
-      "style": "SVG circular progress. 32x32px. Stroke width 3. Gradient stroke based on score. Center text: Score (e.g., '92').",
-      "logic": "0-69: Rose, 70-84: Amber, 85-100: Emerald."
-    },
-    "integration_chips": {
-      "style": "h-6 px-2 rounded-md border text-xs flex items-center gap-1 font-mono",
-      "variants": {
-        "acronis": "border-sky-500/30 text-sky-400 bg-sky-500/10",
-        "pax8": "border-indigo-500/30 text-indigo-400 bg-indigo-500/10",
-        "m365": "border-blue-500/30 text-blue-400 bg-blue-500/10"
-      }
-    },
-    "detail_tabs": {
-      "style": "Linear-style horizontal tabs. `border-b border-zinc-800`. Active tab: `border-b-2 border-indigo-500 text-zinc-100`. Inactive: `text-zinc-500 hover:text-zinc-300`."
-    },
-    "quick_action_fab": {
-      "style": "Floating at bottom-center of detail pane. Pill-shaped command menu `rounded-full border border-zinc-700 bg-zinc-800/90 backdrop-blur-lg shadow-2xl px-2 py-2 flex gap-2`. Includes iconic buttons with tooltips for shortcuts (e.g., [T] New Ticket)."
-    },
-    "empty_states": {
-      "style": "Centralized, using ASCII/Terminal retro-tech aesthetic or simple stark wireframe icons. Heavy text guidance with primary CTA."
-    }
-  },
-  "motion_and_interactions": {
-    "detail_pane_load": "Fade and slight slide-up (framer-motion: `initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}`).",
-    "list_item_hover": "No lifting (`-translate-y` is banned for this dense layout). Change background only `hover:bg-zinc-800/50`.",
-    "active_state": "The selected client in the list gets a persistent left-border: `border-l-2 border-indigo-500 bg-zinc-900`."
-  },
-  "media": {
-    "client_logos": [
-      "https://images.unsplash.com/photo-1770210217380-d78a69acdc77?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwxfHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBhYnN0cmFjdHxlbnwwfHx8fDE3NzY1ODc0MDF8MA&ixlib=rb-4.1.0&q=85",
-      "https://images.unsplash.com/photo-1761044591996-7a05341a3e12?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwyfHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBhYnN0cmFjdHxlbnwwfHx8fDE3NzY1ODc0MDF8MA&ixlib=rb-4.1.0&q=85",
-      "https://images.unsplash.com/photo-1738003946582-aabeabf5e009?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBhYnN0cmFjdHxlbnwwfHx8fDE3NzY1ODc0MDF8MA&ixlib=rb-4.1.0&q=85",
-      "https://images.pexels.com/photos/13597064/pexels-photo-13597064.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
-    ],
-    "avatars": [
-      "https://images.unsplash.com/photo-1769636929388-99eff95d3bf1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMGhlYWRzaG90fGVufDB8fHx8MTc3NjU4NzQwMHww&ixlib=rb-4.1.0&q=85",
-      "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMGhlYWRzaG90fGVufDB8fHx8MTc3NjU4NzQwMHww&ixlib=rb-4.1.0&q=85",
-      "https://images.unsplash.com/photo-1672685667592-0392f458f46f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMGhlYWRzaG90fGVufDB8fHx8MTc3NjU4NzQwMHww&ixlib=rb-4.1.0&q=85"
+    "rules": [
+      "No generic 'Bold' for headers; use 'Medium' or 'Semibold' with tight tracking.",
+      "Use monospace for all metrics, IDs, IP addresses, and timers.",
+      "Avoid large fonts; prioritize density."
     ]
   },
+  "color_palette": {
+    "backgrounds": {
+      "app": "#0A0A0A (Deep Obsidian)",
+      "card": "#121212 (Elevated Gray, Flat Solid)",
+      "hover": "#1A1A1A (Subtle interaction)",
+      "glass": "bg-black/60 backdrop-blur-xl border-t border-white/10"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA (Zinc 400)",
+      "tertiary": "#71717A (Zinc 500)"
+    },
+    "accents": {
+      "primary": "#8B5CF6 (Violet - for AI features and primary CTAs)",
+      "secondary": "#06B6D4 (Cyan - for active viewer/tech rings and live status)",
+      "danger": "#EF4444 (Red - SLA breach/blocked)",
+      "warning": "#F59E0B (Amber - at risk)",
+      "success": "#10B981 (Emerald - resolved/online)"
+    },
+    "semantic_status": {
+      "new": "text-zinc-100 bg-zinc-900 border border-zinc-700",
+      "in_progress": "text-cyan-400 bg-cyan-950 border border-cyan-800",
+      "blocked": "text-red-400 bg-red-950 border border-red-800",
+      "resolved": "text-emerald-400 bg-emerald-950 border border-emerald-800"
+    },
+    "rules": [
+      "NO purple-blue gradients.",
+      "NO teal/green universally (use Cyan for active states).",
+      "Surface logic: Flat solid backgrounds with 1px border (`border-white/10`) for cards, no drop shadows on dark mode, use subtle 'Inner Glow' highlights."
+    ]
+  },
+  "density_modes": {
+    "compact": "py-1 px-2 text-xs (For massive lists)",
+    "comfortable": "py-2 px-3 text-sm (Default)",
+    "spacious": "py-4 px-5 text-base (Tablet/Touch target friendly)",
+    "toggle": "Keyboard shortcut: ⌘ + Shift + D"
+  },
+  "layouts": {
+    "list_view": {
+      "concept": "Virtualized, dense table-list hybrid inspired by Linear. No bulky cards per row.",
+      "structure": "1 row per ticket. Border-bottom only (`border-b border-white/5`). Hover state: `hover:bg-white/[0.02]`.",
+      "row_elements": [
+        "Left Edge: Sticky priority dot (Red/Amber/Gray) or 2px left-border",
+        "Col 1: Checkbox (appears on row hover or if selected)",
+        "Col 2: Ticket ID (Monospace, muted)",
+        "Col 3: Type Icon (Phosphor/Lucide)",
+        "Col 4: Title + 'Unread' dot indicator",
+        "Col 5: Client / Contact (Muted text)",
+        "Col 6: Status Pill (Compact padding `px-2 py-0.5 text-[10px]`)",
+        "Col 7: Assignee Avatar + Active Viewers (overlapping circles with Cyan shimmer ring if active)",
+        "Col 8: SLA Timer / Age (Monospace, turns red if < 1h)",
+        "Right Edge: Quick action icons reveal on hover (Assign, Resolve, Menu)"
+      ],
+      "grouping": "Collapsible section headers (e.g., 'Today', 'SLA Breached', 'Waiting on Client') with count badges."
+    },
+    "detail_view": {
+      "concept": "3-Column layout to eliminate modal-fatigue and reduce clicking.",
+      "col_1_left": "Context Rail (20% width): Collapsible. Contains Client info, Asset Details, related tickets graph mini-view.",
+      "col_2_center": "Timeline & Conversation (50% width): Top shows 'AI Summarization & Triage'. Middle is sequential chronological thread of notes/emails/alerts. Bottom is composer (always visible, tab to switch internal vs public).",
+      "col_3_right": "Live Device & Workflow Rail (30% width): Burn-down bar, Status/Priority selectors, Live Device Cockpit (gauges, quick actions).",
+      "hierarchy": "Center column is brightest; left/right rails are slightly dimmed (`bg-[#0a0a0a]`) compared to center thread (`bg-[#121212]`)."
+    },
+    "workshop_jobs": {
+      "concept": "Kanban-style 6-stage pipeline. Drag and drop.",
+      "stages": ["Checked In", "Diagnosing", "Parts Ordered", "Repairing", "Ready for Pickup", "Collected"],
+      "card_design": "Grid-based bento card (`grid-cols-1 gap-2`). Shows photo thumbnail, monospace ID, parts list inline tags, progress bar. Use pure HTML/Tailwind for cards to allow easy framer-motion dragging."
+    },
+    "field_service": {
+      "concept": "Map + Calendar Split View.",
+      "left_panel": "Timeline of today's jobs (Scheduled, En-route, On-site).",
+      "right_panel": "Map preview card, customer notify CTA, and 'Materials Used' quick-add."
+    }
+  },
+  "missing_features_to_build": [
+    "1. Command Palette Inline Filter (Context-aware ⌘K on list view).",
+    "2. AI Ticket Summarization & Next Best Action strip at the top of detail view.",
+    "3. Sentiment Heatmap (Tiny red/yellow/green indicator on row based on text analysis).",
+    "4. Live Collaborative Cursors/Viewers (Real-time presence avatars with cyan glow).",
+    "5. Related Tickets Graph View (Node-graph in left rail).",
+    "6. Predicted SLA Close-Time ETA (Machine learning estimation display).",
+    "7. On-the-fly Automation Builder (Quick 'Create Rule' from ticket).",
+    "8. Mobile-Optimized Swipe Actions for list rows."
+  ],
+  "components_to_create": [
+    "TicketRow.js (Highly dense, grid-based single row, replacing the bulky Card)",
+    "StatusPill.js (Strict color semantics, tiny uppercase mono text)",
+    "ActiveViewers.js (Overlapping avatars with Framer Motion enter animations and active cyan ring)",
+    "DeviceCockpit.js (Right-rail widget for RAM/CPU gauges using minimal SVGs or Recharts)",
+    "AICopilotStrip.js (Violet accented 'Next Best Action' and summary bar)",
+    "WorkshopKanbanBoard.js (Drag-drop context area with stage columns)",
+    "FieldServiceMap.js (Static/Mocked map view with route timeline)"
+  ],
+  "motion_and_interactions": {
+    "hover_states": "Row hover slightly lightens background (`hover:bg-white/[0.02]`) and reveals right-aligned quick actions.",
+    "active_states": "Focus states MUST use `focus:ring-1 focus:ring-violet-500`.",
+    "animations": "Minimal. Use Framer Motion layout animations for Kanban reordering and list filtering. No bouncy effects. Keep it snappy (e.g., `duration: 0.15`).",
+    "tabs": "Linear-style compact tabs. No colored background. Underline indicator using `framer-motion` layoutId for smooth sliding."
+  },
+  "image_urls": [
+    {
+      "description": "Professional avatar 1 (for Assignee/Viewer)",
+      "url": "https://images.unsplash.com/photo-1531299983330-093763e1d963?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBwb3J0cmFpdCUyMHByb2Zlc3Npb25hbHxlbnwwfHx8fDE3NzgzNzQxNDB8MA&ixlib=rb-4.1.0&q=85",
+      "category": "avatar"
+    },
+    {
+      "description": "Professional avatar 2 (for Assignee/Viewer)",
+      "url": "https://images.unsplash.com/photo-1595436222774-4b1cd819aada?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwyfHxwZXJzb24lMjBwb3J0cmFpdCUyMHByb2Zlc3Npb25hbHxlbnwwfHx8fDE3NzgzNzQxNDB8MA&ixlib=rb-4.1.0&q=85",
+      "category": "avatar"
+    }
+  ],
   "instructions_to_main_agent": [
-    "Use Phosphor Icons (@phosphor-icons/react) for a dense, high-end technical feel.",
-    "Implement Recharts for the MRR/ARR 12-month sparklines. Hide all axes and grids; just render the line with a gradient stroke and a dot at the current month.",
-    "Do not use Shadcn 'Cards' with border-radius and shadows for the list view. Use raw HTML/Tailwind to create a dense, flat, border-bottom separated list item layout.",
-    "Use standard Radix/Shadcn components heavily for the Detail Pane (Tabs, Progress, Dialog, DropdownMenu).",
-    "Include data-testid attributes on all interactive elements (e.g., data-testid='client-list-item-0', data-testid='tab-overview').",
-    "Use flex layouts to strictly clamp heights (h-screen minus topbar) and set overflow-y-auto so the left list and right pane scroll independently."
+    "DO NOT recreate the entire project. Extend the existing TicketsPage.jsx.",
+    "Preserve ALL existing data-testids and functionalities (like bulk select, routing, etc.).",
+    "Implement the 3-column detail view layout (Context Rail, Timeline, Device Cockpit) using CSS Grid.",
+    "Refactor the Ticket List to use the dense 'TicketRow' concept instead of Shadcn Cards.",
+    "Implement the 'Compact/Comfortable/Spacious' density toggle using React state, applying different padding classes to rows.",
+    "Inject the 'AICopilotStrip' into the Ticket Detail view as a prominent feature.",
+    "Ensure the UI matches the 'Archetype 4 (Swiss & High-Contrast)' palette: #0A0A0A background, white/10 borders, pure white text, Violet/Cyan accents.",
+    "For icons, prefer Phosphor Icons or Lucide-react (if installed) to maintain the linear, thin-line aesthetic."
   ]
 }
