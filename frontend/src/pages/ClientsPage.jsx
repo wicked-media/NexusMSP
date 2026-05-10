@@ -20,6 +20,7 @@ import { Link } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
+import ClientWarRoom from "@/components/clients/ClientWarRoom";
 import HeroTile from "@/components/HeroTile";
 
 const LIFECYCLE_COLORS = {
@@ -497,6 +498,7 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
         <TabsList className="h-auto rounded-none border-b border-zinc-800 bg-transparent p-0 justify-start gap-1 px-6">
           {[
             { v: "overview", l: "Overview" },
+            { v: "warroom", l: "War Room" },
             { v: "tickets", l: "Tickets" },
             { v: "assets", l: "Assets" },
             { v: "subscriptions", l: "Subscriptions" },
@@ -596,6 +598,10 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
               <Ticket className="w-8 h-8 mx-auto mb-3 opacity-40" />
               Deep ticket view — <Link className="text-indigo-400 hover:underline" to={`/tickets?clientId=${client.id}`}>open full Tickets page</Link>
             </div>
+          </TabsContent>
+
+          <TabsContent value="warroom" className="mt-0">
+            <ClientWarRoom clientId={client.id} />
           </TabsContent>
 
           <TabsContent value="assets" className="mt-0">

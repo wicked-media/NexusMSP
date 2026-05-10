@@ -8,6 +8,16 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Client War Room — live operational dashboard)
+- New backend router `client_war_room.py` with two endpoints:
+  - `GET /api/clients/{id}/war-room` → live aggregation: devices (online/offline/warning), open tickets w/ critical+breached counts, MTTR (7d), on-call/active techs, last 24h activity, severity (ok/warning/critical).
+  - `GET /api/clients/{id}/war-room/commentary` → AI-generated NOC commentary using Claude Sonnet 4.5 via Emergent LLM Key (with deterministic heuristic fallback if no key). Returns tactical 60-90 word situation report: biggest risk → root-cause hypothesis → recommended next action.
+- New frontend component `/app/frontend/src/components/clients/ClientWarRoom.jsx`:
+  - Wired into `ClientsPage` as a new "War Room" tab in the client detail pane.
+  - Auto-refresh every 15s (toggleable), severity banner (rose/amber/emerald), 6 HeroTile metrics, AI commentary card with Regenerate button, quad-grid for Device Telemetry / Active Tickets / On-Call / Live Activity (24h).
+  - Visual style perfectly matches the Tickets/Jobs page (gradient-glow tiles, monospace numbers, glassy cards).
+- **Tested:** backend returns valid data + AI commentary works (verified live for `client-001` Acme Corporation — severity=critical, 9/10 devices, 31 open / 11 critical tickets, AI commentary is tactical not generic). Frontend smoke screenshot confirms perfect render.
+
 ## Recent Updates (Feb 2026 — Clients Module HeroTile rollout — completion)
 - Fixed blocker JSX syntax error in `ClientTimelinePage.jsx` (stray closing `</div>`) that was breaking webpack build.
 - All Clients module pages now route their stat tiles through the shared `HeroTile` component (single source of truth):
