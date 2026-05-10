@@ -1314,7 +1314,7 @@ export default function TicketsPage() {
     const slaHours = viewingTicket.sla_due ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
     return (
       <PageShell>
-        <div className="p-6 space-y-4" data-testid="ticket-detail-view">
+        <div className="p-6 space-y-4 ticket-glass" data-testid="ticket-detail-view">
         {/* Header with grouped menus */}
         <TicketDetailHeader
           viewingTicket={viewingTicket}
@@ -1593,17 +1593,17 @@ export default function TicketsPage() {
 
             {/* Tabs: Conversation first, then Suggestions, etc */}
             <Tabs defaultValue="conversation">
-              <TabsList className="w-full grid grid-cols-10">
-                <TabsTrigger value="conversation" data-testid="conversation-tab"><MessageSquare className="w-3 h-3 mr-1" />Conversation ({ticketNotes.length + ticketEmails.length + ticketSms.length})</TabsTrigger>
-                <TabsTrigger value="blueprint" data-testid="blueprint-tab"><Lightbulb className="w-3 h-3 mr-1" />{viewingTicket.blueprint_id ? "Worksheet" : "Blueprint"}</TabsTrigger>
-                <TabsTrigger value="suggestions"><Lightbulb className="w-3 h-3 mr-1" />Suggestions</TabsTrigger>
-                <TabsTrigger value="worksheets" data-testid="worksheets-tab"><CheckCircle className="w-3 h-3 mr-1" />Worksheets ({worksheetItems.length})</TabsTrigger>
-                <TabsTrigger value="attachments" data-testid="attachments-tab"><Paperclip className="w-3 h-3 mr-1" />Files ({ticketAttachments.length})</TabsTrigger>
-                <TabsTrigger value="items" data-testid="items-tab"><ShoppingCart className="w-3 h-3 mr-1" />Items ({ticketProducts.length})</TabsTrigger>
-                <TabsTrigger value="children"><GitBranch className="w-3 h-3 mr-1" />Children ({childTickets.length})</TabsTrigger>
-                <TabsTrigger value="time"><Timer className="w-3 h-3 mr-1" />Time ({timeEntries.length})</TabsTrigger>
-                <TabsTrigger value="audit"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
-                <TabsTrigger value="timeline" data-testid="timeline-tab"><History className="w-3 h-3 mr-1" />Time Machine</TabsTrigger>
+              <TabsList className="w-full grid grid-cols-10 bg-transparent border-b border-white/[0.06] rounded-none p-0 h-auto">
+                <TabsTrigger value="conversation" data-testid="conversation-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><MessageSquare className="w-3 h-3 mr-1" />Convo · {ticketNotes.length + ticketEmails.length + ticketSms.length}</TabsTrigger>
+                <TabsTrigger value="blueprint" data-testid="blueprint-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Lightbulb className="w-3 h-3 mr-1" />{viewingTicket.blueprint_id ? "Sheet" : "Blueprint"}</TabsTrigger>
+                <TabsTrigger value="suggestions" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Lightbulb className="w-3 h-3 mr-1" />AI</TabsTrigger>
+                <TabsTrigger value="worksheets" data-testid="worksheets-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><CheckCircle className="w-3 h-3 mr-1" />Tasks · {worksheetItems.length}</TabsTrigger>
+                <TabsTrigger value="attachments" data-testid="attachments-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Paperclip className="w-3 h-3 mr-1" />Files · {ticketAttachments.length}</TabsTrigger>
+                <TabsTrigger value="items" data-testid="items-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><ShoppingCart className="w-3 h-3 mr-1" />Items · {ticketProducts.length}</TabsTrigger>
+                <TabsTrigger value="children" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><GitBranch className="w-3 h-3 mr-1" />Sub · {childTickets.length}</TabsTrigger>
+                <TabsTrigger value="time" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Timer className="w-3 h-3 mr-1" />Time · {timeEntries.length}</TabsTrigger>
+                <TabsTrigger value="audit" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
+                <TabsTrigger value="timeline" data-testid="timeline-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><History className="w-3 h-3 mr-1" />TimeM</TabsTrigger>
               </TabsList>
 
               {/* BLUEPRINT / WORKSHEET TAB */}

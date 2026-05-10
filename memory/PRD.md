@@ -34,9 +34,15 @@ Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/
 - Extracted the gradient-glow KPI tile from `BackupCenterPage` into reusable `/app/frontend/src/components/HeroTile.jsx`
 - **Rewrote `MetricTile`/`MetricStrip` in `/app/frontend/src/components/design-system/index.jsx`** to render the same gradient-glow aesthetic — all **17 pages** that already use `MetricStrip` (Tickets, Devices, Dashboard, Workspace, Security, Invoices, Contracts, all Command Centers, Live Chat, Shadow IT, Assets, Integrations…) auto-upgrade with zero JSX changes
 - Mobile Tech Page custom tile blocks also upgraded to the gradient-glow look
-- Removed duplicate hero strip on TicketsPage (was added then made redundant by MetricTile rewrite)
 - Backup Center re-uses the shared `HeroTile` component (single source of truth)
 - Result: **every stat tile in the platform now has identical visual language** — gradient bg, top-right blur orb, monospace number, uppercase tracking-widest label
+
+### 🎨 Ticket Detail Visual Redesign
+- Added `.ticket-glass` CSS utility in `/app/frontend/src/index.css` — wraps the ticket detail container so all child cards automatically get a violet→cyan gradient sheen, hairline accent border, soft inset glow
+- Added `.glass-card` utility for opt-in upgrade of any individual Card across the platform (gradient bg + corner blur orb)
+- **Tab list rebuilt** — Linear/Plain.com aesthetic: monospace uppercase labels (`Convo · 4`, `Sheet`, `AI`, `Tasks · 3`, `Files · 2`, …), thin violet underline on active tab, transparent bg, no rounded chrome
+- Right-rail panels (BurndownBar, WorkflowPanel, DeviceCockpit, AICopilotStrip) already use the same gradient aesthetic — now visually consistent with everything else
+- Layout customisation toggle remains: each tech can show/hide AI Co-Pilot · Burn-down · Workflow · Device Cockpit (persisted per user)
 
 ### 🧩 Right-rail panel customisation on ticket detail
 - New "Layout" dropdown above the ticket detail (data-testid `layout-toggle`) lets each user toggle: AI Co-Pilot · SLA Burn-down · Workflow · Device Cockpit

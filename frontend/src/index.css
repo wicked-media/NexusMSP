@@ -94,6 +94,35 @@
 }
 
 @layer utilities {
+    /* Glassy ticket detail card aesthetic — gradient bg + subtle border + accent glow.
+       Apply to root container; all rounded-lg/border children pick up the look without per-Card edits. */
+    .ticket-glass > div > [class*="rounded-lg"][class*="border"],
+    .ticket-glass > div > div > [class*="rounded-lg"][class*="border"] {
+        background-image: linear-gradient(135deg, rgba(139, 92, 246, 0.025), rgba(6, 182, 212, 0.015) 40%, transparent 70%);
+        border-color: rgba(139, 92, 246, 0.12);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -16px rgba(139, 92, 246, 0.18);
+    }
+
+    /* Reusable glass card — opt-in via className="glass-card" to upgrade any Card */
+    .glass-card {
+        background-image: linear-gradient(135deg, rgba(139, 92, 246, 0.04), rgba(6, 182, 212, 0.02) 50%, transparent 80%) !important;
+        border-color: rgba(139, 92, 246, 0.18) !important;
+        position: relative;
+        overflow: hidden;
+    }
+    .glass-card::before {
+        content: "";
+        position: absolute;
+        top: -24px;
+        right: -24px;
+        width: 80px;
+        height: 80px;
+        border-radius: 9999px;
+        background: rgba(139, 92, 246, 0.06);
+        filter: blur(28px);
+        pointer-events: none;
+    }
+
     .scrollbar-thin {
         scrollbar-width: thin;
         scrollbar-color: hsl(var(--border)) transparent;
