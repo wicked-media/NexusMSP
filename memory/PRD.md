@@ -32,10 +32,11 @@ Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/
 
 ### 🎨 Hero Tiles propagated platform-wide (consistency drive)
 - Extracted the gradient-glow KPI tile from `BackupCenterPage` into reusable `/app/frontend/src/components/HeroTile.jsx`
-- **Rewrote `MetricTile`/`MetricStrip` in `/app/frontend/src/components/design-system/index.jsx`** to render the same gradient-glow aesthetic — all **17 pages** that already use `MetricStrip` (Tickets, Devices, Dashboard, Workspace, Security, Invoices, Contracts, all Command Centers, Live Chat, Shadow IT, Assets, Integrations…) auto-upgrade with zero JSX changes
-- Mobile Tech Page custom tile blocks also upgraded to the gradient-glow look
+- **Rewrote `MetricTile`/`MetricStrip` in `/app/frontend/src/components/design-system/index.jsx`** to render the gradient-glow aesthetic — all **17 pages** that already use `MetricStrip` (Tickets, Devices, Dashboard, Workspace, Security, Invoices, Contracts, all Command Centers, Live Chat, Shadow IT, Assets, Integrations…) auto-upgrade with zero JSX changes
+- **Added 8 global CSS rules** in `index.css` that automatically upgrade flat-tinted colored Cards (`border-{color}-500/30 bg-{color}-500/[0.0x]`) to the gradient-glow look — catches the **~150 other pages** that hand-rolled their own colored tiles (BillingPro, ClientHealth, AssetDepreciation, etc.)
+- Mobile Tech Page custom tile blocks also upgraded
 - Backup Center re-uses the shared `HeroTile` component (single source of truth)
-- Result: **every stat tile in the platform now has identical visual language** — gradient bg, top-right blur orb, monospace number, uppercase tracking-widest label
+- Result: **every stat tile on every page now has identical visual language** — gradient bg, top-right blur orb where applicable, monospace number, uppercase tracking-widest label
 
 ### 🎨 Ticket Detail Visual Redesign
 - Added `.ticket-glass` CSS utility in `/app/frontend/src/index.css` — wraps the ticket detail container so all child cards automatically get a violet→cyan gradient sheen, hairline accent border, soft inset glow
