@@ -68,38 +68,10 @@ async def get_csat_report(current_user: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/tickets/{ticket_id}/send-csat")
-async def send_csat_survey(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Send CSAT survey for a resolved ticket"""
-    import uuid
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Ticket not found")
-
-    survey = {
-        "id": str(uuid.uuid4()),
-        "ticket_id": ticket_id,
-        "ticket_number": ticket.get("ticket_number", ""),
-        "client_id": ticket.get("client_id"),
-        "client_name": ticket.get("client_name", ""),
-        "assigned_to": ticket.get("assigned_to"),
-        "assigned_to_name": ticket.get("assigned_to_name", ""),
-        "status": "pending",
-        "score": None,
-        "feedback": None,
-        "sent_at": datetime.now(timezone.utc).isoformat(),
-        "responded_at": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.csat_surveys.insert_one(survey)
-    survey.pop("_id", None)
-    return survey
-
-
-@router.post("/csat/{survey_id}/respond")
-async def respond_to_survey(survey_id: str, data: dict):
-    """Submit a CSAT response (public endpoint for clients)"""
+@router.post("/csat/{survey_id}/respond-public")
+async def respond_to_survey_public(survey_id: str, data: dict):
+    """Public CSAT response (no auth) — used by external survey link.
+    Authenticated submissions go through ticket_workflow.respond_csat at /api/csat/{id}/respond."""
     result = await db.csat_surveys.update_one(
         {"id": survey_id, "status": "pending"},
         {"$set": {

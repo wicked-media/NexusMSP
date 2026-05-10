@@ -10,6 +10,41 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 ## Recent Updates (Feb 2026 — Team Chat Redesign + Slash Commands + Tickets Refactor)
 
+### 🎮 Ticket → Live Device Cockpit (A + B + C)
+The ticket detail right-rail now houses a **full RMM control panel** for the linked device:
+
+**Group A — Take Control** (one-click MeshCentral via TRMM)
+- Desktop · Terminal · Files buttons each fetch a one-time URL from `GET /api/tickets/{id}/device/remote-url`
+- Terminal opens in an embedded modal so the tech stays in ticket context
+
+**Group B — Live device actions** (each posts an audit note to the ticket)
+- Reboot / Shutdown (with 60s grace, confirm dialog)
+- Wake-on-LAN (graceful "logged for LAN-proxy" until LAN agent wired)
+- Run Checks · Install Patches · Send Message to user
+- Backend wrapper: `POST /api/tickets/{id}/device/{action}` — auto-creates ticket_notes (is_system_action) + ticket_audit row
+
+**Group C — Diagnostics tabs** (services, processes, patches)
+- Services list with start/stop/restart inline (filterable)
+- Top 25 processes by CPU with kill button
+- Pending Windows Updates list
+- Live gauges for CPU, RAM, Disk pulled from TRMM agent every 30s
+- Status pills: needs reboot · failing checks · pending patches · logged-in user
+
+**New backend file:** `/app/backend/app/routers/ticket_device_actions.py` (13 endpoints; all gracefully degrade when TRMM not configured)
+**New frontend file:** `/app/frontend/src/components/tickets/TicketDeviceCockpit.jsx` (~340 lines)
+
+### 🧰 Ticket Workflow Polish (Group D)
+- **Block-on chain**: `POST /api/tickets/{id}/block-on` — pick another ticket as blocker; visible rose-colored indicator
+- **Convert to Change Request**: `POST /api/tickets/{id}/convert-to-change` — sets category=change with risk + planned window
+- **Schedule Maintenance Window**: `POST /api/tickets/{id}/schedule-maintenance` — creates `db.maintenance_windows` row
+- **Send CSAT**: `POST /api/tickets/{id}/send-csat` — manual trigger; **auto-fires on status→closed transition** when `contact_email` exists (`tickets.update` hook)
+- **SLA Burn-down bar** in right rail: `GET /api/tickets/{id}/burndown` shows elapsed vs target with breach highlighting
+- New backend file: `/app/backend/app/routers/ticket_workflow.py`
+- New frontend files: `TicketWorkflowPanel.jsx`, `TicketBurndownBar.jsx`
+- **Cleaned up duplicate `/send-csat`** in `tech_performance.py` — `ticket_workflow.py` is now the single source of truth (proper contact_email validation)
+
+**Tested:** `iteration_166` — Backend 23/24 PASS, Frontend 100% PASS, duplicate endpoint resolved
+
 ### 🪄 Global Command Palette (`⌘K` / `Ctrl+K`)
 - New `/app/frontend/src/components/CommandPalette.jsx` — mounted globally in `App.js → AuthedAddons` so ⌘K opens it from ANY authenticated route
 - Unified search across **tickets · clients · devices · people · pages** with 180 ms debounce (backed by `GET /api/command-palette/search`)
