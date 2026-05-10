@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogD
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
 import DeviceBulkBar from "../components/devices/DeviceBulkBar";
@@ -61,7 +62,7 @@ export default function DevicesPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [remoteBusy, setRemoteBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
-  const [mapView, setMapView] = useState(false);
+  const [tab, setTab] = useState("directory");
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -350,54 +351,71 @@ export default function DevicesPage() {
       <TrmmFreshnessStrip token={token} />
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-      {/* New Command Center: HeroTile strip + Smart Inbox */}
-      <DeviceCommandStrip headers={headers} API={API} />
-
-      {/* Bulk Actions Bar (replaces old, uses parallel fan-out) */}
-      <DeviceBulkBar
-        selectedIds={selectedDevices}
-        onClear={() => setSelectedDevices([])}
-        headers={headers}
-        devices={devices}
-      />
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header — matches Team Command Center pattern */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Devices</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">{devices.length} managed endpoints</p>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-violet-400" />Devices Command Center
+          </h1>
+          <p className="text-sm text-zinc-500">{devices.length} managed endpoints · live telemetry · fan-out actions · site map</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+        <div className="flex gap-2 flex-wrap">
           <Button
-            variant="outline" size="sm"
-            onClick={() => navigate("/devices/compare")}
-            data-testid="compare-devices-btn"
-            title="Compare 2-4 devices side-by-side"
-          >
-            Compare
-          </Button>
-          <Button
-            variant="outline" size="sm"
-            className="text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/10"
+            size="sm" variant="outline"
+            className="h-8 text-xs text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10"
             onClick={async () => {
               try {
                 const r = await axios.post(`${API}/devices/auto-link-acronis`, {}, { headers: { Authorization: `Bearer ${token}` } });
-                toast.success(`Auto-linked ${r.data.matched}/${r.data.scanned} devices to Acronis (${r.data.no_match} no match)`);
+                toast.success(`Auto-linked ${r.data.matched}/${r.data.scanned} (${r.data.no_match} no match)`);
                 fetchData();
               } catch (e) { toast.error(e.response?.data?.detail || "Auto-link failed"); }
             }}
             data-testid="auto-link-acronis-btn"
             title="Match device names to Acronis resources"
           >
-            <Cloud className="w-4 h-4 mr-1" />Auto-link Acronis
+            <Cloud className="w-3 h-3 mr-1" />Acronis
           </Button>
-          <Button variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn"><Radar className="w-4 h-4 mr-1" />Discover</Button>
-          <Button onClick={openCreate} data-testid="add-device-btn"><Plus className="w-4 h-4 mr-1" />Add Device</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
+            <BarChart3 className="w-3 h-3 mr-1" />Compare
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn">
+            <Radar className="w-3 h-3 mr-1" />Discover
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" onClick={openCreate} data-testid="add-device-btn">
+            <Plus className="w-3 h-3 mr-1" />Add Device
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={fetchData} data-testid="devices-refresh-btn">
+            <RefreshCw className="w-3 h-3 mr-1" />Refresh
+          </Button>
         </div>
       </div>
 
-      {mapView && <DeviceMapView sites={siteMap} />}
+      {/* HeroTile metric strip + Smart Inbox (shared across tabs) */}
+      <DeviceCommandStrip headers={headers} API={API} />
+
+      {/* Bulk Actions Bar — appears whenever rows are selected */}
+      <DeviceBulkBar selectedIds={selectedDevices} onClear={() => setSelectedDevices([])} headers={headers} devices={devices} />
+
+      {/* Tabs */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
+          {[
+            { v: "directory", l: "Directory", Icon: List },
+            { v: "map",       l: "Site Map", Icon: Cloud },
+          ].map(t => (
+            <TabsTrigger key={t.v} value={t.v}
+              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
+              data-testid={`devices-tab-${t.v}`}>
+              <t.Icon className="w-3 h-3 mr-1" />{t.l}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="map" className="mt-4">
+          <DeviceMapView sites={siteMap} />
+        </TabsContent>
+
+        <TabsContent value="directory" className="mt-4 space-y-4">
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -432,14 +450,13 @@ export default function DevicesPage() {
           </SelectContent>
         </Select>
         <div className="ml-auto flex gap-1">
-          <Button variant={!mapView && viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => { setMapView(false); setViewMode("table"); }} data-testid="view-table"><List className="w-4 h-4" /></Button>
-          <Button variant={!mapView && viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => { setMapView(false); setViewMode("grid"); }} data-testid="view-grid"><LayoutGrid className="w-4 h-4" /></Button>
-          <Button variant={mapView ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setMapView(true)} data-testid="view-map" title="Site map"><Cloud className="w-4 h-4" /></Button>
+          <Button variant={viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("table")} data-testid="view-table"><List className="w-4 h-4" /></Button>
+          <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("grid")} data-testid="view-grid"><LayoutGrid className="w-4 h-4" /></Button>
         </div>
       </div>
 
       {/* TABLE VIEW */}
-      {!mapView && viewMode === "table" && (
+      {viewMode === "table" && (
         <Card>
           <CardContent className="p-0">
             <Table>
@@ -558,7 +575,7 @@ export default function DevicesPage() {
       )}
 
       {/* GRID VIEW */}
-      {!mapView && viewMode === "grid" && (
+      {viewMode === "grid" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 ? (
             <div className="col-span-3 text-center py-12 text-muted-foreground">No devices found</div>
@@ -655,6 +672,9 @@ export default function DevicesPage() {
           })}
         </div>
       )}
+
+        </TabsContent>
+      </Tabs>
 
       {formDialog}
 

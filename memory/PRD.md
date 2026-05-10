@@ -8,6 +8,18 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Devices Page format consistency rewrite)
+
+Restructured `DevicesPage.jsx` to match the Team Command Center / Clients module formatting exactly:
+- **New header**: ✨ Sparkles icon + "**Devices Command Center**" title + descriptive subtitle. Action buttons grouped right and visually consistent (Acronis · Compare · Discover · Add Device · Refresh) — same shape, sizing, and outline style as Team Command Center.
+- **HeroTile strip + Smart Inbox** stay shared at the top across all tabs.
+- **Tabs row** added (`Directory` · `Site Map`) with the same `data-[state=active]:border-b-2 data-[state=active]:border-violet-500` styling used in Team CC.
+- Filters + table/grid view selector now live **inside the Directory tab** (no longer mixed into the page body).
+- Site Map view promoted from a "view-mode toggle button" to a first-class **tab**, matching the Devices CC pattern.
+- All existing functionality preserved (RustDesk live status, Eye-shimmer remote-viewer badges, table/grid view selector, bulk actions bar, RemoteAccessButton TRMM-first behaviour).
+
+**Tested:** Smoke screenshots confirm the new header + HeroTile strip + Smart Inbox + tab bar render identically to Team Command Center. Both Directory and Site Map tabs work. Acronis, Compare, Discover, Add Device, Refresh buttons all present and styled consistently. ESLint clean.
+
 ## Recent Updates (Feb 2026 — Team Command Center FULL REWRITE)
 
 Rewrote `TechCommandCenter.jsx` from scratch (~900 lines, single file) to match the format of Devices Command Center / Clients module exactly:
