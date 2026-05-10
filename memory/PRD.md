@@ -8,6 +8,36 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Devices Module Massive Overhaul)
+
+A complete rebuild of `/devices` to outclass Syncro/Ninja/HaloPSA. Same Tactical Dark glow aesthetic.
+
+### Backend (`device_intel.py`)
+- `GET /api/devices/intel/stats` — Total/Online/Offline/Warning/Patches Pending/Disk-at-Risk/Asset Value/MTTR-30d.
+- `GET /api/devices/smart-inbox` — fleet-wide "needs attention" aggregator: failing checks, offline > 24h, disk > 90%, patches > 10. Sorted by severity.
+- `GET /api/devices/{id}/dossier` — health score (0-100) + tactical commentary, lifecycle band (new/healthy/aging/eol), failure risk % with verdict (minimal/low/moderate/high) + factors, open tickets, 24h change timeline, 24h telemetry.
+- `POST /api/devices/compare` — side-by-side data for 2-4 devices.
+- `POST /api/devices/bulk-action` — parallel fan-out via `asyncio.gather`. Actions: run-checks/install-patches/reboot/shutdown/send-message/tag. Per-device result + summary.
+- `GET /api/devices/sites-map` — aggregates devices by client into geo points (uses client.lat/lng if set, else deterministic seed → NZ-ish coordinates so map is populated).
+
+### Frontend
+- `RemoteAccessButton.jsx` — **TRMM-first ALWAYS**: even when no agent is linked, the primary CTA is now "Link & Remote (TRMM)" — RustDesk demoted. Bug fix.
+- `DeviceCommandStrip.jsx` — 6 HeroTile metrics + Smart Inbox cards (clickable, jump to device).
+- `DeviceBulkBar.jsx` — sticky multi-select toolbar: Checks · Patches · Reboot (confirm) · Tag · Message. Live progress strip per device with ✓/✗/—/⟳ icons. Reuses our new fan-out engine.
+- `DeviceMapView.jsx` — pure-SVG geographic site map, pulsing rings on critical/warning sites, click pin → jump to client.
+- `DeviceDossier.jsx` — embedded into DeviceDetailPage above the tabs: animated SVG circular health gauge, lifecycle pill, failure risk %, AI commentary, 24h change timeline.
+- `DeviceComparePage.jsx` — new route `/devices/compare?ids=a,b,c` — 4-slot device picker + side-by-side attribute table + per-column AI verdict.
+- `DevicesPage.jsx` — replaced old MetricStrip with DeviceCommandStrip; replaced old bulk bar with the new fan-out one; added Map view toggle in the view-mode group; added "Compare" button in header.
+
+**Tested live:**
+- Stats: 135 devices, 104 online, 27 offline, 4 warning, $86.9k asset value.
+- Smart Inbox: 7 fleet-wide issues correctly surfaced.
+- Sites Map: 17 sites with computed coords + severities (Acme=ok, TechStart=critical).
+- Dossier returned health/lifecycle/risk shape correctly.
+- Compare returned 3-device payload.
+- Bulk tag fanned out, both devices tagged successfully.
+- Frontend smoke screenshots show full Tactical Dark aesthetic — gradient HeroTiles, glassy inbox, geographic map with pulsing critical pin on TechStart Inc.
+
 ## Recent Updates (Feb 2026 — Fan-out actions across all linked devices)
 Added a master "Run on all devices" row at the top of `TicketDeviceList` (only renders when 2+ devices have a TRMM agent):
 - Backend: new `POST /api/tickets/{id}/device/fanout/{action}` endpoint runs in parallel via `asyncio.gather` against every linked device with an agent. Supported actions: `run-checks`, `install-patches`, `reboot`, `shutdown`, `send-message`. Power actions auto-skip offline devices. Returns per-device `{device_id, device_name, status: ok|failed|skipped, message}` plus a summary `{total, ok, failed, skipped}`. Audit note posted to the ticket.

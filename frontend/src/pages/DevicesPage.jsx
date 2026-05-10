@@ -14,6 +14,9 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
+import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
+import DeviceBulkBar from "../components/devices/DeviceBulkBar";
+import DeviceMapView from "../components/devices/DeviceMapView";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -57,6 +60,8 @@ export default function DevicesPage() {
   const [rdStatusMap, setRdStatusMap] = useState({});
   const [activeProviders, setActiveProviders] = useState([]);
   const [remoteBusy, setRemoteBusy] = useState({});
+  const [siteMap, setSiteMap] = useState([]);
+  const [mapView, setMapView] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -85,6 +90,11 @@ export default function DevicesPage() {
         const pRes = await axios.get(`${API}/remote-providers/active`, { headers });
         setActiveProviders(pRes.data || []);
       } catch { setActiveProviders([]); }
+      // Site map data
+      try {
+        const sRes = await axios.get(`${API}/devices/sites-map`, { headers });
+        setSiteMap(sRes.data?.sites || []);
+      } catch { setSiteMap([]); }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [token]);
 
@@ -338,15 +348,19 @@ export default function DevicesPage() {
   return (
     <PageShell data-testid="devices-page">
       <TrmmFreshnessStrip token={token} />
-      <MetricStrip columns={6}>
-        <MetricTile label="Total" value={stats.total || 0} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="devices-metric-total" />
-        <MetricTile label="Online" value={stats.online || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="devices-metric-online" />
-        <MetricTile label="Offline" value={stats.offline || 0} accent="rose" icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="devices-metric-offline" />
-        <MetricTile label="Warning" value={stats.warning || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="devices-metric-warning" />
-        <MetricTile label="Avg CPU" value={`${stats.avg_cpu || 0}%`} accent="violet" icon={<Cpu className="w-2.5 h-2.5 text-violet-400" />} testid="devices-metric-cpu" />
-        <MetricTile label="Need Patching" value={stats.needs_patching || 0} accent="amber" icon={<Download className="w-2.5 h-2.5 text-amber-400" />} testid="devices-metric-patching" />
-      </MetricStrip>
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+      {/* New Command Center: HeroTile strip + Smart Inbox */}
+      <DeviceCommandStrip headers={headers} API={API} />
+
+      {/* Bulk Actions Bar (replaces old, uses parallel fan-out) */}
+      <DeviceBulkBar
+        selectedIds={selectedDevices}
+        onClear={() => setSelectedDevices([])}
+        headers={headers}
+        devices={devices}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -355,6 +369,14 @@ export default function DevicesPage() {
         </div>
         <div className="flex gap-2">
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button
+            variant="outline" size="sm"
+            onClick={() => navigate("/devices/compare")}
+            data-testid="compare-devices-btn"
+            title="Compare 2-4 devices side-by-side"
+          >
+            Compare
+          </Button>
           <Button
             variant="outline" size="sm"
             className="text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/10"
@@ -375,29 +397,7 @@ export default function DevicesPage() {
         </div>
       </div>
 
-      {/* Bulk Actions Toolbar */}
-      {selectedDevices.length > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 border border-primary/20 rounded-lg" data-testid="bulk-actions-bar">
-          <Badge variant="secondary">{selectedDevices.length} selected</Badge>
-          <Button size="sm" variant="outline" onClick={handleBulkReboot} data-testid="bulk-reboot"><RefreshCw className="w-3 h-3 mr-1" />Reboot</Button>
-          <Button size="sm" variant="outline" onClick={handleBulkScan} data-testid="bulk-scan"><Shield className="w-3 h-3 mr-1" />Scan</Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" data-testid="bulk-deploy-agent"><Download className="w-3 h-3 mr-1" />Deploy Agent</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => handleBulkDeployAgent("windows")} data-testid="bulk-deploy-windows">
-                <Monitor className="w-4 h-4 mr-2" />Windows (PowerShell)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleBulkDeployAgent("linux")} data-testid="bulk-deploy-linux">
-                <Terminal className="w-4 h-4 mr-2" />Linux / macOS (Bash)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button size="sm" variant="destructive" onClick={handleBulkDelete} data-testid="bulk-delete"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelectedDevices([])} className="ml-auto">Clear</Button>
-        </div>
-      )}
+      {mapView && <DeviceMapView sites={siteMap} />}
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -432,13 +432,14 @@ export default function DevicesPage() {
           </SelectContent>
         </Select>
         <div className="ml-auto flex gap-1">
-          <Button variant={viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("table")}><List className="w-4 h-4" /></Button>
-          <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("grid")}><LayoutGrid className="w-4 h-4" /></Button>
+          <Button variant={!mapView && viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => { setMapView(false); setViewMode("table"); }} data-testid="view-table"><List className="w-4 h-4" /></Button>
+          <Button variant={!mapView && viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => { setMapView(false); setViewMode("grid"); }} data-testid="view-grid"><LayoutGrid className="w-4 h-4" /></Button>
+          <Button variant={mapView ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setMapView(true)} data-testid="view-map" title="Site map"><Cloud className="w-4 h-4" /></Button>
         </div>
       </div>
 
       {/* TABLE VIEW */}
-      {viewMode === "table" && (
+      {!mapView && viewMode === "table" && (
         <Card>
           <CardContent className="p-0">
             <Table>
@@ -557,7 +558,7 @@ export default function DevicesPage() {
       )}
 
       {/* GRID VIEW */}
-      {viewMode === "grid" && (
+      {!mapView && viewMode === "grid" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 ? (
             <div className="col-span-3 text-center py-12 text-muted-foreground">No devices found</div>

@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import WatchDeviceButton from "../components/devices/WatchDeviceButton";
 import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
+import DeviceDossier from "../components/devices/DeviceDossier";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -219,8 +220,7 @@ export default function DeviceDetailPage() {
 
   return (
     <div className="space-y-6" data-testid="device-detail-page">
-      {/* Header */}
-      <div className="flex items-start justify-between">
+      {/* Header */}<div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate("/devices")} data-testid="back-to-devices"><ArrowLeft className="w-5 h-5" /></Button>
           <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
@@ -306,6 +306,8 @@ export default function DeviceDetailPage() {
       </div>
 
       {/* Tabs */}
+      <DeviceDossier deviceId={dev.id} headers={{ Authorization: `Bearer ${token}` }} API={API} />
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid grid-cols-10 w-full" data-testid="device-tabs">
           <TabsTrigger value="overview">Overview</TabsTrigger>

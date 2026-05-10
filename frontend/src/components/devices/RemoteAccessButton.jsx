@@ -73,11 +73,11 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
   const trmmLinkable = !!trmmCfg && !device?.trmm_agent_id;
   const rdReady = !!rdCfg && !!device?.rustdesk_id;
 
-  // Pick a primary path
+  // Pick a primary path — TRMM-FIRST always
   let primary = null;
   if (trmmReady) primary = { id: "trmm", label: compact ? "Remote" : "Remote (TRMM)", action: onLaunchTrmm };
+  else if (trmmCfg && !device?.trmm_agent_id) primary = { id: "trmm-link", label: compact ? "Link & Remote" : "Link TRMM agent", action: onLaunchTrmm };
   else if (rdReady) primary = { id: "rustdesk", label: compact ? "Remote" : "Remote (RustDesk)", action: onLaunchRustDesk };
-  else if (trmmLinkable) primary = { id: "trmm-link", label: compact ? "Link" : "Link TRMM agent", action: onLaunchTrmm };
   else if (otherCfg.length === 1) primary = { id: otherCfg[0].id, label: compact ? "Remote" : `Remote (${otherCfg[0].name})`, action: () => toast.info(`${otherCfg[0].name} provider — open from Settings → Remote Providers`) };
 
   const sizeCls = compact ? "h-7 text-[11px] px-2" : "";

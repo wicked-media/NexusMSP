@@ -29,6 +29,7 @@ export const routeConfig = [
   { path: "/workspace", component: page("WorkspacePage"), auth: true, layout: true },
   { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
   { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },
+  { path: "/devices/compare", component: page("DeviceComparePage"), auth: true, layout: true },
   { path: "/devices/:deviceId", component: page("DeviceDetailPage"), auth: true, layout: true },
   { path: "/devices/:deviceId/chat", component: page("DeviceChatPage"), auth: true, layout: true },
   { path: "/assets", component: page("AssetsPage"), auth: true, layout: true },
