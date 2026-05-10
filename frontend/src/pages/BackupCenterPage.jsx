@@ -22,14 +22,18 @@ import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
 import TenantsTab from "@/components/backups/TenantsTab";
 import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
+import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
 const STATUS_COLOR = { success: "text-emerald-400 bg-emerald-500/10", failed: "text-red-400 bg-red-500/10", running: "text-blue-400 bg-blue-500/10", warning: "text-amber-400 bg-amber-500/10" };
 const complianceColors = { compliant: "default", non_compliant: "destructive", no_backup: "outline" };
 
-/** ── Animated counter — ticks up to target value ── */
-function AnimatedCounter({ value, suffix = "", duration = 800 }) {
+// Re-export for legacy local references in this file
+const AnimatedCounter = _AC;
+
+/** ── Animated counter — ticks up to target value (legacy local; the canonical version lives in /components/HeroTile.jsx) ── */
+function _AnimatedCounterLocal({ value, suffix = "", duration = 800 }) {
   const [display, setDisplay] = useState(0);
   const startRef = useRef(null);
   useEffect(() => {
@@ -145,7 +149,10 @@ function RunningBackupCard({ activity, onCancel }) {
 }
 
 /** ── Hero metric tile with glow ── */
-function HeroMetric({ label, value, icon: Icon, glow = "cyan", suffix = "", subtitle, animated = true }) {
+/** ── Hero metric — delegates to the canonical HeroTile component ── */
+function HeroMetric(props) { return <HeroTile {...props} />; }
+/* legacy local impl preserved below for reference, no longer used */
+function _HeroMetricLegacy({ label, value, icon: Icon, glow = "cyan", suffix = "", subtitle, animated = true }) {
   const glowMap = {
     cyan: "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
     emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",

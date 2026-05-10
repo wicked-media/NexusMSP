@@ -30,6 +30,17 @@ Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/
 
 ## Recent Updates (Feb 2026 — Saved Views + Tech Profile Richness + Settings Hub)
 
+### 🎨 Hero Tiles propagated platform-wide (consistency drive)
+- Extracted the gradient-glow KPI tile from `BackupCenterPage` into reusable `/app/frontend/src/components/HeroTile.jsx` (with `AnimatedCounter` export)
+- Backup Center now imports the canonical tile (`HeroMetric` is a thin pass-through preserving its API)
+- **Tickets page** now has a 6-tile hero strip: Open · SLA Breached · Awaiting Reply · Unassigned · My Open · Closed Today — each tile is **clickable** and applies a quick filter
+- All tiles share: gradient bg, top-right blur orb, animated number, monospace font, uppercase tracking-widest label
+
+### 🧩 Right-rail panel customisation on ticket detail
+- New "Layout" dropdown above the ticket detail (data-testid `layout-toggle`) lets each user toggle: AI Co-Pilot · SLA Burn-down · Workflow · Device Cockpit
+- Choices persisted to localStorage per user (`nexus.tickets.panels`)
+- Combined with **Saved Views**, **Density modes**, **Group-by**, **Custom fields** (existing) → ticket workspace is now fully customisable per technician
+
 ### ⭐ Saved Views (Linear-style pinned filter+grouping presets)
 - New backend: `/app/backend/app/routers/saved_views.py` — full CRUD scoped to user (`/api/saved-views`)
 - Stores: name, scope (tickets/workspace/devices/clients), filters, group_by, density, sort, color, icon, pinned, shared

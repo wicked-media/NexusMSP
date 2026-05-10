@@ -28,6 +28,8 @@ import {
 } from "@/components/tickets/TicketRow";
 import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import SavedViewsBar from "@/components/SavedViewsBar";
+import HeroTile from "@/components/HeroTile";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -71,7 +73,8 @@ import {
   Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
-  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes
+  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
+  MessageCircle, UserPlus, Settings2
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
@@ -122,6 +125,19 @@ export default function TicketsPage() {
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Right-rail panel visibility (persisted per-user) ──
+  const [panelVisible, setPanelVisible] = useState(() => {
+    try {
+      const raw = localStorage.getItem("nexus.tickets.panels");
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return { copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
+  });
+  useEffect(() => {
+    try { localStorage.setItem("nexus.tickets.panels", JSON.stringify(panelVisible)); } catch {}
+  }, [panelVisible]);
+  const togglePanel = (k) => setPanelVisible(p => ({ ...p, [k]: !p[k] }));
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
@@ -1327,19 +1343,51 @@ export default function TicketsPage() {
           }}
         />
 
+        {/* Layout customisation toolbar */}
+        <div className="flex items-center justify-end gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5" data-testid="layout-toggle">
+                <Settings2 className="w-3 h-3 mr-1" />Layout
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52" data-testid="layout-menu">
+              <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest font-mono text-muted-foreground">Show panels</div>
+              {[
+                { k: "copilot",  label: "AI Co-Pilot" },
+                { k: "burndown", label: "SLA Burn-down" },
+                { k: "workflow", label: "Workflow" },
+                { k: "cockpit",  label: "Device Cockpit" },
+              ].map(p => (
+                <DropdownMenuCheckboxItem
+                  key={p.k}
+                  checked={!!panelVisible[p.k]}
+                  onCheckedChange={() => togglePanel(p.k)}
+                  data-testid={`layout-${p.k}`}
+                  className="text-xs"
+                >
+                  {p.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         {/* AI Co-Pilot Strip — heuristic next-best-action + optional AI summary */}
-        <AICopilotStrip
-          ticket={viewingTicket}
-          deviceStatus={deviceStatus}
-          headers={headers}
-          onActionClick={(target) => {
-            if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
-            else if (target === "assign") setEditingAssignee?.(true);
-            else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
-            else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-            else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-          }}
-        />
+        {panelVisible.copilot && (
+          <AICopilotStrip
+            ticket={viewingTicket}
+            deviceStatus={deviceStatus}
+            headers={headers}
+            onActionClick={(target) => {
+              if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
+              else if (target === "assign") setEditingAssignee?.(true);
+              else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
+              else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
+              else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
+            }}
+          />
+        )}
 
         {/* Finance Intel: Quote Nudge banner */}
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
@@ -1878,18 +1926,20 @@ export default function TicketsPage() {
             )}
 
             {/* SLA Burn-down */}
-            <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
+            {panelVisible.burndown && <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />}
 
             {/* Workflow polish (Group D — block-on, change, maintenance, CSAT) */}
-            <TicketWorkflowPanel
-              ticket={viewingTicket}
-              allTickets={tickets}
-              headers={headers}
-              refresh={() => fetchTicketDetail(viewingTicket)}
-            />
+            {panelVisible.workflow && (
+              <TicketWorkflowPanel
+                ticket={viewingTicket}
+                allTickets={tickets}
+                headers={headers}
+                refresh={() => fetchTicketDetail(viewingTicket)}
+              />
+            )}
 
             {/* Live Device Cockpit (Group A + B + C — remote, actions, telemetry) */}
-            {viewingTicket.device_id && (
+            {viewingTicket.device_id && panelVisible.cockpit && (
               <TicketDeviceCockpit
                 ticketId={viewingTicket.id}
                 deviceStatus={deviceStatus}
@@ -3252,6 +3302,38 @@ export default function TicketsPage() {
             </>
           )}
         </div>
+      )}
+
+      {/* Hero Tiles — Backup Center-style KPI strip; click to filter */}
+      {(typeFilter === "all" || typeFilter === "sla") && (
+        (() => {
+          const now = new Date();
+          const open = tickets.filter(t => !["closed", "resolved"].includes(t.status)).length;
+          const breached = tickets.filter(t => t.sla_due && new Date(t.sla_due) < now && !["closed", "resolved"].includes(t.status)).length;
+          const awaiting = tickets.filter(t => noteCounts[t.id] === 0 && !["closed", "resolved"].includes(t.status)).length;
+          const closedToday = tickets.filter(t => t.resolved_at && (now - new Date(t.resolved_at)) < 86400000).length;
+          const myOpen = tickets.filter(t => t.assignee_id === user?.id && !["closed", "resolved"].includes(t.status)).length;
+          const unassigned = tickets.filter(t => !t.assignee_id && !["closed", "resolved"].includes(t.status)).length;
+          const tiles = [
+            { key: "open",       label: "Open",         value: open,        glow: "cyan",    icon: Ticket,        onClick: () => setStatusFilter("open") },
+            { key: "breached",   label: "SLA Breached", value: breached,    glow: "rose",    icon: AlertCircle,   onClick: () => setStatusFilter("all") },
+            { key: "awaiting",   label: "Awaiting Reply", value: awaiting,  glow: "amber",   icon: MessageCircle, onClick: () => setStatusFilter("all") },
+            { key: "unassigned", label: "Unassigned",   value: unassigned,  glow: "violet",  icon: UserPlus,      onClick: () => setStatusFilter("all") },
+            { key: "mine",       label: "My Open",      value: myOpen,      glow: "emerald", icon: User,          onClick: () => setStatusFilter("all") },
+            { key: "closed-today", label: "Closed Today", value: closedToday, glow: "zinc",  icon: CheckCircle,   onClick: () => setStatusFilter("closed") },
+          ];
+          return (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="ticket-hero-tiles">
+              {tiles.map(t => (
+                <HeroTile
+                  key={t.key} label={t.label} value={t.value} icon={t.icon} glow={t.glow}
+                  onClick={t.onClick}
+                  testId={`hero-tile-${t.key}`}
+                />
+              ))}
+            </div>
+          );
+        })()
       )}
 
       {/* Density + Group toolbar */}
