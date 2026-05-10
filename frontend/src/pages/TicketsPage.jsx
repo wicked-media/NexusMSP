@@ -3304,38 +3304,6 @@ export default function TicketsPage() {
         </div>
       )}
 
-      {/* Hero Tiles — Backup Center-style KPI strip; click to filter */}
-      {(typeFilter === "all" || typeFilter === "sla") && (
-        (() => {
-          const now = new Date();
-          const open = tickets.filter(t => !["closed", "resolved"].includes(t.status)).length;
-          const breached = tickets.filter(t => t.sla_due && new Date(t.sla_due) < now && !["closed", "resolved"].includes(t.status)).length;
-          const awaiting = tickets.filter(t => noteCounts[t.id] === 0 && !["closed", "resolved"].includes(t.status)).length;
-          const closedToday = tickets.filter(t => t.resolved_at && (now - new Date(t.resolved_at)) < 86400000).length;
-          const myOpen = tickets.filter(t => t.assignee_id === user?.id && !["closed", "resolved"].includes(t.status)).length;
-          const unassigned = tickets.filter(t => !t.assignee_id && !["closed", "resolved"].includes(t.status)).length;
-          const tiles = [
-            { key: "open",       label: "Open",         value: open,        glow: "cyan",    icon: Ticket,        onClick: () => setStatusFilter("open") },
-            { key: "breached",   label: "SLA Breached", value: breached,    glow: "rose",    icon: AlertCircle,   onClick: () => setStatusFilter("all") },
-            { key: "awaiting",   label: "Awaiting Reply", value: awaiting,  glow: "amber",   icon: MessageCircle, onClick: () => setStatusFilter("all") },
-            { key: "unassigned", label: "Unassigned",   value: unassigned,  glow: "violet",  icon: UserPlus,      onClick: () => setStatusFilter("all") },
-            { key: "mine",       label: "My Open",      value: myOpen,      glow: "emerald", icon: User,          onClick: () => setStatusFilter("all") },
-            { key: "closed-today", label: "Closed Today", value: closedToday, glow: "zinc",  icon: CheckCircle,   onClick: () => setStatusFilter("closed") },
-          ];
-          return (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="ticket-hero-tiles">
-              {tiles.map(t => (
-                <HeroTile
-                  key={t.key} label={t.label} value={t.value} icon={t.icon} glow={t.glow}
-                  onClick={t.onClick}
-                  testId={`hero-tile-${t.key}`}
-                />
-              ))}
-            </div>
-          );
-        })()
-      )}
-
       {/* Density + Group toolbar */}
       {(typeFilter === "all" || typeFilter === "sla") && (
         <>

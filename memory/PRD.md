@@ -31,10 +31,12 @@ Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/
 ## Recent Updates (Feb 2026 — Saved Views + Tech Profile Richness + Settings Hub)
 
 ### 🎨 Hero Tiles propagated platform-wide (consistency drive)
-- Extracted the gradient-glow KPI tile from `BackupCenterPage` into reusable `/app/frontend/src/components/HeroTile.jsx` (with `AnimatedCounter` export)
-- Backup Center now imports the canonical tile (`HeroMetric` is a thin pass-through preserving its API)
-- **Tickets page** now has a 6-tile hero strip: Open · SLA Breached · Awaiting Reply · Unassigned · My Open · Closed Today — each tile is **clickable** and applies a quick filter
-- All tiles share: gradient bg, top-right blur orb, animated number, monospace font, uppercase tracking-widest label
+- Extracted the gradient-glow KPI tile from `BackupCenterPage` into reusable `/app/frontend/src/components/HeroTile.jsx`
+- **Rewrote `MetricTile`/`MetricStrip` in `/app/frontend/src/components/design-system/index.jsx`** to render the same gradient-glow aesthetic — all **17 pages** that already use `MetricStrip` (Tickets, Devices, Dashboard, Workspace, Security, Invoices, Contracts, all Command Centers, Live Chat, Shadow IT, Assets, Integrations…) auto-upgrade with zero JSX changes
+- Mobile Tech Page custom tile blocks also upgraded to the gradient-glow look
+- Removed duplicate hero strip on TicketsPage (was added then made redundant by MetricTile rewrite)
+- Backup Center re-uses the shared `HeroTile` component (single source of truth)
+- Result: **every stat tile in the platform now has identical visual language** — gradient bg, top-right blur orb, monospace number, uppercase tracking-widest label
 
 ### 🧩 Right-rail panel customisation on ticket detail
 - New "Layout" dropdown above the ticket detail (data-testid `layout-toggle`) lets each user toggle: AI Co-Pilot · SLA Burn-down · Workflow · Device Cockpit

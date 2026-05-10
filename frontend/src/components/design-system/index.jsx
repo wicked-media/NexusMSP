@@ -49,22 +49,31 @@ export function Sparkline({ data, color = "#818cf8", width = 80, height = 28 }) 
 }
 
 /** Single metric in the top strip. Accented left border + uppercase micro-label + large numeric value. */
+/** Single metric tile — gradient-glow aesthetic shared with the Backup Center hero tiles.
+ *  Accent → glow-color mapping for backwards compatibility. */
 export function MetricTile({ label, value, trend, trendColor, accent = "indigo", icon, testid }) {
-  const colorMap = {
-    indigo: "border-indigo-500",
-    emerald: "border-emerald-500",
-    amber: "border-amber-500",
-    rose: "border-rose-500",
-    sky: "border-sky-500",
-    cyan: "border-cyan-500",
-    violet: "border-violet-500",
+  const glowMap = {
+    indigo:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
+    violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
+    cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+    sky:     "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+    emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
+    amber:   "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
+    rose:    "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
+    zinc:    "from-zinc-500/15 to-zinc-700/5 border-zinc-500/30 text-zinc-300 shadow-zinc-500/10",
   };
+  const tone = glowMap[accent] || glowMap.indigo;
   return (
-    <div className={`border-l-2 pl-4 ${colorMap[accent] || colorMap.indigo}`} data-testid={testid}>
-      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground flex items-center gap-1">{icon}{label}</div>
-      <div className="flex items-baseline gap-2 mt-0.5">
-        <div className="text-2xl font-light tracking-tighter text-foreground">{value}</div>
-        {trend && <span className={`text-[10px] font-mono ${trendColor || (trend.startsWith("+") ? "text-emerald-500" : trend.startsWith("-") ? "text-rose-500" : "text-muted-foreground")}`}>{trend}</span>}
+    <div className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tone} shadow-lg p-4`} data-testid={testid}>
+      <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
+      <div className="relative">
+        <div className="text-[10px] font-semibold uppercase tracking-widest opacity-80 flex items-center gap-1">
+          {icon}{label}
+        </div>
+        <div className="flex items-baseline gap-2 mt-1">
+          <div className="text-3xl font-bold tracking-tighter font-mono">{value}</div>
+          {trend && <span className={`text-[10px] font-mono ${trendColor || (trend.startsWith("+") ? "text-emerald-300" : trend.startsWith("-") ? "text-rose-300" : "opacity-70")}`}>{trend}</span>}
+        </div>
       </div>
     </div>
   );
@@ -74,7 +83,7 @@ export function MetricTile({ label, value, trend, trendColor, accent = "indigo",
 export function MetricStrip({ children, columns = 6 }) {
   const gridClass = columns >= 6 ? "lg:grid-cols-6" : columns === 5 ? "lg:grid-cols-5" : columns === 4 ? "lg:grid-cols-4" : columns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-2";
   return (
-    <div className={`grid grid-cols-2 md:grid-cols-3 ${gridClass} gap-4 px-6 py-4 border-b border-border bg-background/80 backdrop-blur-md`}>
+    <div className={`grid grid-cols-2 md:grid-cols-3 ${gridClass} gap-3 px-6 py-4`}>
       {children}
     </div>
   );

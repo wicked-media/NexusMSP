@@ -41,19 +41,30 @@ export default function MobileTechPage() {
         </div>
       </div>
 
-      {/* Stats row */}
+      {/* Stats row — gradient glow tiles for consistency with the rest of the app */}
       <div className="grid grid-cols-4 gap-2 mb-4">
         {[
-          { label: "Assigned", value: dayData.stats.tickets_today, color: "#3b82f6" },
-          { label: "Completed", value: dayData.stats.completed_today, color: "#10b981" },
-          { label: "Avg Response", value: `${dayData.stats.avg_response_min}m`, color: "#f97316" },
-          { label: "CSAT", value: dayData.stats.satisfaction, icon: Star, color: "#eab308" },
-        ].map((s, i) => (
-          <div key={`k-${i}`} className="rounded-xl p-3 text-center border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-            <div className="text-lg font-bold" style={{ color: s.color }}>{s.value}</div>
-            <div className="text-[10px] text-[var(--muted)]">{s.label}</div>
-          </div>
-        ))}
+          { label: "Assigned",     value: dayData.stats.tickets_today,     accent: "cyan" },
+          { label: "Completed",    value: dayData.stats.completed_today,   accent: "emerald" },
+          { label: "Avg Response", value: `${dayData.stats.avg_response_min}m`, accent: "amber" },
+          { label: "CSAT",         value: dayData.stats.satisfaction,      accent: "violet" },
+        ].map((s, i) => {
+          const tone = {
+            cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+            emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
+            amber:   "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
+            violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
+          }[s.accent];
+          return (
+            <div key={`k-${i}`} className={`relative overflow-hidden rounded-xl border bg-gradient-to-br ${tone} shadow-lg p-3 text-center`}>
+              <div className="absolute -top-4 -right-4 w-12 h-12 rounded-full bg-current opacity-10 blur-xl" />
+              <div className="relative">
+                <div className="text-xl font-bold font-mono tracking-tighter">{s.value}</div>
+                <div className="text-[9px] uppercase tracking-widest opacity-80 mt-0.5">{s.label}</div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Tabs */}
