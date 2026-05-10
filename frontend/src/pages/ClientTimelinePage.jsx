@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Ticket, Receipt, FileText, Monitor, Heart, CheckCircle, Clock, Users } from "lucide-react";
+import { Ticket, Receipt, FileText, Monitor, Heart, CheckCircle, Clock, Users, Activity } from "lucide-react";
+import HeroTile from "@/components/HeroTile";
 
 const iconMap = { ticket: Ticket, check: CheckCircle, receipt: Receipt, file: FileText, filetext: FileText, monitor: Monitor, heart: Heart };
 const colorMap = { blue: "bg-blue-500", green: "bg-green-500", amber: "bg-amber-500", violet: "bg-violet-500", emerald: "bg-emerald-500", cyan: "bg-cyan-500", pink: "bg-pink-500" };
@@ -61,23 +62,11 @@ export default function ClientTimelinePage() {
 
       {timeline && !loading && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card><CardContent className="pt-4 pb-3 text-center">
-              <p className="text-2xl font-bold">{timeline.total_events}</p>
-              <p className="text-xs text-muted-foreground">Total Events</p>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4 pb-3 text-center">
-              <p className="text-2xl font-bold">{timeline.events.filter(e => e.type === "ticket_created").length}</p>
-              <p className="text-xs text-muted-foreground">Tickets</p>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4 pb-3 text-center">
-              <p className="text-2xl font-bold">{timeline.events.filter(e => e.type === "invoice").length}</p>
-              <p className="text-xs text-muted-foreground">Invoices</p>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4 pb-3 text-center">
-              <p className="text-2xl font-bold">{timeline.events.filter(e => e.type === "device_added").length}</p>
-              <p className="text-xs text-muted-foreground">Devices</p>
-            </CardContent></Card>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <HeroTile label="Total Events" value={timeline.total_events} icon={Activity} glow="violet" testId="timeline-total-events" />
+            <HeroTile label="Tickets" value={timeline.events.filter(e => e.type === "ticket_created").length} icon={Ticket} glow="cyan" testId="timeline-tickets" />
+            <HeroTile label="Invoices" value={timeline.events.filter(e => e.type === "invoice").length} icon={Receipt} glow="emerald" testId="timeline-invoices" />
+            <HeroTile label="Devices" value={timeline.events.filter(e => e.type === "device_added").length} icon={Monitor} glow="amber" testId="timeline-devices" />
           </div>
 
           <Card>

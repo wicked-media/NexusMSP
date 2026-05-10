@@ -145,12 +145,25 @@ function ClientListItem({ client, selected, onClick }) {
 }
 
 function TopMetric({ label, value, trend, color = "indigo" }) {
+  // Map legacy color → HeroTile glow tone for instant visual upgrade
+  const glowMap = { indigo: "violet", violet: "violet", emerald: "emerald", amber: "amber", rose: "rose", red: "rose", sky: "cyan", cyan: "cyan", zinc: "zinc" };
+  const tone = {
+    violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
+    emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
+    amber:   "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
+    rose:    "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
+    cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+    zinc:    "from-zinc-500/15 to-zinc-700/5 border-zinc-500/30 text-zinc-300 shadow-zinc-500/10",
+  }[glowMap[color] || "violet"];
   return (
-    <div className={`border-l-2 pl-4 border-${color}-500`}>
-      <div className="text-[10px] font-medium uppercase tracking-widest text-zinc-500">{label}</div>
-      <div className="flex items-baseline gap-2">
-        <div className="text-2xl font-light tracking-tighter text-zinc-100 mt-0.5">{value}</div>
-        {trend && <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-400" : trend.startsWith("-") ? "text-rose-400" : "text-zinc-500"}`}>{trend}</span>}
+    <div className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tone} shadow-lg p-4`}>
+      <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
+      <div className="relative">
+        <div className="text-[10px] font-semibold uppercase tracking-widest opacity-80">{label}</div>
+        <div className="flex items-baseline gap-2 mt-1">
+          <div className="text-3xl font-bold tracking-tighter font-mono">{value}</div>
+          {trend && <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-300" : trend.startsWith("-") ? "text-rose-300" : "opacity-70"}`}>{trend}</span>}
+        </div>
       </div>
     </div>
   );
@@ -264,7 +277,7 @@ export default function ClientsPage() {
     <TooltipProvider delayDuration={200}>
       <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 flex flex-col" data-testid="clients-page">
         {/* Portfolio metric strip */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 px-6 py-4 sticky top-0 z-10 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-900/60">
           <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : null} color="indigo" />
           <TopMetric label="Portfolio MRR" value={`$${(s.total_mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="emerald" />
           <TopMetric label="Avg Health" value={`${s.avg_health || 0}`} color={s.avg_health >= 80 ? "emerald" : s.avg_health >= 60 ? "amber" : "rose"} />

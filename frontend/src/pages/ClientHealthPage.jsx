@@ -159,31 +159,40 @@ export default function ClientHealthPage() {
         </div>
       </div>
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-7 gap-3">
-        <Card className="col-span-2 border-border/40">
-          <CardContent className="pt-4 pb-3 flex items-center gap-4">
-            <HealthGauge score={d.avg_health} size={72} />
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Average Health</p>
-              <p className="text-2xl font-bold">{d.avg_health}<span className="text-sm text-muted-foreground">/100</span></p>
-              <p className="text-xs text-muted-foreground">{d.total} clients</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* KPI Row — gradient hero tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="col-span-2 relative overflow-hidden rounded-lg border bg-gradient-to-br from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-lg shadow-violet-500/20 p-4 flex items-center gap-4">
+          <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
+          <div className="relative"><HealthGauge score={d.avg_health} size={72} /></div>
+          <div className="relative">
+            <p className="text-[10px] uppercase tracking-widest opacity-80">Average Health</p>
+            <p className="text-3xl font-bold font-mono tracking-tighter">{d.avg_health}<span className="text-sm opacity-70">/100</span></p>
+            <p className="text-[10px] opacity-70">{d.total} clients</p>
+          </div>
+        </div>
         {["thriving", "healthy", "needs_attention", "at_risk", "critical"].map(s => {
           const cfg = STATUS_CONFIG[s];
           const count = dist[s] || 0;
+          const tone = ({
+            thriving:        "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
+            healthy:         "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+            needs_attention: "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
+            at_risk:         "from-orange-500/20 to-red-600/10 border-orange-500/30 text-orange-300 shadow-orange-500/20",
+            critical:        "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
+          })[s];
+          const isActive = statusFilter === s;
           return (
-            <Card key={s} className={`border-border/40 cursor-pointer transition-all hover:ring-1 ${cfg.ring} ${statusFilter === s ? "ring-1 " + cfg.ring : ""}`}
-              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}>
-              <CardContent className="pt-4 pb-3">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{cfg.label}</p>
-                </div>
-                <p className={`text-2xl font-bold ${cfg.color.split(" ")[1]}`}>{count}</p>
-              </CardContent>
-            </Card>
+            <button
+              key={s}
+              className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tone} shadow-lg p-4 text-left transition-transform hover:scale-[1.02] ${isActive ? "ring-2 ring-white/30" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
+            >
+              <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
+              <div className="relative">
+                <p className="text-[10px] uppercase tracking-widest opacity-80">{cfg.label}</p>
+                <p className="text-3xl font-bold font-mono tracking-tighter mt-1">{count}</p>
+              </div>
+            </button>
           );
         })}
       </div>

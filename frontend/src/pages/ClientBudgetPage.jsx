@@ -29,11 +29,31 @@ export default function ClientBudgetPage() {
         <p className="text-sm text-muted-foreground">Track annual IT budgets, spend by category, and forecast end-of-year totals</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        <Card><CardContent className="pt-4 pb-3"><DollarSign className="w-5 h-5 text-blue-400 mb-1" /><p className="text-2xl font-bold">${(s.total_annual_budget / 1000).toFixed(0)}k</p><p className="text-[11px] text-muted-foreground">Total Annual Budget</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><TrendingUp className="w-5 h-5 text-emerald-400 mb-1" /><p className="text-2xl font-bold">${(s.total_ytd_spent / 1000).toFixed(0)}k</p><p className="text-[11px] text-muted-foreground">YTD Spent</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><PieChart className="w-5 h-5 text-violet-400 mb-1" /><p className="text-2xl font-bold">{s.avg_utilization_pct}%</p><p className="text-[11px] text-muted-foreground">Avg Utilization</p></CardContent></Card>
-        <Card className="border-red-500/20"><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{s.clients_over_budget}</p><p className="text-[11px] text-muted-foreground">Over Budget Pace</p></CardContent></Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Total Annual Budget", value: `$${(s.total_annual_budget / 1000).toFixed(0)}k`, icon: DollarSign, tone: "cyan" },
+          { label: "YTD Spent",            value: `$${(s.total_ytd_spent / 1000).toFixed(0)}k`,    icon: TrendingUp,  tone: "emerald" },
+          { label: "Avg Utilization",      value: `${s.avg_utilization_pct}%`,                     icon: PieChart,    tone: "violet" },
+          { label: "Over Budget Pace",     value: s.clients_over_budget,                           icon: AlertTriangle, tone: "rose" },
+        ].map((m, i) => {
+          const tones = {
+            cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
+            emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
+            violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
+            rose:    "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
+          }[m.tone];
+          const Ic = m.icon;
+          return (
+            <div key={`k-${i}`} className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tones} shadow-lg p-4`}>
+              <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
+              <div className="relative">
+                <div className="flex items-center justify-between mb-1"><Ic className="w-4 h-4 opacity-80" /></div>
+                <p className="text-3xl font-bold font-mono tracking-tighter">{m.value}</p>
+                <p className="text-[10px] uppercase tracking-widest opacity-80 mt-0.5">{m.label}</p>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
