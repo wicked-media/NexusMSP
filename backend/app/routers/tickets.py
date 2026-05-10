@@ -238,6 +238,29 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
         if changes:
             await ticket_audit(ticket_id, current_user, "updated", "; ".join(changes))
             await log_activity(current_user, "updated", "ticket", ticket_id, old_ticket.get("title", ""), "; ".join(changes), changes=change_dict)
+        # Auto CSAT: when transitioning to closed for the first time
+        try:
+            became_closed = ticket_data.get("status") == "closed" and old_ticket.get("status") != "closed"
+            if became_closed and not old_ticket.get("csat_sent"):
+                contact = old_ticket.get("contact_email") or old_ticket.get("requester_email")
+                if contact:
+                    import uuid as _uuid
+                    survey_id = _uuid.uuid4().hex
+                    await db.csat_surveys.insert_one({
+                        "id": survey_id,
+                        "ticket_id": ticket_id,
+                        "ticket_number": old_ticket.get("ticket_number"),
+                        "client_id": old_ticket.get("client_id"),
+                        "client_name": old_ticket.get("client_name"),
+                        "contact_email": contact,
+                        "status": "sent",
+                        "sent_at": datetime.now(timezone.utc).isoformat(),
+                        "sent_by_id": "system",
+                        "sent_by_name": "Auto-CSAT (on close)",
+                    })
+                    await db.tickets.update_one({"id": ticket_id}, {"$set": {"csat_sent": True, "csat_sent_at": datetime.now(timezone.utc).isoformat()}})
+        except Exception as e:
+            logger.warning(f"Auto-CSAT failed for {ticket_id}: {e}")
     return {"message": "Ticket updated"}
 
 @router.post("/tickets/{ticket_id}/devices")

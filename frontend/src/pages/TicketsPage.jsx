@@ -19,6 +19,9 @@ import {
   TicketWorksheetTab, TicketAttachmentsTab, TicketItemsTab,
   TicketChildrenTab, TicketTimeTab, TicketAuditTab,
 } from "@/components/tickets/TicketSecondaryTabs";
+import TicketDeviceCockpit from "@/components/tickets/TicketDeviceCockpit";
+import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
+import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -1816,6 +1819,28 @@ export default function TicketsPage() {
                   </ScrollArea>
                 </CardContent>
               </Card>
+            )}
+
+            {/* SLA Burn-down */}
+            <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
+
+            {/* Workflow polish (Group D — block-on, change, maintenance, CSAT) */}
+            <TicketWorkflowPanel
+              ticket={viewingTicket}
+              allTickets={tickets}
+              headers={headers}
+              refresh={() => fetchTicketDetail(viewingTicket)}
+            />
+
+            {/* Live Device Cockpit (Group A + B + C — remote, actions, telemetry) */}
+            {viewingTicket.device_id && (
+              <TicketDeviceCockpit
+                ticketId={viewingTicket.id}
+                deviceStatus={deviceStatus}
+                headers={headers}
+                hasAgent={!!deviceStatus?.trmm_agent_id}
+                refreshTicketDetails={() => fetchTicketDetail(viewingTicket)}
+              />
             )}
 
             {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
