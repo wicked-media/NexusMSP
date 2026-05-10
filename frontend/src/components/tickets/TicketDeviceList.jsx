@@ -24,7 +24,7 @@ import {
   MoreVertical, Monitor, Terminal, FolderOpen, Power, Wifi, RefreshCw,
   Download, MessageSquareWarning, Wrench, Cpu, MemoryStick, HardDrive,
   Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight,
-  Keyboard,
+  Keyboard, Sparkles,
 } from "lucide-react";
 import { API } from "@/App";
 
@@ -381,6 +381,9 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
 export default function TicketDeviceList({ ticketId, headers, refreshTicketDetails }) {
   const [data, setData] = useState({ devices: [], primary_id: null });
   const [loading, setLoading] = useState(true);
+  const [fanoutResults, setFanoutResults] = useState(null); // { action, results: [...] }
+  const [fanoutBusy, setFanoutBusy] = useState(null);
+  const [fanoutConfirm, setFanoutConfirm] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -393,11 +396,36 @@ export default function TicketDeviceList({ ticketId, headers, refreshTicketDetai
 
   useEffect(() => { load(); }, [load]);
 
+  const runFanout = async (action, label, payload = {}) => {
+    setFanoutBusy(action);
+    // Seed initial in-progress strip so the UI shows immediate feedback
+    const targets = (data.devices || []).filter(d => d.has_agent);
+    setFanoutResults({
+      action: label,
+      results: targets.map(d => ({ device_id: d.id, device_name: d.name, status: "running" })),
+    });
+    try {
+      const r = await axios.post(`${API}/tickets/${ticketId}/device/fanout/${action}`, payload, { headers });
+      setFanoutResults({ action: label, results: r.data.results, summary: r.data.summary });
+      const s = r.data.summary;
+      toast.success(`${label} → ${s.ok} OK · ${s.failed} failed · ${s.skipped} skipped`);
+      refreshTicketDetails?.();
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || `${label} failed`);
+      setFanoutResults(null);
+    } finally {
+      setFanoutBusy(null);
+      setFanoutConfirm(null);
+    }
+  };
+
   if (loading) {
     return <Card><CardContent className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-zinc-500" /></CardContent></Card>;
   }
 
   const devices = data.devices || [];
+  const agentCount = devices.filter(d => d.has_agent).length;
 
   return (
     <Card data-testid="ticket-device-list" className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]">
@@ -413,17 +441,115 @@ export default function TicketDeviceList({ ticketId, headers, refreshTicketDetai
       <CardContent className="space-y-2">
         {devices.length === 0 ? (
           <p className="text-xs text-zinc-500 text-center py-4">No devices linked. Link a device to enable remote actions.</p>
-        ) : devices.map(d => (
-          <DeviceRow
-            key={d.id}
-            device={d}
-            ticketId={ticketId}
-            headers={headers}
-            onMutate={() => { load(); refreshTicketDetails?.(); }}
-          />
-        ))}
-        <p className="text-[10px] text-zinc-600 font-mono text-center pt-1">All actions audited on this ticket · 3-dot menu per device</p>
+        ) : (
+          <>
+            {/* Fan-out master row — only when 2+ devices have agents */}
+            {agentCount >= 2 && (
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-md border border-fuchsia-500/30 bg-gradient-to-r from-fuchsia-500/10 via-violet-500/10 to-cyan-500/5"
+                data-testid="device-fanout-row"
+              >
+                <Sparkles className="w-4 h-4 text-fuchsia-400 shrink-0" />
+                <span className="text-xs font-medium text-fuchsia-200">Run on all {agentCount} devices</span>
+                <span className="text-[10px] text-zinc-500 font-mono ml-1 hidden md:inline">in parallel · audited</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <Button
+                    size="sm" variant="outline"
+                    className="h-7 text-[10px] border-violet-500/40 text-violet-300 hover:bg-violet-500/10"
+                    disabled={!!fanoutBusy}
+                    onClick={() => runFanout("run-checks", "Run Checks (all)")}
+                    data-testid="fanout-checks"
+                  >
+                    {fanoutBusy === "run-checks" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Checks
+                  </Button>
+                  <Button
+                    size="sm" variant="outline"
+                    className="h-7 text-[10px] border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                    disabled={!!fanoutBusy}
+                    onClick={() => runFanout("install-patches", "Install Patches (all)")}
+                    data-testid="fanout-patches"
+                  >
+                    {fanoutBusy === "install-patches" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}Patches
+                  </Button>
+                  <Button
+                    size="sm" variant="outline"
+                    className="h-7 text-[10px] border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                    disabled={!!fanoutBusy}
+                    onClick={() => setFanoutConfirm("reboot")}
+                    data-testid="fanout-reboot"
+                  >
+                    <Power className="w-3 h-3 mr-1" />Reboot
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Progress strip — appears during/after fan-out */}
+            {fanoutResults && (
+              <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 space-y-1" data-testid="fanout-progress">
+                <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
+                  <span>{fanoutResults.action}</span>
+                  {fanoutResults.summary && (
+                    <span>
+                      <span className="text-emerald-400">{fanoutResults.summary.ok} ok</span>
+                      {" · "}<span className="text-rose-400">{fanoutResults.summary.failed} failed</span>
+                      {" · "}<span className="text-zinc-500">{fanoutResults.summary.skipped} skipped</span>
+                    </span>
+                  )}
+                  <button className="text-zinc-500 hover:text-zinc-300" onClick={() => setFanoutResults(null)} data-testid="fanout-progress-clear">clear</button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                  {fanoutResults.results.map(r => {
+                    const tone = r.status === "ok" ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/5" :
+                                 r.status === "failed" ? "text-rose-300 border-rose-500/30 bg-rose-500/5" :
+                                 r.status === "skipped" ? "text-zinc-500 border-zinc-700 bg-zinc-900/50" :
+                                 "text-cyan-300 border-cyan-500/30 bg-cyan-500/5";
+                    const icon = r.status === "ok" ? "✓" : r.status === "failed" ? "✗" : r.status === "skipped" ? "—" : "⟳";
+                    return (
+                      <div
+                        key={r.device_id}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] ${tone} ${r.status === "running" ? "animate-pulse" : ""}`}
+                        title={r.message || r.status}
+                        data-testid={`fanout-result-${r.device_id}`}
+                      >
+                        <span className="font-mono">{icon}</span>
+                        <span className="truncate flex-1">{r.device_name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {devices.map(d => (
+              <DeviceRow
+                key={d.id}
+                device={d}
+                ticketId={ticketId}
+                headers={headers}
+                onMutate={() => { load(); refreshTicketDetails?.(); }}
+              />
+            ))}
+            <p className="text-[10px] text-zinc-600 font-mono text-center pt-1">All actions audited on this ticket · 3-dot menu per device</p>
+          </>
+        )}
       </CardContent>
+
+      {/* Fan-out reboot confirmation */}
+      <Dialog open={fanoutConfirm === "reboot"} onOpenChange={(v) => !v && setFanoutConfirm(null)}>
+        <DialogContent className="max-w-sm" data-testid="fanout-reboot-confirm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Power className="w-4 h-4 text-amber-400" />Reboot all {agentCount} devices?</DialogTitle>
+            <DialogDescription className="text-xs">
+              Each linked device will reboot immediately in parallel. Offline devices and devices without an agent will be skipped. The action is audited on this ticket.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setFanoutConfirm(null)}>Cancel</Button>
+            <Button onClick={() => runFanout("reboot", "Reboot (all)")} disabled={!!fanoutBusy} data-testid="fanout-reboot-go">Reboot all</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

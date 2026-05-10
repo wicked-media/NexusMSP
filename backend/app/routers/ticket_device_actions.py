@@ -239,3 +239,75 @@ async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_c
     # Order: primary first, then by name
     devices.sort(key=lambda x: (not x["is_primary"], (x.get("name") or "").lower()))
     return {"primary_id": primary, "devices": devices}
+
+
+# ─────────────────────── Fan-out: run an action on every linked device ───────────────────────
+
+import asyncio
+
+
+@router.post("/tickets/{ticket_id}/device/fanout/{action}")
+async def device_fanout(ticket_id: str, action: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
+    """Run a single action against every linked device that has a TRMM agent.
+
+    Supported actions: run-checks · install-patches · reboot · shutdown · send-message
+    Returns per-device result so the UI can show a progress strip.
+    """
+    allowed = {"run-checks", "install-patches", "reboot", "shutdown", "send-message"}
+    if action not in allowed:
+        raise HTTPException(400, f"Action must be one of {sorted(allowed)}")
+
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    primary = ticket.get("device_id")
+    ids = list(ticket.get("device_ids") or [])
+    if primary and primary not in ids:
+        ids.insert(0, primary)
+    if not ids:
+        return {"results": [], "summary": {"total": 0, "ok": 0, "failed": 0, "skipped": 0}}
+
+    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "hostname": 1, "trmm_agent_id": 1, "status": 1})
+    targets = [d async for d in cursor]
+
+    async def _run_one(d: dict) -> dict:
+        name = d.get("name") or d.get("hostname") or d.get("id")
+        agent_id = d.get("trmm_agent_id")
+        if not agent_id:
+            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No TRMM agent linked"}
+        # Power-state guards
+        if action in ("reboot", "shutdown", "send-message") and d.get("status") != "online":
+            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "Device offline"}
+        try:
+            if action == "run-checks":
+                r = await _trmm_call("POST", f"agents/{agent_id}/runchecks/")
+            elif action == "install-patches":
+                r = await _trmm_call("POST", f"agents/{agent_id}/installpatches/")
+            elif action == "reboot":
+                r = await _trmm_call("POST", f"agents/{agent_id}/reboot/")
+            elif action == "shutdown":
+                r = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body={"cmd": "shutdown /s /t 60", "shell": "cmd", "timeout": 60})
+            elif action == "send-message":
+                title = (payload.get("title") or "Message from IT").strip()
+                body = (payload.get("body") or "").strip()
+                if not body:
+                    return {"device_id": d["id"], "device_name": name, "status": "failed", "message": "body required"}
+                r = await _trmm_call("POST", "core/sendnotification/", json_body={"agent_ids": [agent_id], "title": title, "message": body})
+            return {"device_id": d["id"], "device_name": name, "status": "ok", "result": r}
+        except Exception as e:
+            return {"device_id": d["id"], "device_name": name, "status": "failed", "message": str(e)[:200]}
+
+    results = await asyncio.gather(*[_run_one(d) for d in targets])
+
+    ok = sum(1 for r in results if r["status"] == "ok")
+    failed = sum(1 for r in results if r["status"] == "failed")
+    skipped = sum(1 for r in results if r["status"] == "skipped")
+
+    detail = f"{ok} succeeded · {failed} failed · {skipped} skipped"
+    await _post_action_note(ticket_id, current_user, f"Fan-out: {action}", detail)
+
+    return {
+        "action": action,
+        "results": results,
+        "summary": {"total": len(results), "ok": ok, "failed": failed, "skipped": skipped},
+    }

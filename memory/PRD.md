@@ -8,6 +8,12 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Fan-out actions across all linked devices)
+Added a master "Run on all devices" row at the top of `TicketDeviceList` (only renders when 2+ devices have a TRMM agent):
+- Backend: new `POST /api/tickets/{id}/device/fanout/{action}` endpoint runs in parallel via `asyncio.gather` against every linked device with an agent. Supported actions: `run-checks`, `install-patches`, `reboot`, `shutdown`, `send-message`. Power actions auto-skip offline devices. Returns per-device `{device_id, device_name, status: ok|failed|skipped, message}` plus a summary `{total, ok, failed, skipped}`. Audit note posted to the ticket.
+- Frontend: master row with three glow buttons (Checks · Patches · Reboot — confirm dialog), in-flight progress strip showing all targets as `⟳` (running, pulse), then morphing into `✓` (ok), `✗` (failed), or `—` (skipped) per device with hover tooltips. Strip can be cleared.
+- Verified: 5-device fan-out on TKT-001 returned correct per-device statuses; invalid action correctly rejected with a 400 listing allowed actions.
+
 ## Recent Updates (Feb 2026 — Per-Device 3-dot Action Menu in tickets)
 Replaced the inline `TicketDeviceCockpit` (single-device with rows of buttons) with a new **`TicketDeviceList`** component that renders one compact row per linked device:
 - Backend `ticket_device_actions.py`:
