@@ -75,7 +75,7 @@ import {
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
   Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
-  MessageCircle, UserPlus, Settings2
+  MessageCircle, UserPlus, Settings2, AlertTriangle
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
@@ -3122,83 +3122,88 @@ export default function TicketsPage() {
 
   return (
     <PageShell data-testid="tickets-page">
-      {/* Portfolio metric strip */}
-      <MetricStrip columns={6}>
-        <MetricTile
-          label="Open"
-          value={openCount}
-          trend={openCount > 0 ? "click to filter" : null}
-          trendColor="text-zinc-500"
-          accent="sky"
-          icon={<Circle className="w-2.5 h-2.5 text-sky-400" />}
-          testid="stat-open"
-        />
-        <MetricTile
-          label="In Progress"
-          value={inProgressCount}
-          accent="amber"
-          icon={<Clock className="w-2.5 h-2.5 text-amber-400" />}
-          testid="stat-progress"
-        />
-        <MetricTile
-          label="Resolved"
-          value={resolvedCount}
-          accent="emerald"
-          icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />}
-          testid="stat-resolved"
-        />
-        <MetricTile
-          label="Critical"
-          value={criticalCount}
-          trend={criticalCount > 0 ? "needs attention" : "none"}
-          accent={criticalCount > 0 ? "rose" : "emerald"}
-          icon={<AlertCircle className={`w-2.5 h-2.5 ${criticalCount > 0 ? "text-rose-400" : "text-zinc-600"}`} />}
-          testid="stat-critical"
-        />
-        <MetricTile
-          label="No Response"
-          value={noNotesCount}
-          accent={noNotesCount > 0 ? "amber" : "emerald"}
-          icon={<MessageSquare className="w-2.5 h-2.5 text-amber-400" />}
-          testid="stat-no-notes"
-        />
-        <MetricTile
-          label="Avg Resolve"
-          value={`${avgResTime}m`}
-          accent="cyan"
-          icon={<Timer className="w-2.5 h-2.5 text-cyan-400" />}
-          testid="stat-avg-time"
-        />
-      </MetricStrip>
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header — matches Devices Command Center / Team Command Center */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Tickets & Jobs</h1>
-          <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{tickets.length} SLA · {workshopJobs.length} workshop · {fieldJobs.length} cabling/WISP</p>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-violet-400" />Tickets Command Center
+          </h1>
+          <p className="text-sm text-zinc-500">{tickets.length} SLA · {workshopJobs.length} workshop · {fieldJobs.length} cabling/WISP · live ticker · saved views</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="text-zinc-300 border-zinc-700 hover:bg-zinc-800" onClick={fetchTickets} data-testid="refresh-tickets-btn">
-            <RefreshCw className="w-3 h-3 mr-1.5" />Refresh
-          </Button>
-          <Button variant="outline" size="sm" className="text-blue-300 border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
-            <Plus className="w-3 h-3 mr-1.5" />New SLA Job
+          <Button variant="outline" size="sm" className="h-8 text-xs text-blue-300 border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
+            <Plus className="w-3 h-3 mr-1" />New SLA
           </Button>
           <Button variant="outline" size="sm"
-            className={isRecording
-              ? "text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 animate-pulse"
-              : "text-amber-300 border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"}
+            className={`h-8 text-xs ${isRecording ? "text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 animate-pulse" : "text-amber-300 border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"}`}
             onClick={isRecording ? stopVoiceRecording : startVoiceRecording} data-testid="voice-ticket-btn">
-            <Mic className="w-3 h-3 mr-1.5" />{isRecording ? "Stop Recording" : "Voice Ticket"}
+            <Mic className="w-3 h-3 mr-1" />{isRecording ? "Stop" : "Voice"}
           </Button>
-          <Button variant="outline" size="sm" className="text-purple-300 border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
-            <Wrench className="w-3 h-3 mr-1.5" />Workshop
+          <Button variant="outline" size="sm" className="h-8 text-xs text-purple-300 border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
+            <Wrench className="w-3 h-3 mr-1" />Workshop
           </Button>
-          <Button variant="outline" size="sm" className="text-cyan-300 border-cyan-500/40 bg-cyan-500/5 hover:bg-cyan-500/10" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
-            <Radio className="w-3 h-3 mr-1.5" />Cabling / WISP
+          <Button variant="outline" size="sm" className="h-8 text-xs text-cyan-300 border-cyan-500/40 bg-cyan-500/5 hover:bg-cyan-500/10" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
+            <Radio className="w-3 h-3 mr-1" />Cabling
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={fetchTickets} data-testid="refresh-tickets-btn">
+            <RefreshCw className="w-3 h-3 mr-1" />Refresh
           </Button>
         </div>
       </div>
+
+      {/* HeroTile metric strip — same as Devices/Team CC */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" testId="stat-open" />
+        <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" testId="stat-progress" />
+        <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" testId="stat-resolved" />
+        <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} testId="stat-critical" />
+        <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} testId="stat-no-notes" />
+        <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} testId="stat-avg-time" />
+      </div>
+
+      {/* Smart Inbox — Needs Attention strip */}
+      {(() => {
+        const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
+        const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
+        const stale = tickets.filter(t => !t.last_response_at && (Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000) && !["closed", "resolved"].includes(t.status));
+        const items = [
+          ...breached.slice(0, 6).map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "border-rose-500/30 bg-rose-500/5 text-rose-300" })),
+          ...critical.slice(0, 6).map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "border-amber-500/30 bg-amber-500/5 text-amber-300" })),
+          ...stale.slice(0, 6).map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "border-cyan-500/30 bg-cyan-500/5 text-cyan-300" })),
+        ].slice(0, 12);
+        if (items.length === 0) return null;
+        return (
+          <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]" data-testid="tickets-smart-inbox">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-violet-400" />Needs Attention
+                <Badge variant="outline" className="text-[9px] uppercase">{items.length}</Badge>
+              </CardTitle>
+              <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">{breached.length} breached · {critical.length} critical · {stale.length} stale</span>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                {items.map((t, i) => (
+                  <button
+                    key={`${t.id}-${i}-${t._kind}`}
+                    onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
+                    className={`text-left flex items-start gap-2 px-2.5 py-2 rounded border ${t._tone} hover:brightness-125 transition`}
+                    data-testid={`tickets-inbox-${t.id}-${t._kind}`}
+                  >
+                    <Badge variant="outline" className="text-[9px] uppercase shrink-0">{t._label}</Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate">{t.title}</div>
+                      <div className="text-[10px] opacity-80 truncate">#{t.ticket_number} · {t.client_name}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Type Filter Tabs */}
       <div className="flex items-center gap-2">

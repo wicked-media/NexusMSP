@@ -8,6 +8,18 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Tickets Page Command Center alignment)
+
+Restructured the top of `TicketsPage.jsx` to match Devices Command Center / Team Command Center exactly:
+- **Header**: ✨ Sparkles + "**Tickets Command Center**" title + descriptive subtitle.
+- **Action buttons** consolidated and styled consistently: New SLA · Voice · Workshop · Cabling · Refresh — same h-8 outline color-coded buttons used across Devices/Team CCs.
+- **HeroTile metric strip** replaces the legacy `MetricStrip + MetricTile`: Open · In Progress · Resolved · Critical · No Response · Avg Resolve.
+- **Smart Inbox** "Needs Attention" card added — surfaces SLA-breached, critical, and stale (no-response 4h+) tickets in 12 colour-coded clickable cards. Click → opens ticket details.
+- All existing functionality preserved (type filter tabs, saved views, density toggles, drill-down, AI Copilot strip, TRMM device cockpit).
+- Added missing `AlertTriangle` import (was triggering a runtime error during the rewrite).
+
+**Tested:** Smoke screenshot confirms Tickets page now shares the same visual language as Devices/Team/Clients — gradient HeroTiles, glassy Smart Inbox card, header with Sparkles icon. ESLint clean.
+
 ## Recent Updates (Feb 2026 — Devices Page format consistency rewrite)
 
 Restructured `DevicesPage.jsx` to match the Team Command Center / Clients module formatting exactly:
