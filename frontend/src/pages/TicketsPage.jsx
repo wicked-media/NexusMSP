@@ -533,15 +533,8 @@ export default function TicketsPage() {
   };
 
   const handleSendEmail = async () => {
-    // Auto-fetch and append the user's rich text signature from settings
-    let sig = emailSignature || "";
-    if (!sig) {
-      try {
-        const sigRes = await axios.get(`${API}/users/${user.id}`, { headers });
-        sig = sigRes.data?.email_signature || "";
-      } catch {}
-    }
-    const bodyWithSig = emailForm.body + (sig ? `\n\n${sig}` : "");
+    // Server-side auto-injects rich signature from /email-signatures default,
+    // so we don't append client-side. Send body as-is.
     try {
       await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
         ticket_id: viewingTicket.id,
@@ -549,7 +542,8 @@ export default function TicketsPage() {
         cc: emailForm.cc ? emailForm.cc.split(",").map(e => e.trim()).filter(Boolean) : [],
         bcc: emailForm.bcc ? emailForm.bcc.split(",").map(e => e.trim()).filter(Boolean) : [],
         subject: emailForm.subject,
-        body: bodyWithSig
+        body: emailForm.body,
+        body_type: emailForm.body?.includes("<") ? "html" : "text",
       }, { headers });
       setIsEmailOpen(false);
       setConversationType("note");

@@ -8,6 +8,41 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Tech Command Center + Outlook-Grade Signatures)
+
+### 🚀 Tech Command Center (`/tech-command`) — outclasses Syncro/HaloPSA/CW/Ninja
+A flagship 6-tab control hub for the entire technician workforce, all in the platform's gradient-glow aesthetic.
+
+**Backend (3 new routers):**
+- `tech_intel.py` — capacity cockpit (live workload state per tech), smart NL tech finder (AI-parsed intent: skills/level/availability), permission matrix (techs × 16 modules), permission diff engine (preview promote/demote changes), role drift detector (AI flags techs whose actual ticket workload misaligns with assigned role), audit timeline.
+- `permission_elevation.py` — JIT elevation (grant elevated permissions for N minutes with auto-revert), break-glass mode (self-grant full admin for emergencies, max 60 min, mandatory detailed reason, fully audited), revoke endpoint, lazy auto-revert on listing.
+- All actions tracked via `_log_audit` helper into `permission_audit` collection.
+
+**Frontend:**
+- `TechCommandCenter.jsx` — single flagship page with 6 tabs:
+  - **Smart Finder**: NL search ("L2 with security skills available now") + skill radar + workload pulse per tech.
+  - **Capacity Cockpit**: HeroTile metric strip + horizontal utilisation bars per tech with state badges (idle/active/busy/overloaded).
+  - **Permission Heatmap**: techs × 16 modules grid, vertical column headers, color-coded R/W/A cells, per-row "Promote to" dropdown with diff preview dialog.
+  - **Role Drift**: AI cards flagging mismatches with rationale.
+  - **JIT Elevation**: live active grants list, Grant dialog with tech/preset/duration/reason, Break-Glass dialog with safety guardrails (10+ char reason, max 60min).
+  - **Audit Timeline**: vertical time-rail with grouped per-day events, color-coded dots (rose=break-glass, violet=grant, cyan=other).
+- 8-axis CSS-only `SkillRadar` component drawn inline (no extra deps).
+- Linked into navigation under **Team → Command Center ⚡** as the primary entry.
+
+### ✉️ Outlook-Grade Email Signatures (`/email-signatures`)
+Replaces the basic plain-text `email_signature` field with a full multi-signature rich-HTML system.
+- Backend `email_signatures.py`: full CRUD + `set-default` + `render-default` + `{sig_id}/render` (substitutes template vars `{{user.*}}`, `{{company.*}}`, `{{ticket.*}}`, `{{client.*}}` against ticket context).
+- `tickets.py` `send_ticket_email` now AUTO-INJECTS the user's default rendered signature into every outbound email (with marker `<!--nx-signature-->` to prevent double-stamping). Falls back to legacy plain text if no rich signature.
+- Frontend `SignatureManager.jsx`: Outlook-style WYSIWYG editor (bold/italic/underline/align/list/link/image/colour/font/size), template variable inserter dropdown, 3 design presets (modern/minimal/bold), live preview with real user context, scope (all/new/reply), default toggle, multi-signature support.
+- Wired into TechSettings → Email Signature tab, replacing the old textarea.
+
+**Tested live (curl + screenshots):**
+- Capacity returns 4 techs with workload states (Aaron=overloaded with 37 open).
+- Smart Finder parses *"L2 with security skills available now"* into `{skills:[security], level:l2, needs_available:true}` and returns 3 ranked results.
+- Permission matrix returns 16 modules × 5 rows.
+- Signature created with template vars rendered live: `<b>Aaron Buckanen</b><br/>Senior Engineer | NexusOps MSP`.
+- Frontend smoke screenshots confirm full render with skill radars, heatmap, animated state badges.
+
 ## Recent Updates (Feb 2026 — Client War Room — live operational dashboard)
 - New backend router `client_war_room.py` with two endpoints:
   - `GET /api/clients/{id}/war-room` → live aggregation: devices (online/offline/warning), open tickets w/ critical+breached counts, MTTR (7d), on-call/active techs, last 24h activity, severity (ok/warning/critical).

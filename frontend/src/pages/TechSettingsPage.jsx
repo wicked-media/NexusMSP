@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import SignatureManager from "@/components/email/SignatureManager";
 import {
   User, Lock, Mail, Shield, Key, Bell, Clock, Palette, Globe, Award, Trophy,
   Star, Zap, Plus, Trash2, Copy, Eye, EyeOff, Monitor, Smartphone, LogOut,
@@ -477,26 +478,7 @@ export default function TechSettingsPage() {
 
           {/* EMAIL SIGNATURE TAB */}
           {activeTab === "signature" && (
-            <Card data-testid="settings-signature-panel">
-              <CardHeader><CardTitle className="flex items-center gap-2"><Mail className="w-5 h-5" />Email Signature</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">This signature will be automatically appended to outgoing emails from tickets.</p>
-                <textarea
-                  className="w-full min-h-[200px] rounded-lg border bg-background p-3 text-sm font-mono resize-y focus:ring-1 focus:ring-primary"
-                  value={signature}
-                  onChange={e => setSignature(e.target.value)}
-                  placeholder="e.g., Best regards,&#10;Alex Thompson&#10;Senior Engineer | NexusOps&#10;Phone: +64 21 123 4567"
-                  data-testid="email-signature-input"
-                />
-                {signature && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Preview:</Label>
-                    <div className="p-3 rounded-lg border bg-muted/20 text-sm whitespace-pre-wrap">{signature}</div>
-                  </div>
-                )}
-                <Button onClick={saveProfile} data-testid="save-signature-btn">Save Signature</Button>
-              </CardContent>
-            </Card>
+            <SignatureManager />
           )}
 
           {/* NOTIFICATIONS TAB */}

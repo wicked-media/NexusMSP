@@ -98,6 +98,7 @@ export const routeConfig = [
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
 
   // People & Scheduling
+  { path: "/tech-command", component: page("TechCommandCenter"), auth: true, layout: true },
   { path: "/technicians", component: page("TechniciansPage"), auth: true, layout: true },
   { path: "/skills-matrix", component: page("SkillsMatrixPage"), auth: true, layout: true },
   { path: "/tech-utilization", component: page("TechUtilizationPage"), auth: true, layout: true },

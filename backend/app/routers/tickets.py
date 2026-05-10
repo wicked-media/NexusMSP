@@ -546,7 +546,34 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         raise HTTPException(status_code=404, detail="Ticket not found")
     
     subject = email_data.subject or f"Re: [{ticket.get('ticket_number', '')}] {ticket.get('title', '')}"
-    
+
+    # ------- Auto-inject rich signature (Outlook-grade) ------------------
+    body = email_data.body or ""
+    body_type = email_data.body_type or "text"
+    sig_marker = "<!--nx-signature-->"
+    if sig_marker not in body and "[[NX_SIG]]" not in body:
+        try:
+            from app.routers.email_signatures import _build_context, _render  # type: ignore
+            sig_doc = await db.email_signatures.find_one(
+                {"user_id": current_user["id"], "is_default": True}, {"_id": 0},
+            )
+            sig_html = ""
+            if sig_doc:
+                ctx = await _build_context(current_user["id"], ticket_id)
+                sig_html = _render(sig_doc.get("html", ""), ctx)
+            else:
+                u = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0}) or {}
+                legacy = u.get("email_signature") or ""
+                if legacy:
+                    sig_html = f"<pre style='font-family:inherit;margin:0;'>{legacy}</pre>"
+            if sig_html:
+                if body_type != "html":
+                    body = f"<div>{body.replace(chr(10), '<br/>')}</div>"
+                    body_type = "html"
+                body = f"{body}<br/><br/>{sig_marker}{sig_html}"
+        except Exception as _sig_err:  # noqa: F841
+            logger.warning(f"signature injection failed: {_sig_err}")
+
     ticket_email = TicketEmail(
         ticket_id=ticket_id,
         ticket_title=ticket.get('title'),
@@ -555,8 +582,8 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         to_addresses=email_data.to_addresses,
         cc_addresses=email_data.cc_addresses,
         subject=subject,
-        body=email_data.body,
-        body_type=email_data.body_type,
+        body=body,
+        body_type=body_type,
         client_id=ticket.get('client_id'),
         user_id=current_user['id'],
         user_name=current_user['name'],
