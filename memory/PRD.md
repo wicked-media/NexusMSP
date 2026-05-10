@@ -8,6 +8,36 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Team Command Center FULL REWRITE)
+
+Rewrote `TechCommandCenter.jsx` from scratch (~900 lines, single file) to match the format of Devices Command Center / Clients module exactly:
+- **Header**: title + Invite + Add User + Refresh — same style as `/devices`.
+- **HeroTile strip** (6 tiles): Total Techs · Idle · Active · Busy · Overloaded · Avg Utilisation — same component & glow tones as Devices/Clients.
+- **Tabs** (8): Directory · Invites · Smart Finder · Capacity · Permissions · Role Drift · JIT · Audit. No more lazy-embedded legacy pages — every tab is **native**, format-consistent.
+
+### New Add User flow (the user's primary complaint)
+- **"Add User Now"** dialog (`AddUserDialog`) → calls `POST /api/technicians` directly. Form: name, email, phone, role, job title (drives permission preset auto-apply), hourly rate, optional password (defaults to `nexusops123`), Grant Admin checkbox.
+- **"Invite via Email"** dialog (`InviteDialog`) → calls `POST /api/technicians/invite` — sends Resend email so recipient sets their own password.
+- Both buttons are first-class in **two places**: header + Directory toolbar.
+- New **Invites** tab → lists pending invites with Resend / Cancel buttons.
+
+### Directory tab — proper formatting
+- Search + Role filter + Active/Archived/All toggle.
+- Native **TechCard** grid (3-up): same gradient avatar, skill radar, status badge, open/overdue/on-call counters, Edit & Archive actions — visually identical to the rest of the platform.
+- **EditTechDialog** for inline editing (name, email, phone, role, job title, hourly rate, admin toggle).
+
+### Other tabs
+- **Smart Finder** — natural-language tech search (re-uses `/tech-intel/find`).
+- **Capacity** — live workload bars per tech.
+- **Permissions** — full heatmap + per-row promote diff dialog (kept).
+- **Role Drift** — AI alignment alerts (kept).
+- **JIT** — temporary elevation grants + break-glass (kept).
+- **Audit** — vertical timeline (kept).
+
+Legacy `/technicians`, `/tech-roster`, `/skills-matrix`, `/tech-utilization`, `/leaderboard` pages remain alive as full-page deep links from a footer row.
+
+**Tested:** `POST /api/technicians` created Test Pilot live (id `94fb7663...` · L2 Technician · $90/hr). Capacity reflected the new tech immediately (4 → 5). Frontend smoke screenshots confirm flawless render — same Tactical Dark glow as Devices/Clients. ESLint clean.
+
 ## Recent Updates (Feb 2026 — Devices Module Massive Overhaul)
 
 A complete rebuild of `/devices` to outclass Syncro/Ninja/HaloPSA. Same Tactical Dark glow aesthetic.
