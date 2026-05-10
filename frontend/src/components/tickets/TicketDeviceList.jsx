@@ -1,0 +1,429 @@
+/**
+ * TicketDeviceList — compact per-device rows with a 3-dot CRAIG-style action menu.
+ *
+ * Each device shows: name · status pill · mini telemetry · 3-dot dropdown
+ * The dropdown has labelled action groups: Take Control · Power · Maintenance · Data
+ */
+import { useEffect, useMemo, useState, useCallback } from "react";
+import axios from "axios";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuSub,
+  DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
+import {
+  MoreVertical, Monitor, Terminal, FolderOpen, Power, Wifi, RefreshCw,
+  Download, MessageSquareWarning, Wrench, Cpu, MemoryStick, HardDrive,
+  Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight,
+  Keyboard,
+} from "lucide-react";
+import { API } from "@/App";
+
+const fmtBytes = (n) => {
+  if (n == null) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0; let v = Number(n);
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${u[i]}`;
+};
+
+function MiniGauge({ value, label, icon: Icon }) {
+  const v = Math.min(100, Math.max(0, Number(value) || 0));
+  const tone = v > 90 ? "bg-rose-500" : v > 75 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div className="flex items-center gap-1 min-w-0">
+      {Icon && <Icon className="w-3 h-3 text-zinc-500 shrink-0" />}
+      <div className="flex-1 min-w-[40px] max-w-[80px] h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+        <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />
+      </div>
+      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{v.toFixed(0)}%</span>
+    </div>
+  );
+}
+
+function DeviceRow({ device, ticketId, headers, onMutate }) {
+  const [agent, setAgent] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [confirm, setConfirm] = useState(null); // {kind}
+  const [msgBody, setMsgBody] = useState("");
+  const [dataPaneOpen, setDataPaneOpen] = useState(null); // services | processes | patches
+  const [services, setServices] = useState([]);
+  const [serviceQuery, setServiceQuery] = useState("");
+  const [processes, setProcesses] = useState([]);
+  const [winupdates, setWinupdates] = useState([]);
+  const [paneLoading, setPaneLoading] = useState(false);
+  const [terminalUrl, setTerminalUrl] = useState(null);
+
+  const qs = `?device_id=${encodeURIComponent(device.id)}`;
+
+  // Live telemetry poll (only if has TRMM agent and online)
+  const fetchAgent = useCallback(async () => {
+    if (!device.has_agent) return;
+    try {
+      const r = await axios.get(`${API}/tickets/${ticketId}/device/agent${qs}`, { headers });
+      setAgent(r.data);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line
+  }, [device.id, ticketId, headers]);
+
+  useEffect(() => {
+    fetchAgent();
+    if (!device.has_agent) return;
+    const t = setInterval(fetchAgent, 30000);
+    return () => clearInterval(t);
+  }, [fetchAgent, device.has_agent]);
+
+  const isOnline = (agent?.status || device.status) === "online";
+  const cpu = agent?.cpu_load ?? 0;
+  const ram = agent?.used_ram ?? 0;
+  const disk = agent?.disks?.[0]?.percent;
+
+  const runAction = async (path, label, opts = {}) => {
+    if (!device.has_agent) { toast.error("Device has no TRMM agent"); return; }
+    setBusy(label);
+    try {
+      const url = `${API}/tickets/${ticketId}/device/${path}${qs}`;
+      const r = await axios.post(url, opts.body || {}, { headers });
+      const ok = r.data?.success !== false;
+      ok ? toast.success(`${device.name} — ${label}`) : toast.warning(r.data?.message || `${label} returned a warning`);
+      onMutate?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || `${label} failed`);
+    } finally { setBusy(null); }
+  };
+
+  const openRemote = async (kind) => {
+    if (!device.has_agent) return;
+    setBusy("remote");
+    try {
+      const r = await axios.get(`${API}/tickets/${ticketId}/device/remote-url${qs}`, { headers });
+      if (!r.data?.success) { toast.error(r.data?.message || "Failed"); return; }
+      const urls = r.data?.urls || {};
+      const url = urls[kind] || urls.control || urls.terminal || urls.file;
+      if (!url) { toast.error("No URL returned"); return; }
+      if (kind === "terminal") setTerminalUrl(url);
+      else window.open(url, "_blank", "noopener");
+      onMutate?.();
+    } catch (e) { toast.error(e.response?.data?.detail || "Remote failed"); }
+    finally { setBusy(null); }
+  };
+
+  const sendMessage = async () => {
+    if (!msgBody.trim()) return;
+    await runAction("send-message", "Send message", { body: { title: "Message from IT", body: msgBody } });
+    setMsgBody(""); setConfirm(null);
+  };
+
+  const loadDataPane = useCallback(async (kind) => {
+    setPaneLoading(true);
+    try {
+      if (kind === "services") {
+        const r = await axios.get(`${API}/tickets/${ticketId}/device/services${qs}`, { headers });
+        setServices(Array.isArray(r.data) ? r.data : r.data?.services || []);
+      } else if (kind === "processes") {
+        const r = await axios.get(`${API}/tickets/${ticketId}/device/processes${qs}`, { headers });
+        setProcesses(Array.isArray(r.data) ? r.data : []);
+      } else if (kind === "patches") {
+        const r = await axios.get(`${API}/tickets/${ticketId}/device/winupdates${qs}`, { headers });
+        setWinupdates(Array.isArray(r.data) ? r.data : []);
+      }
+    } catch { /* ignore */ }
+    finally { setPaneLoading(false); }
+    // eslint-disable-next-line
+  }, [device.id, ticketId, headers]);
+
+  useEffect(() => {
+    if (dataPaneOpen) loadDataPane(dataPaneOpen);
+  }, [dataPaneOpen, loadDataPane]);
+
+  const serviceAction = async (svc, action) => {
+    setBusy(`svc-${svc.name}`);
+    try {
+      await axios.post(`${API}/tickets/${ticketId}/device/services/${encodeURIComponent(svc.name)}/${action}${qs}`, {}, { headers });
+      toast.success(`${svc.name}: ${action}`);
+      loadDataPane("services");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(null); }
+  };
+
+  const killProcess = async (p) => {
+    if (!window.confirm(`Kill ${p.name} (PID ${p.pid})?`)) return;
+    setBusy(`kill-${p.pid}`);
+    try {
+      await axios.post(`${API}/tickets/${ticketId}/device/processes/${p.pid}/kill${qs}`, {}, { headers });
+      toast.success(`Killed PID ${p.pid}`);
+      loadDataPane("processes");
+    } catch (e) { toast.error(e.response?.data?.detail || "Kill failed"); }
+    finally { setBusy(null); }
+  };
+
+  const filteredServices = useMemo(() => {
+    if (!serviceQuery.trim()) return services.slice(0, 80);
+    const q = serviceQuery.toLowerCase();
+    return services.filter(s => (s.display_name || s.name || "").toLowerCase().includes(q)).slice(0, 100);
+  }, [services, serviceQuery]);
+
+  const topProcesses = useMemo(() => {
+    const arr = [...processes].sort((a, b) => (b.cpu_percent || 0) - (a.cpu_percent || 0));
+    return arr.slice(0, 30);
+  }, [processes]);
+
+  const disabled = !device.has_agent;
+
+  return (
+    <>
+      <div
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-md border ${isOnline ? "border-emerald-500/20 bg-emerald-500/[0.02]" : "border-zinc-800 bg-zinc-900/30"} hover:bg-zinc-900/50 transition-colors`}
+        data-testid={`device-row-${device.id}`}
+      >
+        <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? "bg-emerald-400 animate-pulse" : "bg-rose-400"}`} />
+        <Monitor className="w-4 h-4 text-zinc-400 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium truncate">{device.name}</span>
+            {device.is_primary && <Badge variant="outline" className="text-[9px] uppercase text-violet-300 border-violet-500/40">Primary</Badge>}
+            {!device.has_agent && <Badge variant="outline" className="text-[9px] uppercase text-amber-300 border-amber-500/40">No Agent</Badge>}
+          </div>
+          <div className="text-[10px] text-zinc-500 font-mono truncate">
+            {device.os_name || "—"} · {device.ip_address || "—"} · {device.device_type || "endpoint"}
+            {agent?.logged_in_username && <> · user: {agent.logged_in_username}</>}
+          </div>
+        </div>
+
+        {/* Mini telemetry */}
+        {device.has_agent && (
+          <div className="hidden md:flex flex-col gap-0.5 w-[260px]">
+            <MiniGauge value={cpu} label="CPU" icon={Cpu} />
+            <div className="flex items-center gap-2">
+              <MiniGauge value={ram} label="RAM" icon={MemoryStick} />
+              {disk != null && <MiniGauge value={disk} label="Disk" icon={HardDrive} />}
+            </div>
+          </div>
+        )}
+
+        {/* 3-dot CRAIG-style menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={disabled} data-testid={`device-menu-${device.id}`}>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreVertical className="w-4 h-4" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60" data-testid={`device-menu-content-${device.id}`}>
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">Take Control</DropdownMenuLabel>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => openRemote("control")} data-testid={`act-${device.id}-desktop`}>
+              <Monitor className="w-3.5 h-3.5 mr-2 text-violet-400" />Remote Desktop
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => openRemote("terminal")} data-testid={`act-${device.id}-terminal`}>
+              <Terminal className="w-3.5 h-3.5 mr-2 text-cyan-400" />Live Terminal
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => openRemote("file")} data-testid={`act-${device.id}-files`}>
+              <FolderOpen className="w-3.5 h-3.5 mr-2 text-emerald-400" />File Browser
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">Power</DropdownMenuLabel>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => setConfirm({ kind: "reboot" })} data-testid={`act-${device.id}-reboot`}>
+              <Power className="w-3.5 h-3.5 mr-2 text-amber-400" />Reboot
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => setConfirm({ kind: "shutdown" })} data-testid={`act-${device.id}-shutdown`}>
+              <Power className="w-3.5 h-3.5 mr-2 text-rose-400" />Shutdown
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={isOnline} onClick={() => runAction("wol", "Wake-on-LAN")} data-testid={`act-${device.id}-wol`}>
+              <Wifi className="w-3.5 h-3.5 mr-2 text-blue-400" />Wake-on-LAN
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">Maintenance</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => runAction("run-checks", "Run checks")} data-testid={`act-${device.id}-checks`}>
+              <RefreshCw className="w-3.5 h-3.5 mr-2 text-violet-400" />Run All Checks
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => runAction("install-patches", "Install patches")} data-testid={`act-${device.id}-patches`}>
+              <Download className="w-3.5 h-3.5 mr-2 text-emerald-400" />Install Patches
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!isOnline} onClick={() => setConfirm({ kind: "send-message" })} data-testid={`act-${device.id}-message`}>
+              <MessageSquareWarning className="w-3.5 h-3.5 mr-2 text-cyan-400" />Message User…
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">Inspect</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => setDataPaneOpen("services")} data-testid={`act-${device.id}-services`}>
+              <Wrench className="w-3.5 h-3.5 mr-2 text-zinc-400" />Services
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDataPaneOpen("processes")} data-testid={`act-${device.id}-processes`}>
+              <Activity className="w-3.5 h-3.5 mr-2 text-zinc-400" />Processes
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDataPaneOpen("patches")} data-testid={`act-${device.id}-winupdates`}>
+              <Zap className="w-3.5 h-3.5 mr-2 text-zinc-400" />Pending Patches
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Confirm dialog */}
+      <Dialog open={!!confirm} onOpenChange={(v) => !v && setConfirm(null)}>
+        <DialogContent className="max-w-sm" data-testid={`confirm-${device.id}`}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {confirm?.kind === "reboot" && <><Power className="w-4 h-4 text-amber-400" />Reboot {device.name}?</>}
+              {confirm?.kind === "shutdown" && <><Power className="w-4 h-4 text-rose-400" />Shutdown {device.name}?</>}
+              {confirm?.kind === "send-message" && <><MessageSquareWarning className="w-4 h-4 text-cyan-400" />Message user on {device.name}</>}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {confirm?.kind === "reboot" && "The device will reboot immediately. Action audited on the ticket."}
+              {confirm?.kind === "shutdown" && "The device shuts down after a 60-second grace. Action audited on the ticket."}
+              {confirm?.kind === "send-message" && "A notification popup will appear on the user's screen."}
+            </DialogDescription>
+          </DialogHeader>
+          {confirm?.kind === "send-message" && (
+            <Textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} placeholder="Hi! I'll be working on your machine for a few minutes…" rows={4} data-testid={`msg-body-${device.id}`} />
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
+            {confirm?.kind === "reboot" && <Button onClick={() => { runAction("reboot", "Reboot"); setConfirm(null); }} data-testid={`confirm-reboot-${device.id}`}>Reboot now</Button>}
+            {confirm?.kind === "shutdown" && <Button variant="destructive" onClick={() => { runAction("shutdown", "Shutdown"); setConfirm(null); }} data-testid={`confirm-shutdown-${device.id}`}>Shutdown</Button>}
+            {confirm?.kind === "send-message" && <Button onClick={sendMessage} disabled={!msgBody.trim()} data-testid={`confirm-message-${device.id}`}>Send</Button>}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Data inspection pane (services / processes / patches) */}
+      <Dialog open={!!dataPaneOpen} onOpenChange={(v) => !v && setDataPaneOpen(null)}>
+        <DialogContent className="max-w-3xl" data-testid={`pane-${device.id}`}>
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-violet-400" />{device.name}
+              <Badge variant="outline" className="text-[10px] uppercase">{dataPaneOpen}</Badge>
+            </DialogTitle>
+          </DialogHeader>
+
+          {dataPaneOpen === "services" && (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500" />
+                <Input value={serviceQuery} onChange={e => setServiceQuery(e.target.value)} placeholder="Filter services…" className="pl-7 h-8 text-xs" />
+              </div>
+              {paneLoading ? <div className="py-8 text-center"><Loader2 className="w-5 h-5 mx-auto animate-spin text-zinc-500" /></div> :
+                <ScrollArea className="h-[400px]">
+                  {filteredServices.length === 0 ? <p className="text-xs text-zinc-500 text-center py-4">No services</p> : filteredServices.map(svc => {
+                    const running = (svc.status || "").toLowerCase().includes("run");
+                    return (
+                      <div key={svc.name} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-zinc-900/50">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium truncate">{svc.display_name || svc.name}</p>
+                          <p className="text-[9px] text-zinc-500 font-mono truncate">{svc.name} · {svc.start_type || "—"}</p>
+                        </div>
+                        <Badge variant="outline" className={`text-[9px] ${running ? "text-emerald-400 border-emerald-500/40" : "text-zinc-500"}`}>{svc.status || "?"}</Badge>
+                        <div className="flex items-center gap-0.5">
+                          {!running && <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Start" onClick={() => serviceAction(svc, "start")}><Play className="w-3 h-3 text-emerald-400" /></Button>}
+                          {running && <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Stop" onClick={() => serviceAction(svc, "stop")}><Square className="w-3 h-3 text-rose-400" /></Button>}
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Restart" onClick={() => serviceAction(svc, "restart")}><RotateCcw className="w-3 h-3 text-amber-400" /></Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </ScrollArea>
+              }
+            </div>
+          )}
+
+          {dataPaneOpen === "processes" && (
+            paneLoading ? <div className="py-8 text-center"><Loader2 className="w-5 h-5 mx-auto animate-spin text-zinc-500" /></div> :
+            <ScrollArea className="h-[400px]">
+              <div className="text-[10px] text-zinc-500 px-2 mb-1">Top {topProcesses.length} by CPU</div>
+              {topProcesses.length === 0 ? <p className="text-xs text-zinc-500 text-center py-4">No processes</p> : topProcesses.map(p => (
+                <div key={p.pid} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-zinc-900/50">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate">{p.name}</p>
+                    <p className="text-[9px] text-zinc-500 font-mono">PID {p.pid} · {fmtBytes(p.memory)} · {(p.cpu_percent || 0).toFixed(1)}% CPU</p>
+                  </div>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Kill" onClick={() => killProcess(p)}><Skull className="w-3 h-3 text-rose-400" /></Button>
+                </div>
+              ))}
+            </ScrollArea>
+          )}
+
+          {dataPaneOpen === "patches" && (
+            paneLoading ? <div className="py-8 text-center"><Loader2 className="w-5 h-5 mx-auto animate-spin text-zinc-500" /></div> :
+            <ScrollArea className="h-[400px]">
+              {(!winupdates || winupdates.length === 0) ? <p className="text-xs text-zinc-500 text-center py-4">All up to date 🎉</p> : winupdates.map(p => (
+                <div key={p.id || p.kb || p.guid} className="py-1.5 px-2 rounded hover:bg-zinc-900/50 border-l-2 border-l-cyan-500/40 mb-1">
+                  <p className="text-xs font-medium truncate">{p.title || p.kb || "Update"}</p>
+                  <p className="text-[9px] text-zinc-500 font-mono">{p.kb || "—"} · {p.severity || "normal"}</p>
+                </div>
+              ))}
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Terminal modal */}
+      <Dialog open={!!terminalUrl} onOpenChange={(v) => !v && setTerminalUrl(null)}>
+        <DialogContent className="max-w-5xl h-[80vh] p-0 gap-0">
+          <DialogHeader className="px-4 py-2 border-b border-zinc-800">
+            <DialogTitle className="text-sm flex items-center gap-2"><Terminal className="w-4 h-4 text-cyan-400" />Live Terminal — {device.name}</DialogTitle>
+          </DialogHeader>
+          {terminalUrl && <iframe src={terminalUrl} title="terminal" className="w-full h-full border-0 bg-black" />}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+export default function TicketDeviceList({ ticketId, headers, refreshTicketDetails }) {
+  const [data, setData] = useState({ devices: [], primary_id: null });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(`${API}/tickets/${ticketId}/devices`, { headers });
+      setData(r.data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [ticketId, headers]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) {
+    return <Card><CardContent className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-zinc-500" /></CardContent></Card>;
+  }
+
+  const devices = data.devices || [];
+
+  return (
+    <Card data-testid="ticket-device-list" className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Monitor className="w-4 h-4 text-violet-400" />Linked Devices
+          <Badge variant="outline" className="text-[9px] uppercase">{devices.length}</Badge>
+        </CardTitle>
+        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={load} data-testid="device-list-refresh">
+          <RefreshCw className="w-3 h-3 mr-1" />Refresh
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {devices.length === 0 ? (
+          <p className="text-xs text-zinc-500 text-center py-4">No devices linked. Link a device to enable remote actions.</p>
+        ) : devices.map(d => (
+          <DeviceRow
+            key={d.id}
+            device={d}
+            ticketId={ticketId}
+            headers={headers}
+            onMutate={() => { load(); refreshTicketDetails?.(); }}
+          />
+        ))}
+        <p className="text-[10px] text-zinc-600 font-mono text-center pt-1">All actions audited on this ticket · 3-dot menu per device</p>
+      </CardContent>
+    </Card>
+  );
+}

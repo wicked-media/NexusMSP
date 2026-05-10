@@ -8,6 +8,22 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Per-Device 3-dot Action Menu in tickets)
+Replaced the inline `TicketDeviceCockpit` (single-device with rows of buttons) with a new **`TicketDeviceList`** component that renders one compact row per linked device:
+- Backend `ticket_device_actions.py`:
+  - `_ticket_with_agent` now accepts an optional `device_id` parameter to target a specific linked device (validates the device is in the ticket's `device_ids` list).
+  - All 14 ticket→device action endpoints now accept `?device_id=X` query param (backwards compatible — falls back to primary device).
+  - New endpoint `GET /api/tickets/{ticket_id}/devices` — returns every linked device with status snapshot (primary marker, agent presence, OS, IP, last_seen).
+- Frontend `TicketDeviceList.jsx`:
+  - One row per device: status dot · monitor icon · device name · PRIMARY badge · OS/IP/type · live mini gauges (CPU/RAM/Disk) · **3-dot dropdown menu**.
+  - Dropdown menu organised in CRAIG-style labelled groups: **TAKE CONTROL** (Remote Desktop · Live Terminal · File Browser), **POWER** (Reboot · Shutdown · Wake-on-LAN), **MAINTENANCE** (Run All Checks · Install Patches · Message User), **INSPECT** (Services · Processes · Pending Patches).
+  - Each row independently polls live agent telemetry every 30s.
+  - Per-device confirm dialogs (reboot/shutdown/message), per-device data inspection panes (services with start/stop/restart, processes with kill, pending patches), per-device terminal modal.
+  - All actions append a ticket note + audit row labelled with device name.
+- Wired into `TicketsPage.jsx` replacing the old single-device cockpit. Layout-toggle "Device Cockpit" still controls visibility.
+
+**Verified:** Backend `/tickets/TKT-001/devices` returned all 5 linked devices with primary marker. Frontend smoke screenshots confirm the row layout and the 3-dot menu shows perfect CRAIG-style action grouping.
+
 ## Recent Updates (Feb 2026 — Team Command Center consolidation)
 Renamed "Tech Command Center" → **Team Command Center**. All Team module pages folded into a single 11-tab hub at `/tech-command`:
 - **Directory** (default) — embeds the full `TechniciansPage` (invite, add, edit, archive, profiles)

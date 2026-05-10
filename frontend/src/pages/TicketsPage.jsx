@@ -20,6 +20,7 @@ import {
   TicketChildrenTab, TicketTimeTab, TicketAuditTab,
 } from "@/components/tickets/TicketSecondaryTabs";
 import TicketDeviceCockpit from "@/components/tickets/TicketDeviceCockpit";
+import TicketDeviceList from "@/components/tickets/TicketDeviceList";
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import {
@@ -1932,13 +1933,11 @@ export default function TicketsPage() {
               />
             )}
 
-            {/* Live Device Cockpit (Group A + B + C — remote, actions, telemetry) */}
-            {viewingTicket.device_id && panelVisible.cockpit && (
-              <TicketDeviceCockpit
+            {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
+            {(viewingTicket.device_id || (viewingTicket.device_ids || []).length > 0) && panelVisible.cockpit && (
+              <TicketDeviceList
                 ticketId={viewingTicket.id}
-                deviceStatus={deviceStatus}
                 headers={headers}
-                hasAgent={!!deviceStatus?.trmm_agent_id}
                 refreshTicketDetails={() => fetchTicketDetail(viewingTicket)}
               />
             )}
