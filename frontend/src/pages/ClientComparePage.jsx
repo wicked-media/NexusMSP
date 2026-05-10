@@ -4,7 +4,8 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, Users, Monitor, DollarSign, Ticket, Heart } from "lucide-react";
+import { BarChart3, Users, Monitor, DollarSign, Ticket } from "lucide-react";
+import HeroTile from "@/components/HeroTile";
 
 export default function ClientComparePage() {
   const { token } = useAuth();
@@ -45,30 +46,10 @@ export default function ClientComparePage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Total Clients",  value: data.total,                                                       icon: Users,      tone: "violet" },
-          { label: "Total MRR",      value: `$${sorted.reduce((s, c) => s + c.monthly_revenue, 0).toLocaleString()}`, icon: DollarSign, tone: "emerald" },
-          { label: "Total Devices",  value: sorted.reduce((s, c) => s + c.devices, 0),                        icon: Monitor,    tone: "cyan" },
-          { label: "Open Tickets",   value: sorted.reduce((s, c) => s + c.open_tickets, 0),                   icon: Ticket,     tone: "amber" },
-        ].map((m, i) => {
-          const tones = {
-            violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
-            emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
-            cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
-            amber:   "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
-          }[m.tone];
-          const Ic = m.icon;
-          return (
-            <div key={`k-${i}`} className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tones} shadow-lg p-4`}>
-              <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
-              <div className="relative">
-                <Ic className="w-4 h-4 opacity-80 mb-1" />
-                <p className="text-3xl font-bold font-mono tracking-tighter">{m.value}</p>
-                <p className="text-[10px] uppercase tracking-widest opacity-80 mt-0.5">{m.label}</p>
-              </div>
-            </div>
-          );
-        })}
+        <HeroTile label="Total Clients" value={data.total} icon={Users} glow="violet" testId="compare-total-clients" />
+        <HeroTile label="Total MRR" value={`$${sorted.reduce((s, c) => s + c.monthly_revenue, 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="compare-mrr" />
+        <HeroTile label="Total Devices" value={sorted.reduce((s, c) => s + c.devices, 0)} icon={Monitor} glow="cyan" testId="compare-devices" />
+        <HeroTile label="Open Tickets" value={sorted.reduce((s, c) => s + c.open_tickets, 0)} icon={Ticket} glow="amber" testId="compare-tickets" />
       </div>
 
       <Card>

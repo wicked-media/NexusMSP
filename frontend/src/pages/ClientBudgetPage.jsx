@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Loader2, DollarSign, TrendingUp, AlertTriangle, PieChart } from "lucide-react";
+import HeroTile from "@/components/HeroTile";
 
 const CAT_COLORS = { Hardware: "bg-blue-500", "Software/Licenses": "bg-violet-500", "Labor/Support": "bg-emerald-500", Projects: "bg-amber-500" };
 
@@ -30,30 +31,10 @@ export default function ClientBudgetPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Total Annual Budget", value: `$${(s.total_annual_budget / 1000).toFixed(0)}k`, icon: DollarSign, tone: "cyan" },
-          { label: "YTD Spent",            value: `$${(s.total_ytd_spent / 1000).toFixed(0)}k`,    icon: TrendingUp,  tone: "emerald" },
-          { label: "Avg Utilization",      value: `${s.avg_utilization_pct}%`,                     icon: PieChart,    tone: "violet" },
-          { label: "Over Budget Pace",     value: s.clients_over_budget,                           icon: AlertTriangle, tone: "rose" },
-        ].map((m, i) => {
-          const tones = {
-            cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
-            emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
-            violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
-            rose:    "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
-          }[m.tone];
-          const Ic = m.icon;
-          return (
-            <div key={`k-${i}`} className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tones} shadow-lg p-4`}>
-              <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-1"><Ic className="w-4 h-4 opacity-80" /></div>
-                <p className="text-3xl font-bold font-mono tracking-tighter">{m.value}</p>
-                <p className="text-[10px] uppercase tracking-widest opacity-80 mt-0.5">{m.label}</p>
-              </div>
-            </div>
-          );
-        })}
+        <HeroTile label="Total Annual Budget" value={`$${(s.total_annual_budget / 1000).toFixed(0)}k`} icon={DollarSign} glow="cyan" animated={false} testId="budget-annual" />
+        <HeroTile label="YTD Spent" value={`$${(s.total_ytd_spent / 1000).toFixed(0)}k`} icon={TrendingUp} glow="emerald" animated={false} testId="budget-ytd" />
+        <HeroTile label="Avg Utilization" value={`${s.avg_utilization_pct}%`} icon={PieChart} glow="violet" animated={false} testId="budget-utilization" />
+        <HeroTile label="Over Budget Pace" value={s.clients_over_budget} icon={AlertTriangle} glow="rose" testId="budget-over" />
       </div>
 
       <div className="grid grid-cols-2 gap-4">

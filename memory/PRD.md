@@ -8,6 +8,14 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Clients Module HeroTile rollout — completion)
+- Fixed blocker JSX syntax error in `ClientTimelinePage.jsx` (stray closing `</div>`) that was breaking webpack build.
+- All Clients module pages now route their stat tiles through the shared `HeroTile` component (single source of truth):
+  - `ClientsPage.jsx`: legacy `TopMetric` shim now delegates to HeroTile + the inner detail-pane metric strip (Monthly Recurring / Open Tickets / Assets / Contacts / AR Overdue) replaced with HeroTiles.
+  - `ClientHealthPage.jsx`, `ClientRiskPage.jsx`, `ClientBudgetPage.jsx`, `ClientComparePage.jsx`, `ClientTimelinePage.jsx`: inline gradient blocks refactored to HeroTile components with `AnimatedCounter`, animated counters, consistent glow tones (cyan/emerald/violet/amber/rose).
+- Verified clean: ESLint passes on all 6 Client pages, webpack compiles without error, smoke screenshot confirms gradient-glow tiles render identically to Tickets/Backup Center.
+
+
 ### 🎨 Tickets List Redesign (Linear/Plain.com-inspired, Feb 2026)
 Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/Ninja/HaloPSA aesthetics:
 - **Density modes**: Compact / Comfortable / Spacious (`⌘+Shift+D` cycles, persisted in localStorage)

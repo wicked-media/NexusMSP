@@ -20,6 +20,7 @@ import { Link } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
+import HeroTile from "@/components/HeroTile";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -145,28 +146,9 @@ function ClientListItem({ client, selected, onClick }) {
 }
 
 function TopMetric({ label, value, trend, color = "indigo" }) {
-  // Map legacy color → HeroTile glow tone for instant visual upgrade
+  // Delegate to HeroTile for platform-wide consistency. Map legacy color → glow tone.
   const glowMap = { indigo: "violet", violet: "violet", emerald: "emerald", amber: "amber", rose: "rose", red: "rose", sky: "cyan", cyan: "cyan", zinc: "zinc" };
-  const tone = {
-    violet:  "from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-violet-500/20",
-    emerald: "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
-    amber:   "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
-    rose:    "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
-    cyan:    "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
-    zinc:    "from-zinc-500/15 to-zinc-700/5 border-zinc-500/30 text-zinc-300 shadow-zinc-500/10",
-  }[glowMap[color] || "violet"];
-  return (
-    <div className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tone} shadow-lg p-4`}>
-      <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
-      <div className="relative">
-        <div className="text-[10px] font-semibold uppercase tracking-widest opacity-80">{label}</div>
-        <div className="flex items-baseline gap-2 mt-1">
-          <div className="text-3xl font-bold tracking-tighter font-mono">{value}</div>
-          {trend && <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-300" : trend.startsWith("-") ? "text-rose-300" : "opacity-70"}`}>{trend}</span>}
-        </div>
-      </div>
-    </div>
-  );
+  return <HeroTile label={label} value={value} subtitle={trend} glow={glowMap[color] || "violet"} animated={typeof value === "number"} />;
 }
 
 export default function ClientsPage() {
@@ -470,32 +452,44 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
       </div>
 
       {/* Quick metrics strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-0 border-b border-zinc-800">
-        <div className="px-4 py-3 border-r border-zinc-800">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Monthly Recurring</div>
-          <div className="text-lg font-light mt-0.5">${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-          <div className="mt-1"><Sparkline data={mrrData} color="#818cf8" /></div>
-        </div>
-        <div className="px-4 py-3 border-r border-zinc-800">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Open Tickets</div>
-          <div className={`text-lg font-light mt-0.5 ${client.open_tickets > 10 ? "text-amber-400" : ""}`}>{client.open_tickets}</div>
-          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.open_tickets > 10 ? "⚠ high volume" : "within range"}</div>
-        </div>
-        <div className="px-4 py-3 border-r border-zinc-800">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Assets</div>
-          <div className="text-lg font-light mt-0.5">{client.asset_count}</div>
-          <div className="text-[10px] text-emerald-400 font-mono mt-1">{client.assets_online}/{client.asset_count} online</div>
-        </div>
-        <div className="px-4 py-3 border-r border-zinc-800">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Contacts</div>
-          <div className="text-lg font-light mt-0.5">{client.contact_count}</div>
-          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.active_contracts} active contracts</div>
-        </div>
-        <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">AR Overdue</div>
-          <div className={`text-lg font-light mt-0.5 ${client.overdue_count > 0 ? "text-rose-400" : "text-emerald-400"}`}>${client.overdue_amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-          <div className="text-[10px] text-zinc-500 font-mono mt-1">{client.overdue_count} invoice{client.overdue_count !== 1 ? "s" : ""}</div>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 px-6 py-4 border-b border-zinc-800">
+        <HeroTile
+          label="Monthly Recurring"
+          value={`$${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          glow="violet"
+          animated={false}
+          subtitle={mrrData.length ? "trending" : "—"}
+          testId="client-mrr-tile"
+        />
+        <HeroTile
+          label="Open Tickets"
+          value={client.open_tickets}
+          glow={client.open_tickets > 10 ? "amber" : "cyan"}
+          subtitle={client.open_tickets > 10 ? "high volume" : "within range"}
+          testId="client-open-tickets-tile"
+        />
+        <HeroTile
+          label="Assets"
+          value={client.asset_count}
+          glow="emerald"
+          subtitle={`${client.assets_online}/${client.asset_count} online`}
+          testId="client-assets-tile"
+        />
+        <HeroTile
+          label="Contacts"
+          value={client.contact_count}
+          glow="cyan"
+          subtitle={`${client.active_contracts} active contracts`}
+          testId="client-contacts-tile"
+        />
+        <HeroTile
+          label="AR Overdue"
+          value={`$${client.overdue_amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          glow={client.overdue_count > 0 ? "rose" : "emerald"}
+          animated={false}
+          subtitle={`${client.overdue_count} invoice${client.overdue_count !== 1 ? "s" : ""}`}
+          testId="client-overdue-tile"
+        />
       </div>
 
       {/* Tabs */}
