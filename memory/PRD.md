@@ -8,6 +8,26 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+### 🎨 Tickets List Redesign (Linear/Plain.com-inspired, Feb 2026)
+Replaced the bulky Card-row list with a **dense table-list** to leapfrog Syncro/Ninja/HaloPSA aesthetics:
+- **Density modes**: Compact / Comfortable / Spacious (`⌘+Shift+D` cycles, persisted in localStorage)
+- **Group-by**: None / Status / Priority / Assignee / Client / **Age** (default — Breached / Due in <4h / Due Today / Later / Resolved buckets)
+- **Collapsible group headers** with tone-coloured uppercase monospace labels + count badges + sticky positioning
+- **Status pills**: Linear-style uppercase mono micro-pills with semantic dot prefix
+- **Priority left-border accent** (2px sticky) on every row
+- **Hover-reveal**: checkbox + kebab menu fade in on hover; row hover lightens bg subtly
+- **Sticky column header** (md+ screens) with monospace 10px uppercase labels
+- **Monospace** ticket numbers + tabular SLA timers (turns red when breached)
+- **Active viewer** avatars: overlapping cyan-ringed circles with ping animation
+
+### 🤖 AI Co-Pilot Strip (top of ticket detail)
+- Violet/cyan banner with "next-best-action" chip computed from heuristics: blocker, SLA breach, device offline, needs reboot, failing checks, pending patches, unassigned, unacknowledged, missing CSAT
+- Optional "Summarise" button calls `/api/ai/proofread` for a one-line AI summary (gracefully handles object-vs-string responses)
+- Inline stats: ticket age · SLA % · note count · device online state
+- Tone-coloured (rose=urgent, amber=warn, cyan=info, violet=primary, emerald=healthy)
+- New files: `TicketRow.jsx`, `AICopilotStrip.jsx`
+- **Tested:** `iteration_167` — all visual + interaction tests PASS; AI summary object-render bug fixed (single-line patch in generateSummary)
+
 ## Recent Updates (Feb 2026 — Team Chat Redesign + Slash Commands + Tickets Refactor)
 
 ### 🎮 Ticket → Live Device Cockpit (A + B + C)

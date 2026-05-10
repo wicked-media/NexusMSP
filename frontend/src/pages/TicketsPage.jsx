@@ -23,6 +23,11 @@ import TicketDeviceCockpit from "@/components/tickets/TicketDeviceCockpit";
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import {
+  TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
+  GroupBySelector, useGroupedTickets,
+} from "@/components/tickets/TicketRow";
+import AICopilotStrip from "@/components/tickets/AICopilotStrip";
+import {
   EmailDialog,
   ChildTicketDialog,
   MergeDialog,
@@ -82,6 +87,11 @@ export default function TicketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [density, setDensity] = useDensityMode();
+  const [groupBy, setGroupBy] = useState(() => {
+    try { return localStorage.getItem("nexus.tickets.groupBy") || "age"; } catch { return "age"; }
+  });
+  useEffect(() => { try { localStorage.setItem("nexus.tickets.groupBy", groupBy); } catch {} }, [groupBy]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
@@ -1213,6 +1223,8 @@ export default function TicketsPage() {
     return true;
   });
 
+  const groupedTickets = useGroupedTickets(filteredTickets, groupBy, statusConfig, priorityConfig);
+
   // AI Analysis
   const handleAiAnalysis = async () => {
     if (!viewingTicket) return;
@@ -1282,6 +1294,20 @@ export default function TicketsPage() {
           onBack={() => {
             if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {});
             setViewingTicket(null);
+          }}
+        />
+
+        {/* AI Co-Pilot Strip — heuristic next-best-action + optional AI summary */}
+        <AICopilotStrip
+          ticket={viewingTicket}
+          deviceStatus={deviceStatus}
+          headers={headers}
+          onActionClick={(target) => {
+            if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
+            else if (target === "assign") setEditingAssignee?.(true);
+            else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
+            else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
+            else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
           }}
         />
 
@@ -3198,151 +3224,83 @@ export default function TicketsPage() {
         </div>
       )}
 
-      {/* Ticket Cards */}
-      <div className="space-y-2">
-        {/* SLA Tickets */}
-        {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.map(ticket => {
-          const pc = priorityConfig[ticket.priority] || priorityConfig.medium;
-          const sc = statusConfig[ticket.status] || statusConfig.open;
-          const hasNoNotes = noteCounts[ticket.id] === 0 && ticket.status !== "closed" && ticket.status !== "resolved";
-          const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && ticket.status !== "closed" && ticket.status !== "resolved";
-          const priorityBorder = ticket.priority === "critical" ? "border-l-red-500" : ticket.priority === "high" ? "border-l-orange-500" : ticket.priority === "medium" ? "border-l-yellow-500" : "border-l-green-500";
-          const isClosed = ticket.status === "closed" || ticket.status === "resolved";
-          const viewers = ticketViewers[ticket.id] || [];
-          const isBeingViewed = viewers.length > 0;
-          const ticketClient = clients.find(c => c.id === ticket.client_id);
-          const ticketContact = ticket.contact_id ? ticketClient?.contacts?.find(ct => ct.id === ticket.contact_id || ct.name === ticket.contact_id) : null;
-          const contactName = ticket.contact_name || ticketContact?.name || "";
-          const clientAddress = ticketClient?.address || "";
-          const slaHrs = ticket.sla_due ? differenceInHours(new Date(ticket.sla_due), new Date()) : null;
-          const isSelected = selectedTickets.has(ticket.id);
+      {/* Density + Group toolbar */}
+      {(typeFilter === "all" || typeFilter === "sla") && (
+        <div className="flex items-center gap-1 px-1 -mb-1">
+          <DensityToggle density={density} setDensity={setDensity} />
+          <span className="text-zinc-700">·</span>
+          <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
+        </div>
+      )}
 
-          return (
-            <Card
-              key={ticket.id}
-              className={`cursor-pointer hover:bg-muted/30 transition-all border-l-4 ${priorityBorder} ${hasNoNotes ? "bg-red-500/3" : ""} ${isOverdue ? "ring-1 ring-red-500/30" : ""} ${isClosed ? "opacity-60" : ""} ${isSelected ? "ring-2 ring-primary/50 bg-primary/5" : ""}`}
-              data-testid={`ticket-row-${ticket.id}`}
-            >
-              <CardContent className="py-3 px-4">
-                <div className="flex items-center gap-4">
-                  {/* Checkbox */}
-                  <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={() => toggleTicketSelect(ticket.id)}
-                      data-testid={`ticket-checkbox-${ticket.id}`}
-                    />
-                  </div>
-                  {/* Type Icon */}
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10" onClick={() => fetchTicketDetail(ticket)}>
-                    <Shield className="w-4 h-4 text-blue-400" />
-                  </div>
-                  {/* Ticket Number Badge */}
-                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0" data-testid={`ticket-badge-${ticket.id}`}>
-                    <div className={`relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider transition-all
-                      ${isBeingViewed
-                        ? "border border-cyan-400/60 text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.35),inset_0_0_15px_rgba(34,211,238,0.08)]"
-                        : isClosed
-                        ? "bg-muted/20 border border-border/30 text-muted-foreground/50"
-                        : ticket.escalated
-                        ? "bg-red-500/10 border border-red-500/30 text-red-400 animate-pulse"
-                        : "bg-muted/40 border border-border/50 text-muted-foreground"
-                      }`}
-                      style={isBeingViewed ? {
-                        background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))",
-                        backgroundSize: "200% 200%",
-                        animation: "viewerShimmer 2s ease-in-out infinite, pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
-                      } : undefined}
-                      title={isBeingViewed ? `Viewed by: ${viewers.map(v => v.user_name).join(", ")}` : ""}
-                    >
-                      {ticket.ticket_number}
-                      {isBeingViewed && (
-                        <div className="absolute -top-2 -right-2 flex items-center" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} viewing: ${viewers.map(v => v.user_name).join(", ")}`}>
-                          <div className="relative">
-                            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/50 ring-2 ring-background">
-                              {viewers.length > 1 ? (
-                                <span className="text-[8px] font-black text-white">{viewers.length}</span>
-                              ) : (
-                                <Eye className="w-2.5 h-2.5 text-white" />
-                              )}
-                            </div>
-                            <div className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
-                          </div>
-                        </div>
-                      )}
-                      {!isBeingViewed && ticket.escalated && (
-                        <div className="absolute -top-1.5 -right-1.5">
-                          <div className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shadow-lg shadow-red-500/50">
-                            <AlertCircle className="w-2.5 h-2.5 text-white" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {ticket.parent_id && <GitBranch className="w-3 h-3 text-indigo-400" />}
-                    {ticket.merged_into && <Merge className="w-3 h-3 text-red-400" />}
-                  </div>
-
-                  {/* Main Content */}
-                  <div className="flex-1 min-w-0" onClick={() => fetchTicketDetail(ticket)}>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium text-sm truncate">{ticket.title}</p>
-                      {isOverdue && <Badge className="bg-red-500/20 text-red-400 text-[9px] border-red-500/30">SLA BREACH</Badge>}
-                      {hasNoNotes && <Badge className="bg-amber-500/20 text-amber-400 text-[9px] border-amber-500/30">AWAITING RESPONSE</Badge>}
-                      {isBeingViewed && (
-                        <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]">
-                          <Eye className="w-2.5 h-2.5" />
-                          <Users className="w-2.5 h-2.5" />
-                          {viewers.length} {viewers.length === 1 ? "viewer" : "viewers"}: {viewers.map(v => v.user_name).join(", ")}
-                        </Badge>
-                      )}
-                      {ticket.escalated && !isBeingViewed && <Badge className="bg-red-500/10 text-red-400 text-[9px] border-red-500/30">ESCALATED</Badge>}
-                      {!ticket.assigned_to && !isClosed && !isBeingViewed && <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">UNASSIGNED</Badge>}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{ticket.client_name}</span>
-                      {contactName && <><span className="text-muted-foreground/30">|</span><span>{contactName}</span></>}
-                      {clientAddress && <><span className="text-muted-foreground/30">|</span><span className="truncate max-w-[180px]">{clientAddress}</span></>}
-                      {ticket.device_name && <><span className="text-muted-foreground/30">|</span><span className="font-mono">{ticket.device_name}</span></>}
-                      {ticket.category && <><span className="text-muted-foreground/30">|</span><span className="capitalize">{ticket.category}</span></>}
-                      {(ticket.tags || []).length > 0 && <><span className="text-muted-foreground/30">|</span>{ticket.tags.slice(0, 2).map(t => <Badge key={t} variant="outline" className="text-[9px] h-4 px-1">{t}</Badge>)}</>}
-                    </div>
-                  </div>
-
-                  {/* Right Side Info */}
-                  <div className="flex items-center gap-3 flex-shrink-0" onClick={() => fetchTicketDetail(ticket)}>
-                    {/* SLA Countdown */}
-                    {slaHrs !== null && !isClosed && (
-                      <div className={`text-center px-2 py-1 rounded-lg border ${slaHrs < 0 ? "bg-red-500/10 border-red-500/30" : slaHrs < 4 ? "bg-amber-500/10 border-amber-500/30" : "bg-emerald-500/10 border-emerald-500/30"}`} data-testid={`sla-countdown-${ticket.id}`}>
-                        <p className={`text-xs font-mono font-bold ${slaHrs < 0 ? "text-red-400" : slaHrs < 4 ? "text-amber-400" : "text-emerald-400"}`}>
-                          {slaHrs < 0 ? `-${Math.abs(slaHrs)}h` : `${slaHrs}h`}
-                        </p>
-                        <p className="text-[8px] text-muted-foreground">SLA</p>
-                      </div>
-                    )}
-                    <div className="text-right">
-                      <Badge className={pc.class + " text-[10px] mb-0.5"}>{pc.label}</Badge>
-                      <div><Badge variant="outline" className={sc.class + " text-[10px]"}>{sc.label}</Badge></div>
-                    </div>
-                    <div className="text-right w-20">
-                      <p className="text-xs text-muted-foreground">{ticket.assigned_name || <span className="text-red-400">Unassigned</span>}</p>
-                      <p className="text-[10px] text-muted-foreground/60">{ticket.created_at && formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}</p>
-                    </div>
-                    {ticket.total_time_minutes > 0 && (
-                      <div className="text-right w-12"><p className="font-mono text-xs">{ticket.total_time_minutes}m</p><p className="text-[9px] text-muted-foreground">time</p></div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-        {filteredTickets.length === 0 && (
-          <Card className="border-dashed"><CardContent className="py-12 text-center">
-            <Ticket className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
-            <p className="text-muted-foreground mb-3">No tickets match your filters</p>
-            <Button onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); setSearchQuery(""); }}>Clear Filters</Button>
-          </CardContent></Card>
+      {/* Dense ticket list (Linear/Plain.com inspired) */}
+      <div className="rounded-xl border border-white/[0.04] bg-[#0a0a0a]/40 overflow-hidden" data-testid="ticket-list">
+        {/* Column header (visible on >=md screens) */}
+        {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.length > 0 && (
+          <div className={`hidden md:flex items-center gap-3 px-3.5 py-1.5 border-b border-white/[0.06] bg-white/[0.015] text-[9px] font-mono uppercase tracking-[0.18em] text-zinc-600`}>
+            <span className="w-3.5 shrink-0" />
+            <span className="w-[78px] shrink-0">ID</span>
+            <span className="w-4 shrink-0" />
+            <span className="flex-1">Title</span>
+            <span className="hidden md:inline-block w-[160px] shrink-0">Client</span>
+            <span className="hidden lg:inline-block w-[44px] shrink-0">Activity</span>
+            <span className="w-[20px] shrink-0" />
+            <span className="w-[68px] shrink-0">Status</span>
+            <span className="w-6 shrink-0">Owner</span>
+            <span className="hidden sm:inline-block w-[60px] shrink-0 text-right">SLA / Age</span>
+            <span className="w-6 shrink-0" />
+          </div>
         )}
+
+        {/* Grouped rows */}
+        {(typeFilter === "all" || typeFilter === "sla") && groupedTickets.map(group => (
+          group.title ? (
+            <TicketGroupSection
+              key={group.key} title={group.title} count={group.items.length}
+              tone={group.tone} defaultOpen={group.defaultOpen !== false}
+              testId={`group-${group.key}`}
+            >
+              {group.items.map(t => (
+                <TicketRow
+                  key={t.id} ticket={t} density={density}
+                  isSelected={selectedTickets.has(t.id)}
+                  onToggleSelect={toggleTicketSelect}
+                  onOpen={fetchTicketDetail}
+                  viewers={ticketViewers[t.id] || []}
+                  noteCount={noteCounts[t.id]}
+                  attachmentCount={t.attachment_count}
+                  statusConfig={statusConfig}
+                  priorityConfig={priorityConfig}
+                />
+              ))}
+            </TicketGroupSection>
+          ) : (
+            group.items.map(t => (
+              <TicketRow
+                key={t.id} ticket={t} density={density}
+                isSelected={selectedTickets.has(t.id)}
+                onToggleSelect={toggleTicketSelect}
+                onOpen={fetchTicketDetail}
+                viewers={ticketViewers[t.id] || []}
+                noteCount={noteCounts[t.id]}
+                attachmentCount={t.attachment_count}
+                statusConfig={statusConfig}
+                priorityConfig={priorityConfig}
+              />
+            ))
+          )
+        ))}
+
+        {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.length === 0 && (
+          <div className="py-16 text-center" data-testid="ticket-list-empty">
+            <Ticket className="w-10 h-10 mx-auto text-zinc-700 mb-3" />
+            <p className="text-sm text-zinc-500 mb-3">No tickets match your filters</p>
+            <Button variant="outline" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); setSearchQuery(""); }}>Clear filters</Button>
+          </div>
+        )}
+      </div>
+      <div className="space-y-2">
+        {/* Workshop / Field jobs continue rendering below */}
 
         {/* Workshop Job Cards (inline in unified list) */}
         {(typeFilter === "all" || typeFilter === "workshop") && workshopJobs.map(j => {
