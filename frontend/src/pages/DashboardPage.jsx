@@ -13,14 +13,43 @@ import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, Clock, ArrowUpRight,
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
   Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
-  ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles
+  ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles,
+  Lock, Unlock, RotateCcw
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
 import { PageShell } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
+import { Responsive, WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "@/styles/dashboard-grid.css";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
+
+// Default widget layout (lg breakpoint = 12 cols)
+const DEFAULT_LAYOUT_LG = [
+  { i: "team-pins",   x: 0, y: 0,  w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "hero-banner", x: 0, y: 2,  w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "standup",     x: 0, y: 5,  w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "threat",      x: 0, y: 8,  w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "sla-radar",   x: 0, y: 10, w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "blueprint",   x: 0, y: 13, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "churn",       x: 6, y: 13, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "huntress",    x: 0, y: 18, w: 12, h: 4, minH: 2, minW: 4 },
+  { i: "attention",   x: 0, y: 22, w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "ticket-trend",x: 0, y: 24, w: 8,  h: 6, minH: 4, minW: 4 },
+  { i: "fleet-health",x: 8, y: 24, w: 4,  h: 6, minH: 4, minW: 3 },
+  { i: "ops-insights",x: 0, y: 30, w: 12, h: 6, minH: 3, minW: 6 },
+  { i: "open-tix",    x: 0, y: 36, w: 5,  h: 7, minH: 4, minW: 3 },
+  { i: "alerts",      x: 5, y: 36, w: 3,  h: 7, minH: 4, minW: 2 },
+  { i: "activity",    x: 8, y: 36, w: 4,  h: 7, minH: 4, minW: 3 },
+];
+
+const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v1";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
@@ -86,6 +115,25 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Dashboard widget layout — persisted per user in localStorage
+  const [editMode, setEditMode] = useState(false);
+  const [layouts, setLayouts] = useState(() => {
+    try {
+      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return { lg: DEFAULT_LAYOUT_LG };
+  });
+  const onLayoutChange = (_currentLayout, allLayouts) => {
+    setLayouts(allLayouts);
+    try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(allLayouts)); } catch { /* */ }
+  };
+  const resetLayout = () => {
+    setLayouts({ lg: DEFAULT_LAYOUT_LG });
+    try { localStorage.removeItem(LAYOUT_STORAGE_KEY); } catch { /* */ }
+    toast.success("Dashboard layout reset to defaults");
   };
 
   useEffect(() => { fetchDashboardData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -279,7 +327,44 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Hero Header Banner */}
+      {/* Widget Edit Mode bar */}
+      <div className="flex items-center justify-between px-1">
+        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+          {editMode ? (
+            <><Unlock className="w-3 h-3 text-violet-400" /><span className="text-violet-300 font-medium">Edit mode active</span> — drag widgets by their header, resize from the bottom-right corner</>
+          ) : (
+            <><Lock className="w-3 h-3" />Layout locked · click <strong className="text-zinc-300">Customise</strong> to rearrange</>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {editMode && (
+            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-zinc-400" onClick={resetLayout} data-testid="reset-layout-btn">
+              <RotateCcw className="w-3 h-3 mr-1" />Reset
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className={`h-7 text-[10px] ${editMode ? "text-violet-300 border-violet-500/40 bg-violet-500/10" : ""}`} onClick={() => setEditMode(e => !e)} data-testid="customise-layout-btn">
+            {editMode ? <><Lock className="w-3 h-3 mr-1" />Lock</> : <><Unlock className="w-3 h-3 mr-1" />Customise</>}
+          </Button>
+        </div>
+      </div>
+
+      {/* Draggable / resizable widget grid */}
+      <ResponsiveGridLayout
+        className={`layout ${editMode ? "nx-edit-mode" : ""}`}
+        layouts={layouts}
+        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+        rowHeight={48}
+        margin={[12, 12]}
+        containerPadding={[0, 0]}
+        isDraggable={editMode}
+        isResizable={editMode}
+        draggableHandle=".nx-widget-handle"
+        onLayoutChange={onLayoutChange}
+        useCSSTransforms
+      >
+
+      <div key="hero-banner" className="nx-widget-card nx-widget-handle">
       <div className="relative overflow-hidden rounded-2xl border border-border/30" data-testid="dashboard-hero">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/8 via-blue-500/5 to-violet-500/8" />
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px)" }} />
