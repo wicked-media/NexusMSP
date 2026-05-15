@@ -1789,3 +1789,21 @@ Admins can add/edit/deactivate tiers via the API (Settings UI is a separate foll
   - Set Urgency=5 × Impact=5 → auto-priority computed as `critical` → ticket header priority badge updated to "Critical" automatically with red glow.
   - Toasts: "Service tier updated", "Categorisation updated".
 - Lint clean. Webpack compiled clean.
+
+## 2026-05-15 (cont. 4) — Tickets Detail Sidebar: Drag/Drop + Resize
+
+### What shipped
+**Sidebar widget grid** in TicketsPage detail view:
+- All 8 sidebar panels (Service Tier, Categorisation, Status Card, Run Scripts, SLA Burn-down, Workflow, Device Cockpit, AI Enrichment) now live inside a `react-grid-layout` ResponsiveGridLayout.
+- New **"Customise sidebar"** button next to Layout dropdown — toggles edit mode (drag/resize active, red X hide buttons appear).
+- New **"Reset sidebar"** button to restore default layout.
+- Existing **"Layout" dropdown** still works for show/hide via checkboxes — **both controls coexist** as the user requested.
+- Layout persisted under `nx-ticket-detail-sidebar-layout-v1`. Conditional renders (e.g. Run Scripts only when device + scripts exist) are filtered out of `liveLayouts` so the grid never has orphan layout entries.
+
+### Bug fixes
+- `impact` field clashed with existing string field on Ticket model → renamed to `itil_urgency` / `itil_impact` (ints 1-5). 
+- Migrated 2 corrupted ticket records in MongoDB that had been saved with int `impact` before the rename.
+- TicketCategorisationWidget now reads/writes `itil_urgency`/`itil_impact`.
+
+### Tests
+- Browser end-to-end: 8 grid items render → toggle Customise → hide categorisation (7 items) → restore via Layout dropdown (8 items) → Lock returns to read-only view. Ticket list still loads 126 tickets correctly post-migration.

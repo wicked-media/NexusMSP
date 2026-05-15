@@ -77,7 +77,7 @@ import {
   Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
   Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
-  MessageCircle, UserPlus, Settings2, AlertTriangle
+  MessageCircle, UserPlus, Settings2, AlertTriangle, Lock, Unlock, RotateCcw, GripVertical
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
@@ -105,6 +105,18 @@ const TICKETS_LIST_DEFAULT_LAYOUT = [
   { i: "toolbar",     x: 0, y: 8, w: 12, h: 2, minH: 1, minW: 4 },
 ];
 
+// ─── Tickets DETAIL sidebar: draggable widget grid ────────────────────────
+const SIDEBAR_DEFAULT_LAYOUT = [
+  { i: "serviceTier",    x: 0, y: 0,  w: 12, h: 6,  minH: 3, minW: 6 },
+  { i: "categorisation", x: 0, y: 6,  w: 12, h: 8,  minH: 5, minW: 6 },
+  { i: "statusCard",     x: 0, y: 14, w: 12, h: 14, minH: 8, minW: 6 },
+  { i: "runScripts",     x: 0, y: 28, w: 12, h: 5,  minH: 3, minW: 6 },
+  { i: "burndown",       x: 0, y: 33, w: 12, h: 4,  minH: 3, minW: 6 },
+  { i: "workflow",       x: 0, y: 37, w: 12, h: 6,  minH: 4, minW: 6 },
+  { i: "cockpit",        x: 0, y: 43, w: 12, h: 8,  minH: 5, minW: 6 },
+  { i: "enrichment",     x: 0, y: 51, w: 12, h: 6,  minH: 4, minW: 6 },
+];
+const SIDEBAR_LAYOUT_KEY = "nx-ticket-detail-sidebar-layout-v1";
 // ─── Tickets DETAIL view: panel visibility keys ───────────────────────────
 const TICKETS_DETAIL_PANELS = [
   { k: "serviceTier",   label: "Service Tier",          icon: Shield },
@@ -188,6 +200,33 @@ export default function TicketsPage() {
     } catch {}
     return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
   });
+
+  // ─── Detail-view sidebar drag/drop layout (separate from panelVisible) ──
+  const [sidebarEditMode, setSidebarEditMode] = useState(false);
+  const [sidebarLayouts, setSidebarLayouts] = useState(() => {
+    try {
+      const saved = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* */ }
+    return { lg: SIDEBAR_DEFAULT_LAYOUT };
+  });
+  const onSidebarLayoutChange = (_cur, all) => {
+    setSidebarLayouts(all);
+    try { localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(all)); } catch { /* */ }
+  };
+  const resetSidebarLayout = () => {
+    setSidebarLayouts({ lg: SIDEBAR_DEFAULT_LAYOUT });
+    try { localStorage.removeItem(SIDEBAR_LAYOUT_KEY); } catch { /* */ }
+    toast.success("Sidebar layout reset");
+  };
+  // Filter sidebar layout to only show widgets visible per panelVisible
+  const sidebarVisibleLayouts = (() => {
+    const out = {};
+    Object.keys(sidebarLayouts).forEach(bp => {
+      out[bp] = (sidebarLayouts[bp] || []).filter(l => panelVisible[l.i] !== false);
+    });
+    return out;
+  })();
   useEffect(() => {
     try { localStorage.setItem("nexus.tickets.panels", JSON.stringify(panelVisible)); } catch {}
   }, [panelVisible]);
@@ -1395,6 +1434,31 @@ export default function TicketsPage() {
         <div className="flex items-center justify-between gap-1.5 flex-wrap">
           <ServiceTierChip ticketId={viewingTicket.id} token={token} />
           <div className="flex items-center gap-1.5 ml-auto">
+          {sidebarEditMode && (
+            <Button
+              variant="ghost" size="sm"
+              className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5"
+              onClick={resetSidebarLayout}
+              data-testid="sidebar-reset-btn"
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />Reset sidebar
+            </Button>
+          )}
+          <Button
+            variant={sidebarEditMode ? "outline" : "ghost"}
+            size="sm"
+            className={`h-7 px-2 text-[10px] font-mono uppercase tracking-wider ${
+              sidebarEditMode
+                ? "text-violet-300 border-violet-500/40 bg-violet-500/10"
+                : "text-zinc-400 hover:text-zinc-100 hover:bg-white/5"
+            }`}
+            onClick={() => setSidebarEditMode(e => !e)}
+            data-testid="sidebar-customise-btn"
+            title="Toggle drag/drop & resize on sidebar widgets"
+          >
+            {sidebarEditMode ? <Lock className="w-3 h-3 mr-1" /> : <Unlock className="w-3 h-3 mr-1" />}
+            {sidebarEditMode ? "Lock sidebar" : "Customise sidebar"}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5" data-testid="layout-toggle">
@@ -1862,24 +1926,67 @@ export default function TicketsPage() {
             </Tabs>
           </div>
 
-          {/* Right sidebar */}
-          <div className="space-y-4">
+          {/* Right sidebar — draggable widget grid */}
+          {(() => {
+            // Compute eligibility: panel must be visible AND its conditional render must pass
+            const hasDevice = !!(viewingTicket.device_id || (viewingTicket.device_ids || []).length > 0);
+            const eligible = {
+              serviceTier: panelVisible.serviceTier !== false,
+              categorisation: panelVisible.categorisation !== false,
+              statusCard: true,
+              runScripts: panelVisible.runScripts !== false && !!viewingTicket.device_id && scripts.length > 0,
+              burndown: panelVisible.burndown !== false,
+              workflow: panelVisible.workflow !== false,
+              cockpit: panelVisible.cockpit !== false && hasDevice,
+              enrichment: panelVisible.enrichment !== false,
+            };
+            const liveLayouts = {};
+            Object.keys(sidebarLayouts).forEach(bp => {
+              liveLayouts[bp] = (sidebarLayouts[bp] || []).filter(l => eligible[l.i]);
+            });
+            return (
+          <TicketsResponsiveGridLayout
+            className={`layout ${sidebarEditMode ? "nx-edit-mode" : ""}`}
+            layouts={liveLayouts}
+            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+            cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+            rowHeight={40}
+            margin={[0, 12]}
+            containerPadding={[0, 0]}
+            isDraggable={sidebarEditMode}
+            isResizable={sidebarEditMode}
+            onLayoutChange={onSidebarLayoutChange}
+            draggableCancel=".nx-widget-hide,button,a,input,kbd,select,[role='combobox']"
+            useCSSTransforms
+            compactType="vertical"
+          >
             {panelVisible.serviceTier && (
-              <TicketServiceTierWidget
-                ticketId={viewingTicket.id}
-                clientId={viewingTicket.client_id}
-                token={token}
-                isAdmin={user?.role === "admin" || user?.is_admin}
-              />
+              <div key="serviceTier" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("serviceTier"); }} className="nx-widget-hide" data-testid="sidebar-hide-serviceTier" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketServiceTierWidget
+                  ticketId={viewingTicket.id}
+                  clientId={viewingTicket.client_id}
+                  token={token}
+                  isAdmin={user?.role === "admin" || user?.is_admin}
+                />
+              </div>
             )}
             {panelVisible.categorisation && (
-              <TicketCategorisationWidget
-                ticket={viewingTicket}
-                token={token}
-                onUpdated={(updated) => setViewingTicket(t => ({ ...t, ...updated }))}
-              />
+              <div key="categorisation" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("categorisation"); }} className="nx-widget-hide" data-testid="sidebar-hide-categorisation" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketCategorisationWidget
+                  ticket={viewingTicket}
+                  token={token}
+                  onUpdated={(updated) => setViewingTicket(t => ({ ...t, ...updated }))}
+                />
+              </div>
             )}
-            <Card>
+            <div key="statusCard" className="nx-widget-card">
+              <Card>
               <CardContent className="pt-4 space-y-4">
                 <div><Label className="text-xs text-muted-foreground">Status</Label>
                   <Select value={viewingTicket.status} onValueChange={v => handleUpdateTicket("status", v)}>
@@ -1979,9 +2086,14 @@ export default function TicketsPage() {
                 )}
               </CardContent>
             </Card>
+            </div>
 
             {/* Run Scripts */}
             {panelVisible.runScripts && viewingTicket.device_id && scripts.length > 0 && (
+              <div key="runScripts" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("runScripts"); }} className="nx-widget-hide" data-testid="sidebar-hide-runScripts" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
               <Card data-testid="run-scripts-card">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-1.5"><Terminal className="w-4 h-4 text-green-400" />Run Script on Device</CardTitle>
@@ -2001,33 +2113,60 @@ export default function TicketsPage() {
                   </ScrollArea>
                 </CardContent>
               </Card>
+              </div>
             )}
 
             {/* SLA Burn-down */}
-            {panelVisible.burndown && <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />}
+            {panelVisible.burndown && (
+              <div key="burndown" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("burndown"); }} className="nx-widget-hide" data-testid="sidebar-hide-burndown" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
+              </div>
+            )}
 
             {/* Workflow polish (Group D — block-on, change, maintenance, CSAT) */}
             {panelVisible.workflow && (
-              <TicketWorkflowPanel
-                ticket={viewingTicket}
-                allTickets={tickets}
-                headers={headers}
-                refresh={() => fetchTicketDetail(viewingTicket)}
-              />
+              <div key="workflow" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("workflow"); }} className="nx-widget-hide" data-testid="sidebar-hide-workflow" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketWorkflowPanel
+                  ticket={viewingTicket}
+                  allTickets={tickets}
+                  headers={headers}
+                  refresh={() => fetchTicketDetail(viewingTicket)}
+                />
+              </div>
             )}
 
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
             {(viewingTicket.device_id || (viewingTicket.device_ids || []).length > 0) && panelVisible.cockpit && (
-              <TicketDeviceList
-                ticketId={viewingTicket.id}
-                headers={headers}
-                refreshTicketDetails={() => fetchTicketDetail(viewingTicket)}
-              />
+              <div key="cockpit" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("cockpit"); }} className="nx-widget-hide" data-testid="sidebar-hide-cockpit" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketDeviceList
+                  ticketId={viewingTicket.id}
+                  headers={headers}
+                  refreshTicketDetails={() => fetchTicketDetail(viewingTicket)}
+                />
+              </div>
             )}
 
             {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
-            {panelVisible.enrichment && <TicketEnrichmentRail enrichment={enrichment} />}
-          </div>
+            {panelVisible.enrichment && (
+              <div key="enrichment" className="nx-widget-card">
+                {sidebarEditMode && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("enrichment"); }} className="nx-widget-hide" data-testid="sidebar-hide-enrichment" title="Hide panel"><X className="w-3 h-3" /></button>
+                )}
+                <TicketEnrichmentRail enrichment={enrichment} />
+              </div>
+            )}
+          </TicketsResponsiveGridLayout>
+            );
+          })()}
         </div>
 
         <EmailDialog

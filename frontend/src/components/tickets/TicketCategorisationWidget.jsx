@@ -38,8 +38,8 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
   const [state, setState] = useState({
     category_id: ticket?.category_id || "",
     issue_type_id: ticket?.issue_type_id || "",
-    urgency: ticket?.urgency || 3,
-    impact: ticket?.impact || 3,
+    urgency: ticket?.itil_urgency || 3,
+    impact: ticket?.itil_impact || 3,
   });
   const [saving, setSaving] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
@@ -56,10 +56,10 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
     setState({
       category_id: ticket?.category_id || "",
       issue_type_id: ticket?.issue_type_id || "",
-      urgency: ticket?.urgency || 3,
-      impact: ticket?.impact || 3,
+      urgency: ticket?.itil_urgency || 3,
+      impact: ticket?.itil_impact || 3,
     });
-  }, [ticket?.id, ticket?.category_id, ticket?.issue_type_id, ticket?.urgency, ticket?.impact]);
+  }, [ticket?.id, ticket?.category_id, ticket?.issue_type_id, ticket?.itil_urgency, ticket?.itil_impact]);
 
   const selectedCategory = categories.find(c => c.id === state.category_id);
   const issueTypes = selectedCategory?.issue_types || [];
