@@ -198,6 +198,19 @@ async def assign_client_tier(client_id: str, data: dict, current_user: dict = De
 
 
 # ── For ticket detail view: get the tier for a ticket's client ────────────
+@router.get("/clients/{client_id}/service-tier")
+async def get_client_service_tier(client_id: str, current_user: dict = Depends(get_current_user)):
+    await _seed_if_empty()
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "service_tier_id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    tier_id = client.get("service_tier_id")
+    if not tier_id:
+        return {"tier": None, "client_id": client_id, "client_name": client.get("name")}
+    tier = await db.service_tiers.find_one({"id": tier_id}, {"_id": 0})
+    return {"tier": tier, "client_id": client_id, "client_name": client.get("name")}
+
+
 @router.get("/tickets/{ticket_id}/service-tier")
 async def get_ticket_service_tier(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _seed_if_empty()

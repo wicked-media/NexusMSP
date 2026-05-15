@@ -22,6 +22,11 @@ import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
 import ClientWarRoom from "@/components/clients/ClientWarRoom";
 import HeroTile from "@/components/HeroTile";
+import { ClientProfilePictureUploader, ClientCoverImage } from "@/components/clients/ClientProfileAssets";
+import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
+import ClientNotesTab from "@/components/clients/ClientNotesTab";
+import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStrip";
+import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -407,31 +412,45 @@ export default function ClientsPage() {
   );
 }
 
-function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab, loading }) {
-  const { token } = useAuth();
+function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading }) {
+  const { token, user } = useAuth();
+  const [clientLocal, setClientLocal] = useState(clientProp);
+  useEffect(() => { setClientLocal(clientProp); }, [clientProp]);
+  const client = clientLocal || clientProp;
   const mrrData = client.mrr_trend || [];
   const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
+  const isAdmin = user?.role === "admin" || user?.is_admin;
+  const applyClientPatch = (patch) => setClientLocal(c => ({ ...c, ...patch }));
 
   return (
     <div className="flex flex-col h-full" data-testid="client-detail-pane">
+      {/* Cover banner */}
+      <div className="px-6 pt-4">
+        <ClientCoverImage client={client} onUpdated={applyClientPatch} />
+      </div>
+
       {/* Header */}
-      <div className="px-6 py-4 border-b border-zinc-800 flex items-start gap-4 bg-gradient-to-br from-zinc-900/40 to-transparent">
-        <div className={`w-14 h-14 rounded-md bg-gradient-to-br ${tierGrad} flex items-center justify-center text-xl font-bold text-white shrink-0`}>
-          {client.name?.slice(0, 2).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+      <div className="px-6 pb-3 -mt-4 flex items-start gap-4">
+        <ClientProfilePictureUploader client={client} onUpdated={applyClientPatch} size={88} />
+        <div className="flex-1 min-w-0 pt-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight">{client.name}</h1>
+            <ClientServiceTierChip client={client} isAdmin={isAdmin} onUpdated={applyClientPatch} />
             <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{(client.lifecycle || "active").replace("_", " ")}</span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 font-mono">{client.tier}</span>
+            {client.vip && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-400/40 bg-amber-500/10 text-amber-300 font-bold">VIP</span>}
           </div>
-          <div className="flex items-center gap-4 text-[11px] text-zinc-500 font-mono mt-1">
+          <div className="flex items-center gap-4 text-[11px] text-zinc-500 font-mono mt-1 flex-wrap">
             {client.industry && <span>{client.industry}</span>}
             {client.email && <span className="flex items-center gap-1"><Mail className="w-2.5 h-2.5" />{client.email}</span>}
             {client.phone && <span className="flex items-center gap-1"><Phone className="w-2.5 h-2.5" />{client.phone}</span>}
-            {client.address && <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" />{client.address}</span>}
+            {client.address && <span className="flex items-center gap-1 truncate max-w-[280px]"><MapPin className="w-2.5 h-2.5" />{client.address}</span>}
+            {client.website && (
+              <a href={client.website.startsWith("http") ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-cyan-400">
+                <ExternalLink className="w-2.5 h-2.5" />{client.website.replace(/^https?:\/\//, "")}
+              </a>
+            )}
           </div>
-          <div className="flex items-center gap-1 mt-2">
+          <div className="flex items-center gap-1 mt-2 flex-wrap">
             <IntegrationChip type="rmm" active={client.integrations.rmm} />
             <IntegrationChip type="acronis" active={client.integrations.acronis} />
             <IntegrationChip type="pax8" active={client.integrations.pax8} />
@@ -450,6 +469,11 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             ★ Certificate
           </button>
         </div>
+      </div>
+
+      {/* Quick Actions strip */}
+      <div className="px-6 pb-3 border-b border-zinc-800">
+        <ClientQuickActionsStrip client={client} />
       </div>
 
       {/* Quick metrics strip */}
@@ -501,6 +525,8 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
             { v: "warroom", l: "War Room" },
             { v: "tickets", l: "Tickets" },
             { v: "assets", l: "Assets" },
+            { v: "documents", l: "Documents" },
+            { v: "notes", l: "Notes" },
             { v: "subscriptions", l: "Subscriptions" },
             { v: "security", l: "Security" },
             { v: "contacts", l: "Contacts" },
@@ -606,6 +632,14 @@ function ClientDetailPane({ client, detail, activity, healthDetail, tab, setTab,
 
           <TabsContent value="assets" className="mt-0">
             <Client360Assets clientId={client.id} token={token} />
+          </TabsContent>
+
+          <TabsContent value="documents" className="mt-0">
+            <ClientDocumentsTab client={client} />
+          </TabsContent>
+
+          <TabsContent value="notes" className="mt-0">
+            <ClientNotesTab client={client} />
           </TabsContent>
 
           <TabsContent value="subscriptions" className="mt-0">

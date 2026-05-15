@@ -1807,3 +1807,41 @@ Admins can add/edit/deactivate tiers via the API (Settings UI is a separate foll
 
 ### Tests
 - Browser end-to-end: 8 grid items render → toggle Customise → hide categorisation (7 items) → restore via Layout dropdown (8 items) → Lock returns to read-only view. Ticket list still loads 126 tickets correctly post-migration.
+
+## 2026-05-15 (cont. 5) — Clients Page Overhaul (Syncro-but-better)
+
+### Backend
+**`/app/backend/app/routers/client_profile.py`** — new:
+- `POST/DELETE /api/clients/{id}/profile-picture` — upload/remove client avatar (20MB max, JPG/PNG/WebP/GIF/SVG)
+- `POST/DELETE /api/clients/{id}/cover-image` — upload/remove hero cover banner
+- `PATCH /api/clients/{id}/profile` — extended fields (website, socials, about, billing/support emails, address, etc.)
+- `GET/POST /api/clients/{id}/documents` — list & upload files (PDF/doc/xls/ppt/txt/csv/md/images/zip)
+- `POST /api/clients/{id}/runbooks` — create/update rich-text SOPs (Hudu-style)
+- `DELETE /api/clients/{id}/documents/{doc_id}` — remove files/runbooks
+- `GET/POST/DELETE /api/clients/{id}/notes` — internal team notes with pinning
+- `GET /api/clients/{id}/service-tier` — added to existing service_tiers router
+
+Files stored under `/app/backend/uploads/clients/` (avatars+covers) and `/app/backend/uploads/client-documents/`.
+
+### Frontend
+**New components** under `/app/frontend/src/components/clients/`:
+- `ClientProfileAssets.jsx` — `ClientProfilePictureUploader` (square avatar w/ hover camera + remove) and `ClientCoverImage` (wide hero banner w/ hover upload)
+- `ClientDocumentsTab.jsx` — file uploads + runbook editor (modal with title, category, pin, HTML body). List with category badges, file size, download, pin indicators
+- `ClientNotesTab.jsx` — internal note composer with pinning, feed sorted pinned-first then newest
+- `ClientQuickActionsStrip.jsx` — 9-button strip (Create Ticket, Add Device, Send Email, Call, Schedule, Health Check, War Room, Invoice, Website, Directions). Disables when contact info missing.
+- `ClientServiceTierChip.jsx` — client-level tier badge with inline admin reassignment
+
+**ClientsPage.jsx** updates:
+- Detail header now starts with a cover banner, profile picture (hover-to-upload), tier chip, lifecycle badge, VIP star, contact strip (email/phone/address/website), integration chips, health dial
+- Quick Actions strip placed directly under header
+- Added 2 new tabs: **Documents** + **Notes** (now 15 tabs total)
+
+### Help Center
+Three new articles seeded via `POST /api/help/articles`:
+- `client-profile-overview` — full deep-dive on the new client page
+- `service-tiers-and-itil-priority` — tier defaults + Urgency × Impact matrix
+- `customisable-widget-layouts` — Dashboard / Tickets / Ticket-detail widget customisation guide
+
+### Tests
+- Browser-tested end-to-end: opened Acme Corporation → header renders w/ SMB Gold chip + cover banner + profile pic fallback + 9-button quick actions strip → switched to Documents → created "Acme — Server reboot procedure" runbook → toast confirmed + card rendered with HTML preview → switched to Notes → added "Primary contact prefers email over phone after 5pm" → toast confirmed + note rendered with author + timestamp.
+- Lint clean (6 files), webpack compiled clean.
