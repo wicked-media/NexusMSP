@@ -1698,3 +1698,20 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
 ### Tests
 - Hand-tested via curl: scan across 20 seed clients → 7 opportunities, $9,080 annual pipeline. All endpoints behave correctly.
 - Frontend visually verified: Growth page renders with KPI cards, top clients grid, filterable opportunity table. Lint clean.
+
+## 2026-05-15 — Drag-and-Drop Customisable Dashboard Widgets
+
+### What shipped
+**Frontend** (`/app/frontend/src/pages/DashboardPage.jsx`, `/app/frontend/src/styles/dashboard-grid.css`):
+- Operations Command Bridge bottom-half (14 widgets: hero-banner, standup, threat, sla-radar, blueprint, churn, huntress, attention, ticket-trend, fleet-health, ops-insights, open-tix, alerts, activity) is now a `react-grid-layout` ResponsiveGridLayout grid.
+- "Customise" button toggles edit mode — when on, widgets become draggable + resizable with violet glow/dashed-outline feedback (`.nx-edit-mode`).
+- Layouts persisted per-user in `localStorage` under `nx-dashboard-layout-v1`. "Reset" button restores defaults.
+- Snap animation: cubic-bezier bounce on drop, dashed-violet placeholder while dragging.
+- Each widget has min-width/min-height constraints so cards don't collapse.
+
+### Stack changes
+- `react-grid-layout@1.5.0` (downgraded from buggy v2.2.3 — v2 removed `WidthProvider` and shipped broken fast-equals sourcemap reference) + `react-resizable@3.0.5`.
+
+### Tests
+- Smoke-test screenshots: locked view + edit-mode view both render correctly (`14` `.react-grid-item` nodes detected, edit mode banner active, Lock/Reset/Customise buttons all wired).
+- Lint clean.

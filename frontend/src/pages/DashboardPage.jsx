@@ -32,21 +32,20 @@ const ResponsiveGridLayout = WidthProvider(Responsive);
 
 // Default widget layout (lg breakpoint = 12 cols)
 const DEFAULT_LAYOUT_LG = [
-  { i: "team-pins",   x: 0, y: 0,  w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "hero-banner", x: 0, y: 2,  w: 12, h: 3, minH: 2, minW: 6 },
-  { i: "standup",     x: 0, y: 5,  w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "threat",      x: 0, y: 8,  w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "sla-radar",   x: 0, y: 10, w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "blueprint",   x: 0, y: 13, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "churn",       x: 6, y: 13, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "huntress",    x: 0, y: 18, w: 12, h: 4, minH: 2, minW: 4 },
-  { i: "attention",   x: 0, y: 22, w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "ticket-trend",x: 0, y: 24, w: 8,  h: 6, minH: 4, minW: 4 },
-  { i: "fleet-health",x: 8, y: 24, w: 4,  h: 6, minH: 4, minW: 3 },
-  { i: "ops-insights",x: 0, y: 30, w: 12, h: 6, minH: 3, minW: 6 },
-  { i: "open-tix",    x: 0, y: 36, w: 5,  h: 7, minH: 4, minW: 3 },
-  { i: "alerts",      x: 5, y: 36, w: 3,  h: 7, minH: 4, minW: 2 },
-  { i: "activity",    x: 8, y: 36, w: 4,  h: 7, minH: 4, minW: 3 },
+  { i: "hero-banner", x: 0, y: 0,  w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "standup",     x: 0, y: 3,  w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "threat",      x: 0, y: 6,  w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "sla-radar",   x: 0, y: 8,  w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "blueprint",   x: 0, y: 11, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "churn",       x: 6, y: 11, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "huntress",    x: 0, y: 16, w: 12, h: 4, minH: 2, minW: 4 },
+  { i: "attention",   x: 0, y: 20, w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "ticket-trend",x: 0, y: 22, w: 8,  h: 6, minH: 4, minW: 4 },
+  { i: "fleet-health",x: 8, y: 22, w: 4,  h: 6, minH: 4, minW: 3 },
+  { i: "ops-insights",x: 0, y: 28, w: 12, h: 6, minH: 3, minW: 6 },
+  { i: "open-tix",    x: 0, y: 34, w: 5,  h: 7, minH: 4, minW: 3 },
+  { i: "alerts",      x: 5, y: 34, w: 3,  h: 7, minH: 4, minW: 2 },
+  { i: "activity",    x: 8, y: 34, w: 4,  h: 7, minH: 4, minW: 3 },
 ];
 
 const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v1";
@@ -359,13 +358,13 @@ export default function DashboardPage() {
         containerPadding={[0, 0]}
         isDraggable={editMode}
         isResizable={editMode}
-        draggableHandle=".nx-widget-handle"
         onLayoutChange={onLayoutChange}
         useCSSTransforms
+        compactType="vertical"
       >
 
-      <div key="hero-banner" className="nx-widget-card nx-widget-handle">
-      <div className="relative overflow-hidden rounded-2xl border border-border/30" data-testid="dashboard-hero">
+      <div key="hero-banner" className="nx-widget-card">
+      <div className="relative overflow-hidden rounded-2xl border border-border/30 h-full" data-testid="dashboard-hero">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/8 via-blue-500/5 to-violet-500/8" />
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px)" }} />
         <div className="relative px-6 py-5 flex items-center justify-between">
@@ -385,21 +384,33 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      </div>
 
       {/* Morning Standup Digest */}
-      <StandupDigestBanner />
-      <ThreatRadarTicker />
-      <SLARadarTile />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div key="standup" className="nx-widget-card">
+        <StandupDigestBanner />
+      </div>
+      <div key="threat" className="nx-widget-card">
+        <ThreatRadarTicker />
+      </div>
+      <div key="sla-radar" className="nx-widget-card">
+        <SLARadarTile />
+      </div>
+      <div key="blueprint" className="nx-widget-card">
         <BlueprintInsightsTile />
+      </div>
+      <div key="churn" className="nx-widget-card">
         <ChurnRiskTile />
       </div>
 
       {/* Huntress Security Snapshot */}
-      <HuntressSummaryCard compact />
+      <div key="huntress" className="nx-widget-card">
+        <HuntressSummaryCard compact />
+      </div>
 
       {/* Attention Banner */}
-      {attentionItems.length > 0 && (
+      <div key="attention" className="nx-widget-card">
+      {attentionItems.length > 0 ? (
         <div className="flex gap-2 flex-wrap" data-testid="attention-banner">
           {attentionItems.map((item, i) => (
             <button key={`k-${i}`} onClick={() => navigate(item.path)}
@@ -410,11 +421,16 @@ export default function DashboardPage() {
             </button>
           ))}
         </div>
+      ) : (
+        <div className="flex items-center gap-2 text-[11px] text-emerald-400/80 px-3 py-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+          <CheckCircle className="w-3.5 h-3.5" /> All systems nominal — nothing to escalate
+        </div>
       )}
+      </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-8 overflow-hidden" data-testid="ticket-trend-chart">
+      {/* Ticket Volume Chart */}
+      <div key="ticket-trend" className="nx-widget-card">
+        <Card className="h-full overflow-hidden" data-testid="ticket-trend-chart">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Activity className="w-4 h-4 text-blue-400" />Ticket Volume (7 Days)</CardTitle>
             <div className="flex items-center gap-2">
@@ -439,8 +455,11 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
 
-        <Card className="col-span-4" data-testid="device-health-card">
+      {/* Fleet Health */}
+      <div key="fleet-health" className="nx-widget-card">
+        <Card className="h-full" data-testid="device-health-card">
           <CardHeader className="pb-0">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Cpu className="w-4 h-4 text-emerald-400" />Fleet Health</CardTitle>
           </CardHeader>
@@ -486,6 +505,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Operational Insights */}
+      <div key="ops-insights" className="nx-widget-card">
       {mspIntel && (
         <details className="group" open data-testid="ops-insights">
           <summary className="cursor-pointer flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors py-1">
@@ -567,10 +587,11 @@ export default function DashboardPage() {
           </div>
         </details>
       )}
+      </div>
 
       {/* Bottom Row: Tickets + Alerts + Activity */}
-      <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-5" data-testid="open-tickets-card">
+      <div key="open-tix" className="nx-widget-card">
+        <Card className="h-full" data-testid="open-tickets-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Ticket className="w-4 h-4 text-blue-400" />Open Tickets</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate("/tickets")} className="text-[10px] h-5 px-2">{stats.open_tickets} total<ExternalLink className="w-2.5 h-2.5 ml-1" /></Button>
@@ -592,8 +613,10 @@ export default function DashboardPage() {
             </ScrollArea>
           </CardContent>
         </Card>
+      </div>
 
-        <Card className="col-span-3" data-testid="alerts-card">
+      <div key="alerts" className="nx-widget-card">
+        <Card className="h-full" data-testid="alerts-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className={`w-4 h-4 ${alerts.length > 0 ? "text-amber-400" : "text-muted-foreground"}`} />Alerts</CardTitle>
             <Badge variant={alerts.length > 0 ? "destructive" : "secondary"} className={`text-[9px] h-4 ${alerts.length > 0 ? "animate-pulse" : ""}`}>{alerts.length}</Badge>
@@ -611,8 +634,10 @@ export default function DashboardPage() {
             </ScrollArea>
           </CardContent>
         </Card>
+      </div>
 
-        <Card className="col-span-4" data-testid="activity-feed-card">
+      <div key="activity" className="nx-widget-card">
+        <Card className="h-full" data-testid="activity-feed-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Zap className="w-4 h-4 text-cyan-400" />Activity</CardTitle>
             <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[9px] text-muted-foreground">Live</span></div>
@@ -643,6 +668,8 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      </ResponsiveGridLayout>
     </div>
     </PageShell>
   );
