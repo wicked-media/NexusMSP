@@ -8,6 +8,25 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+## Recent Updates (Feb 2026 — Operations Command Bridge dashboard + Apple-style nav badges)
+
+### Dashboard rebuilt as "Operations Command Bridge"
+- Replaced legacy `MetricStrip + MetricTile` with HeroTile grid (6 tiles: Open Tickets · Devices Online · Devices Offline · Critical Alerts · Clients · MRR) — same shape as Tickets/Devices/Team CCs.
+- ✨ Sparkles header + "**Operations Command Bridge**" + greeting subtitle, action buttons (Quick Search ⌘K · Tickets · Devices · Refresh).
+- New **Cross-Module Bridge** card aggregating top "Needs Attention" items into 4 columns: **Tickets** (critical) · **Devices** (offline/warning) · **Alerts** (active) · **Predictions** (urgent failure forecasts). Every card is clickable and deep-links to the relevant module.
+
+### Apple-style notification badges across sidebar nav
+- New backend endpoint `GET /api/nav-counts` — single lightweight aggregator returning per-path counts (tickets/devices/security/approvals/invoices/billing/team-chat/tech-command/backup).
+- New frontend `NavCountsProvider` + `useNavCounts` hook that polls every 60s and provides global counts.
+- New `<NavBadge>` component: rose pill with white text, `min-w-[16px] h-[16px]`, ring offset, capped at "99+", drop-shadow glow.
+- Sidebar `NavItem` extended to:
+  - Render the badge on the icon when sidebar is collapsed (top-right pill on the icon — Apple style).
+  - Render the badge inline next to the label when expanded.
+  - Aggregate child-path counts into the parent badge when collapsed/closed.
+  - Each child link also renders its own badge.
+
+**Verified live:** `GET /api/nav-counts` returned `{tickets: 70, devices: 29, security: 3, approvals: 2, invoices: 12}`. Dashboard screenshot shows badges rendered correctly: Notifications `9+`, Tickets `99+`, Approvals `2`, Devices `58`. Cross-Module Bridge populated with real critical devices (ACME-WS-001, SUMMIT-DC-01) and AI predictions (RETA-SRV-02 disk_failure 3d, PACI-WS-004 cooling_failure 5d). ESLint + Ruff clean.
+
 ## Recent Updates (Feb 2026 — Tickets Page Command Center alignment)
 
 Restructured the top of `TicketsPage.jsx` to match Devices Command Center / Team Command Center exactly:

@@ -13,13 +13,14 @@ import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, Clock, ArrowUpRight,
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
   Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
-  ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3
+  ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
+import HeroTile from "@/components/HeroTile";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
@@ -145,13 +146,99 @@ export default function DashboardPage() {
   return (
     <PageShell>
     <WeatherStrip />
-    <MetricStrip columns={4}>
-      <MetricTile label="Clients" value={stats.total_clients} trend={`$${stats.total_mrr?.toLocaleString() || 0} MRR`} trendColor="text-zinc-500" accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} testid="metric-clients" />
-      <MetricTile label="Devices" value={devices.length} trend={`${onlineDevices.length} online${offlineDevices.length > 0 ? ` · ${offlineDevices.length} offline` : ""}`} trendColor={offlineDevices.length > 0 ? "text-rose-400" : "text-emerald-400"} accent="emerald" icon={<Monitor className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-devices" />
-      <MetricTile label="Open Tickets" value={stats.open_tickets} trend={`${stats.in_progress_tickets} in progress`} trendColor="text-zinc-500" accent={stats.open_tickets > 20 ? "amber" : "cyan"} icon={<Ticket className="w-2.5 h-2.5 text-cyan-400" />} testid="metric-open-tickets" />
-      <MetricTile label="Revenue" value={`$${stats.total_mrr?.toLocaleString() || 0}`} trend="+12% MRR" accent="emerald" icon={<DollarSign className="w-2.5 h-2.5 text-emerald-400" />} testid="metric-revenue" />
-    </MetricStrip>
     <div className="flex-1 overflow-y-auto p-6 space-y-5" data-testid="dashboard-page">
+
+      {/* Command Bridge Header — matches all module Command Centers */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-violet-400" />Operations Command Bridge
+          </h1>
+          <p className="text-sm text-zinc-500">{greeting}, {user?.name?.split(" ")[0] || "Operator"} — live cross-module situational awareness</p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSearchOpen(true)} data-testid="bridge-search-btn">
+            <Search className="w-3 h-3 mr-1" />Quick Search <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">⌘K</kbd>
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn"><Ticket className="w-3 h-3 mr-1" />Tickets</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn"><Monitor className="w-3 h-3 mr-1" />Devices</Button>
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={fetchDashboardData} data-testid="bridge-refresh-btn"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+        </div>
+      </div>
+
+      {/* HeroTile Command Strip — same as every other module */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} testId="bridge-tile-tickets" />
+        <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" testId="bridge-tile-online" />
+        <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} testId="bridge-tile-offline" />
+        <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} testId="bridge-tile-critical" />
+        <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" testId="bridge-tile-clients" />
+        <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="bridge-tile-mrr" />
+      </div>
+
+      {/* Cross-module Command Bridge — top "Needs Attention" from each module */}
+      <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]" data-testid="command-bridge">
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-violet-400" />Cross-Module Bridge</CardTitle>
+          <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">live · auto-refresh 60s</span>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Tickets column */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-widest font-mono text-cyan-300 flex items-center gap-1 mb-1"><Ticket className="w-3 h-3" />Tickets</div>
+            {criticalTickets.slice(0, 3).map(t => (
+              <button key={t.id} onClick={() => navigate("/tickets")} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-tk-${t.id}`}>
+                <div className="text-xs font-medium text-rose-300 truncate">{t.title}</div>
+                <div className="text-[10px] text-zinc-500 truncate">#{t.ticket_number} · {t.client_name}</div>
+              </button>
+            ))}
+            {criticalTickets.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No critical tickets</p>}
+          </div>
+
+          {/* Devices column */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-widest font-mono text-emerald-300 flex items-center gap-1 mb-1"><Monitor className="w-3 h-3" />Devices</div>
+            {offlineDevices.slice(0, 3).map(d => (
+              <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
+                <div className="text-xs font-medium text-rose-300 truncate">{d.name || d.hostname}</div>
+                <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · offline</div>
+              </button>
+            ))}
+            {warningDevices.slice(0, Math.max(0, 3 - offlineDevices.length)).map(d => (
+              <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-amber-500/30 bg-amber-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
+                <div className="text-xs font-medium text-amber-300 truncate">{d.name || d.hostname}</div>
+                <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · warning</div>
+              </button>
+            ))}
+            {offlineDevices.length === 0 && warningDevices.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">All devices nominal</p>}
+          </div>
+
+          {/* Alerts column */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-widest font-mono text-amber-300 flex items-center gap-1 mb-1"><AlertCircle className="w-3 h-3" />Alerts</div>
+            {(alerts || []).slice(0, 3).map(a => (
+              <button key={a.id} onClick={() => navigate("/security")} className={`w-full text-left px-2.5 py-1.5 rounded border ${a.severity === "critical" ? "border-rose-500/30 bg-rose-500/5" : "border-amber-500/30 bg-amber-500/5"} hover:brightness-125 transition`} data-testid={`bridge-al-${a.id}`}>
+                <div className={`text-xs font-medium truncate ${a.severity === "critical" ? "text-rose-300" : "text-amber-300"}`}>{a.title || a.message}</div>
+                <div className="text-[10px] text-zinc-500 truncate uppercase tracking-widest">{a.severity || "info"}</div>
+              </button>
+            ))}
+            {(alerts || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No active alerts</p>}
+          </div>
+
+          {/* Predictions / Compliance column */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-widest font-mono text-violet-300 flex items-center gap-1 mb-1"><Zap className="w-3 h-3" />Predictions</div>
+            {(mspIntel?.urgentPredictions || []).slice(0, 3).map((p, i) => (
+              <button key={`p-${i}`} onClick={() => navigate("/predictive-failure")} className="w-full text-left px-2.5 py-1.5 rounded border border-violet-500/30 bg-violet-500/5 hover:brightness-125 transition" data-testid={`bridge-pred-${i}`}>
+                <div className="text-xs font-medium text-violet-300 truncate">{p.device_name || "Device"}</div>
+                <div className="text-[10px] text-zinc-500 truncate">{p.failure_type || "predicted failure"} · {p.days_until_failure}d</div>
+              </button>
+            ))}
+            {(mspIntel?.urgentPredictions || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No urgent predictions</p>}
+          </div>
+        </CardContent>
+      </Card>
+
       <TeamPinsStrip />
       {/* Quick Search Modal */}
       {searchOpen && (

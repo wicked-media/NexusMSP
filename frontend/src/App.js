@@ -14,6 +14,7 @@ import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 import CommandPalette from "@/components/CommandPalette";
+import { NavCountsProvider } from "@/hooks/useNavCounts";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -277,6 +278,7 @@ function App() {
   return (
     <ThemeProvider>
     <AuthProvider>
+      <NavCountsProvider>
       <BrowserRouter>
         <GlobalAddons />
         <Routes>
@@ -291,6 +293,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </NavCountsProvider>
       <Toaster position="top-right" richColors />
     </AuthProvider>
     </ThemeProvider>

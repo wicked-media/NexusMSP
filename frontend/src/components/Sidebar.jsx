@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { navGroups, getAllNavItems } from "@/config/navigation";
+import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
@@ -135,7 +136,7 @@ function NotificationBell({ token, collapsed }) {
 }
 
 // NavItem with optional collapsible children
-const NavItem = ({ item, collapsed, expandedMenus, toggleMenu }) => {
+const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const hasChildren = item.children && item.children.length > 0;
@@ -145,6 +146,11 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu }) => {
   const isActive = location.pathname === item.path;
   const isChildActive = hasChildren && item.children.some(c => location.pathname === c.path);
   const isHighlighted = isActive || isChildActive;
+
+  // Aggregate badge count: own + any child paths
+  const ownCount = counts[item.path] || 0;
+  const childrenCount = hasChildren ? item.children.reduce((s, c) => s + (counts[c.path] || 0), 0) : 0;
+  const badgeCount = ownCount + childrenCount;
 
   const handleClick = () => {
     if (hasChildren) {
@@ -171,10 +177,18 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu }) => {
             }`}
             data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
           >
-            {item.icon && <item.icon className={`flex-shrink-0 ${collapsed ? 'w-[18px] h-[18px]' : 'w-4 h-4'}`} />}
+            {item.icon && (
+              <span className="relative flex-shrink-0">
+                <item.icon className={`${collapsed ? 'w-[18px] h-[18px]' : 'w-4 h-4'}`} />
+                {collapsed && badgeCount > 0 && (
+                  <NavBadge count={badgeCount} className="absolute -top-1.5 -right-1.5" />
+                )}
+              </span>
+            )}
             {!collapsed && (
               <>
                 <span className="text-[12px] flex-1 text-left truncate">{item.label}</span>
+                {!isExpanded && badgeCount > 0 && <NavBadge count={badgeCount} />}
                 {hasChildren && (
                   <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                 )}
@@ -186,16 +200,18 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu }) => {
             <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
               {item.children.map(child => {
                 const childActive = location.pathname === child.path;
+                const childCount = counts[child.path] || 0;
                 return (
                   <Link
                     key={child.path}
                     to={child.path}
-                    className={`flex items-center px-2.5 py-1 rounded text-[11px] transition-all ${
+                    className={`flex items-center gap-2 px-2.5 py-1 rounded text-[11px] transition-all ${
                       childActive ? 'text-primary font-medium bg-primary/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
                     data-testid={`nav-child-${child.path.replace(/\//g, '-').replace(/^-/, '')}`}
                   >
-                    {child.label}
+                    <span className="flex-1 truncate">{child.label}</span>
+                    {childCount > 0 && <NavBadge count={childCount} />}
                   </Link>
                 );
               })}
@@ -292,6 +308,7 @@ function SidebarSearch() {
 export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { counts: navCounts } = useNavCounts();
   const navigate = useNavigate();
   const location = useLocation();
   const [expandedMenus, setExpandedMenus] = useState(new Set());
@@ -417,7 +434,7 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                 )}
                 <div className="space-y-0.5">
                   {group.items.map((item) => (
-                    <NavItem key={item.path} item={item} collapsed={collapsed} expandedMenus={expandedMenus} toggleMenu={toggleMenu} />
+                    <NavItem key={item.path} item={item} collapsed={collapsed} expandedMenus={expandedMenus} toggleMenu={toggleMenu} counts={navCounts} />
                   ))}
                 </div>
               </div>
