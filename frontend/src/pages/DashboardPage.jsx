@@ -14,7 +14,7 @@ import {
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
   Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
   ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles,
-  Lock, Unlock, RotateCcw
+  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,28 +27,57 @@ import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator
+} from "@/components/ui/dropdown-menu";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
+// Widget metadata — label + icon for the "Add Widget" picker
+const WIDGET_META = {
+  "hero-tiles":   { label: "Hero Tile Strip",        icon: BarChart3 },
+  "cross-bridge": { label: "Cross-Module Bridge",    icon: AlertTriangle },
+  "team-pins":    { label: "Team Pins / NOC Strip",  icon: Users },
+  "hero-banner":  { label: "Welcome Banner",         icon: Sparkles },
+  "standup":      { label: "Morning Standup",        icon: Activity },
+  "threat":       { label: "Threat Radar",           icon: Shield },
+  "sla-radar":    { label: "SLA Radar",              icon: Clock },
+  "blueprint":    { label: "Blueprint Insights",     icon: Eye },
+  "churn":        { label: "Churn Risk",             icon: TrendingUp },
+  "huntress":     { label: "Huntress Security",      icon: Shield },
+  "attention":    { label: "Attention Banner",       icon: AlertCircle },
+  "ticket-trend": { label: "Ticket Volume Chart",    icon: Activity },
+  "fleet-health": { label: "Fleet Health",           icon: Cpu },
+  "ops-insights": { label: "Operational Insights",   icon: Eye },
+  "open-tix":     { label: "Open Tickets",           icon: Ticket },
+  "alerts":       { label: "Alerts",                 icon: AlertTriangle },
+  "activity":     { label: "Activity Feed",          icon: Zap },
+};
+
 // Default widget layout (lg breakpoint = 12 cols)
 const DEFAULT_LAYOUT_LG = [
-  { i: "hero-banner", x: 0, y: 0,  w: 12, h: 3, minH: 2, minW: 6 },
-  { i: "standup",     x: 0, y: 3,  w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "threat",      x: 0, y: 6,  w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "sla-radar",   x: 0, y: 8,  w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "blueprint",   x: 0, y: 11, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "churn",       x: 6, y: 11, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "huntress",    x: 0, y: 16, w: 12, h: 4, minH: 2, minW: 4 },
-  { i: "attention",   x: 0, y: 20, w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "ticket-trend",x: 0, y: 22, w: 8,  h: 6, minH: 4, minW: 4 },
-  { i: "fleet-health",x: 8, y: 22, w: 4,  h: 6, minH: 4, minW: 3 },
-  { i: "ops-insights",x: 0, y: 28, w: 12, h: 6, minH: 3, minW: 6 },
-  { i: "open-tix",    x: 0, y: 34, w: 5,  h: 7, minH: 4, minW: 3 },
-  { i: "alerts",      x: 5, y: 34, w: 3,  h: 7, minH: 4, minW: 2 },
-  { i: "activity",    x: 8, y: 34, w: 4,  h: 7, minH: 4, minW: 3 },
+  { i: "hero-tiles",  x: 0, y: 0,  w: 12, h: 2, minH: 2, minW: 6 },
+  { i: "cross-bridge",x: 0, y: 2,  w: 12, h: 5, minH: 3, minW: 6 },
+  { i: "team-pins",   x: 0, y: 7,  w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "hero-banner", x: 0, y: 10, w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "standup",     x: 0, y: 13, w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "threat",      x: 0, y: 16, w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "sla-radar",   x: 0, y: 18, w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "blueprint",   x: 0, y: 21, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "churn",       x: 6, y: 21, w: 6,  h: 5, minH: 3, minW: 3 },
+  { i: "huntress",    x: 0, y: 26, w: 12, h: 4, minH: 2, minW: 4 },
+  { i: "attention",   x: 0, y: 30, w: 12, h: 2, minH: 1, minW: 4 },
+  { i: "ticket-trend",x: 0, y: 32, w: 8,  h: 6, minH: 4, minW: 4 },
+  { i: "fleet-health",x: 8, y: 32, w: 4,  h: 6, minH: 4, minW: 3 },
+  { i: "ops-insights",x: 0, y: 38, w: 12, h: 6, minH: 3, minW: 6 },
+  { i: "open-tix",    x: 0, y: 44, w: 5,  h: 7, minH: 4, minW: 3 },
+  { i: "alerts",      x: 5, y: 44, w: 3,  h: 7, minH: 4, minW: 2 },
+  { i: "activity",    x: 8, y: 44, w: 4,  h: 7, minH: 4, minW: 3 },
 ];
 
-const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v1";
+const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v2";
+const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v2";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
@@ -125,15 +154,51 @@ export default function DashboardPage() {
     } catch { /* ignore */ }
     return { lg: DEFAULT_LAYOUT_LG };
   });
+  const [hiddenWidgets, setHiddenWidgets] = useState(() => {
+    try {
+      const saved = localStorage.getItem(HIDDEN_STORAGE_KEY);
+      if (saved) return new Set(JSON.parse(saved));
+    } catch { /* ignore */ }
+    return new Set();
+  });
+  const persistHidden = (next) => {
+    try { localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify([...next])); } catch { /* */ }
+  };
+  const hideWidget = (id) => {
+    setHiddenWidgets(prev => {
+      const next = new Set(prev); next.add(id); persistHidden(next); return next;
+    });
+    toast.success(`${WIDGET_META[id]?.label || id} hidden`, { description: "Re-add it from + Add Widget" });
+  };
+  const showWidget = (id) => {
+    setHiddenWidgets(prev => {
+      const next = new Set(prev); next.delete(id); persistHidden(next); return next;
+    });
+    toast.success(`${WIDGET_META[id]?.label || id} restored`);
+  };
   const onLayoutChange = (_currentLayout, allLayouts) => {
     setLayouts(allLayouts);
     try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(allLayouts)); } catch { /* */ }
   };
   const resetLayout = () => {
     setLayouts({ lg: DEFAULT_LAYOUT_LG });
-    try { localStorage.removeItem(LAYOUT_STORAGE_KEY); } catch { /* */ }
+    setHiddenWidgets(new Set());
+    try {
+      localStorage.removeItem(LAYOUT_STORAGE_KEY);
+      localStorage.removeItem(HIDDEN_STORAGE_KEY);
+    } catch { /* */ }
     toast.success("Dashboard layout reset to defaults");
   };
+
+  // Filter the visible layout by removing hidden widget entries
+  const visibleLayouts = (() => {
+    const filtered = {};
+    Object.keys(layouts).forEach(bp => {
+      filtered[bp] = (layouts[bp] || []).filter(l => !hiddenWidgets.has(l.i));
+    });
+    return filtered;
+  })();
+  const hiddenList = Object.keys(WIDGET_META).filter(id => hiddenWidgets.has(id));
 
   useEffect(() => { fetchDashboardData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -213,80 +278,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* HeroTile Command Strip — same as every other module */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} testId="bridge-tile-tickets" />
-        <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" testId="bridge-tile-online" />
-        <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} testId="bridge-tile-offline" />
-        <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} testId="bridge-tile-critical" />
-        <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" testId="bridge-tile-clients" />
-        <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="bridge-tile-mrr" />
-      </div>
-
-      {/* Cross-module Command Bridge — top "Needs Attention" from each module */}
-      <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]" data-testid="command-bridge">
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-violet-400" />Cross-Module Bridge</CardTitle>
-          <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">live · auto-refresh 60s</span>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Tickets column */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] uppercase tracking-widest font-mono text-cyan-300 flex items-center gap-1 mb-1"><Ticket className="w-3 h-3" />Tickets</div>
-            {criticalTickets.slice(0, 3).map(t => (
-              <button key={t.id} onClick={() => navigate("/tickets")} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-tk-${t.id}`}>
-                <div className="text-xs font-medium text-rose-300 truncate">{t.title}</div>
-                <div className="text-[10px] text-zinc-500 truncate">#{t.ticket_number} · {t.client_name}</div>
-              </button>
-            ))}
-            {criticalTickets.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No critical tickets</p>}
-          </div>
-
-          {/* Devices column */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] uppercase tracking-widest font-mono text-emerald-300 flex items-center gap-1 mb-1"><Monitor className="w-3 h-3" />Devices</div>
-            {offlineDevices.slice(0, 3).map(d => (
-              <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
-                <div className="text-xs font-medium text-rose-300 truncate">{d.name || d.hostname}</div>
-                <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · offline</div>
-              </button>
-            ))}
-            {warningDevices.slice(0, Math.max(0, 3 - offlineDevices.length)).map(d => (
-              <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-amber-500/30 bg-amber-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
-                <div className="text-xs font-medium text-amber-300 truncate">{d.name || d.hostname}</div>
-                <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · warning</div>
-              </button>
-            ))}
-            {offlineDevices.length === 0 && warningDevices.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">All devices nominal</p>}
-          </div>
-
-          {/* Alerts column */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] uppercase tracking-widest font-mono text-amber-300 flex items-center gap-1 mb-1"><AlertCircle className="w-3 h-3" />Alerts</div>
-            {(alerts || []).slice(0, 3).map(a => (
-              <button key={a.id} onClick={() => navigate("/security")} className={`w-full text-left px-2.5 py-1.5 rounded border ${a.severity === "critical" ? "border-rose-500/30 bg-rose-500/5" : "border-amber-500/30 bg-amber-500/5"} hover:brightness-125 transition`} data-testid={`bridge-al-${a.id}`}>
-                <div className={`text-xs font-medium truncate ${a.severity === "critical" ? "text-rose-300" : "text-amber-300"}`}>{a.title || a.message}</div>
-                <div className="text-[10px] text-zinc-500 truncate uppercase tracking-widest">{a.severity || "info"}</div>
-              </button>
-            ))}
-            {(alerts || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No active alerts</p>}
-          </div>
-
-          {/* Predictions / Compliance column */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] uppercase tracking-widest font-mono text-violet-300 flex items-center gap-1 mb-1"><Zap className="w-3 h-3" />Predictions</div>
-            {(mspIntel?.urgentPredictions || []).slice(0, 3).map((p, i) => (
-              <button key={`p-${i}`} onClick={() => navigate("/predictive-failure")} className="w-full text-left px-2.5 py-1.5 rounded border border-violet-500/30 bg-violet-500/5 hover:brightness-125 transition" data-testid={`bridge-pred-${i}`}>
-                <div className="text-xs font-medium text-violet-300 truncate">{p.device_name || "Device"}</div>
-                <div className="text-[10px] text-zinc-500 truncate">{p.failure_type || "predicted failure"} · {p.days_until_failure}d</div>
-              </button>
-            ))}
-            {(mspIntel?.urgentPredictions || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No urgent predictions</p>}
-          </div>
-        </CardContent>
-      </Card>
-
-      <TeamPinsStrip />
+      {/* HeroTile Command Strip + Cross-Module Bridge + Team Pins now live INSIDE the customisable widget grid below */}
       {/* Quick Search Modal */}
       {searchOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]" onClick={() => setSearchOpen(false)}>
@@ -330,12 +322,45 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2 text-[11px] text-zinc-500">
           {editMode ? (
-            <><Unlock className="w-3 h-3 text-violet-400" /><span className="text-violet-300 font-medium">Edit mode active</span> — drag widgets by their header, resize from the bottom-right corner</>
+            <><Unlock className="w-3 h-3 text-violet-400" /><span className="text-violet-300 font-medium">Edit mode active</span> — drag widgets, resize from the bottom-right, or click <X className="inline w-3 h-3 mx-0.5 text-rose-400" /> to hide{hiddenWidgets.size > 0 ? <> · <span className="text-amber-300">{hiddenWidgets.size} hidden</span></> : null}</>
           ) : (
-            <><Lock className="w-3 h-3" />Layout locked · click <strong className="text-zinc-300">Customise</strong> to rearrange</>
+            <><Lock className="w-3 h-3" />Layout locked · click <strong className="text-zinc-300">Customise</strong> to rearrange{hiddenWidgets.size > 0 ? <> · <span className="text-amber-300/80">{hiddenWidgets.size} widget{hiddenWidgets.size > 1 ? "s" : ""} hidden</span></> : null}</>
           )}
         </div>
         <div className="flex gap-2">
+          {editMode && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-7 text-[10px] text-emerald-300 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20" data-testid="add-widget-btn">
+                  <PlusCircle className="w-3 h-3 mr-1" />Add Widget{hiddenList.length > 0 ? ` (${hiddenList.length})` : ""}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-zinc-500">
+                  {hiddenList.length === 0 ? "All widgets visible" : `${hiddenList.length} hidden widget${hiddenList.length > 1 ? "s" : ""}`}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {hiddenList.length === 0 ? (
+                  <div className="px-3 py-4 text-[11px] text-zinc-500 text-center">
+                    <LayoutGrid className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+                    Hide widgets via the <X className="inline w-3 h-3 mx-0.5 text-rose-400" /> button to see them here
+                  </div>
+                ) : (
+                  hiddenList.map(id => {
+                    const meta = WIDGET_META[id];
+                    const Icon = meta?.icon || LayoutGrid;
+                    return (
+                      <DropdownMenuItem key={id} onClick={() => showWidget(id)} className="cursor-pointer" data-testid={`add-widget-${id}`}>
+                        <Icon className="w-3.5 h-3.5 mr-2 text-violet-400" />
+                        <span className="flex-1 text-xs">{meta?.label || id}</span>
+                        <Plus className="w-3 h-3 text-emerald-400" />
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {editMode && (
             <Button size="sm" variant="ghost" className="h-7 text-[10px] text-zinc-400" onClick={resetLayout} data-testid="reset-layout-btn">
               <RotateCcw className="w-3 h-3 mr-1" />Reset
@@ -350,7 +375,7 @@ export default function DashboardPage() {
       {/* Draggable / resizable widget grid */}
       <ResponsiveGridLayout
         className={`layout ${editMode ? "nx-edit-mode" : ""}`}
-        layouts={layouts}
+        layouts={visibleLayouts}
         breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
         cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
         rowHeight={48}
@@ -359,11 +384,95 @@ export default function DashboardPage() {
         isDraggable={editMode}
         isResizable={editMode}
         onLayoutChange={onLayoutChange}
+        draggableCancel=".nx-widget-hide,button,a,input,kbd"
         useCSSTransforms
         compactType="vertical"
       >
 
+      {!hiddenWidgets.has("hero-tiles") && (
+      <div key="hero-tiles" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("hero-tiles"); }} className="nx-widget-hide" data-testid="hide-widget-hero-tiles" aria-label="Hide Hero Tile Strip"><X className="w-3 h-3" /></button>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
+          <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} testId="bridge-tile-tickets" />
+          <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" testId="bridge-tile-online" />
+          <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} testId="bridge-tile-offline" />
+          <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} testId="bridge-tile-critical" />
+          <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" testId="bridge-tile-clients" />
+          <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="bridge-tile-mrr" />
+        </div>
+      </div>
+      )}
+
+      {!hiddenWidgets.has("cross-bridge") && (
+      <div key="cross-bridge" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("cross-bridge"); }} className="nx-widget-hide" data-testid="hide-widget-cross-bridge" aria-label="Hide Cross-Module Bridge"><X className="w-3 h-3" /></button>
+        <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02] h-full" data-testid="command-bridge">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-violet-400" />Cross-Module Bridge</CardTitle>
+            <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">live · auto-refresh 60s</span>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-widest font-mono text-cyan-300 flex items-center gap-1 mb-1"><Ticket className="w-3 h-3" />Tickets</div>
+              {criticalTickets.slice(0, 3).map(t => (
+                <button key={t.id} onClick={() => navigate("/tickets")} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-tk-${t.id}`}>
+                  <div className="text-xs font-medium text-rose-300 truncate">{t.title}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">#{t.ticket_number} · {t.client_name}</div>
+                </button>
+              ))}
+              {criticalTickets.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No critical tickets</p>}
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-widest font-mono text-emerald-300 flex items-center gap-1 mb-1"><Monitor className="w-3 h-3" />Devices</div>
+              {offlineDevices.slice(0, 3).map(d => (
+                <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-rose-500/30 bg-rose-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
+                  <div className="text-xs font-medium text-rose-300 truncate">{d.name || d.hostname}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · offline</div>
+                </button>
+              ))}
+              {warningDevices.slice(0, Math.max(0, 3 - offlineDevices.length)).map(d => (
+                <button key={d.id} onClick={() => navigate(`/devices/${d.id}`)} className="w-full text-left px-2.5 py-1.5 rounded border border-amber-500/30 bg-amber-500/5 hover:brightness-125 transition" data-testid={`bridge-dev-${d.id}`}>
+                  <div className="text-xs font-medium text-amber-300 truncate">{d.name || d.hostname}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">{d.client_name} · warning</div>
+                </button>
+              ))}
+              {offlineDevices.length === 0 && warningDevices.length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">All devices nominal</p>}
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-widest font-mono text-amber-300 flex items-center gap-1 mb-1"><AlertCircle className="w-3 h-3" />Alerts</div>
+              {(alerts || []).slice(0, 3).map(a => (
+                <button key={a.id} onClick={() => navigate("/security")} className={`w-full text-left px-2.5 py-1.5 rounded border ${a.severity === "critical" ? "border-rose-500/30 bg-rose-500/5" : "border-amber-500/30 bg-amber-500/5"} hover:brightness-125 transition`} data-testid={`bridge-al-${a.id}`}>
+                  <div className={`text-xs font-medium truncate ${a.severity === "critical" ? "text-rose-300" : "text-amber-300"}`}>{a.title || a.message}</div>
+                  <div className="text-[10px] text-zinc-500 truncate uppercase tracking-widest">{a.severity || "info"}</div>
+                </button>
+              ))}
+              {(alerts || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No active alerts</p>}
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-widest font-mono text-violet-300 flex items-center gap-1 mb-1"><Zap className="w-3 h-3" />Predictions</div>
+              {(mspIntel?.urgentPredictions || []).slice(0, 3).map((p, i) => (
+                <button key={`p-${i}`} onClick={() => navigate("/predictive-failure")} className="w-full text-left px-2.5 py-1.5 rounded border border-violet-500/30 bg-violet-500/5 hover:brightness-125 transition" data-testid={`bridge-pred-${i}`}>
+                  <div className="text-xs font-medium text-violet-300 truncate">{p.device_name || "Device"}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">{p.failure_type || "predicted failure"} · {p.days_until_failure}d</div>
+                </button>
+              ))}
+              {(mspIntel?.urgentPredictions || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No urgent predictions</p>}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      )}
+
+      {!hiddenWidgets.has("team-pins") && (
+      <div key="team-pins" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("team-pins"); }} className="nx-widget-hide" data-testid="hide-widget-team-pins" aria-label="Hide Team Pins"><X className="w-3 h-3" /></button>
+        <TeamPinsStrip />
+      </div>
+      )}
+
+      {!hiddenWidgets.has("hero-banner") && (
       <div key="hero-banner" className="nx-widget-card">
+      <button onClick={(e) => { e.stopPropagation(); hideWidget("hero-banner"); }} className="nx-widget-hide" data-testid="hide-widget-hero-banner" aria-label="Hide Welcome Banner"><X className="w-3 h-3" /></button>
       <div className="relative overflow-hidden rounded-2xl border border-border/30 h-full" data-testid="dashboard-hero">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/8 via-blue-500/5 to-violet-500/8" />
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px)" }} />
@@ -385,31 +494,52 @@ export default function DashboardPage() {
         </div>
       </div>
       </div>
+      )}
 
       {/* Morning Standup Digest */}
+      {!hiddenWidgets.has("standup") && (
       <div key="standup" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("standup"); }} className="nx-widget-hide" data-testid="hide-widget-standup" aria-label="Hide Standup"><X className="w-3 h-3" /></button>
         <StandupDigestBanner />
       </div>
+      )}
+      {!hiddenWidgets.has("threat") && (
       <div key="threat" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("threat"); }} className="nx-widget-hide" data-testid="hide-widget-threat" aria-label="Hide Threat Radar"><X className="w-3 h-3" /></button>
         <ThreatRadarTicker />
       </div>
+      )}
+      {!hiddenWidgets.has("sla-radar") && (
       <div key="sla-radar" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("sla-radar"); }} className="nx-widget-hide" data-testid="hide-widget-sla-radar" aria-label="Hide SLA Radar"><X className="w-3 h-3" /></button>
         <SLARadarTile />
       </div>
+      )}
+      {!hiddenWidgets.has("blueprint") && (
       <div key="blueprint" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("blueprint"); }} className="nx-widget-hide" data-testid="hide-widget-blueprint" aria-label="Hide Blueprint Insights"><X className="w-3 h-3" /></button>
         <BlueprintInsightsTile />
       </div>
+      )}
+      {!hiddenWidgets.has("churn") && (
       <div key="churn" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("churn"); }} className="nx-widget-hide" data-testid="hide-widget-churn" aria-label="Hide Churn Risk"><X className="w-3 h-3" /></button>
         <ChurnRiskTile />
       </div>
+      )}
 
       {/* Huntress Security Snapshot */}
+      {!hiddenWidgets.has("huntress") && (
       <div key="huntress" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("huntress"); }} className="nx-widget-hide" data-testid="hide-widget-huntress" aria-label="Hide Huntress Snapshot"><X className="w-3 h-3" /></button>
         <HuntressSummaryCard compact />
       </div>
+      )}
 
       {/* Attention Banner */}
+      {!hiddenWidgets.has("attention") && (
       <div key="attention" className="nx-widget-card">
+      <button onClick={(e) => { e.stopPropagation(); hideWidget("attention"); }} className="nx-widget-hide" data-testid="hide-widget-attention" aria-label="Hide Attention Banner"><X className="w-3 h-3" /></button>
       {attentionItems.length > 0 ? (
         <div className="flex gap-2 flex-wrap" data-testid="attention-banner">
           {attentionItems.map((item, i) => (
@@ -427,9 +557,12 @@ export default function DashboardPage() {
         </div>
       )}
       </div>
+      )}
 
       {/* Ticket Volume Chart */}
+      {!hiddenWidgets.has("ticket-trend") && (
       <div key="ticket-trend" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("ticket-trend"); }} className="nx-widget-hide" data-testid="hide-widget-ticket-trend" aria-label="Hide Ticket Volume"><X className="w-3 h-3" /></button>
         <Card className="h-full overflow-hidden" data-testid="ticket-trend-chart">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Activity className="w-4 h-4 text-blue-400" />Ticket Volume (7 Days)</CardTitle>
@@ -456,9 +589,12 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Fleet Health */}
+      {!hiddenWidgets.has("fleet-health") && (
       <div key="fleet-health" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("fleet-health"); }} className="nx-widget-hide" data-testid="hide-widget-fleet-health" aria-label="Hide Fleet Health"><X className="w-3 h-3" /></button>
         <Card className="h-full" data-testid="device-health-card">
           <CardHeader className="pb-0">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Cpu className="w-4 h-4 text-emerald-400" />Fleet Health</CardTitle>
@@ -503,9 +639,12 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Operational Insights */}
+      {!hiddenWidgets.has("ops-insights") && (
       <div key="ops-insights" className="nx-widget-card">
+      <button onClick={(e) => { e.stopPropagation(); hideWidget("ops-insights"); }} className="nx-widget-hide" data-testid="hide-widget-ops-insights" aria-label="Hide Operational Insights"><X className="w-3 h-3" /></button>
       {mspIntel && (
         <details className="group" open data-testid="ops-insights">
           <summary className="cursor-pointer flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors py-1">
@@ -588,9 +727,12 @@ export default function DashboardPage() {
         </details>
       )}
       </div>
+      )}
 
       {/* Bottom Row: Tickets + Alerts + Activity */}
+      {!hiddenWidgets.has("open-tix") && (
       <div key="open-tix" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("open-tix"); }} className="nx-widget-hide" data-testid="hide-widget-open-tix" aria-label="Hide Open Tickets"><X className="w-3 h-3" /></button>
         <Card className="h-full" data-testid="open-tickets-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Ticket className="w-4 h-4 text-blue-400" />Open Tickets</CardTitle>
@@ -614,8 +756,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {!hiddenWidgets.has("alerts") && (
       <div key="alerts" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("alerts"); }} className="nx-widget-hide" data-testid="hide-widget-alerts" aria-label="Hide Alerts"><X className="w-3 h-3" /></button>
         <Card className="h-full" data-testid="alerts-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className={`w-4 h-4 ${alerts.length > 0 ? "text-amber-400" : "text-muted-foreground"}`} />Alerts</CardTitle>
@@ -635,8 +780,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {!hiddenWidgets.has("activity") && (
       <div key="activity" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("activity"); }} className="nx-widget-hide" data-testid="hide-widget-activity" aria-label="Hide Activity Feed"><X className="w-3 h-3" /></button>
         <Card className="h-full" data-testid="activity-feed-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2"><Zap className="w-4 h-4 text-cyan-400" />Activity</CardTitle>
@@ -668,6 +816,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       </ResponsiveGridLayout>
     </div>

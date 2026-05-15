@@ -61,5 +61,34 @@
   display: flex;
   flex-direction: column;
   overflow: auto;
+  position: relative;
 }
 .nx-widget-card > * { min-height: 0; }
+
+/* Hide button overlay — only visible in edit mode */
+.nx-widget-hide {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 20;
+  width: 22px;
+  height: 22px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(244, 63, 94, 0.15);
+  color: rgb(252, 165, 165);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  border-radius: 9999px;
+  backdrop-filter: blur(6px);
+  transition: all 120ms ease;
+  cursor: pointer;
+}
+.nx-widget-hide:hover {
+  background: rgba(244, 63, 94, 0.85);
+  color: #fff;
+  transform: scale(1.1);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
+}
+.nx-edit-mode .nx-widget-hide { display: flex; }
+.nx-edit-mode .nx-widget-card { padding-top: 2px; }

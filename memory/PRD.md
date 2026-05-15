@@ -1715,3 +1715,23 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
 ### Tests
 - Smoke-test screenshots: locked view + edit-mode view both render correctly (`14` `.react-grid-item` nodes detected, edit mode banner active, Lock/Reset/Customise buttons all wired).
 - Lint clean.
+
+## 2026-05-15 (cont.) — Dashboard: Full-page Customisation + Hide/Show Widgets
+
+### What shipped
+**`/app/frontend/src/pages/DashboardPage.jsx` + `/app/frontend/src/styles/dashboard-grid.css`:**
+- Extended the customisable grid to cover the **entire** dashboard: Hero Tile Strip, Cross-Module Bridge, and Team Pins / NOC Strip are now widgets inside `ResponsiveGridLayout` (17 widgets total, up from 14).
+- **Per-widget hide button** (red X overlay, top-right) visible in edit mode. `draggableCancel=".nx-widget-hide,button,a,input,kbd"` prevents drag conflicts.
+- **"+ Add Widget" dropdown** in the edit bar lists all hidden widgets with their icon + label; one click restores them. Counter on the button (`Add Widget (N)`) shows how many are hidden.
+- `hiddenWidgets` Set persisted in `localStorage` under `nx-dashboard-hidden-v2`. `Reset` clears both layout and hidden state.
+- Layout key bumped to `nx-dashboard-layout-v2` so existing users get the new 17-widget default rather than colliding with old saved positions.
+- `WIDGET_META` registry maps widget id → human label + icon, single source of truth for the picker and toasts.
+
+### Tests
+- Browser-tested end-to-end via screenshot tool:
+  - Entered edit mode → red X hide button visible on every widget
+  - Hid `hero-banner` + `activity` → grid recomputed to 15 visible
+  - "Add Widget (2)" dropdown opened correctly, showing "Welcome Banner" and "Activity Feed"
+  - Clicking "Welcome Banner" restored it → grid returned to 16 visible
+  - Toast notifications confirmed hide/restore actions
+- Lint clean.
