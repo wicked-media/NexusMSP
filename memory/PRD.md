@@ -1762,3 +1762,30 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
   - LIST view: 5 widgets visible by default → Customise → hide smart-inbox → grid drops to 4 widgets → "Add Widget (1)" picker shows the hidden one → restore works.
   - DETAIL view: opened a ticket → clicked Layout → confirmed 10 toggleable panels with icons + "Show all" button.
 - Lint clean, webpack compiled with no errors.
+
+## 2026-05-15 (cont. 3) — Tickets: Service Tiers + ITIL Categorisation Widgets
+
+### What shipped
+**Backend:**
+- `/app/backend/app/routers/service_tiers.py` — CRUD for tiered service plans + auto-seeded defaults (SMB Bronze · Silver · Gold · Platinum · Diamond) with colour, icon, response/resolution SLA minutes, features list, description. Admin-editable. Routes: `GET/POST/PATCH/DELETE /api/service-tiers`, `PATCH /api/clients/{id}/service-tier`, `GET /api/tickets/{id}/service-tier`.
+- `/app/backend/app/routers/ticket_categorisation.py` — ITIL-style 5×5 Urgency × Impact → Priority matrix with auto-recompute. Routes: `GET /api/ticket-priority-matrix`, `PATCH /api/tickets/{id}/categorisation`. Stores category/issue_type/urgency/impact on the ticket and overwrites priority via the matrix.
+
+**Frontend:**
+- `/app/frontend/src/components/tickets/TicketServiceTierWidget.jsx` — sidebar panel with tier-coloured gradient, SLA targets (Response · Resolution), feature checklist, inline tier reassignment (admin only). Exports `ServiceTierChip` for inline header use.
+- `/app/frontend/src/components/tickets/TicketCategorisationWidget.jsx` — Category/Issue Type dropdowns (driven by existing ticket-categories config), Urgency 1-5 + Impact 1-5 selectors, auto-computed Priority badge with red glow, expandable 5×5 priority heat-map preview.
+- Wired both into `TicketsPage.jsx` detail view sidebar (top of right rail).
+- Inline `ServiceTierChip` at the start of the Layout toolbar row so techs see tier the moment they open a ticket.
+- Layout dropdown extended from 10 → 12 toggleable panels (Service Tier + Categorisation added at the top, with icons + tooltip).
+- `panelVisible` defaults merged so existing users get the new panels enabled by default.
+
+### Defaults
+SMB Bronze (24h / 5d) → Silver (8h / 3d) → Gold (4h / 2d) → Platinum (1h / 1d) → Diamond (15m / 4h).
+Admins can add/edit/deactivate tiers via the API (Settings UI is a separate follow-up).
+
+### Tests
+- Backend: `curl /api/service-tiers` returns 5 default tiers; `/api/ticket-priority-matrix` returns the full 5×5 matrix with correct ITIL mapping.
+- Frontend (browser-tested):
+  - Assigned Acme Corp the "SMB Gold" tier inline — full tier widget rendered with response 4h / resolution 2d / 5 features.
+  - Set Urgency=5 × Impact=5 → auto-priority computed as `critical` → ticket header priority badge updated to "Critical" automatically with red glow.
+  - Toasts: "Service tier updated", "Categorisation updated".
+- Lint clean. Webpack compiled clean.

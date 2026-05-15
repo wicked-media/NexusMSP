@@ -23,6 +23,8 @@ import TicketDeviceCockpit from "@/components/tickets/TicketDeviceCockpit";
 import TicketDeviceList from "@/components/tickets/TicketDeviceList";
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
+import TicketServiceTierWidget, { ServiceTierChip } from "@/components/tickets/TicketServiceTierWidget";
+import TicketCategorisationWidget from "@/components/tickets/TicketCategorisationWidget";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
   GroupBySelector, useGroupedTickets,
@@ -105,6 +107,8 @@ const TICKETS_LIST_DEFAULT_LAYOUT = [
 
 // ─── Tickets DETAIL view: panel visibility keys ───────────────────────────
 const TICKETS_DETAIL_PANELS = [
+  { k: "serviceTier",   label: "Service Tier",          icon: Shield },
+  { k: "categorisation", label: "Categorisation (ITIL)", icon: Settings2 },
   { k: "aiAnalysis",    label: "AI Diagnosis",          icon: Brain },
   { k: "related",       label: "Related Tickets",       icon: Link2 },
   { k: "copilot",       label: "AI Co-Pilot Strip",     icon: Sparkles },
@@ -179,10 +183,10 @@ export default function TicketsPage() {
       const raw = localStorage.getItem("nexus.tickets.panels");
       if (raw) {
         const parsed = JSON.parse(raw);
-        return { aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, ...parsed };
+        return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, ...parsed };
       }
     } catch {}
-    return { aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
+    return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
   });
   useEffect(() => {
     try { localStorage.setItem("nexus.tickets.panels", JSON.stringify(panelVisible)); } catch {}
@@ -1388,7 +1392,9 @@ export default function TicketsPage() {
         />
 
         {/* Layout customisation toolbar */}
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-between gap-1.5 flex-wrap">
+          <ServiceTierChip ticketId={viewingTicket.id} token={token} />
+          <div className="flex items-center gap-1.5 ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5" data-testid="layout-toggle">
@@ -1400,7 +1406,7 @@ export default function TicketsPage() {
                 <span>Show panels</span>
                 <button
                   type="button"
-                  onClick={() => setPanelVisible({ aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true })}
+                  onClick={() => setPanelVisible({ serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true })}
                   className="text-[9px] text-emerald-400 hover:text-emerald-300 normal-case tracking-normal"
                   data-testid="layout-show-all"
                 >
@@ -1423,6 +1429,7 @@ export default function TicketsPage() {
               })}
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </div>
 
         {/* AI Co-Pilot Strip — heuristic next-best-action + optional AI summary */}
@@ -1857,6 +1864,21 @@ export default function TicketsPage() {
 
           {/* Right sidebar */}
           <div className="space-y-4">
+            {panelVisible.serviceTier && (
+              <TicketServiceTierWidget
+                ticketId={viewingTicket.id}
+                clientId={viewingTicket.client_id}
+                token={token}
+                isAdmin={user?.role === "admin" || user?.is_admin}
+              />
+            )}
+            {panelVisible.categorisation && (
+              <TicketCategorisationWidget
+                ticket={viewingTicket}
+                token={token}
+                onUpdated={(updated) => setViewingTicket(t => ({ ...t, ...updated }))}
+              />
+            )}
             <Card>
               <CardContent className="pt-4 space-y-4">
                 <div><Label className="text-xs text-muted-foreground">Status</Label>
