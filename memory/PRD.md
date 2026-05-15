@@ -1735,3 +1735,30 @@ Slack & Teams URL inputs · `notify_on` dropdown (Every broadcast / Only failure
   - Clicking "Welcome Banner" restored it → grid returned to 16 visible
   - Toast notifications confirmed hide/restore actions
 - Lint clean.
+
+## 2026-05-15 (cont. 2) — Tickets Page: Customisable Widget Layouts
+
+### What shipped
+**Reusable hook** (`/app/frontend/src/hooks/useWidgetGrid.jsx`):
+- Extracted dashboard widget logic into a single hook `useWidgetGrid({ storageKey, hiddenKey, defaultLayout, widgetMeta, label })`.
+- Returns: editMode, hide/show widget helpers, visibleLayouts (filtered for hidden), reset, `HideBtn` component, and `EditBar` component (handles Customise/Lock/Reset/Add Widget dropdown).
+- Single source of truth for all customisable grids.
+
+**Tickets LIST view** (`TicketsPage.jsx`):
+- Hero Tile strip, Smart Inbox, Type Filter tabs, Search & Filter bar, Saved Views toolbar are now 5 widgets inside a `react-grid-layout` ResponsiveGridLayout.
+- Drag-and-drop, resize, hide (red X), and "+ Add Widget" picker all work via shared hook.
+- Layout persisted under `nx-tickets-list-layout-v1`, hidden state under `nx-tickets-list-hidden-v1`.
+- Smart Inbox renders an "All clear" placeholder when no items need attention (so the widget tile is never empty in edit mode).
+- Bulk Actions and the main ticket list remain fixed below the grid (intentional — these are core workflow surfaces).
+
+**Tickets DETAIL view** (`TicketsPage.jsx`):
+- Extended the existing "Layout" dropdown from 4 toggles to 10 panel toggles: AI Diagnosis, Related Tickets, AI Co-Pilot Strip, SLA Burn-down, Workflow Controls, Live Device Cockpit, Run Scripts on Device, Quick Actions, Device Info Panel, AI Enrichment Rail.
+- Each toggle now has its own icon for quick scanning + "Show all" button to restore everything.
+- Wrapped AI Analysis, Related Tickets, Quick Actions, Device Info, Run Scripts, AI Enrichment Rail in `{panelVisible.X && ...}` conditionals (the existing system).
+- `panelVisible` state defaults merged so existing users get the new keys automatically.
+
+### Tests
+- Browser-tested end-to-end:
+  - LIST view: 5 widgets visible by default → Customise → hide smart-inbox → grid drops to 4 widgets → "Add Widget (1)" picker shows the hidden one → restore works.
+  - DETAIL view: opened a ticket → clicked Layout → confirmed 10 toggleable panels with icons + "Show all" button.
+- Lint clean, webpack compiled with no errors.

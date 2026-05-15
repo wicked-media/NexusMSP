@@ -79,6 +79,43 @@ import {
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
+import { Responsive, WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "@/styles/dashboard-grid.css";
+import { useWidgetGrid } from "@/hooks/useWidgetGrid";
+
+const TicketsResponsiveGridLayout = WidthProvider(Responsive);
+
+// ─── Tickets LIST view widget metadata ────────────────────────────────────
+const TICKETS_LIST_WIDGET_META = {
+  "hero-tiles":  { label: "Hero Metric Strip", icon: Sparkles },
+  "smart-inbox": { label: "Smart Inbox (Needs Attention)", icon: AlertTriangle },
+  "type-tabs":   { label: "Type Filter Tabs", icon: Ticket },
+  "filters":     { label: "Search & Filter Bar", icon: Search },
+  "toolbar":     { label: "Saved Views · Density · Group By", icon: Settings2 },
+};
+const TICKETS_LIST_DEFAULT_LAYOUT = [
+  { i: "hero-tiles",  x: 0, y: 0, w: 12, h: 2, minH: 2, minW: 6 },
+  { i: "smart-inbox", x: 0, y: 2, w: 12, h: 4, minH: 2, minW: 4 },
+  { i: "type-tabs",   x: 0, y: 6, w: 12, h: 1, minH: 1, minW: 4 },
+  { i: "filters",     x: 0, y: 7, w: 12, h: 1, minH: 1, minW: 4 },
+  { i: "toolbar",     x: 0, y: 8, w: 12, h: 2, minH: 1, minW: 4 },
+];
+
+// ─── Tickets DETAIL view: panel visibility keys ───────────────────────────
+const TICKETS_DETAIL_PANELS = [
+  { k: "aiAnalysis",    label: "AI Diagnosis",          icon: Brain },
+  { k: "related",       label: "Related Tickets",       icon: Link2 },
+  { k: "copilot",       label: "AI Co-Pilot Strip",     icon: Sparkles },
+  { k: "burndown",      label: "SLA Burn-down",         icon: Clock },
+  { k: "workflow",      label: "Workflow Controls",     icon: Settings2 },
+  { k: "cockpit",       label: "Live Device Cockpit",   icon: MonitorCheck },
+  { k: "runScripts",    label: "Run Scripts on Device", icon: Terminal },
+  { k: "quickActions",  label: "Quick Actions",         icon: Zap },
+  { k: "devicePanel",   label: "Device Info Panel",     icon: Cpu },
+  { k: "enrichment",    label: "AI Enrichment Rail",    icon: Sparkles },
+];
 
 
 export default function TicketsPage() {
@@ -98,6 +135,15 @@ export default function TicketsPage() {
   });
   useEffect(() => { try { localStorage.setItem("nexus.tickets.groupBy", groupBy); } catch {} }, [groupBy]);
   const [activeViewId, setActiveViewId] = useState(null);
+
+  // ─── List-view widget grid (drag/drop, hide, add) ──────────────────────
+  const listGrid = useWidgetGrid({
+    storageKey: "nx-tickets-list-layout-v1",
+    hiddenKey:  "nx-tickets-list-hidden-v1",
+    defaultLayout: TICKETS_LIST_DEFAULT_LAYOUT,
+    widgetMeta: TICKETS_LIST_WIDGET_META,
+    label: "Tickets",
+  });
 
   const applyView = (v) => {
     if (!v) { setActiveViewId(null); return; }
@@ -131,9 +177,12 @@ export default function TicketsPage() {
   const [panelVisible, setPanelVisible] = useState(() => {
     try {
       const raw = localStorage.getItem("nexus.tickets.panels");
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, ...parsed };
+      }
     } catch {}
-    return { copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
+    return { aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
   });
   useEffect(() => {
     try { localStorage.setItem("nexus.tickets.panels", JSON.stringify(panelVisible)); } catch {}
@@ -1346,24 +1395,32 @@ export default function TicketsPage() {
                 <Settings2 className="w-3 h-3 mr-1" />Layout
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52" data-testid="layout-menu">
-              <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest font-mono text-muted-foreground">Show panels</div>
-              {[
-                { k: "copilot",  label: "AI Co-Pilot" },
-                { k: "burndown", label: "SLA Burn-down" },
-                { k: "workflow", label: "Workflow" },
-                { k: "cockpit",  label: "Device Cockpit" },
-              ].map(p => (
-                <DropdownMenuCheckboxItem
-                  key={p.k}
-                  checked={!!panelVisible[p.k]}
-                  onCheckedChange={() => togglePanel(p.k)}
-                  data-testid={`layout-${p.k}`}
-                  className="text-xs"
+            <DropdownMenuContent align="end" className="w-60" data-testid="layout-menu">
+              <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest font-mono text-muted-foreground flex items-center justify-between">
+                <span>Show panels</span>
+                <button
+                  type="button"
+                  onClick={() => setPanelVisible({ aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true })}
+                  className="text-[9px] text-emerald-400 hover:text-emerald-300 normal-case tracking-normal"
+                  data-testid="layout-show-all"
                 >
-                  {p.label}
-                </DropdownMenuCheckboxItem>
-              ))}
+                  Show all
+                </button>
+              </div>
+              {TICKETS_DETAIL_PANELS.map(p => {
+                const Icon = p.icon;
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={p.k}
+                    checked={!!panelVisible[p.k]}
+                    onCheckedChange={() => togglePanel(p.k)}
+                    data-testid={`layout-${p.k}`}
+                    className="text-xs"
+                  >
+                    <Icon className="w-3 h-3 mr-1.5 text-violet-400" />{p.label}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1489,7 +1546,7 @@ export default function TicketsPage() {
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
             {/* AI ANALYSIS PANEL */}
-            {aiAnalysis && (
+            {panelVisible.aiAnalysis && aiAnalysis && (
               <Card className="border-purple-500/20 bg-purple-500/[0.02]" data-testid="ai-analysis-panel">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
@@ -1556,7 +1613,7 @@ export default function TicketsPage() {
             )}
 
             {/* Related Tickets — promoted from sidebar to give better visibility */}
-            {enrichment?.merge_candidates?.length > 0 && (
+            {panelVisible.related && enrichment?.merge_candidates?.length > 0 && (
               <Card data-testid="related-tickets-banner" className="border-violet-500/20 bg-violet-500/[0.02]">
                 <CardContent className="pt-3 pb-3 space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -1858,7 +1915,7 @@ export default function TicketsPage() {
                   </Select>
                 </div>
                 {/* Device info panel (primary device) */}
-                {deviceStatus && (
+                {panelVisible.devicePanel && deviceStatus && (
                   <div className="mt-2 p-2 rounded-lg bg-muted/30 border border-border/50 space-y-1" data-testid="device-info-panel">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
@@ -1879,6 +1936,8 @@ export default function TicketsPage() {
                   </div>
                 )}
                 {/* Quick Actions */}
+                {panelVisible.quickActions && (
+                <>
                 <Separator />
                 <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Quick Actions</Label>
@@ -1894,11 +1953,13 @@ export default function TicketsPage() {
                     )}
                   </div>
                 </div>
+                </>
+                )}
               </CardContent>
             </Card>
 
             {/* Run Scripts */}
-            {viewingTicket.device_id && scripts.length > 0 && (
+            {panelVisible.runScripts && viewingTicket.device_id && scripts.length > 0 && (
               <Card data-testid="run-scripts-card">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-1.5"><Terminal className="w-4 h-4 text-green-400" />Run Script on Device</CardTitle>
@@ -1943,7 +2004,7 @@ export default function TicketsPage() {
             )}
 
             {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
-            <TicketEnrichmentRail enrichment={enrichment} />
+            {panelVisible.enrichment && <TicketEnrichmentRail enrichment={enrichment} />}
           </div>
         </div>
 
@@ -3153,97 +3214,171 @@ export default function TicketsPage() {
         </div>
       </div>
 
-      {/* HeroTile metric strip — same as Devices/Team CC */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" testId="stat-open" />
-        <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" testId="stat-progress" />
-        <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" testId="stat-resolved" />
-        <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} testId="stat-critical" />
-        <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} testId="stat-no-notes" />
-        <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} testId="stat-avg-time" />
+      {/* Edit Bar — drag/drop & hide widgets above the ticket list */}
+      <listGrid.EditBar testIdPrefix="tickets-list-" />
+
+      <TicketsResponsiveGridLayout
+        className={`layout ${listGrid.editMode ? "nx-edit-mode" : ""}`}
+        layouts={listGrid.visibleLayouts}
+        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+        rowHeight={48}
+        margin={[12, 12]}
+        containerPadding={[0, 0]}
+        isDraggable={listGrid.editMode}
+        isResizable={listGrid.editMode}
+        onLayoutChange={listGrid.onLayoutChange}
+        draggableCancel=".nx-widget-hide,button,a,input,kbd,select"
+        useCSSTransforms
+        compactType="vertical"
+      >
+
+      {/* HeroTile metric strip */}
+      {!listGrid.hiddenWidgets.has("hero-tiles") && (
+      <div key="hero-tiles" className="nx-widget-card">
+        <listGrid.HideBtn id="hero-tiles" />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
+          <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" testId="stat-open" />
+          <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" testId="stat-progress" />
+          <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" testId="stat-resolved" />
+          <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} testId="stat-critical" />
+          <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} testId="stat-no-notes" />
+          <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} testId="stat-avg-time" />
+        </div>
       </div>
+      )}
 
       {/* Smart Inbox — Needs Attention strip */}
-      {(() => {
-        const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
-        const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
-        const stale = tickets.filter(t => !t.last_response_at && (Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000) && !["closed", "resolved"].includes(t.status));
-        const items = [
-          ...breached.slice(0, 6).map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "border-rose-500/30 bg-rose-500/5 text-rose-300" })),
-          ...critical.slice(0, 6).map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "border-amber-500/30 bg-amber-500/5 text-amber-300" })),
-          ...stale.slice(0, 6).map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "border-cyan-500/30 bg-cyan-500/5 text-cyan-300" })),
-        ].slice(0, 12);
-        if (items.length === 0) return null;
-        return (
-          <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02]" data-testid="tickets-smart-inbox">
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-violet-400" />Needs Attention
-                <Badge variant="outline" className="text-[9px] uppercase">{items.length}</Badge>
-              </CardTitle>
-              <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">{breached.length} breached · {critical.length} critical · {stale.length} stale</span>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                {items.map((t, i) => (
-                  <button
-                    key={`${t.id}-${i}-${t._kind}`}
-                    onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
-                    className={`text-left flex items-start gap-2 px-2.5 py-2 rounded border ${t._tone} hover:brightness-125 transition`}
-                    data-testid={`tickets-inbox-${t.id}-${t._kind}`}
-                  >
-                    <Badge variant="outline" className="text-[9px] uppercase shrink-0">{t._label}</Badge>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-medium truncate">{t.title}</div>
-                      <div className="text-[10px] opacity-80 truncate">#{t.ticket_number} · {t.client_name}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })()}
+      {!listGrid.hiddenWidgets.has("smart-inbox") && (
+      <div key="smart-inbox" className="nx-widget-card">
+        <listGrid.HideBtn id="smart-inbox" />
+        {(() => {
+          const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
+          const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
+          const stale = tickets.filter(t => !t.last_response_at && (Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000) && !["closed", "resolved"].includes(t.status));
+          const items = [
+            ...breached.slice(0, 6).map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "border-rose-500/30 bg-rose-500/5 text-rose-300" })),
+            ...critical.slice(0, 6).map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "border-amber-500/30 bg-amber-500/5 text-amber-300" })),
+            ...stale.slice(0, 6).map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "border-cyan-500/30 bg-cyan-500/5 text-cyan-300" })),
+          ].slice(0, 12);
+          if (items.length === 0) return (
+            <Card className="border-emerald-500/20 bg-emerald-500/[0.02] h-full" data-testid="tickets-smart-inbox-empty">
+              <CardContent className="py-4 flex items-center gap-2 text-emerald-400/80 text-sm">
+                <CheckCircle className="w-4 h-4" />All clear — no tickets need attention right now
+              </CardContent>
+            </Card>
+          );
+          return (
+            <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02] h-full" data-testid="tickets-smart-inbox">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-violet-400" />Needs Attention
+                  <Badge variant="outline" className="text-[9px] uppercase">{items.length}</Badge>
+                </CardTitle>
+                <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">{breached.length} breached · {critical.length} critical · {stale.length} stale</span>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {items.map((t, i) => (
+                    <button
+                      key={`${t.id}-${i}-${t._kind}`}
+                      onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
+                      className={`text-left flex items-start gap-2 px-2.5 py-2 rounded border ${t._tone} hover:brightness-125 transition`}
+                      data-testid={`tickets-inbox-${t.id}-${t._kind}`}
+                    >
+                      <Badge variant="outline" className="text-[9px] uppercase shrink-0">{t._label}</Badge>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium truncate">{t.title}</div>
+                        <div className="text-[10px] opacity-80 truncate">#{t.ticket_number} · {t.client_name}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
+      </div>
+      )}
 
       {/* Type Filter Tabs */}
-      <div className="flex items-center gap-2">
-        {[
-          { val: "all", label: "All", icon: Ticket, count: tickets.length + workshopJobs.length + fieldJobs.length },
-          { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
-          { val: "workshop", label: "Workshop", icon: Wrench, count: workshopJobs.length, color: "text-purple-400" },
-          { val: "cabling_wisp", label: "Cabling / WISP", icon: Wifi, count: fieldJobs.length, color: "text-cyan-400" },
-        ].map(t => (
-          <Button key={t.val} variant="outline" size="sm"
-            onClick={() => setTypeFilter(t.val)}
-            className={`gap-1.5 ${typeFilter === t.val
-              ? "text-zinc-100 border-zinc-600 bg-zinc-800"
-              : "text-zinc-400 border-zinc-800 hover:bg-zinc-900 hover:text-zinc-300"}`}
-            data-testid={`type-filter-${t.val}`}>
-            <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? t.color || "" : "opacity-60"}`} />
-            {t.label} <span className="text-xs opacity-70">({t.count})</span>
-          </Button>
-        ))}
+      {!listGrid.hiddenWidgets.has("type-tabs") && (
+      <div key="type-tabs" className="nx-widget-card">
+        <listGrid.HideBtn id="type-tabs" />
+        <div className="flex items-center gap-2 flex-wrap h-full">
+          {[
+            { val: "all", label: "All", icon: Ticket, count: tickets.length + workshopJobs.length + fieldJobs.length },
+            { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
+            { val: "workshop", label: "Workshop", icon: Wrench, count: workshopJobs.length, color: "text-purple-400" },
+            { val: "cabling_wisp", label: "Cabling / WISP", icon: Wifi, count: fieldJobs.length, color: "text-cyan-400" },
+          ].map(t => (
+            <Button key={t.val} variant="outline" size="sm"
+              onClick={() => setTypeFilter(t.val)}
+              className={`gap-1.5 ${typeFilter === t.val
+                ? "text-zinc-100 border-zinc-600 bg-zinc-800"
+                : "text-zinc-400 border-zinc-800 hover:bg-zinc-900 hover:text-zinc-300"}`}
+              data-testid={`type-filter-${t.val}`}>
+              <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? t.color || "" : "opacity-60"}`} />
+              {t.label} <span className="text-xs opacity-70">({t.count})</span>
+            </Button>
+          ))}
+        </div>
       </div>
+      )}
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
+      {!listGrid.hiddenWidgets.has("filters") && (
+      <div key="filters" className="nx-widget-card">
+        <listGrid.HideBtn id="filters" />
+        <div className="flex items-center gap-3 flex-wrap h-full">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
+          </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[140px]" data-testid="status-filter"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+            <SelectTrigger className="w-[140px]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+          </Select>
+          {(statusFilter !== "all" || priorityFilter !== "all") && (
+            <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); }} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
+          )}
+          <p className="text-sm text-muted-foreground ml-auto">{filteredTickets.length} of {tickets.length} tickets</p>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]" data-testid="status-filter"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-[140px]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-        </Select>
-        {(statusFilter !== "all" || priorityFilter !== "all") && (
-          <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); }} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
-        )}
-        <p className="text-sm text-muted-foreground ml-auto">{filteredTickets.length} of {tickets.length} tickets</p>
       </div>
+      )}
+
+      {/* Saved Views · Density · Group By toolbar */}
+      {!listGrid.hiddenWidgets.has("toolbar") && (
+      <div key="toolbar" className="nx-widget-card">
+        <listGrid.HideBtn id="toolbar" />
+        {(typeFilter === "all" || typeFilter === "sla") ? (
+          <>
+            <SavedViewsBar
+              scope="tickets" headers={headers}
+              currentSnapshot={currentSnapshot}
+              activeViewId={activeViewId}
+              onApply={applyView}
+              onClearActive={() => applyView(null)}
+            />
+            <div className="flex items-center gap-1 px-1 -mb-1 mt-1">
+              <DensityToggle density={density} setDensity={setDensity} />
+              <span className="text-zinc-700">·</span>
+              <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
+            </div>
+          </>
+        ) : (
+          <div className="text-[11px] text-zinc-500 flex items-center gap-2 h-full">
+            <Settings2 className="w-3 h-3" />Saved Views & grouping available on SLA / All tab
+          </div>
+        )}
+      </div>
+      )}
+
+      </TicketsResponsiveGridLayout>
 
       {/* Bulk Actions Bar */}
       {(typeFilter === "all" || typeFilter === "sla") && (
@@ -3300,24 +3435,6 @@ export default function TicketsPage() {
             </>
           )}
         </div>
-      )}
-
-      {/* Density + Group toolbar */}
-      {(typeFilter === "all" || typeFilter === "sla") && (
-        <>
-          <SavedViewsBar
-            scope="tickets" headers={headers}
-            currentSnapshot={currentSnapshot}
-            activeViewId={activeViewId}
-            onApply={applyView}
-            onClearActive={() => applyView(null)}
-          />
-          <div className="flex items-center gap-1 px-1 -mb-1">
-            <DensityToggle density={density} setDensity={setDensity} />
-            <span className="text-zinc-700">·</span>
-            <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
-          </div>
-        </>
       )}
 
       {/* Dense ticket list (Linear/Plain.com inspired) */}
