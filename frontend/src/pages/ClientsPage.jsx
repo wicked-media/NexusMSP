@@ -186,6 +186,8 @@ export default function ClientsPage() {
   const [lifecycleFilter, setLifecycleFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState("all");
   const [integrationFilter, setIntegrationFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState("all");
+  const [tierOptions, setTierOptions] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [activity, setActivity] = useState([]);
@@ -212,6 +214,14 @@ export default function ClientsPage() {
   };
 
   useEffect(() => { fetchData(); /* eslint-disable-line */ }, []);
+
+  // Load tiers once for the filter dropdown
+  useEffect(() => {
+    axios.get(`${API}/service-tiers`, { headers })
+      .then(r => setTierOptions((r.data || []).filter(t => t.is_active)))
+      .catch(() => setTierOptions([]));
+    // eslint-disable-next-line
+  }, []);
 
   const fetchDetail = async (id) => {
     if (!id) return;
@@ -260,9 +270,11 @@ export default function ClientsPage() {
       if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
       if (riskFilter !== "all" && c.risk_level !== riskFilter) return false;
       if (integrationFilter !== "all" && !c.integrations[integrationFilter]) return false;
+      if (tierFilter === "untiered" && c.service_tier_id) return false;
+      if (tierFilter !== "all" && tierFilter !== "untiered" && c.service_tier_id !== tierFilter) return false;
       return true;
     });
-  }, [data, search, lifecycleFilter, riskFilter, integrationFilter]);
+  }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
 
   const selectedClient = useMemo(() => data.clients?.find(c => c.id === selectedId), [data, selectedId]);
 
@@ -344,8 +356,23 @@ export default function ClientsPage() {
                     <SelectItem value="rmm">RMM active</SelectItem>
                   </SelectContent>
                 </Select>
-                {(search || lifecycleFilter !== "all" || riskFilter !== "all" || integrationFilter !== "all") && (
-                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={() => { setSearch(""); setLifecycleFilter("all"); setRiskFilter("all"); setIntegrationFilter("all"); }}>
+                <Select value={tierFilter} onValueChange={setTierFilter}>
+                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-tier"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All tiers</SelectItem>
+                    <SelectItem value="untiered">Untiered</SelectItem>
+                    {tierOptions.map(t => (
+                      <SelectItem key={t.id} value={t.id} data-testid={`filter-tier-${t.slug}`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full" style={{ background: t.color }} />
+                          {t.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {(search || lifecycleFilter !== "all" || riskFilter !== "all" || integrationFilter !== "all" || tierFilter !== "all") && (
+                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={() => { setSearch(""); setLifecycleFilter("all"); setRiskFilter("all"); setIntegrationFilter("all"); setTierFilter("all"); }}>
                     <X className="w-2.5 h-2.5 mr-1" />Clear
                   </Button>
                 )}
