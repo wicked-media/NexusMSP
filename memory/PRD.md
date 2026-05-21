@@ -8,6 +8,75 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Portal: `john@acmecorp.com` / `portal123`
 
 
+
+## 2026-05-21 — INVOICE STUDIO + SMART BILLING ENGINE (Phase 1+2+3+4 full send)
+
+### Phase 1 — Invoice Studio (Block-by-block Builder + Designer Gallery)
+**Backend** `/app/backend/app/routers/invoice_pdf_templates.py` rewritten:
+- 10 designer presets seeded into `db.invoice_pdf_templates` (idempotent): Tactical Dark, Modern Executive, Minimalist White, Corporate Blue, Bold Branded, Compact Tax-Compliant, Service Detailed, Tier-Themed, Pro Forma, Customer Statement.
+- 22 block types (11 new): `header_banner`, `time_entries_table`, `tax_breakdown`, `savings_summary`, `payment_methods`, `qr_pay` (real QR via `qrcode` lib), `signature`, `custom_html`, `divider`, `spacer`, `page_break` (plus original 11).
+- **Page settings** per template: orientation, paper_size (A4/Letter), 4 margins, font_family (Helvetica/Times/Courier), watermark_text + opacity.
+- **Per-block style**: align, font_size, text_color, bold, italic, padding.
+- 2 new layouts: `tactical` (slate + emerald), `modern` (soft gray header).
+- Endpoints: `GET /invoice-templates/gallery`, `POST /invoice-templates/clone/{preset_key}`, `POST /invoice-templates/{id}/duplicate`, `GET /invoice-templates/blocks/catalog`. Presets read-only (PUT/DELETE → 400).
+
+**Frontend** `/app/frontend/src/pages/InvoiceTemplatesPage.jsx` rewritten as `Invoice Studio`:
+- **Gallery view** (default): 10 preset cards with custom gradient backgrounds + icon, "Use this design" CTA cloning to editable template.
+- **Builder view**: 3-pane (template list / editor / live PDF preview).
+- Editor tabs: **Blocks** (HTML5 drag-to-reorder, per-block style controls), **Design** (layout/density/font/3 colors), **Page** (paper/orientation/margins/watermark + opacity slider).
+- Merge tag chips (20 tags) click-to-copy.
+- Duplicate / Set Default / Delete actions.
+
+### Phase 2 — Smart Invoice Engine
+**Backend** NEW `/app/backend/app/routers/invoice_smart.py`:
+- `POST /invoices/ai-draft` — Pulls billable time entries + tickets + (optionally) active recurring streams for a client into a draft invoice with Claude Sonnet 4.5 AI value-summary notes.
+- `POST /invoices/{id}/payment-plan` — 2-12 installment plans with auto-due-date scheduling, persisted in `db.invoice_payment_plans`.
+- `POST /invoices/{id}/smart-reminder` — AI-drafted reminders with 4 escalating tones (friendly nudge → polite → firm → final notice) keyed off days-overdue.
+- `POST /invoices/{id}/apply-late-fee` — flat or % fee; adds line item.
+- `POST /invoices/{id}/reissue` — clones with new number + draft status.
+- `POST /invoices/bulk/{action}` (send/void/discount/apply-late-fee/reissue/mark-sent).
+- `GET /invoices/customer-statement/{client_id}` — aged buckets + rows + total_due.
+- `GET /invoices/aged-ar-insights` — top-5 offenders + AI executive summary.
+- `POST /invoices/{id}/pay-now-link` — Stripe Checkout session persisted on invoice.
+- `GET/POST /invoices/late-fee-policy` — global/per-client.
+- `GET/POST/DELETE /invoices/webhooks` — event-driven (paid/overdue/voided/created).
+
+**Frontend** NEW `/app/frontend/src/components/invoices/InvoicesSmartBar.jsx`:
+- Smart Actions bar (emerald gradient) injected into `/invoices` list with AI Draft / Aged AR / Bulk(N) buttons.
+- `<InvoiceDetailSmartActions>` row on invoice detail with Smart Reminder, Payment Plan, Late Fee, Pay-Now Link, Reissue.
+- AI Draft dialog reviews draft + AI Notes → Create Invoice POST.
+- Aged AR dialog with metric tiles + top offenders + AI summary card + Refresh.
+- Smart Reminder dialog with 4 stage buttons, editable AI subject+body, Send Now.
+
+### Phase 3 — Recurring Smart Engine
+**Backend** NEW `/app/backend/app/routers/recurring_smart.py`:
+- `POST /recurring-invoices/{id}/uplift-rule` + `POST /apply-uplift` — CPI/YoY auto-uplift with frequency (annually/biannually/quarterly), applied_count tracking.
+- `GET /recurring-invoices/{id}/renewal-risk` — 0-100 risk score from signals (DSO, overdue count, open critical tickets, ticket volume) + Claude AI analysis + 3 recommended actions.
+- `POST /recurring-invoices/consolidate/{client_id}` — merges all active streams of a client into one monthly stream; old streams paused with `consolidated_into` link.
+- `POST /recurring-invoices/{id}/pre-bill-preview` — sends client a preview email (Resend) before billing.
+- `POST /recurring-invoices/{id}/pause-range` — schedule a pause window with from/to dates.
+- `POST /recurring-invoices/{id}/rollup-usage` — pulls Acronis applications + Pax8 seats + M365 user counts into line items.
+
+**Frontend** NEW `/app/frontend/src/components/billing/RecurringSmartActions.jsx`:
+- Per-row Smart sub-row under each recurring row (Fragment-wrapped) with: Renewal Risk, CPI Uplift, Pause Window, Pre-Bill Preview, Rollup Usage, Consolidate Streams.
+- Renewal Risk dialog: big score, band badge, 3 signal tiles, AI Analysis card, Recommended Actions list, Recompute button.
+- CPI Uplift dialog: enable toggle, pct + frequency selects, Apply Now button, applied_count display.
+- Pause Window dialog with date range + reason.
+- Pre-Bill Preview dialog with HTML iframe preview.
+
+### Tests
+- 35/35 backend tests passed (testing_agent_v3_fork iteration 167).
+- Frontend pages verified: Studio Gallery (10 presets), Studio Builder (Blocks/Design/Page tabs), Smart Actions bar on Invoices, Smart sub-row on Recurring, all dialogs functional.
+- Real AI verified live: AI Draft returned 10 lines + Claude value summary, Aged AR returned Claude executive summary, Renewal Risk returned 100/high band with AI analysis, Smart Reminder returned AI-drafted Stage-2 polite copy.
+- Bug fix by testing agent: added missing `Sparkles` import in `RecurringInvoicesPage.jsx`.
+
+### Key Technical Notes
+- `qrcode==8.2` (already in requirements) used to render real QR PNGs into PDFs.
+- All AI endpoints use `emergentintegrations.LlmChat` → Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) via Emergent LLM key. Graceful fallbacks if AI fails.
+- Stripe Pay-Now uses `STRIPE_API_KEY` from env (test key `sk_test_emergent`).
+- Login response shape is `{ token, user }` — use `d['token']`.
+
+
 ## Recent Updates (Feb 2026 — Operations Command Bridge dashboard + Apple-style nav badges)
 
 ### Dashboard rebuilt as "Operations Command Bridge"
