@@ -24,7 +24,7 @@ import {
   MoreVertical, Monitor, Terminal, FolderOpen, Power, Wifi, RefreshCw,
   Download, MessageSquareWarning, Wrench, Cpu, MemoryStick, HardDrive,
   Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight,
-  Keyboard, Sparkles,
+  Keyboard, Sparkles, Gauge, Camera, BrainCircuit, X,
 } from "lucide-react";
 import { API } from "@/App";
 
@@ -62,6 +62,12 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
   const [winupdates, setWinupdates] = useState([]);
   const [paneLoading, setPaneLoading] = useState(false);
   const [terminalUrl, setTerminalUrl] = useState(null);
+  const [metricsOpen, setMetricsOpen] = useState(false);
+  const [metricsData, setMetricsData] = useState(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagData, setDiagData] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
 
   const qs = `?device_id=${encodeURIComponent(device.id)}`;
 
@@ -179,6 +185,40 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
 
   const disabled = !device.has_agent;
 
+  // ─────────────────── Smart actions: Live Metrics, AI Diagnose, Snapshot ───────────────────
+  const openMetrics = async () => {
+    setMetricsOpen(true);
+    setMetricsLoading(true);
+    try {
+      const r = await axios.get(`${API}/devices/${device.id}/live-metrics?minutes=30`, { headers });
+      setMetricsData(r.data);
+    } catch (e) { toast.error(e.response?.data?.detail || "Metrics failed"); }
+    finally { setMetricsLoading(false); }
+  };
+
+  const runDiagnose = async () => {
+    setDiagOpen(true);
+    setDiagLoading(true);
+    setDiagData(null);
+    try {
+      const r = await axios.post(`${API}/devices/${device.id}/ai-diagnose`, { ticket_id: ticketId }, { headers });
+      setDiagData(r.data);
+      if (r.data?.posted_to_ticket) toast.success("AI Diagnose posted to ticket");
+      onMutate?.();
+    } catch (e) { toast.error(e.response?.data?.detail || "Diagnose failed"); }
+    finally { setDiagLoading(false); }
+  };
+
+  const snapToTicket = async () => {
+    setBusy("snapshot");
+    try {
+      const r = await axios.post(`${API}/devices/${device.id}/screenshot-to-ticket`, { ticket_id: ticketId }, { headers });
+      toast.success(r.data?.pending ? "Screenshot requested — agent will respond shortly." : "Screenshot captured & posted to ticket");
+      onMutate?.();
+    } catch (e) { toast.error(e.response?.data?.detail || "Screenshot failed"); }
+    finally { setBusy(null); }
+  };
+
   return (
     <>
       <div
@@ -209,6 +249,44 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
             </div>
           </div>
         )}
+
+        {/* INLINE QUICK ACTIONS — Syncro-killer: always-visible icon buttons */}
+        <div className="flex items-center gap-0.5 shrink-0" data-testid={`inline-actions-${device.id}`}>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-violet-500/15"
+            disabled={disabled || !isOnline} title="Remote Desktop" onClick={() => openRemote("control")}
+            data-testid={`inline-remote-${device.id}`}>
+            <Monitor className="w-3.5 h-3.5 text-violet-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-cyan-500/15"
+            disabled={disabled || !isOnline} title="Live Terminal" onClick={() => openRemote("terminal")}
+            data-testid={`inline-terminal-${device.id}`}>
+            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-emerald-500/15"
+            disabled={disabled || !isOnline} title="File Browser" onClick={() => openRemote("file")}
+            data-testid={`inline-files-${device.id}`}>
+            <FolderOpen className="w-3.5 h-3.5 text-emerald-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-sky-500/15"
+            title="Live Metrics" onClick={openMetrics} data-testid={`inline-metrics-${device.id}`}>
+            <Gauge className="w-3.5 h-3.5 text-sky-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-amber-500/15"
+            disabled={disabled || !isOnline} title="Reboot"
+            onClick={() => setConfirm({ kind: "reboot" })}
+            data-testid={`inline-reboot-${device.id}`}>
+            <Power className="w-3.5 h-3.5 text-amber-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-fuchsia-500/15"
+            title="AI Diagnose" onClick={runDiagnose} data-testid={`inline-diagnose-${device.id}`}>
+            <BrainCircuit className="w-3.5 h-3.5 text-fuchsia-400" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:bg-rose-500/15"
+            disabled={disabled || !isOnline} title="Snapshot screen → Ticket"
+            onClick={snapToTicket} data-testid={`inline-snapshot-${device.id}`}>
+            {busy === "snapshot" ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" /> : <Camera className="w-3.5 h-3.5 text-rose-400" />}
+          </Button>
+        </div>
 
         {/* 3-dot CRAIG-style menu */}
         <DropdownMenu>
@@ -362,6 +440,122 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
               ))}
             </ScrollArea>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Live Metrics Drawer */}
+      <Dialog open={metricsOpen} onOpenChange={(v) => !v && setMetricsOpen(false)}>
+        <DialogContent className="max-w-3xl" data-testid={`metrics-drawer-${device.id}`}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Gauge className="w-4 h-4 text-sky-400" />Live Metrics — {device.name}</DialogTitle>
+            <DialogDescription className="text-xs">Last {metricsData?.minutes || 30} minutes · auto-refreshing every 30s</DialogDescription>
+          </DialogHeader>
+          {metricsLoading && !metricsData ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
+            metricsData && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: "CPU", value: metricsData.current.cpu, color: "violet", icon: Cpu },
+                    { label: "Memory", value: metricsData.current.memory, color: "cyan", icon: MemoryStick },
+                    { label: "Disk", value: metricsData.current.disk, color: "emerald", icon: HardDrive },
+                  ].map(({ label, value, color, icon: Icon }) => (
+                    <Card key={label} className={`bg-gradient-to-br from-${color}-500/10 to-transparent border-${color}-500/30`}>
+                      <CardContent className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1 text-[10px] uppercase tracking-wider text-zinc-400">
+                          <Icon className="w-3 h-3" />{label}
+                        </div>
+                        <div className={`text-3xl font-light mt-1 text-${color}-300`}>{Math.round(value || 0)}<span className="text-base text-zinc-500">%</span></div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Compact SVG sparkline */}
+                <Card>
+                  <CardContent className="p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-400 mb-1">CPU / Memory trend</div>
+                    {(() => {
+                      const s = metricsData.series || [];
+                      if (s.length < 2) return <p className="text-xs text-zinc-500">Not enough data points yet.</p>;
+                      const w = 600, h = 120, pad = 6;
+                      const xStep = (w - pad * 2) / Math.max(1, s.length - 1);
+                      const toY = (v) => h - pad - (Math.max(0, Math.min(100, v)) / 100) * (h - pad * 2);
+                      const cpuPath = s.map((p, i) => `${i === 0 ? "M" : "L"}${pad + i * xStep},${toY(p.cpu)}`).join(" ");
+                      const memPath = s.map((p, i) => `${i === 0 ? "M" : "L"}${pad + i * xStep},${toY(p.memory)}`).join(" ");
+                      return (
+                        <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-28">
+                          <rect width={w} height={h} fill="rgba(15,23,42,0.4)" rx="6" />
+                          <path d={cpuPath} fill="none" stroke="#a78bfa" strokeWidth="1.5" />
+                          <path d={memPath} fill="none" stroke="#22d3ee" strokeWidth="1.5" />
+                          {[25, 50, 75].map(g => <line key={g} x1={pad} x2={w - pad} y1={toY(g)} y2={toY(g)} stroke="rgba(255,255,255,0.04)" />)}
+                        </svg>
+                      );
+                    })()}
+                    <div className="flex items-center gap-4 mt-1 text-[10px]">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400" />CPU</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" />Memory</span>
+                      {metricsData.series?.some(s => s.synthetic) && <Badge variant="outline" className="text-[9px] ml-auto">synthesised (no agent data)</Badge>}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          <DialogFooter>
+            <Button variant="outline" onClick={openMetrics}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+            <Button onClick={() => setMetricsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Diagnose Dialog */}
+      <Dialog open={diagOpen} onOpenChange={(v) => !v && setDiagOpen(false)}>
+        <DialogContent className="max-w-2xl" data-testid={`diagnose-${device.id}`}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-fuchsia-400" />AI Diagnose — {device.name}</DialogTitle>
+            <DialogDescription className="text-xs">Claude analyses telemetry, events, services & patches and posts the result to the ticket.</DialogDescription>
+          </DialogHeader>
+          {diagLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
+            diagData && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Badge className={`text-sm px-3 py-1 ${diagData.severity === "critical" ? "bg-rose-500/20 text-rose-300 border-rose-500/40" : diagData.severity === "high" ? "bg-rose-500/15 text-rose-300 border-rose-500/30" : diagData.severity === "medium" ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"}`}>
+                    {String(diagData.severity || "").toUpperCase()}
+                  </Badge>
+                  {diagData.posted_to_ticket && <Badge variant="outline" className="text-[10px] text-emerald-300 border-emerald-500/40">Posted to ticket</Badge>}
+                </div>
+                <Card className="bg-fuchsia-500/5 border-fuchsia-500/30">
+                  <CardContent className="p-3">
+                    <pre className="text-xs whitespace-pre-wrap font-sans text-zinc-200">{diagData.diagnosis}</pre>
+                  </CardContent>
+                </Card>
+                {(diagData.actions || []).length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-400 mb-1">Recommended actions</div>
+                    <ul className="space-y-1">
+                      {diagData.actions.map((a, i) => (
+                        <li key={i} className="flex items-center gap-2 text-sm">
+                          <ChevronRight className="w-3 h-3 text-fuchsia-400" />{a}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {diagData.signals && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(diagData.signals).map(([k, v]) => (
+                      <div key={k} className="text-[10px] text-zinc-500 p-2 rounded bg-zinc-900/60">
+                        <div className="uppercase tracking-wider">{k.replace(/_/g, " ")}</div>
+                        <div className="text-zinc-200 font-mono">{String(v)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          <DialogFooter>
+            <Button variant="outline" onClick={runDiagnose} disabled={diagLoading}><RefreshCw className="w-3 h-3 mr-1" />Re-run</Button>
+            <Button onClick={() => setDiagOpen(false)}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

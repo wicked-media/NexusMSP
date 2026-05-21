@@ -18,6 +18,7 @@ import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
 import DeviceBulkBar from "../components/devices/DeviceBulkBar";
 import DeviceMapView from "../components/devices/DeviceMapView";
+import DevicesSmartBar from "../components/devices/DevicesSmartBar";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -455,6 +456,8 @@ export default function DevicesPage() {
         </div>
       </div>
 
+      <DevicesSmartBar selectedIds={selectedDevices} onReload={fetchData} />
+
       {/* TABLE VIEW */}
       {viewMode === "table" && (
         <Card>
@@ -561,6 +564,16 @@ export default function DevicesPage() {
                             providersOverride={activeProviders}
                             testid={`row-remote-${d.id}`}
                           />
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-fuchsia-500/15" title="AI Diagnose"
+                            onClick={async () => {
+                              try {
+                                const r = await axios.post(`${API}/devices/${d.id}/ai-diagnose`, {}, { headers });
+                                toast.success(`${d.name}: ${String(r.data?.severity || "").toUpperCase()} — ${(r.data?.diagnosis || "").slice(0, 90)}…`);
+                              } catch (e) { toast.error(e.response?.data?.detail || "Diagnose failed"); }
+                            }}
+                            data-testid={`row-diagnose-${d.id}`}>
+                            <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                          </Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="w-3 h-3" /></Button>
                         </div>
