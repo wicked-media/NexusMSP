@@ -9,6 +9,36 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 
 
+## 2026-05-21 — DEVICE SMART FEATURES (Syncro-killer inline actions + Fleet AI)
+
+### Backend NEW `/app/backend/app/routers/device_smart.py`
+- `POST /api/devices/{id}/ai-diagnose` — Claude Sonnet 4.5 analyses telemetry, events, services & patches → returns `{severity, diagnosis (string), actions[], signals}`. Optional `ticket_id` posts result as a ticket comment.
+- `GET /api/devices/{id}/live-metrics?minutes=N` — last-N-minute time-series for CPU/RAM/Disk. Synthesises 20 points when no agent data exists so charts always render.
+- `POST /api/devices/{id}/screenshot-to-ticket` — requests TRMM screenshot + auto-posts comment to ticket (pending=true when TRMM not configured).
+- `GET /api/devices/fleet-health` — fleet score 0-100 + band + 9 metric counts (offline/warning/no_agent/stale/high_cpu/high_mem/low_disk).
+- `GET /api/devices/fleet-insights` — fleet-health + AI summary + top 5 risky devices.
+- `POST /api/devices/bulk-diagnose` — parallel AI diagnose across up to 25 devices.
+
+### Frontend — Ticket-Device inline action strip (OUTPERFORMS Syncro)
+`/app/frontend/src/components/tickets/TicketDeviceList.jsx` — DeviceRow now shows **7 always-visible inline icon buttons** per device row (plus the existing 3-dot menu for deep stuff):
+- 🖥️ Remote Desktop · 💻 Live Terminal · 📁 File Browser · 📊 Live Metrics · ⚡ Reboot · ✨ AI Diagnose · 📸 Snapshot → Ticket
+- **Live Metrics Drawer** — 3 metric cards + SVG dual-line sparkline (CPU + Memory).
+- **AI Diagnose Dialog** — severity badge (low/medium/high/critical), AI diagnosis, recommended actions, signal tiles; auto-posts comment to the ticket.
+- **Snapshot** — one click to grab the user's screen via TRMM and attach to the ticket.
+
+### Frontend — Devices page Smart Bar
+`/app/frontend/src/components/devices/DevicesSmartBar.jsx` (NEW), wired into `DevicesPage.jsx`:
+- **Fleet Health** dialog — big score, band badge, 9 count tiles, AI summary, top 5 risky devices.
+- **Bulk AI Diagnose** — runs AI across all checked devices in parallel, shows per-device severity badge + diagnosis.
+- Row-level Sparkles AI Diagnose icon (135 buttons rendered live).
+
+### Tests
+- testing_agent_v3_fork iteration 168: **17/17 backend passed, 100% frontend verified**.
+- All AI features verified live: fleet health 96/100 excellent with Claude summary, AI diagnose returned severity=low + 5 bullet diagnosis + 4 actions, bulk diagnose ran across 2 devices in parallel.
+- Lint clean (Python + JS).
+
+
+
 ## 2026-05-21 — INVOICE STUDIO + SMART BILLING ENGINE (Phase 1+2+3+4 full send)
 
 ### Phase 1 — Invoice Studio (Block-by-block Builder + Designer Gallery)
