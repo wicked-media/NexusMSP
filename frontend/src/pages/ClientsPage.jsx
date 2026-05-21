@@ -27,6 +27,26 @@ import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
 import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStrip";
 import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
+import { Responsive, WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "@/styles/dashboard-grid.css";
+import { useWidgetGrid } from "@/hooks/useWidgetGrid";
+
+const ClientResponsiveGridLayout = WidthProvider(Responsive);
+
+const CLIENT_OVERVIEW_WIDGET_META = {
+  "nba":      { label: "Next Best Action",     icon: Sparkles },
+  "quick":    { label: "Quick Actions Tiles",  icon: Zap },
+  "health":   { label: "Health Score Breakdown", icon: Activity },
+  "activity": { label: "Recent Activity",      icon: Activity },
+};
+const CLIENT_OVERVIEW_DEFAULT_LAYOUT = [
+  { i: "nba",      x: 0, y: 0, w: 6,  h: 3, minH: 2, minW: 4 },
+  { i: "quick",    x: 6, y: 0, w: 6,  h: 3, minH: 2, minW: 4 },
+  { i: "health",   x: 0, y: 3, w: 12, h: 4, minH: 3, minW: 6 },
+  { i: "activity", x: 0, y: 7, w: 12, h: 6, minH: 3, minW: 6 },
+];
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -412,6 +432,137 @@ export default function ClientsPage() {
   );
 }
 
+function ClientOverviewGrid({ client, activity, healthDetail }) {
+  const grid = useWidgetGrid({
+    storageKey: "nx-client-overview-layout-v1",
+    hiddenKey:  "nx-client-overview-hidden-v1",
+    defaultLayout: CLIENT_OVERVIEW_DEFAULT_LAYOUT,
+    widgetMeta: CLIENT_OVERVIEW_WIDGET_META,
+    label: "Client Overview",
+  });
+
+  return (
+    <>
+      <grid.EditBar testIdPrefix="client-overview-" />
+      <ClientResponsiveGridLayout
+        className={`layout ${grid.editMode ? "nx-edit-mode" : ""}`}
+        layouts={grid.visibleLayouts}
+        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+        rowHeight={48}
+        margin={[12, 12]}
+        containerPadding={[0, 0]}
+        isDraggable={grid.editMode}
+        isResizable={grid.editMode}
+        onLayoutChange={grid.onLayoutChange}
+        draggableCancel=".nx-widget-hide,button,a,input,kbd,select,[role='combobox']"
+        useCSSTransforms
+        compactType="vertical"
+      >
+        {!grid.hiddenWidgets.has("nba") && (
+          <div key="nba" className="nx-widget-card">
+            <grid.HideBtn id="nba" />
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-indigo-400" />Next Best Action
+              </div>
+              <p className="text-sm text-zinc-300">
+                {client.overdue_count > 0 ? <>Client has <strong className="text-rose-400">${(client.overdue_amount || 0).toLocaleString()} overdue</strong>. Send SMS reminder or start a dunning chase.</> :
+                  client.open_tickets > 10 ? <>Ticket volume is <strong className="text-amber-400">{client.open_tickets}</strong> — book a QBR to understand what's causing the pressure.</> :
+                  client.health_score < 70 ? <>Health score <strong className="text-amber-400">{client.health_score}</strong> — review breakdown and mitigate.</> :
+                  <>All green. Consider scheduling the next QBR or proposing an upsell.</>}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!grid.hiddenWidgets.has("quick") && (
+          <div key="quick" className="nx-widget-card">
+            <grid.HideBtn id="quick" />
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
+                <Zap className="w-3 h-3 text-amber-400" />Quick Actions
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link to={`/tickets?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs" data-testid="qa-new-ticket"><Ticket className="w-3 h-3 mr-1" />New Ticket</Button></Link>
+                <Link to={`/invoices?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs"><DollarSign className="w-3 h-3 mr-1" />New Invoice</Button></Link>
+                <Button size="sm" variant="outline" className="h-7 text-xs"><Send className="w-3 h-3 mr-1" />Send SMS</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs"><Mail className="w-3 h-3 mr-1" />Email</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs"><Timer className="w-3 h-3 mr-1" />Start Timer</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!grid.hiddenWidgets.has("health") && (
+          <div key="health" className="nx-widget-card">
+            <grid.HideBtn id="health" />
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full overflow-auto">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center justify-between">
+                <span>Health Score Breakdown</span>
+                {healthDetail && <span className="text-zinc-400 font-mono">{healthDetail.health_score}/100</span>}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {healthDetail?.breakdown ? [
+                  { k: "tickets", max: 30, label: "Tickets" },
+                  { k: "sla", max: 20, label: "SLA" },
+                  { k: "devices", max: healthDetail.breakdown.m365_hygiene != null ? 15 : 20, label: "Devices" },
+                  { k: "payments", max: 20, label: "Payments" },
+                  { k: "contracts", max: healthDetail.breakdown.m365_hygiene != null ? 5 : 10, label: "Contracts" },
+                  ...(healthDetail.breakdown.m365_hygiene != null ? [{ k: "m365_hygiene", max: 10, label: "M365" }] : []),
+                ].map(({ k, max, label }) => {
+                  const v = healthDetail.breakdown[k] ?? 0;
+                  const pct = (v / max) * 100;
+                  const color = pct >= 85 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-rose-500";
+                  return (
+                    <div key={k} className="text-xs" data-testid={`health-breakdown-${k}`}>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500 uppercase tracking-wider text-[10px]">{label}</span>
+                        <span className="font-mono text-zinc-400 text-[10px]">{v}/{max}</span>
+                      </div>
+                      <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
+                        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, pct)}%`, transition: "width 600ms" }} />
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="col-span-5 text-xs text-zinc-500">Calculating…</div>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-500 mt-3">Composite score derived from ticket velocity, SLA adherence, device uptime, payment timeliness, and contract status.</p>
+            </div>
+          </div>
+        )}
+
+        {!grid.hiddenWidgets.has("activity") && (
+          <div key="activity" className="nx-widget-card">
+            <grid.HideBtn id="activity" />
+            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full overflow-auto">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1">
+                <Activity className="w-3 h-3" />Recent Activity
+              </div>
+              {activity.length === 0 ? (
+                <p className="text-sm text-zinc-500">No recent activity.</p>
+              ) : (
+                <div className="space-y-2">
+                  {activity.slice(0, 8).map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                      <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
+                      {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
+                      <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </ClientResponsiveGridLayout>
+    </>
+  );
+}
+
 function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
@@ -542,81 +693,8 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
         </TabsList>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <TabsContent value="overview" className="mt-0 space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
-                <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1"><Sparkles className="w-3 h-3 text-indigo-400" />Next Best Action</div>
-                <p className="text-sm text-zinc-300">
-                  {client.overdue_count > 0 ? <>Client has <strong className="text-rose-400">${client.overdue_amount.toLocaleString()} overdue</strong>. Send SMS reminder or start a dunning chase.</> :
-                    client.open_tickets > 10 ? <>Ticket volume is <strong className="text-amber-400">{client.open_tickets}</strong> — book a QBR to understand what's causing the pressure.</> :
-                    client.health_score < 70 ? <>Health score <strong className="text-amber-400">{client.health_score}</strong> — review breakdown and mitigate.</> :
-                    <>All green. Consider scheduling the next QBR or proposing an upsell.</>}
-                </p>
-              </div>
-              <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
-                <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1"><Zap className="w-3 h-3 text-amber-400" />Quick Actions</div>
-                <div className="flex flex-wrap gap-2">
-                  <Link to={`/tickets?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs" data-testid="qa-new-ticket"><Ticket className="w-3 h-3 mr-1" />New Ticket</Button></Link>
-                  <Link to={`/invoices?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs"><DollarSign className="w-3 h-3 mr-1" />New Invoice</Button></Link>
-                  <Button size="sm" variant="outline" className="h-7 text-xs"><Send className="w-3 h-3 mr-1" />Send SMS</Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs"><Mail className="w-3 h-3 mr-1" />Email</Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs"><Timer className="w-3 h-3 mr-1" />Start Timer</Button>
-                </div>
-              </div>
-            </div>
-
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center justify-between">
-                <span>Health Score Breakdown</span>
-                {healthDetail && <span className="text-zinc-400 font-mono">{healthDetail.health_score}/100</span>}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {healthDetail?.breakdown ? [
-                  { k: "tickets", max: 30, label: "Tickets" },
-                  { k: "sla", max: 20, label: "SLA" },
-                  { k: "devices", max: healthDetail.breakdown.m365_hygiene != null ? 15 : 20, label: "Devices" },
-                  { k: "payments", max: 20, label: "Payments" },
-                  { k: "contracts", max: healthDetail.breakdown.m365_hygiene != null ? 5 : 10, label: "Contracts" },
-                  ...(healthDetail.breakdown.m365_hygiene != null ? [{ k: "m365_hygiene", max: 10, label: "M365" }] : []),
-                ].map(({ k, max, label }) => {
-                  const v = healthDetail.breakdown[k] ?? 0;
-                  const pct = (v / max) * 100;
-                  const color = pct >= 85 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-rose-500";
-                  return (
-                    <div key={k} className="text-xs" data-testid={`health-breakdown-${k}`}>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500 uppercase tracking-wider text-[10px]">{label}</span>
-                        <span className="font-mono text-zinc-400 text-[10px]">{v}/{max}</span>
-                      </div>
-                      <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
-                        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, pct)}%`, transition: "width 600ms" }} />
-                      </div>
-                    </div>
-                  );
-                }) : (
-                  <div className="col-span-5 text-xs text-zinc-500">Calculating…</div>
-                )}
-              </div>
-              <p className="text-[11px] text-zinc-500 mt-3">Composite score derived from ticket velocity, SLA adherence, device uptime, payment timeliness, and contract status.</p>
-            </div>
-
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1"><Activity className="w-3 h-3" />Recent Activity</div>
-              {activity.length === 0 ? (
-                <p className="text-sm text-zinc-500">No recent activity.</p>
-              ) : (
-                <div className="space-y-2">
-                  {activity.slice(0, 8).map((a, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                      <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
-                      {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
-                      <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          <TabsContent value="overview" className="mt-0 space-y-3">
+            <ClientOverviewGrid client={client} activity={activity} healthDetail={healthDetail} />
           </TabsContent>
 
           <TabsContent value="tickets" className="mt-0">

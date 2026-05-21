@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import UnifiControllersManager from "@/components/unifi/UnifiControllersManager";
+import ServiceTiersSettings from "@/components/settings/ServiceTiersSettings";
 import { toast } from "sonner";
 import { 
   User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
@@ -27,6 +28,7 @@ import {
 const TABS = [
   { id: "branding", label: "Platform Branding", icon: Palette },
   { id: "general", label: "General", icon: User },
+  { id: "tiers", label: "Service Tiers", icon: Shield },
   { id: "auth", label: "Authentication", icon: KeyRound },
   { id: "mailbox", label: "Mailbox & Email", icon: Mail },
   { id: "integrations", label: "Integrations", icon: Plug },
@@ -48,6 +50,8 @@ const SETTINGS_INDEX = [
   { tab: "general", anchor: "general-threshold-card", label: "No-Notes Escalation Threshold", keywords: "sla no notes threshold escalation" },
   { tab: "general", anchor: "general-users-card", label: "Team / Users", keywords: "users team technicians accounts invite" },
   { tab: "general", anchor: "general-canned-card", label: "Canned Responses", keywords: "canned ticket response template reply" },
+  // Service Tiers
+  { tab: "tiers", anchor: "service-tiers-card", label: "Service Tiers", keywords: "service tier bronze silver gold platinum diamond sla msp plan level price" },
   // Auth
   { tab: "auth", anchor: "auth-sso-card", label: "Microsoft SSO", keywords: "sso microsoft azure ad entra single sign on oauth" },
   // Mailbox
@@ -856,6 +860,10 @@ export default function SettingsPage() {
       </>)}
 
       {/* ==================== AUTH TAB ==================== */}
+      {activeTab === "tiers" && (
+        <ServiceTiersSettings />
+      )}
+
       {activeTab === "auth" && (<>
 
       {/* Microsoft SSO */}

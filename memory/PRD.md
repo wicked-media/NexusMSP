@@ -1871,3 +1871,25 @@ Three new articles seeded via `POST /api/help/articles`:
 ### Limitations / notes
 - Bulk requests are sequential (one HTTP call per ID) to surface per-ID failures cleanly; with 100+ rows it can take a few seconds.
 - Acronis sometimes returns 202 (queued) — we treat that as success; the resource may take a few minutes to fully disappear from the Acronis console.
+
+## 2026-05-21 (cont.) — Service Tiers Settings UI + Client Overview Widget Grid
+
+### What shipped
+
+**1) Service Tiers Settings UI** — new `/app/frontend/src/components/settings/ServiceTiersSettings.jsx`:
+- Card per tier with gradient border in the tier's color + icon (Shield/Award/Crown/Gem/Sparkles)
+- Inline Active toggle, Save (edit), Delete (red trash) per card
+- Per-card preview: Response & Resolution SLA tiles, feature chips, monthly price, sort order, slug
+- "+ New Tier" dialog with: name, slug (auto-kebab), description, color picker, icon dropdown, sort order, response/resolution SLA inputs (with live "≈ 4h / 3d" preview), monthly price, dynamic feature list (add/remove), active toggle
+- Wired into `SettingsPage.jsx` as new "Service Tiers" tab (between General and Authentication)
+- Added to the Settings search index (`service tier bronze silver gold platinum diamond sla msp plan level price`)
+
+**2) Client Overview widget grid** — refactored Overview tab content into `<ClientOverviewGrid>` component using shared `useWidgetGrid` hook:
+- 4 widgets: Next Best Action, Quick Actions Tiles, Health Score Breakdown, Recent Activity
+- Drag-and-drop, resize, red X hide, "+ Add Widget" dropdown, Reset
+- Layout persisted under `nx-client-overview-layout-v1` + `nx-client-overview-hidden-v1`
+
+### Tests
+- Service Tiers tab → all 5 default tiers render with correct colors/SLA/features; create new tier dialog produced a new card; delete works.
+- Client Overview → 4 grid items default → toggle Customise → hide health widget → grid shrinks to 3 → "Add Widget (1)" appears.
+- Lint clean across all touched files. Webpack compile clean.
