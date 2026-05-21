@@ -29,6 +29,7 @@ import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 import { InvoiceAIBundle } from "@/components/ai/InvoiceAIBundle";
+import InvoicesSmartBar, { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
@@ -750,6 +751,17 @@ export default function InvoicesPage() {
           </Card>
         )}
 
+        {/* Smart Actions (AI Reminder, Payment Plan, Late Fee, Pay-Now Link, Reissue) */}
+        <Card className="bg-gradient-to-r from-emerald-500/5 to-cyan-500/5 border-emerald-500/20">
+          <CardContent className="p-3">
+            <InvoiceDetailSmartActions invoice={inv} onReload={async () => {
+              const updated = await axios.get(`${API}/invoices/${inv.id}`, { headers });
+              setViewInvoice(updated.data);
+              fetchAll();
+            }} />
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-8 space-y-4">
             <Tabs value={detailTab} onValueChange={setDetailTab}>
@@ -1187,6 +1199,8 @@ export default function InvoicesPage() {
           </SelectContent>
         </Select>
       </div>
+
+      <InvoicesSmartBar invoices={invoices} selectedIds={selectedIds} onReload={fetchAll} />
 
       {/* Bulk Actions Toolbar (visible when items selected) */}
       {selectedIds.size > 0 && (

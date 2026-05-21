@@ -1,17 +1,9 @@
-# Test Credentials
+# Test Credentials — NexusOps Preview
 
-## Admin Account
-- Email: aaron@stech.com.au
-- Password: Lucky@2871$!
+## Admin (full access)
+- Email: `aaron@stech.com.au`
+- Password: `Lucky@2871$!`
 
-## Portal Account (Acme Corporation)
-- Email: john@acmecorp.com
-- Password: portal123
-- Client: Acme Corporation (client-001)
-- Role: Admin
-
-## Portal Account (Created via admin)
-- Email: jane@acmecorp.com
-- Password: ViZ4KsjJ-KktHA (auto-generated, may have been reset)
-- Client: Acme Corporation (client-001)
-- Role: User
+## Notes
+- This account has admin role. Login response returns `{ token, user }` (not `access_token`).
+- Use this account for any auth-required flows in testing (Invoice Studio, Smart actions, Recurring smart, etc).

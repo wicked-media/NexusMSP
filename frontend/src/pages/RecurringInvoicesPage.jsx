@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -19,9 +19,10 @@ import { toast } from "sonner";
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
   Receipt, TrendingUp, Loader2, Copy, Send, Clock, FileText, Users,
-  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search, Cloud
+  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search, Cloud, Sparkles
 } from "lucide-react";
 import ReconcileDialog from "@/components/billing/ReconcileDialog";
+import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
@@ -320,7 +321,8 @@ export default function RecurringInvoicesPage() {
                     <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">No recurring invoices</TableCell></TableRow>
                   )}
                   {filtered.map(ri => (
-                    <TableRow key={ri.id} data-testid={`ri-row-${ri.id}`}>
+                    <Fragment key={ri.id}>
+                    <TableRow data-testid={`ri-row-${ri.id}`}>
                       <TableCell>
                         <p className="font-medium text-sm">{ri.client_name}</p>
                         <p className="text-[10px] text-muted-foreground truncate max-w-[200px]">{ri.description}</p>
@@ -350,6 +352,16 @@ export default function RecurringInvoicesPage() {
                         </div>
                       </TableCell>
                     </TableRow>
+                    <TableRow key={`${ri.id}-smart`} className="border-b-0">
+                      <TableCell colSpan={8} className="py-1.5 px-3 bg-gradient-to-r from-emerald-500/[0.03] to-transparent">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] uppercase tracking-wider text-emerald-400/70 flex items-center gap-1"><span className="inline-block w-1 h-1 rounded-full bg-emerald-400" />Smart:</span>
+                          <RecurringSmartActions ri={ri} onReload={fetchData} />
+                          <ConsolidateButton clientId={ri.client_id} clientName={ri.client_name} onDone={fetchData} />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
