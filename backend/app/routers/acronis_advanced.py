@@ -497,6 +497,108 @@ async def remove_acronis_application(application_id: str, current_user: dict = D
         raise HTTPException(status_code=500, detail=f"Remove failed: {str(e)}")
 
 
+@router.post("/acronis/orphans/cleanup")
+async def cleanup_orphan_applications(body: dict, current_user: dict = Depends(get_current_user)):
+    """Bulk-remove orphan/zombie backup applications.
+
+    Body: { "application_ids": ["id1", "id2", ...] }
+    Returns: { "removed": [...], "failed": [{ "id": ..., "error": ... }], "total": N }
+    """
+    ids = body.get("application_ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="application_ids (non-empty list) required")
+    token = await acronis_service.get_token()
+    api_url, _, _ = await acronis_service.get_credentials()
+    removed, failed = [], []
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for app_id in ids:
+            try:
+                resp = await client.delete(
+                    f"{api_url}/api/policy_management/v4/applications/{app_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code in (200, 202, 204):
+                    removed.append(app_id)
+                else:
+                    failed.append({"id": app_id, "status": resp.status_code, "error": resp.text[:200]})
+            except Exception as e:
+                failed.append({"id": app_id, "error": str(e)})
+    # Audit log
+    try:
+        await db.acronis_cleanup_log.insert_one({
+            "kind": "applications",
+            "actor_id": current_user.get("id"),
+            "actor_name": current_user.get("name"),
+            "ids": ids,
+            "removed": removed,
+            "failed": failed,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+    return {"removed": removed, "failed": failed, "total": len(ids)}
+
+
+@router.delete("/acronis/agents/{agent_id}")
+async def remove_acronis_agent(agent_id: str, current_user: dict = Depends(get_current_user)):
+    """Remove an Acronis agent (e.g. for long-offline machines still consuming storage)."""
+    try:
+        token = await acronis_service.get_token()
+        api_url, _, _ = await acronis_service.get_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.delete(
+                f"{api_url}/api/agent_manager/v2/agents/{agent_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code in (200, 202, 204):
+                return {"status": "removed", "agent_id": agent_id}
+            raise HTTPException(status_code=resp.status_code, detail=f"Acronis: {resp.text[:300]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Remove agent failed: {str(e)}")
+
+
+@router.post("/acronis/agents/cleanup")
+async def cleanup_offline_agents(body: dict, current_user: dict = Depends(get_current_user)):
+    """Bulk-remove offline / long-stale agents.
+
+    Body: { "agent_ids": ["id1", ...] }
+    """
+    ids = body.get("agent_ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="agent_ids (non-empty list) required")
+    token = await acronis_service.get_token()
+    api_url, _, _ = await acronis_service.get_credentials()
+    removed, failed = [], []
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for agent_id in ids:
+            try:
+                resp = await client.delete(
+                    f"{api_url}/api/agent_manager/v2/agents/{agent_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code in (200, 202, 204):
+                    removed.append(agent_id)
+                else:
+                    failed.append({"id": agent_id, "status": resp.status_code, "error": resp.text[:200]})
+            except Exception as e:
+                failed.append({"id": agent_id, "error": str(e)})
+    try:
+        await db.acronis_cleanup_log.insert_one({
+            "kind": "agents",
+            "actor_id": current_user.get("id"),
+            "actor_name": current_user.get("name"),
+            "ids": ids,
+            "removed": removed,
+            "failed": failed,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+    return {"removed": removed, "failed": failed, "total": len(ids)}
+
+
 @router.get("/acronis/resources/{resource_id}/applications")
 async def get_resource_applications(resource_id: str, current_user: dict = Depends(get_current_user)):
     """Get all backup plans currently assigned to a resource."""

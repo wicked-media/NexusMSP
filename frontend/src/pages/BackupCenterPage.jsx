@@ -24,6 +24,28 @@ import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Responsive, WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "@/styles/dashboard-grid.css";
+import { useWidgetGrid } from "@/hooks/useWidgetGrid";
+
+const BackupResponsiveGridLayout = WidthProvider(Responsive);
+
+const ORPHAN_WIDGET_META = {
+  "metrics":     { label: "Orphan Metric Tiles",     icon: FileQuestion },
+  "unprotected": { label: "Unprotected Resources",   icon: FileQuestion },
+  "stale":       { label: "Stale Backups",           icon: Clock },
+  "zombies":     { label: "Zombie Plans",            icon: Skull },
+  "offline":     { label: "Long-Offline Agents",     icon: WifiOff },
+};
+const ORPHAN_DEFAULT_LAYOUT = [
+  { i: "metrics",     x: 0, y: 0,  w: 12, h: 2, minH: 2, minW: 6 },
+  { i: "unprotected", x: 0, y: 2,  w: 12, h: 7, minH: 4, minW: 6 },
+  { i: "stale",       x: 0, y: 9,  w: 12, h: 7, minH: 4, minW: 6 },
+  { i: "zombies",     x: 0, y: 16, w: 12, h: 7, minH: 4, minW: 6 },
+  { i: "offline",     x: 0, y: 23, w: 12, h: 7, minH: 4, minW: 6 },
+];
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
 const STATUS_COLOR = { success: "text-emerald-400 bg-emerald-500/10", failed: "text-red-400 bg-red-500/10", running: "text-blue-400 bg-blue-500/10", warning: "text-amber-400 bg-amber-500/10" };
@@ -196,8 +218,20 @@ export default function BackupCenterPage() {
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [planTargets, setPlanTargets] = useState([]);
   const [selectedOrphans, setSelectedOrphans] = useState([]);
+  const [selectedZombies, setSelectedZombies] = useState([]);
+  const [selectedAgents, setSelectedAgents] = useState([]);
+  const [cleaning, setCleaning] = useState(false);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [backupStatuses, setBackupStatuses] = useState(null);
+
+  // ── Widget grid (Orphans tab) ────────────────────────────────────────
+  const orphanGrid = useWidgetGrid({
+    storageKey: "nx-orphan-layout-v1",
+    hiddenKey:  "nx-orphan-hidden-v1",
+    defaultLayout: ORPHAN_DEFAULT_LAYOUT,
+    widgetMeta: ORPHAN_WIDGET_META,
+    label: "Orphans",
+  });
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -307,6 +341,77 @@ export default function BackupCenterPage() {
         ? prev.filter(r => (r.resource_id || r.id) !== (resource.resource_id || resource.id))
         : [...prev, resource];
     });
+  };
+
+  const toggleZombieSelection = (z) => {
+    setSelectedZombies(prev => prev.find(s => s.application_id === z.application_id) ? prev.filter(s => s.application_id !== z.application_id) : [...prev, z]);
+  };
+  const toggleAgentSelection = (a) => {
+    setSelectedAgents(prev => prev.find(s => s.agent_id === a.agent_id) ? prev.filter(s => s.agent_id !== a.agent_id) : [...prev, a]);
+  };
+
+  const handleRemoveZombie = async (z) => {
+    if (!window.confirm(`Remove zombie plan "${z.policy_name || "(unnamed)"}"? This unassigns it from the missing resource.`)) return;
+    try {
+      await axios.delete(`${API}/acronis/applications/${z.application_id}`, { headers });
+      toast.success("Zombie plan removed");
+      setOrphans(prev => prev ? {
+        ...prev,
+        zombie_apps: prev.zombie_apps.filter(x => x.application_id !== z.application_id),
+        totals: { ...prev.totals, zombie_apps: Math.max(0, (prev.totals.zombie_apps || 0) - 1), total_orphans: Math.max(0, (prev.totals.total_orphans || 0) - 1) },
+      } : prev);
+    } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
+  };
+
+  const handleBulkCleanupZombies = async () => {
+    if (selectedZombies.length === 0) { toast.error("No zombie plans selected"); return; }
+    if (!window.confirm(`Permanently remove ${selectedZombies.length} zombie backup plan(s)? This cannot be undone.`)) return;
+    setCleaning(true);
+    try {
+      const ids = selectedZombies.map(z => z.application_id);
+      const r = await axios.post(`${API}/acronis/orphans/cleanup`, { application_ids: ids }, { headers });
+      const { removed = [], failed = [] } = r.data || {};
+      toast.success(`Removed ${removed.length} of ${ids.length}${failed.length ? ` · ${failed.length} failed` : ""}`);
+      setOrphans(prev => prev ? {
+        ...prev,
+        zombie_apps: prev.zombie_apps.filter(x => !removed.includes(x.application_id)),
+        totals: { ...prev.totals, zombie_apps: Math.max(0, (prev.totals.zombie_apps || 0) - removed.length), total_orphans: Math.max(0, (prev.totals.total_orphans || 0) - removed.length) },
+      } : prev);
+      setSelectedZombies([]);
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk cleanup failed"); }
+    finally { setCleaning(false); }
+  };
+
+  const handleRemoveAgent = async (a) => {
+    if (!window.confirm(`Uninstall offline agent "${a.agent_name}" (${a.days_offline}d offline)? This frees up the storage but cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API}/acronis/agents/${a.agent_id}`, { headers });
+      toast.success("Agent removed");
+      setOrphans(prev => prev ? {
+        ...prev,
+        offline_consuming: prev.offline_consuming.filter(x => x.agent_id !== a.agent_id),
+        totals: { ...prev.totals, offline_consuming: Math.max(0, (prev.totals.offline_consuming || 0) - 1), total_orphans: Math.max(0, (prev.totals.total_orphans || 0) - 1) },
+      } : prev);
+    } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
+  };
+
+  const handleBulkCleanupAgents = async () => {
+    if (selectedAgents.length === 0) { toast.error("No agents selected"); return; }
+    if (!window.confirm(`Permanently uninstall ${selectedAgents.length} offline agent(s)? This cannot be undone.`)) return;
+    setCleaning(true);
+    try {
+      const ids = selectedAgents.map(a => a.agent_id);
+      const r = await axios.post(`${API}/acronis/agents/cleanup`, { agent_ids: ids }, { headers });
+      const { removed = [], failed = [] } = r.data || {};
+      toast.success(`Removed ${removed.length} of ${ids.length}${failed.length ? ` · ${failed.length} failed` : ""}`);
+      setOrphans(prev => prev ? {
+        ...prev,
+        offline_consuming: prev.offline_consuming.filter(x => !removed.includes(x.agent_id)),
+        totals: { ...prev.totals, offline_consuming: Math.max(0, (prev.totals.offline_consuming || 0) - removed.length), total_orphans: Math.max(0, (prev.totals.total_orphans || 0) - removed.length) },
+      } : prev);
+      setSelectedAgents([]);
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk cleanup failed"); }
+    finally { setCleaning(false); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -654,7 +759,7 @@ export default function BackupCenterPage() {
         </TabsContent>
 
         {/* ORPHANS */}
-        <TabsContent value="orphans" className="mt-4 space-y-4">
+        <TabsContent value="orphans" className="mt-4 space-y-3">
           <Card className="border-violet-500/30 bg-gradient-to-br from-violet-500/5 to-fuchsia-500/5">
             <CardContent className="py-4 px-5">
               <div className="flex items-center gap-4">
@@ -667,7 +772,7 @@ export default function BackupCenterPage() {
                     <Sparkles className="w-3 h-3 text-violet-400" />
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    Find unprotected resources, stale backups, zombie plans pointing to deleted machines, and offline agents that may still be billed.
+                    Find unprotected resources, stale backups, zombie plans pointing to deleted machines, and offline agents still consuming storage. Tick rows and click <strong className="text-rose-300">Remove Selected</strong> to clean up at the click of a button.
                   </p>
                 </div>
                 <Button onClick={handleScanOrphans} disabled={scanning} className="bg-violet-600 hover:bg-violet-700" data-testid="run-orphan-scan-btn">
@@ -687,176 +792,252 @@ export default function BackupCenterPage() {
             </Card>
           ) : (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <HeroMetric label="Unprotected" value={orphans.totals.unprotected || 0} icon={FileQuestion} glow="rose" subtitle="No backup policy" />
-                <HeroMetric label="Stale Backups" value={orphans.totals.stale || 0} icon={Clock} glow="amber" subtitle={`${orphans.stale_threshold_days}+ days old`} />
-                <HeroMetric label="Zombie Plans" value={orphans.totals.zombie_apps || 0} icon={Skull} glow="violet" subtitle="Missing resource" />
-                <HeroMetric label="Offline Agents" value={orphans.totals.offline_consuming || 0} icon={WifiOff} glow="rose" subtitle="May still bill" />
-              </div>
+              {/* Customise toolbar */}
+              <orphanGrid.EditBar testIdPrefix="orphans-" />
 
-              {/* Unprotected */}
-              {orphans.unprotected?.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      <span className="flex items-center gap-2"><FileQuestion className="w-4 h-4 text-rose-400" />Unprotected Resources ({orphans.unprotected.length})</span>
-                      <div className="flex gap-2">
-                        {selectedOrphans.length > 0 && (
-                          <Button
-                            size="sm" variant="outline"
-                            className="h-7 text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10"
-                            onClick={() => openApplyPlan(selectedOrphans)}
-                            data-testid="apply-plan-bulk-btn"
-                          >
-                            <Wand2 className="w-3 h-3 mr-1" />
-                            Apply Plan to {selectedOrphans.length} selected
-                          </Button>
-                        )}
-                        {selectedOrphans.length > 0 && (
-                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedOrphans([])}>
-                            Clear
-                          </Button>
-                        )}
-                      </div>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <ScrollArea className="h-[280px]">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-8"></TableHead>
-                            <TableHead>Resource</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Tenant</TableHead>
-                            <TableHead>Severity</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {orphans.unprotected.map(u => {
-                            const isSelected = selectedOrphans.find(s => s.resource_id === u.resource_id);
-                            return (
-                              <TableRow key={u.resource_id} className={isSelected ? "bg-cyan-500/5" : ""}>
-                                <TableCell className="px-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!isSelected}
-                                    onChange={() => toggleOrphanSelection(u)}
-                                    className="w-3.5 h-3.5 rounded border-border"
-                                    data-testid={`orphan-select-${u.resource_id}`}
-                                  />
-                                </TableCell>
-                                <TableCell className="font-medium text-sm">{u.resource_name}</TableCell>
-                                <TableCell className="text-xs capitalize">{u.resource_type}</TableCell>
-                                <TableCell className="text-xs text-muted-foreground">{u.tenant_name || "-"}</TableCell>
-                                <TableCell><Badge variant="destructive" className="text-[10px]">{u.severity}</Badge></TableCell>
-                                <TableCell className="text-right">
-                                  <Button
-                                    variant="ghost" size="sm"
-                                    className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10"
-                                    onClick={() => openApplyPlan([u])}
-                                    title="Apply backup plan to this resource"
-                                    data-testid={`apply-plan-${u.resource_id}`}
-                                  >
-                                    <Wand2 className="w-3 h-3 mr-1" />Apply Plan
-                                  </Button>
-                                  <Button
-                                    variant="ghost" size="sm" className="h-7 w-7 p-0"
-                                    onClick={() => handleOpenAcronis(u.resource_id)}
-                                    title="Open in Acronis"
-                                  >
-                                    <ExternalLink className="w-3 h-3" />
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
+              <BackupResponsiveGridLayout
+                className={`layout ${orphanGrid.editMode ? "nx-edit-mode" : ""}`}
+                layouts={orphanGrid.visibleLayouts}
+                breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+                cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+                rowHeight={48}
+                margin={[12, 12]}
+                containerPadding={[0, 0]}
+                isDraggable={orphanGrid.editMode}
+                isResizable={orphanGrid.editMode}
+                onLayoutChange={orphanGrid.onLayoutChange}
+                draggableCancel=".nx-widget-hide,button,a,input,kbd,select,[role='combobox']"
+                useCSSTransforms
+                compactType="vertical"
+              >
+                {!orphanGrid.hiddenWidgets.has("metrics") && (
+                  <div key="metrics" className="nx-widget-card">
+                    <orphanGrid.HideBtn id="metrics" />
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 h-full">
+                      <HeroMetric label="Unprotected" value={orphans.totals.unprotected || 0} icon={FileQuestion} glow="rose" subtitle="No backup policy" />
+                      <HeroMetric label="Stale Backups" value={orphans.totals.stale || 0} icon={Clock} glow="amber" subtitle={`${orphans.stale_threshold_days}+ days old`} />
+                      <HeroMetric label="Zombie Plans" value={orphans.totals.zombie_apps || 0} icon={Skull} glow="violet" subtitle="Missing resource" />
+                      <HeroMetric label="Offline Agents" value={orphans.totals.offline_consuming || 0} icon={WifiOff} glow="rose" subtitle="May still bill" />
+                    </div>
+                  </div>
+                )}
 
-              {/* Stale */}
-              {orphans.stale?.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" />Stale Backups ({orphans.stale.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <ScrollArea className="h-[280px]">
-                      <Table>
-                        <TableHeader><TableRow><TableHead>Resource</TableHead><TableHead>Last Backup</TableHead><TableHead>Days Stale</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                          {orphans.stale.map(s => (
-                            <TableRow key={s.resource_id}>
-                              <TableCell className="font-medium text-sm">{s.resource_name}</TableCell>
-                              <TableCell className="text-xs">{s.last_backup ? new Date(s.last_backup).toLocaleDateString() : "Never"}</TableCell>
-                              <TableCell><Badge variant="outline" className="text-[10px] font-mono">{s.days_stale}d</Badge></TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{s.tenant_name || "-"}</TableCell>
-                              <TableCell><Badge variant={s.severity === "critical" ? "destructive" : "outline"} className="text-[10px]">{s.severity}</Badge></TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
+                {!orphanGrid.hiddenWidgets.has("unprotected") && orphans.unprotected?.length > 0 && (
+                  <div key="unprotected" className="nx-widget-card">
+                    <orphanGrid.HideBtn id="unprotected" />
+                    <Card className="h-full flex flex-col">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          <span className="flex items-center gap-2"><FileQuestion className="w-4 h-4 text-rose-400" />Unprotected Resources ({orphans.unprotected.length})</span>
+                          <div className="flex gap-2">
+                            {selectedOrphans.length > 0 && (
+                              <>
+                                <Button size="sm" variant="outline" className="h-7 text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10" onClick={() => openApplyPlan(selectedOrphans)} data-testid="apply-plan-bulk-btn">
+                                  <Wand2 className="w-3 h-3 mr-1" />Apply Plan to {selectedOrphans.length}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedOrphans([])}>Clear</Button>
+                              </>
+                            )}
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 flex-1 min-h-0">
+                        <ScrollArea className="h-full">
+                          <Table>
+                            <TableHeader>
+                              <TableRow><TableHead className="w-8"></TableHead><TableHead>Resource</TableHead><TableHead>Type</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead><TableHead className="text-right">Actions</TableHead></TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {orphans.unprotected.map(u => {
+                                const isSelected = selectedOrphans.find(s => s.resource_id === u.resource_id);
+                                return (
+                                  <TableRow key={u.resource_id} className={isSelected ? "bg-cyan-500/5" : ""}>
+                                    <TableCell className="px-2">
+                                      <input type="checkbox" checked={!!isSelected} onChange={() => toggleOrphanSelection(u)} className="w-3.5 h-3.5 rounded border-border" data-testid={`orphan-select-${u.resource_id}`} />
+                                    </TableCell>
+                                    <TableCell className="font-medium text-sm">{u.resource_name}</TableCell>
+                                    <TableCell className="text-xs capitalize">{u.resource_type}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{u.tenant_name || "-"}</TableCell>
+                                    <TableCell><Badge variant="destructive" className="text-[10px]">{u.severity}</Badge></TableCell>
+                                    <TableCell className="text-right">
+                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10" onClick={() => openApplyPlan([u])} data-testid={`apply-plan-${u.resource_id}`}>
+                                        <Wand2 className="w-3 h-3 mr-1" />Apply Plan
+                                      </Button>
+                                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleOpenAcronis(u.resource_id)} title="Open in Acronis"><ExternalLink className="w-3 h-3" /></Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
 
-              {/* Zombie apps */}
-              {orphans.zombie_apps?.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2"><Skull className="w-4 h-4 text-violet-400" />Zombie Backup Plans ({orphans.zombie_apps.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <ScrollArea className="h-[280px]">
-                      <Table>
-                        <TableHeader><TableRow><TableHead>Plan</TableHead><TableHead>Missing Resource</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                          {orphans.zombie_apps.map(z => (
-                            <TableRow key={z.application_id}>
-                              <TableCell className="font-medium text-sm">{z.policy_name || "(unnamed plan)"}</TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{z.missing_resource_name}</TableCell>
-                              <TableCell><Badge variant="outline" className="text-[10px]">{z.severity}</Badge></TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
+                {!orphanGrid.hiddenWidgets.has("stale") && orphans.stale?.length > 0 && (
+                  <div key="stale" className="nx-widget-card">
+                    <orphanGrid.HideBtn id="stale" />
+                    <Card className="h-full flex flex-col">
+                      <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" />Stale Backups ({orphans.stale.length})</CardTitle></CardHeader>
+                      <CardContent className="p-0 flex-1 min-h-0">
+                        <ScrollArea className="h-full">
+                          <Table>
+                            <TableHeader><TableRow><TableHead>Resource</TableHead><TableHead>Last Backup</TableHead><TableHead>Days Stale</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                            <TableBody>
+                              {orphans.stale.map(s => (
+                                <TableRow key={s.resource_id}>
+                                  <TableCell className="font-medium text-sm">{s.resource_name}</TableCell>
+                                  <TableCell className="text-xs">{s.last_backup ? new Date(s.last_backup).toLocaleDateString() : "Never"}</TableCell>
+                                  <TableCell><Badge variant="outline" className="text-[10px] font-mono">{s.days_stale}d</Badge></TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">{s.tenant_name || "-"}</TableCell>
+                                  <TableCell><Badge variant={s.severity === "critical" ? "destructive" : "outline"} className="text-[10px]">{s.severity}</Badge></TableCell>
+                                  <TableCell className="text-right">
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleOpenAcronis(s.resource_id)} title="Open in Acronis"><ExternalLink className="w-3 h-3" /></Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
 
-              {/* Offline consuming */}
-              {orphans.offline_consuming?.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2"><WifiOff className="w-4 h-4 text-rose-400" />Long-Offline Agents ({orphans.offline_consuming.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <ScrollArea className="h-[280px]">
-                      <Table>
-                        <TableHeader><TableRow><TableHead>Agent</TableHead><TableHead>Last Seen</TableHead><TableHead>Days Offline</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                          {orphans.offline_consuming.map(o => (
-                            <TableRow key={o.agent_id}>
-                              <TableCell className="font-medium text-sm">{o.agent_name}</TableCell>
-                              <TableCell className="text-xs">{o.last_seen ? new Date(o.last_seen).toLocaleDateString() : "-"}</TableCell>
-                              <TableCell><Badge variant="outline" className="text-[10px] font-mono">{o.days_offline}d</Badge></TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{o.tenant_name || "-"}</TableCell>
-                              <TableCell><Badge variant="outline" className="text-[10px]">{o.severity}</Badge></TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
+                {/* ─── ZOMBIE PLANS — with bulk + per-row delete ──────── */}
+                {!orphanGrid.hiddenWidgets.has("zombies") && orphans.zombie_apps?.length > 0 && (
+                  <div key="zombies" className="nx-widget-card">
+                    <orphanGrid.HideBtn id="zombies" />
+                    <Card className="h-full flex flex-col border-violet-500/30">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center justify-between flex-wrap gap-2">
+                          <span className="flex items-center gap-2"><Skull className="w-4 h-4 text-violet-400" />Zombie Backup Plans ({orphans.zombie_apps.length})</span>
+                          <div className="flex gap-1.5 items-center">
+                            <Button
+                              size="sm" variant="outline"
+                              className="h-7 text-[11px]"
+                              onClick={() => setSelectedZombies(selectedZombies.length === orphans.zombie_apps.length ? [] : [...orphans.zombie_apps])}
+                              data-testid="zombies-select-all-btn"
+                            >
+                              {selectedZombies.length === orphans.zombie_apps.length ? "Deselect All" : "Select All"}
+                            </Button>
+                            {selectedZombies.length > 0 && (
+                              <Button
+                                size="sm" variant="destructive"
+                                className="h-7 text-[11px]"
+                                onClick={handleBulkCleanupZombies}
+                                disabled={cleaning}
+                                data-testid="zombies-bulk-cleanup-btn"
+                              >
+                                {cleaning ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                                Remove {selectedZombies.length} Selected
+                              </Button>
+                            )}
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 flex-1 min-h-0">
+                        <ScrollArea className="h-full">
+                          <Table>
+                            <TableHeader>
+                              <TableRow><TableHead className="w-8"></TableHead><TableHead>Plan</TableHead><TableHead>Missing Resource</TableHead><TableHead>Severity</TableHead><TableHead className="text-right">Action</TableHead></TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {orphans.zombie_apps.map(z => {
+                                const isSelected = !!selectedZombies.find(s => s.application_id === z.application_id);
+                                return (
+                                  <TableRow key={z.application_id} className={isSelected ? "bg-violet-500/10" : ""}>
+                                    <TableCell className="px-2">
+                                      <input type="checkbox" checked={isSelected} onChange={() => toggleZombieSelection(z)} className="w-3.5 h-3.5 rounded border-border" data-testid={`zombie-select-${z.application_id}`} />
+                                    </TableCell>
+                                    <TableCell className="font-medium text-sm">{z.policy_name || "(unnamed plan)"}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{z.missing_resource_name}</TableCell>
+                                    <TableCell><Badge variant="outline" className="text-[10px]">{z.severity}</Badge></TableCell>
+                                    <TableCell className="text-right">
+                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10" onClick={() => handleRemoveZombie(z)} data-testid={`zombie-remove-${z.application_id}`}>
+                                        <Trash2 className="w-3 h-3 mr-1" />Remove
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* ─── OFFLINE AGENTS — with bulk + per-row uninstall ──────── */}
+                {!orphanGrid.hiddenWidgets.has("offline") && orphans.offline_consuming?.length > 0 && (
+                  <div key="offline" className="nx-widget-card">
+                    <orphanGrid.HideBtn id="offline" />
+                    <Card className="h-full flex flex-col border-rose-500/30">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center justify-between flex-wrap gap-2">
+                          <span className="flex items-center gap-2"><WifiOff className="w-4 h-4 text-rose-400" />Long-Offline Agents ({orphans.offline_consuming.length})</span>
+                          <div className="flex gap-1.5 items-center">
+                            <Button
+                              size="sm" variant="outline"
+                              className="h-7 text-[11px]"
+                              onClick={() => setSelectedAgents(selectedAgents.length === orphans.offline_consuming.length ? [] : [...orphans.offline_consuming])}
+                              data-testid="agents-select-all-btn"
+                            >
+                              {selectedAgents.length === orphans.offline_consuming.length ? "Deselect All" : "Select All"}
+                            </Button>
+                            {selectedAgents.length > 0 && (
+                              <Button
+                                size="sm" variant="destructive"
+                                className="h-7 text-[11px]"
+                                onClick={handleBulkCleanupAgents}
+                                disabled={cleaning}
+                                data-testid="agents-bulk-cleanup-btn"
+                              >
+                                {cleaning ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                                Uninstall {selectedAgents.length} Selected
+                              </Button>
+                            )}
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 flex-1 min-h-0">
+                        <ScrollArea className="h-full">
+                          <Table>
+                            <TableHeader>
+                              <TableRow><TableHead className="w-8"></TableHead><TableHead>Agent</TableHead><TableHead>Last Seen</TableHead><TableHead>Days Offline</TableHead><TableHead>Tenant</TableHead><TableHead>Severity</TableHead><TableHead className="text-right">Action</TableHead></TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {orphans.offline_consuming.map(o => {
+                                const isSelected = !!selectedAgents.find(s => s.agent_id === o.agent_id);
+                                return (
+                                  <TableRow key={o.agent_id} className={isSelected ? "bg-rose-500/10" : ""}>
+                                    <TableCell className="px-2">
+                                      <input type="checkbox" checked={isSelected} onChange={() => toggleAgentSelection(o)} className="w-3.5 h-3.5 rounded border-border" data-testid={`agent-select-${o.agent_id}`} />
+                                    </TableCell>
+                                    <TableCell className="font-medium text-sm">{o.agent_name}</TableCell>
+                                    <TableCell className="text-xs">{o.last_seen ? new Date(o.last_seen).toLocaleDateString() : "-"}</TableCell>
+                                    <TableCell><Badge variant="outline" className="text-[10px] font-mono">{o.days_offline}d</Badge></TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{o.tenant_name || "-"}</TableCell>
+                                    <TableCell><Badge variant="outline" className="text-[10px]">{o.severity}</Badge></TableCell>
+                                    <TableCell className="text-right">
+                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10" onClick={() => handleRemoveAgent(o)} data-testid={`agent-remove-${o.agent_id}`}>
+                                        <Trash2 className="w-3 h-3 mr-1" />Uninstall
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+              </BackupResponsiveGridLayout>
 
               {orphans.totals.total_orphans === 0 && (
                 <Card>

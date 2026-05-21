@@ -1845,3 +1845,29 @@ Three new articles seeded via `POST /api/help/articles`:
 ### Tests
 - Browser-tested end-to-end: opened Acme Corporation → header renders w/ SMB Gold chip + cover banner + profile pic fallback + 9-button quick actions strip → switched to Documents → created "Acme — Server reboot procedure" runbook → toast confirmed + card rendered with HTML preview → switched to Notes → added "Primary contact prefers email over phone after 5pm" → toast confirmed + note rendered with author + timestamp.
 - Lint clean (6 files), webpack compiled clean.
+
+## 2026-05-21 — Backup Center: Orphan & Zombie one-click cleanup + widget grid
+
+### Backend
+**`/app/backend/app/routers/acronis_advanced.py`** — added bulk-cleanup endpoints:
+- `POST /api/acronis/orphans/cleanup` — accepts `{ application_ids: [...] }` and returns `{ removed, failed, total }`. Calls `DELETE /api/policy_management/v4/applications/{id}` for each ID in turn.
+- `DELETE /api/acronis/agents/{id}` — single agent uninstall via Acronis Agent Manager API.
+- `POST /api/acronis/agents/cleanup` — bulk agent uninstall (same shape as orphan cleanup).
+- Both bulk endpoints write to `db.acronis_cleanup_log` for audit trail (kind, actor, ids, removed, failed, timestamp).
+
+### Frontend
+**`/app/frontend/src/pages/BackupCenterPage.jsx`** — Orphans tab rebuilt:
+- Wrapped Metric Tiles + Unprotected + Stale + Zombie + Offline Agent tables in `react-grid-layout` using shared `useWidgetGrid` hook.
+- Each widget hideable via red X button in edit mode; restored via the **Add Widget** dropdown — same pattern as Dashboard + Tickets pages (`nx-orphan-layout-v1` / `nx-orphan-hidden-v1` storage keys).
+- **Zombie Plans card** — per-row checkboxes, **Select All** + **Remove N Selected** bulk button, per-row **Remove** trash button (confirm dialog → calls bulk or single delete endpoint).
+- **Long-Offline Agents card** — same UX (per-row checkbox + Select All + **Uninstall N Selected** + per-row Uninstall).
+- Optimistic UI: removed items drop out of state + totals shrink in real time after each cleanup.
+- Updated copy: "Tick rows and click **Remove Selected** to clean up at the click of a button."
+
+### Tests
+- Live Acronis tenant returned 90 unprotected + 78 zombie plans + 0 stale + 0 offline → all rendered correctly with 78 per-row Remove buttons, Select All button, customise edit mode toggling 3 hide buttons.
+- Help article seeded: `orphan-zombie-cleanup` (slug).
+
+### Limitations / notes
+- Bulk requests are sequential (one HTTP call per ID) to surface per-ID failures cleanly; with 100+ rows it can take a few seconds.
+- Acronis sometimes returns 202 (queued) — we treat that as success; the resource may take a few minutes to fully disappear from the Acronis console.
