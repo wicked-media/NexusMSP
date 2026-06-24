@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Sparkles, BrainCircuit, Activity, RefreshCw, Loader2, ChevronRight, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Sparkles, BrainCircuit, Activity, RefreshCw, Loader2, ChevronRight, ShieldCheck, AlertTriangle, Wrench, History } from "lucide-react";
+import MaintenanceWindowDialog, { MaintenanceWindowHistory } from "./MaintenanceWindowDialog";
 
 const BAND = {
   excellent: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
@@ -16,7 +17,7 @@ const BAND = {
   poor: "bg-rose-500/20 text-rose-300 border-rose-500/30",
 };
 
-export default function DevicesSmartBar({ selectedIds = [], onReload }) {
+export default function DevicesSmartBar({ selectedIds = [], deviceNames = {}, onReload }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
   const [healthOpen, setHealthOpen] = useState(false);
@@ -25,6 +26,8 @@ export default function DevicesSmartBar({ selectedIds = [], onReload }) {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [mwOpen, setMwOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const loadInsights = useCallback(async () => {
     setBusy(true);
@@ -67,6 +70,12 @@ export default function DevicesSmartBar({ selectedIds = [], onReload }) {
           </Button>
           <Button size="sm" variant="outline" className="text-fuchsia-400 border-fuchsia-500/30" onClick={runBulkDiagnose} disabled={selectedIds.length === 0 || bulkBusy} data-testid="bulk-diagnose-btn">
             <BrainCircuit className="w-3.5 h-3.5 mr-1" /> AI Diagnose ({selectedIds.length})
+          </Button>
+          <Button size="sm" variant="outline" className="text-amber-400 border-amber-500/30" onClick={() => setMwOpen(true)} disabled={selectedIds.length === 0} data-testid="schedule-window-btn">
+            <Wrench className="w-3.5 h-3.5 mr-1" /> Schedule Window ({selectedIds.length})
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setHistoryOpen(true)} data-testid="window-history-btn">
+            <History className="w-3.5 h-3.5 mr-1" /> Windows
           </Button>
           <div className="text-[10px] text-muted-foreground ml-2">Tick devices in the table to bulk-diagnose with Claude (max 25).</div>
         </CardContent>
@@ -163,6 +172,15 @@ export default function DevicesSmartBar({ selectedIds = [], onReload }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MaintenanceWindowDialog
+        open={mwOpen}
+        onClose={() => setMwOpen(false)}
+        selectedIds={selectedIds}
+        deviceNames={deviceNames}
+        onScheduled={() => { onReload && onReload(); setHistoryOpen(true); }}
+      />
+      <MaintenanceWindowHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </>
   );
 }

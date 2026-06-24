@@ -1,0 +1,85 @@
+{
+  "summary": "Comprehensive testing of Maintenance Window Scheduler feature (Iteration 169). All 20 backend API tests passed. Frontend testing confirmed DevicesSmartBar with 'Schedule Window (N)' and 'Windows' buttons, MaintenanceWindowDialog with all required elements (name, scheduled_at with preset chips, parent_ticket, 3 action toggles, description, notify_clients, device list, Schedule button), and MaintenanceWindowHistory dialog showing windows with status badges, View/Run Now/Cancel buttons, and detail view with AI Summary card and per-device results.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration169_maintenance_windows.py",
+    "/app/test_reports/pytest/pytest_results_iter169.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration169_maintenance_windows.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Test windows created during backend tests (TEST_ prefixed, cleaned up)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Maintenance Window Scheduler fully functional. Backend endpoints: POST /api/maintenance-windows (create), GET /api/maintenance-windows (list with ?status= and ?limit=), GET /api/maintenance-windows/{id} (detail with runs[]), GET /api/maintenance-windows/stats/summary (no route collision), POST /api/maintenance-windows/{id}/run-now (triggers execution), DELETE /api/maintenance-windows/{id} (cancel scheduled only). Frontend: DevicesSmartBar has 'Schedule Window (N)' button (disabled when N=0) and 'Windows' button. MaintenanceWindowDialog has all required elements. MaintenanceWindowHistory shows windows with status badges and action buttons. Detail view shows AI Summary (real Claude output) and per-device results. Background scheduler logs 'Maintenance Window scheduler started' on startup.",
+  "features_verified": {
+    "backend_endpoints": {
+      "create_window": "POST /api/maintenance-windows - validates device_ids (required, max 200), actions (must be valid), scheduled_at (required ISO format). Returns window with id, name, status='scheduled', devices_meta[]",
+      "list_windows": "GET /api/maintenance-windows - supports ?status= filter and ?limit= parameter",
+      "get_window_detail": "GET /api/maintenance-windows/{id} - returns window with runs[] array",
+      "stats_summary": "GET /api/maintenance-windows/stats/summary - returns {counts:{}, upcoming:[]} - no route collision with /{wid}",
+      "run_now": "POST /api/maintenance-windows/{id}/run-now - triggers immediate execution, status goes scheduled→running→completed",
+      "cancel_window": "DELETE /api/maintenance-windows/{id} - cancels scheduled windows only, returns 400 for running/completed",
+      "parent_ticket_comment": "When parent_ticket_id is set, completion posts comment with kind='maintenance_window' to ticket_comments"
+    },
+    "backend_validation": {
+      "empty_device_ids": "Returns 400 'device_ids required'",
+      "invalid_action": "Returns 400 'invalid action {a}; must be in [...]'",
+      "missing_scheduled_at": "Returns 400 'scheduled_at required'",
+      "bad_scheduled_at_format": "Returns 400",
+      "over_200_devices": "Returns 400 'max 200 devices per window'"
+    },
+    "backend_execution": {
+      "run_now_triggers": "Status changes to 'running', then 'completed' after execution",
+      "summary_counts": "Completed windows have summary_counts: {ok, failed, skipped}",
+      "ai_summary": "Real Claude Sonnet 4.5 generates post-maintenance report",
+      "per_device_runs": "Each device+action combination creates a run record with status"
+    },
+    "frontend_devices_page": {
+      "schedule_window_btn": "data-testid='schedule-window-btn' - shows count of selected devices, disabled when 0",
+      "window_history_btn": "data-testid='window-history-btn' - opens history dialog"
+    },
+    "frontend_maintenance_window_dialog": {
+      "dialog": "data-testid='maintenance-window-dialog'",
+      "scheduled_at": "data-testid='mw-scheduled-at' - datetime-local input with preset chips (+2h, Tonight, +1d, +1wk)",
+      "parent_ticket": "data-testid='mw-parent-ticket' - optional ticket ID input",
+      "action_install_patches": "data-testid='mw-action-install-patches' - toggle button",
+      "action_run_checks": "data-testid='mw-action-run-checks' - toggle button",
+      "action_reboot": "data-testid='mw-action-reboot' - toggle button",
+      "schedule_btn": "data-testid='mw-schedule-btn' - submits the form",
+      "device_list": "ScrollArea showing selected device names",
+      "notify_clients": "Checkbox for email notification 24h before"
+    },
+    "frontend_maintenance_history_dialog": {
+      "dialog": "data-testid='maintenance-history-dialog'",
+      "window_list": "Shows windows with name, status badge, scheduled_at, device count, actions",
+      "view_btn": "Opens detail dialog for any window",
+      "run_now_btn": "Play icon, only for scheduled windows - data-testid='mw-runnow-{id}'",
+      "cancel_btn": "Trash icon, only for scheduled windows - data-testid='mw-cancel-{id}'",
+      "detail_dialog": "Shows AI Summary card (fuchsia styling) and Per-device results list",
+      "ai_summary_card": "Real Claude-generated post-maintenance report with bullet points"
+    },
+    "background_scheduler": {
+      "startup_log": "'Maintenance Window scheduler started' logged on backend startup",
+      "auto_execution": "Picks up scheduled windows where scheduled_at <= now every 60 seconds"
+    }
+  },
+  "mocked_apis": {
+    "per_device_action_dispatch": "MOCKED - Per-device action execution is a deterministic stub (sleep 50ms + 'dispatched' record). Live TRMM fan-out available through existing ticket device list endpoint. AI summary is REAL Claude output."
+  }
+}

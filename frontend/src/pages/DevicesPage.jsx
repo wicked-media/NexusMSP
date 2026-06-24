@@ -456,7 +456,11 @@ export default function DevicesPage() {
         </div>
       </div>
 
-      <DevicesSmartBar selectedIds={selectedDevices} onReload={fetchData} />
+      <DevicesSmartBar
+        selectedIds={selectedDevices}
+        deviceNames={Object.fromEntries((devices || []).map(d => [d.id, d.name]))}
+        onReload={fetchData}
+      />
 
       {/* TABLE VIEW */}
       {viewMode === "table" && (
