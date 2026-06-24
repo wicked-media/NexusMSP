@@ -383,6 +383,7 @@ export const navGroups = [
           { path: "/pax8", label: "Pax8" },
           { path: "/hudu", label: "Hudu" },
           { path: "/cipp", label: "CIPP" },
+          { path: "/m365", label: "M365 Center" },
           { path: "/unifi", label: "UniFi" },
           { path: "/suped", label: "Suped" },
           { path: "/webhook-builder", label: "Webhook Builder" },

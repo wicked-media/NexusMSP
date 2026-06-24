@@ -11,6 +11,7 @@ export const routeConfig = [
   { path: "/shadow-it", component: page("ShadowItPage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/cipp", component: page("CippCommandCenterPage"), auth: true, layout: true },
+  { path: "/m365", component: page("M365CommandCenter"), auth: true, layout: true },
   { path: "/unifi", component: page("UnifiCommandCenterPage"), auth: true, layout: true },
   { path: "/tactical-rmm", component: page("TacticalRmmCommandCenterPage"), auth: true, layout: true },
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
