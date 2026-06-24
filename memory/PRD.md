@@ -9,6 +9,32 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 
 
+## 2026-06-24 — MAINTENANCE WINDOW SCHEDULER (autonomous overnight maintenance)
+
+### Backend NEW `/app/backend/app/routers/maintenance_windows.py`
+- `POST /api/maintenance-windows` — Creates a window bundling N devices (max 200) + N actions (`install-patches`/`run-checks`/`reboot`/`run-script`) + `scheduled_at`. Optional `parent_ticket_id` and `notify_clients`.
+- `GET /api/maintenance-windows` — list with `?status=` and `?limit=`.
+- `GET /api/maintenance-windows/{id}` — detail with `runs[]` per-device-per-action records.
+- `GET /api/maintenance-windows/stats/summary` — counts + next 5 upcoming.
+- `POST /api/maintenance-windows/{id}/run-now` — manual trigger.
+- `DELETE /api/maintenance-windows/{id}` — cancel scheduled (400 if running/completed).
+- **Background scheduler** loop (60s tick) auto-picks due windows + executes with concurrency=8.
+- **AI summary** (Claude Sonnet 4.5) generated on completion; posted as comment to `parent_ticket_id` if set.
+- Per-device dispatch is a deterministic stub (live TRMM fan-out remains in TicketDeviceList).
+
+### Frontend NEW `/app/frontend/src/components/devices/MaintenanceWindowDialog.jsx`
+- Schedule dialog: name, datetime-local picker with 4 preset chips (+2h, Tonight, +1d, +1wk), 3 action toggles, parent-ticket input, description, notify-clients checkbox, device list scroll.
+- History dialog: status-badged list with View/Run-Now/Cancel; detail dialog with AI Summary card (fuchsia styling) + per-device runs.
+
+### Wiring
+- `DevicesSmartBar` extended with two new buttons: "Schedule Window (N)" and "Windows".
+- `DevicesPage` passes `deviceNames` map for the device list inside the dialog.
+
+### Tests
+- testing_agent_v3_fork iteration 169: **20/20 backend passed, 100% frontend verified**. AI summary returned real Claude post-maintenance report with bullets + next steps. End-to-end verified: 3-device × 2-action window completed with 6 run records + summary_counts + AI summary + parent-ticket comment posted.
+
+
+
 ## 2026-05-21 — DEVICE SMART FEATURES (Syncro-killer inline actions + Fleet AI)
 
 ### Backend NEW `/app/backend/app/routers/device_smart.py`
