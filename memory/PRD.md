@@ -9,6 +9,33 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 
 
 
+## 2026-06-24 — M365 COMMAND CENTER (CIPP-style — based on r/MSP + CIPP research)
+
+Result of crawling MSP/PSA/RMM forums + the CIPP feature catalogue. Reddit r/MSP top pain points already crushed by NexusOps (unified RMM+PSA, native AI, modern UI) — the missing piece was a multi-tenant M365 lens. We built it.
+
+### Backend NEW `/app/backend/app/routers/m365.py` (consolidated CIPP-style router)
+- **M1 — Tenants & Search**: list/detail tenants with secure_score, MFA %, deep_links (Entra/Exchange/Intune/SharePoint/Defender), universal search across users+tenants+GDAP roles, AI executive brief (Claude).
+- **M2 — Standards Engine**: 15 seeded standards across identity/exchange/defender/intune/sharepoint/teams; toggle/schedule/run/auto-remediate; BPA report matrix; per-run history.
+- **M3 — GDAP**: relationships with expires_in_days, +1y extend, 4 role templates (Tier 1/2/3 + Billing).
+- **M3b — Offboarding Wizard**: 7-step (disable sign-in / remove licenses / hide from GAL / set OOO / convert to shared / forward / OneDrive transfer).
+- **M4 — Security & Alerts**: MFA analytics by method, 30-day Secure Score trend, 8 Conditional Access templates (CyberDrain / Open Intune / Microsoft baselines) with cross-tenant deploy, 5 seeded Scripted Alerts (impossible travel, new admin, mass delete, inbox forward external, guest admin), Anti-AITM CSS page generator.
+- **Connection settings**: app_id / tenant_id / app_secret / refresh_token with masked GET + test endpoint. MOCK badge until configured.
+- Mock-first: all data tagged `source: "m365cc"` to coexist with legacy CIPP integration on `db.m365_users`.
+
+### Frontend NEW `/app/frontend/src/pages/M365CommandCenter.jsx`
+- 7-tab Command Center: Tenants / Users / Standards / GDAP / Security / Alerts / Connection.
+- 7 KPI hero tiles (Tenants, Users, MFA %, Secure Score, Trend 30d, Risky sign-ins, GDAP expiring).
+- Standards toggles + Run dialog with compliant/drifted/remediated counts.
+- Offboarding Wizard dialog.
+- SVG Secure Score trend line + MFA method bars + Anti-AITM CSS preview.
+- Sidebar entry under Integrations.
+
+### Tests
+- testing_agent_v3_fork iteration 170: **33/33 backend passed, 100% frontend verified, zero issues**.
+- AI brief returned real Claude executive brief, Standards run returned correct compliance counts, Offboarding ran 5 steps and persisted state.
+
+
+
 ## 2026-06-24 — MAINTENANCE WINDOW SCHEDULER (autonomous overnight maintenance)
 
 ### Backend NEW `/app/backend/app/routers/maintenance_windows.py`
