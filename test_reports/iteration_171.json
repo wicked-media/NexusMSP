@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 171: Ticket Console Header + Change Customer Flow - All backend tests passed (14/14). Frontend verified: TicketConsoleHeader renders with all elements (Back, ID badge, Priority badge, Status badge, Title, Reply, Resolve, More dropdown). Change Customer dialog works with search, client list, 'current' badge, reason textarea, and Reassign button. Status pipeline (5 steps) visible. Customer history audit comments visible in conversation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration171_ticket_console_change_customer.py",
+    "/app/test_reports/pytest/pytest_results_iter171.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration171_ticket_console_change_customer.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "None - used existing ticket data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Ticket Console Header and Change Customer flow fully functional. Backend endpoints: POST /api/tickets/{id}/change-customer (reassigns ticket, adds history entry, posts audit comment), GET /api/tickets/{id}/customer-history (returns history array), POST /api/tickets/{id}/revert-customer (reverts to previous customer). Frontend: TicketConsoleHeader component renders at top of ticket detail view with all required elements. Change Customer dialog opens from customer pill click. Legacy header hidden by default (toggle via Layout menu).",
+  "features_verified": {
+    "backend_endpoints": {
+      "change_customer": "POST /api/tickets/{id}/change-customer - validates client_id (400 if empty, 404 if unknown), returns no_change:true if same client, creates history entry, posts audit comment with kind='customer_changed', clears contact if not provided",
+      "customer_history": "GET /api/tickets/{id}/customer-history - returns array of history entries with id, ts, from_client_id, from_client_name, to_client_id, to_client_name, changed_by, reason",
+      "revert_customer": "POST /api/tickets/{id}/revert-customer - reverts to previous customer using last history entry's from_client_id, returns 400 if no history",
+      "ticket_update": "PUT /api/tickets/{id} - updates status and title correctly"
+    },
+    "frontend_components": {
+      "ticket_console_header": "data-testid='ticket-console-header' - renders at top of ticket detail with Back button, ID badge, Priority badge, Status badge, Title (click-to-edit), Reply button, Resolve button, More dropdown",
+      "customer_pill": "data-testid='customer-pill' - shows client_name with swap icon, opens Change Customer dialog on click",
+      "change_customer_dialog": "data-testid='change-customer-dialog' - search input (data-testid='change-customer-search'), client list (data-testid='change-cust-row-{id}'), 'current' badge on assigned client, reason textarea, Reassign button (data-testid='change-customer-submit')",
+      "status_pipeline": "data-testid='pipeline-step-{status}' - 5 steps (open, in_progress, on_hold, resolved, closed), click-to-set status, current step highlighted in emerald",
+      "console_title": "data-testid='console-title' - click to edit, shows input (data-testid='console-title-input'), Enter saves, Escape cancels",
+      "more_dropdown": "data-testid='console-more-btn' - contains Transfer, Change customer, Customer history (if exists), C.R.A.I.G, Co-Pilot, Explain error, Voice Journal, Why on fire?, Email, PDF, Billing",
+      "customer_history_link": "data-testid='customer-history-link' - appears after customer change, shows count of changes",
+      "customer_history_dialog": "data-testid='customer-history-dialog' - reverse-chronological list, Revert last button (data-testid='revert-customer-btn')",
+      "legacy_header": "Hidden by default (legacyHeader: false), can be enabled via Layout customise menu"
+    },
+    "audit_trail": "Customer change creates audit comment with kind='customer_changed' visible in ticket conversation timeline"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  }
+}

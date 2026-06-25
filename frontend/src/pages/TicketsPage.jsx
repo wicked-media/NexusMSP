@@ -82,6 +82,7 @@ import {
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
 import { Responsive, WidthProvider } from "react-grid-layout";
+import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
@@ -119,6 +120,7 @@ const SIDEBAR_DEFAULT_LAYOUT = [
 const SIDEBAR_LAYOUT_KEY = "nx-ticket-detail-sidebar-layout-v1";
 // ─── Tickets DETAIL view: panel visibility keys ───────────────────────────
 const TICKETS_DETAIL_PANELS = [
+  { k: "legacyHeader",  label: "Legacy big header",     icon: Settings2 },
   { k: "serviceTier",   label: "Service Tier",          icon: Shield },
   { k: "categorisation", label: "Categorisation (ITIL)", icon: Settings2 },
   { k: "aiAnalysis",    label: "AI Diagnosis",          icon: Brain },
@@ -195,10 +197,10 @@ export default function TicketsPage() {
       const raw = localStorage.getItem("nexus.tickets.panels");
       if (raw) {
         const parsed = JSON.parse(raw);
-        return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, ...parsed };
+        return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, legacyHeader: false, ...parsed };
       }
     } catch {}
-    return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true };
+    return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, legacyHeader: false };
   });
 
   // ─── Detail-view sidebar drag/drop layout (separate from panelVisible) ──
@@ -1402,7 +1404,44 @@ export default function TicketsPage() {
     return (
       <PageShell>
         <div className="p-6 space-y-4 ticket-glass" data-testid="ticket-detail-view">
-        {/* Header with grouped menus */}
+        {/* 🆕 Clean Console Header — primary surface */}
+        <TicketConsoleHeader
+          ticket={viewingTicket}
+          clients={clients}
+          onBack={() => {
+            if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {});
+            setViewingTicket(null);
+          }}
+          onReply={() => {
+            try { document.querySelector('[data-testid="ticket-reply-tab"]')?.click(); } catch {}
+            window.scrollTo({ top: 800, behavior: "smooth" });
+          }}
+          onResolve={() => handleUpdateTicket("status", "resolved")}
+          onStatusChange={(s) => handleUpdateTicket("status", s)}
+          onChangeCustomer={(updated) => updated && setViewingTicket(updated)}
+          onTitleSave={(t) => { if (t && t !== viewingTicket.title) handleUpdateTicket("title", t); }}
+          onMutate={async () => {
+            try {
+              const r = await axios.get(`${API}/tickets/${viewingTicket.id}`, { headers });
+              setViewingTicket(r.data);
+              fetchTickets();
+            } catch {}
+          }}
+          onMoreAction={(k) => {
+            if (k === "transfer") {
+              try { document.querySelector('[data-testid="ticket-assignee-select"]')?.click(); } catch {}
+              window.scrollTo({ top: 600, behavior: "smooth" });
+            }
+            else if (k === "voice") document.querySelector('[data-testid="voice-journal-btn"]')?.click();
+            else if (k === "email") setIsEmailOpen?.(true);
+            else if (k === "pdf") handleDownloadPdf?.();
+            else if (k === "billing") setIsPushInvoiceOpen?.(true);
+            else if (k === "craig" || k === "copilot" || k === "explain" || k === "why_fire") handleAiAnalysis?.();
+          }}
+        />
+
+        {/* Header with grouped menus (legacy — hidden by default, toggle from Layout menu) */}
+        {panelVisible.legacyHeader && (
         <TicketDetailHeader
           viewingTicket={viewingTicket}
           parent={parent}
@@ -1429,10 +1468,11 @@ export default function TicketsPage() {
             setViewingTicket(null);
           }}
         />
+        )}
 
         {/* Layout customisation toolbar */}
         <div className="flex items-center justify-between gap-1.5 flex-wrap">
-          <ServiceTierChip ticketId={viewingTicket.id} token={token} />
+          {panelVisible.legacyHeader && <ServiceTierChip ticketId={viewingTicket.id} token={token} />}
           <div className="flex items-center gap-1.5 ml-auto">
           {sidebarEditMode && (
             <Button
@@ -1504,7 +1544,7 @@ export default function TicketsPage() {
             headers={headers}
             onActionClick={(target) => {
               if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
-              else if (target === "assign") setEditingAssignee?.(true);
+              else if (target === "assign") { try { document.querySelector('[data-testid="ticket-assignee-select"]')?.click(); } catch { /* noop */ } }
               else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
               else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
               else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
