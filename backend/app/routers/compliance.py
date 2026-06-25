@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
+import random as _random_mod
+random = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
 
@@ -109,3 +111,108 @@ async def get_compliance_reports(current_user: dict = Depends(get_current_user))
 @router.get("/compliance/frameworks")
 async def get_frameworks(current_user: dict = Depends(get_current_user)):
     return [{"id": k, "name": v["name"], "controls": len(v["controls"])} for k, v in COMPLIANCE_FRAMEWORKS.items()]
+
+
+# ============================================================
+# Compliance Frameworks (merged from compliance_frameworks.py)
+# ============================================================
+@router.get("/compliance-frameworks/overview")
+async def frameworks_overview(current_user: dict = Depends(get_current_user)):
+    frameworks = await db.compliance_frameworks.find({}, {"_id": 0}).to_list(50)
+    if not frameworks:
+        frameworks = await _seed_frameworks_catalog()
+    return {
+        "frameworks": frameworks,
+        "summary": {
+            "total_frameworks": len(frameworks),
+            "avg_compliance_pct": round(sum(f.get("compliance_pct", 0) for f in frameworks) / max(len(frameworks), 1), 1),
+            "total_controls": sum(f.get("total_controls", 0) for f in frameworks),
+            "controls_met": sum(f.get("controls_met", 0) for f in frameworks),
+        },
+    }
+
+
+@router.get("/compliance-frameworks/{framework_id}")
+async def get_framework_detail(framework_id: str, current_user: dict = Depends(get_current_user)):
+    fw = await db.compliance_frameworks.find_one({"id": framework_id}, {"_id": 0})
+    if not fw:
+        return {"error": "Not found"}
+    return fw
+
+
+async def _seed_frameworks_catalog():
+    fws = [
+        {"name": "NIST 800-171", "controls": [("AC - Access Control", 22, 18), ("AU - Audit", 9, 7), ("CM - Config Mgmt", 9, 6), ("IA - Identification", 11, 9), ("IR - Incident Response", 3, 3), ("MA - Maintenance", 6, 4), ("MP - Media Protection", 9, 7), ("PE - Physical", 6, 5), ("PS - Personnel", 2, 2), ("RA - Risk Assessment", 3, 2), ("SC - System Comms", 16, 11), ("SI - System Integrity", 7, 5)]},
+        {"name": "CIS Controls v8", "controls": [("Inventory & Control of Enterprise Assets", 5, 4), ("Inventory of Software Assets", 7, 5), ("Data Protection", 14, 10), ("Secure Config of Assets", 12, 8), ("Account Management", 6, 5), ("Access Control Management", 8, 6), ("Continuous Vulnerability Mgmt", 7, 5), ("Audit Log Management", 12, 9), ("Email & Browser Protections", 7, 5), ("Malware Defenses", 7, 6), ("Data Recovery", 5, 4), ("Network Infrastructure", 8, 5)]},
+        {"name": "SOC 2 Type II", "controls": [("CC1 - Control Environment", 4, 4), ("CC2 - Communication", 3, 3), ("CC3 - Risk Assessment", 4, 3), ("CC5 - Control Activities", 3, 2), ("CC6 - Logical Access", 8, 6), ("CC7 - System Operations", 5, 4), ("CC8 - Change Management", 3, 2), ("CC9 - Risk Mitigation", 2, 2), ("A1 - Availability", 3, 2), ("C1 - Confidentiality", 2, 2), ("PI1 - Privacy", 8, 5)]},
+        {"name": "HIPAA", "controls": [("Administrative Safeguards", 12, 9), ("Physical Safeguards", 4, 3), ("Technical Safeguards", 5, 4), ("Organizational Requirements", 4, 3), ("Breach Notification", 3, 3)]},
+    ]
+    frameworks = []
+    for fw_data in fws:
+        controls = []
+        total_c = 0
+        met_c = 0
+        for cat_name, total, met in fw_data["controls"]:
+            total_c += total
+            met_c += met
+            controls.append({"category": cat_name, "total": total, "met": met, "pct": round(met / total * 100, 1)})
+        fw = {
+            "id": f"cf-{uuid.uuid4().hex[:8]}", "name": fw_data["name"],
+            "total_controls": total_c, "controls_met": met_c,
+            "compliance_pct": round(met_c / total_c * 100, 1),
+            "categories": controls,
+            "last_assessed": (datetime.now(timezone.utc) - timedelta(days=random.randint(1, 30))).isoformat(),
+            "next_assessment": (datetime.now(timezone.utc) + timedelta(days=random.randint(30, 90))).isoformat(),
+            "clients_applicable": random.randint(3, 12),
+        }
+        frameworks.append(fw)
+        await db.compliance_frameworks.insert_one(fw)
+    return [{k: v for k, v in f.items() if k != "_id"} for f in frameworks]
+
+
+# ============================================================
+# Compliance Report Generator (merged from compliance_generator.py)
+# ============================================================
+@router.get("/compliance-generator/frameworks")
+async def get_generator_frameworks(current_user: dict = Depends(get_current_user)):
+    return [
+        {"id": "fw-hipaa", "name": "HIPAA", "controls": 45, "description": "Health Insurance Portability and Accountability Act"},
+        {"id": "fw-soc2", "name": "SOC 2 Type II", "controls": 64, "description": "Service Organization Control 2"},
+        {"id": "fw-cis", "name": "CIS Controls v8", "controls": 153, "description": "Center for Internet Security Controls"},
+        {"id": "fw-essential8", "name": "Essential Eight", "controls": 8, "description": "Australian Signals Directorate Essential Eight"},
+        {"id": "fw-nist", "name": "NIST CSF 2.0", "controls": 106, "description": "National Institute of Standards Cybersecurity Framework"},
+    ]
+
+
+@router.get("/compliance-generator/reports")
+async def get_generated_reports(current_user: dict = Depends(get_current_user)):
+    reports = await db.compliance_generated_reports.find({}, {"_id": 0}).sort("generated_at", -1).to_list(50)
+    if not reports:
+        now = datetime.now(timezone.utc)
+        reports = [
+            {"id": "cr-001", "client_name": "Global Finance Ltd", "framework": "SOC 2 Type II", "score": 87, "controls_passed": 56, "controls_total": 64, "generated_at": (now - timedelta(days=7)).isoformat(), "generated_by": "Alex Thompson", "status": "completed"},
+            {"id": "cr-002", "client_name": "HealthCare Plus", "framework": "HIPAA", "score": 72, "controls_passed": 32, "controls_total": 45, "generated_at": (now - timedelta(days=14)).isoformat(), "generated_by": "Sarah Chen", "status": "completed"},
+            {"id": "cr-003", "client_name": "Acme Corporation", "framework": "CIS Controls v8", "score": 81, "controls_passed": 124, "controls_total": 153, "generated_at": (now - timedelta(days=3)).isoformat(), "generated_by": "Alex Thompson", "status": "completed"},
+        ]
+        for r in reports:
+            await db.compliance_generated_reports.insert_one(r)
+        reports = [dict((k, v) for k, v in r.items() if k != "_id") for r in reports]
+    return reports
+
+
+@router.post("/compliance-generator/generate")
+async def generate_compliance_report(data: dict, current_user: dict = Depends(get_current_user)):
+    report = {
+        "id": f"cr-{uuid.uuid4().hex[:8]}",
+        "client_name": data.get("client_name"),
+        "framework": data.get("framework"),
+        "score": random.randint(65, 95),
+        "controls_passed": random.randint(30, 60),
+        "controls_total": random.randint(45, 153),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": current_user.get("name"),
+        "status": "completed",
+    }
+    await db.compliance_generated_reports.insert_one(report)
+    report.pop("_id", None)
+    return report

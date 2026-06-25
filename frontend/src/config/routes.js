@@ -275,6 +275,12 @@ export const routeConfig = [
   { path: "/notifications", component: page("NotificationsPage"), auth: true, layout: true },
   { path: "/workshop-bench", component: page("WorkshopBenchPage"), auth: true, layout: true },
 
+  // Consolidation hubs (Feb 2026 dedup)
+  { path: "/client-insights", component: page("ClientInsightsHubPage"), auth: true, layout: true },
+  { path: "/auto-ops", component: page("AutoOpsHubPage"), auth: true, layout: true },
+  { path: "/credentials", component: page("CredentialsHubPage"), auth: true, layout: true },
+  { path: "/team-hub", component: page("TeamHubPage"), auth: true, layout: true },
+
   // Public routes (no auth, no layout)
   { path: "/pay/:token", component: page("PublicPaymentPage"), auth: false, layout: false },
   { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -34,7 +34,25 @@ const TABS = [
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "ai", label: "AI & Automation", icon: Brain },
   { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "tickets", label: "Ticket Defaults", icon: FileText },
+  { id: "ping", label: "Ping & Escalation", icon: Activity },
+  { id: "white-label", label: "White Label", icon: Image },
+  { id: "channel", label: "Channel / MSP Mode", icon: Building },
+  { id: "tokens", label: "API Tokens", icon: Server },
+  { id: "twofa", label: "2FA / Security", icon: Shield },
+  { id: "comms", label: "Notify Channels", icon: MessageSquare },
+  { id: "my-settings", label: "My Workspace", icon: Settings2 },
 ];
+
+// Settings tabs that are powered by separate page components, lazy-loaded inline
+const LazyTicketSettings = lazy(() => import("./TicketSettingsPage"));
+const LazyTicketPingSettings = lazy(() => import("./TicketPingSettingsPage"));
+const LazyWhiteLabel = lazy(() => import("./WhiteLabelPage"));
+const LazyChannelMode = lazy(() => import("./ChannelModePage"));
+const LazyApiTokens = lazy(() => import("./ApiTokensPage"));
+const LazySecurity2FA = lazy(() => import("./Security2FAPage"));
+const LazyNotifyChannels = lazy(() => import("./NotifyChannelsPage"));
+const LazyTechSettings = lazy(() => import("./TechSettingsPage"));
 
 // Search index: maps keywords → (tab, card anchor, human label)
 const SETTINGS_INDEX = [
@@ -2668,6 +2686,48 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       </>)}
+
+      {/* === Merged sub-pages (lazy) === */}
+      {activeTab === "tickets" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ticket defaults…</div>}>
+          <LazyTicketSettings />
+        </Suspense>
+      )}
+      {activeTab === "ping" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ping & escalation…</div>}>
+          <LazyTicketPingSettings />
+        </Suspense>
+      )}
+      {activeTab === "white-label" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading white label…</div>}>
+          <LazyWhiteLabel />
+        </Suspense>
+      )}
+      {activeTab === "channel" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading channel mode…</div>}>
+          <LazyChannelMode />
+        </Suspense>
+      )}
+      {activeTab === "tokens" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading API tokens…</div>}>
+          <LazyApiTokens />
+        </Suspense>
+      )}
+      {activeTab === "twofa" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading 2FA settings…</div>}>
+          <LazySecurity2FA />
+        </Suspense>
+      )}
+      {activeTab === "comms" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading notify channels…</div>}>
+          <LazyNotifyChannels />
+        </Suspense>
+      )}
+      {activeTab === "my-settings" && (
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading my workspace…</div>}>
+          <LazyTechSettings />
+        </Suspense>
+      )}
 
       </div>
     </div>

@@ -7,6 +7,47 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-25 — DEDUP & MERGE AUDIT (Full Send)
+
+User asked to "go through every module to see what has been duplicated or can be merged" — full consolidation across all tiers executed.
+
+### Tier 1 — Deleted orphan files (27 total)
+- 25 unused frontend pages: `Backup{Compliance,Dashboard,Verify}Page`, `Compliance{Frameworks,Page,ReportGen}Page`, `Reports/Executive/Client/Financial/Roi`ReportsPage, `Revenue{Analytics,Tracker,Tracking,Forecast}Page`, `Sla{Center,Penalties,ReportGen,Timer}Page`, `Scheduling/SmartSchedule/DispatchBoard`Page, `Predictive{Failure,Maintenance}Page`, `Pax8Page`.
+- 2 empty backend stub routers: `ai_triage.py`, `ticket_triage.py`.
+
+### Tier 2 — Backend router consolidation
+- **`backup_center.py`** ← merged backup_dashboard + backup_compliance + backup_verify (all endpoint paths preserved).
+- **`compliance.py`** ← absorbed compliance_frameworks + compliance_generator.
+- **`revenue.py`** ← merged revenue_tracker + revenue_tracking + revenue_forecast.
+- **`predictive.py`** ← absorbed predictive_failure + predictive_maintenance.
+- **`onboarding.py`** ← absorbed onboarding_workflows (left `onboarding_enhanced` as v2 with separate prefix).
+- **`workshop.py`** ← merged workshop_bench + workshop_enhanced.
+- **`soc.py`** ← merged soc_feed + soc_realtime + soc_enhanced.
+Backend now registers 243 routers (down from 259). All 15 migrated endpoints verified returning 200.
+
+### Tier 3 — Tabbed Settings hub
+`SettingsPage.jsx` extended with 8 new tabs that lazy-load existing settings pages: Ticket Defaults, Ping & Escalation, White Label, Channel/MSP Mode, API Tokens, 2FA, Notify Channels, My Workspace. Deep-links work via `?tab=<id>`. Legacy routes still alive for backwards compat.
+
+### Tier 4 — Conceptual hub pages (new)
+- **`ClientInsightsHubPage`** — `/client-insights` — tabs: Customer Health / RMM Health / Risk / Sentiment / Timeline.
+- **`AutoOpsHubPage`** — `/auto-ops` — tabs: Triage Queue / Smart Routing / Auto-Resolve / Self-Healing.
+- **`CredentialsHubPage`** — `/credentials` — tabs: Vault / Rotation / MFA Management.
+- **`TeamHubPage`** — `/team-hub` — tabs: Command Center / Technicians / Roster / Utilization / Skills Matrix / Leaderboard.
+Each uses lazy-loaded React.lazy() for code-splitting, deep-link via `?tab=`.
+
+### Navigation rewired
+`navigation.js`: Clients group, Team group, Vault & Credentials, Compliance, and AI Copilot all now point at the new hubs (with sub-tab deep-links). Settings group surfaces all 16 tabs.
+
+### Files touched
+- Deleted: 27 orphan files (25 pages + 2 stubs) + 12 merged-source routers.
+- New: `backup_center.py`, `revenue.py`, `workshop.py`, `soc.py` (renames + merges), `ClientInsightsHubPage.jsx`, `AutoOpsHubPage.jsx`, `CredentialsHubPage.jsx`, `TeamHubPage.jsx`.
+- Modified: `SettingsPage.jsx`, `navigation.js`, `routes.js`, `compliance.py`, `predictive.py`, `onboarding.py`.
+
+### Tested
+- Backend: 15 consolidated endpoints all return 200 (curl).
+- Frontend: All 4 new hubs + `/settings?tab=tickets` render without errors (smoke tests).
+
+
 
 
 ## 2026-06-24 — M365 COMMAND CENTER (CIPP-style — based on r/MSP + CIPP research)

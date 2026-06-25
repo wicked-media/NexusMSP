@@ -589,3 +589,138 @@ async def get_billing_reconciliation(user=Depends(get_current_user)):
         },
         "mock_data": False,
     }
+
+
+# ============================================================
+# SOC Feed (merged from soc_feed.py)
+# ============================================================
+from datetime import timedelta as _socf_td
+import uuid as _socf_uuid
+import random as _socf_rand_mod
+_socf_rand = _socf_rand_mod.SystemRandom()
+
+
+@router.get("/soc-feed/events")
+async def get_soc_feed_events(current_user: dict = Depends(get_current_user)):
+    events = await db.soc_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    if not events:
+        events = await _seed_soc_feed_events()
+    return events
+
+
+@router.get("/soc-feed/stats")
+async def get_soc_feed_stats(current_user: dict = Depends(get_current_user)):
+    events = await db.soc_events.find({}, {"_id": 0}).to_list(500)
+    return {
+        "total_events": len(events),
+        "investigations": sum(1 for e in events if e.get("type") == "investigation"),
+        "responses": sum(1 for e in events if e.get("type") == "response"),
+        "resolutions": sum(1 for e in events if e.get("type") == "resolution"),
+        "avg_response_time_min": round(_socf_rand.uniform(4, 12), 1),
+        "mttr_hours": round(_socf_rand.uniform(1.5, 4.2), 1),
+    }
+
+
+async def _seed_soc_feed_events():
+    now = datetime.now(timezone.utc)
+    events = [
+        {"id": "soc-001", "type": "investigation", "analyst": "NexusOps AI", "title": "Automated triage: Suspicious scheduled task on TECH-SRV-01", "description": "AI detected persistence mechanism. Escalating to L2 analyst for human review.", "client_name": "TechStart Inc", "severity": "critical", "timestamp": (now - _socf_td(hours=2, minutes=5)).isoformat()},
+        {"id": "soc-002", "type": "response", "analyst": "Sarah C. (L2)", "title": "Confirmed malicious: Isolating TECH-SRV-01", "description": "Scheduled task confirmed as malicious. Endpoint isolated. Running remediation playbook.", "client_name": "TechStart Inc", "severity": "critical", "timestamp": (now - _socf_td(hours=2)).isoformat()},
+        {"id": "soc-003", "type": "investigation", "analyst": "NexusOps AI", "title": "BEC attempt detected on Summit Legal partner account", "description": "Inbox rule forwarding wire transfer emails to external address. Account flagged for immediate review.", "client_name": "Summit Legal Group", "severity": "critical", "timestamp": (now - _socf_td(hours=5, minutes=10)).isoformat()},
+        {"id": "soc-004", "type": "response", "analyst": "Mike R. (L3)", "title": "BEC remediation complete - Summit Legal", "description": "Malicious inbox rule removed. Password reset forced. MFA re-enrolled. All sessions revoked.", "client_name": "Summit Legal Group", "severity": "critical", "timestamp": (now - _socf_td(hours=4, minutes=30)).isoformat()},
+        {"id": "soc-005", "type": "resolution", "analyst": "Sarah C. (L2)", "title": "False positive: LSASS access by security tool", "description": "CrowdStrike sensor triggered LSASS access alert on ACME-DC01. Confirmed legitimate security scan.", "client_name": "Acme Corporation", "severity": "low", "timestamp": (now - _socf_td(days=1)).isoformat()},
+        {"id": "soc-006", "type": "investigation", "analyst": "NexusOps AI", "title": "Ransomware canary triggered on HC-WS-REC01", "description": "Canary file encryption detected. Auto-isolation executed. Forensic data collection in progress.", "client_name": "HealthCare Plus", "severity": "critical", "timestamp": (now - _socf_td(hours=1, minutes=5)).isoformat()},
+        {"id": "soc-007", "type": "response", "analyst": "Alex T. (L1)", "title": "Data exfiltration investigation - Global Finance CFO laptop", "description": "Analyzing 2.3GB upload to mega.nz from CFO laptop. User contacted for verification.", "client_name": "Global Finance Ltd", "severity": "high", "timestamp": (now - _socf_td(hours=3, minutes=45)).isoformat()},
+        {"id": "soc-008", "type": "resolution", "analyst": "Alex T. (L1)", "title": "Confirmed authorized: CFO uploading board presentation", "description": "CFO confirmed uploading quarterly board presentation to personal storage. Advisory issued on policy compliance.", "client_name": "Global Finance Ltd", "severity": "info", "timestamp": (now - _socf_td(hours=3)).isoformat()},
+    ]
+    for e in events:
+        await db.soc_events.insert_one(e)
+    return [dict((k, v) for k, v in e.items() if k != "_id") for e in events]
+
+
+# ============================================================
+# SOC Realtime (merged from soc_realtime.py)
+# ============================================================
+@router.get("/soc-realtime/events")
+async def get_soc_realtime_events(current_user: dict = Depends(get_current_user)):
+    events = await db.soc_realtime_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    if not events:
+        events = await _seed_realtime_events()
+    stats = {
+        "total_events_24h": len(events),
+        "critical": len([e for e in events if e.get("severity") == "critical"]),
+        "high": len([e for e in events if e.get("severity") == "high"]),
+        "medium": len([e for e in events if e.get("severity") == "medium"]),
+        "blocked": len([e for e in events if e.get("action") == "blocked"]),
+        "investigating": len([e for e in events if e.get("status") == "investigating"]),
+    }
+    return {"events": events, "stats": stats, "feed_type": "polling"}
+
+
+@router.post("/soc-realtime/generate")
+async def generate_soc_realtime_event(current_user: dict = Depends(get_current_user)):
+    event = _create_realtime_event()
+    await db.soc_realtime_events.insert_one({**event})
+    return {"status": "generated", "event": event}
+
+
+@router.get("/soc-realtime/threat-map")
+async def soc_threat_map(current_user: dict = Depends(get_current_user)):
+    sources = [
+        {"country": "Russia", "code": "RU", "attacks": _socf_rand.randint(15, 45), "lat": 55.75, "lng": 37.62},
+        {"country": "China", "code": "CN", "attacks": _socf_rand.randint(20, 50), "lat": 39.9, "lng": 116.4},
+        {"country": "North Korea", "code": "KP", "attacks": _socf_rand.randint(5, 15), "lat": 39.0, "lng": 125.8},
+        {"country": "Iran", "code": "IR", "attacks": _socf_rand.randint(8, 20), "lat": 35.7, "lng": 51.4},
+        {"country": "Brazil", "code": "BR", "attacks": _socf_rand.randint(3, 12), "lat": -15.8, "lng": -47.9},
+        {"country": "Nigeria", "code": "NG", "attacks": _socf_rand.randint(2, 8), "lat": 9.1, "lng": 7.5},
+        {"country": "United States", "code": "US", "attacks": _socf_rand.randint(10, 30), "lat": 38.9, "lng": -77.0},
+    ]
+    return {
+        "attack_sources": sources,
+        "total_blocked_today": sum(s["attacks"] for s in sources),
+        "top_attack_type": _socf_rand.choice(["Brute Force", "Phishing", "Port Scan", "SQL Injection", "DDoS"]),
+    }
+
+
+def _create_realtime_event():
+    types = [
+        ("Brute Force Login Attempt", "authentication", "blocked"),
+        ("Malware Detected", "endpoint", "quarantined"),
+        ("Suspicious PowerShell Execution", "endpoint", "investigating"),
+        ("Phishing Email Intercepted", "email", "blocked"),
+        ("Unauthorized Access Attempt", "network", "blocked"),
+        ("Data Exfiltration Detected", "network", "investigating"),
+        ("Ransomware Signature Match", "endpoint", "quarantined"),
+        ("Port Scan Detected", "network", "blocked"),
+        ("MFA Bypass Attempt", "authentication", "blocked"),
+        ("Lateral Movement Detected", "network", "investigating"),
+        ("Credential Stuffing Attack", "authentication", "blocked"),
+        ("C2 Beacon Communication", "endpoint", "quarantined"),
+    ]
+    t = _socf_rand.choice(types)
+    devices = ["WS-PC-045", "SRV-DC-01", "FW-EDGE-01", "RETA-SRV-01", "TECH-PRN-01", "GLOB-SW-01"]
+    clients = ["TechStart Inc", "RetailMax", "Global Finance Ltd", "Summit Hotels", "Cascade Media"]
+    return {
+        "event_id": str(_socf_uuid.uuid4())[:8],
+        "title": t[0], "category": t[1], "action": t[2],
+        "severity": _socf_rand.choice(["critical", "high", "medium"]),
+        "status": t[2],
+        "device": _socf_rand.choice(devices),
+        "client": _socf_rand.choice(clients),
+        "source_ip": f"{_socf_rand.randint(1,223)}.{_socf_rand.randint(0,255)}.{_socf_rand.randint(0,255)}.{_socf_rand.randint(1,254)}",
+        "geo": _socf_rand.choice(["Moscow, RU", "Beijing, CN", "Pyongyang, KP", "Tehran, IR", "Lagos, NG"]),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "details": f"Detected by {_socf_rand.choice(['Sentinel', 'Defender', 'NexusOps Agent', 'Firewall'])} at {datetime.now(timezone.utc).strftime('%H:%M:%S')}",
+    }
+
+
+async def _seed_realtime_events():
+    events = []
+    for i in range(30):
+        event = _create_realtime_event()
+        event["timestamp"] = (datetime.now(timezone.utc) - _socf_td(minutes=_socf_rand.randint(1, 1440))).isoformat()
+        events.append(event)
+    await db.soc_realtime_events.insert_many(events)
+    for e in events:
+        e.pop("_id", None)
+    return events

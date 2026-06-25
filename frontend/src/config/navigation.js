@@ -60,7 +60,13 @@ export const navGroups = [
       {
         path: "/tech-command", icon: UserCog, label: "Team",
         children: [
-          { path: "/tech-command", label: "Team Command Center ⚡" },
+          { path: "/team-hub", label: "Team Hub" },
+          { path: "/team-hub?tab=command", label: "Command Center ⚡" },
+          { path: "/team-hub?tab=technicians", label: "Technicians" },
+          { path: "/team-hub?tab=roster", label: "Roster" },
+          { path: "/team-hub?tab=utilization", label: "Utilization" },
+          { path: "/team-hub?tab=skills", label: "Skills Matrix" },
+          { path: "/team-hub?tab=leaderboard", label: "Leaderboard" },
         ]
       },
       {
@@ -137,9 +143,12 @@ export const navGroups = [
         ]
       },
       {
-        path: "/vault", icon: KeyRound, label: "Vault & Tools",
+        path: "/vault", icon: KeyRound, label: "Vault & Credentials",
         children: [
-          { path: "/vault", label: "Password Vault" },
+          { path: "/credentials", label: "Credentials Hub" },
+          { path: "/credentials?tab=vault", label: "Password Vault" },
+          { path: "/credentials?tab=password-rotation", label: "Rotation" },
+          { path: "/credentials?tab=mfa-management", label: "MFA Management" },
           { path: "/doc-scanner", label: "Document Scanner" },
           { path: "/device-terminal", label: "Live Terminal" },
         ]
@@ -154,13 +163,14 @@ export const navGroups = [
         path: "/clients", icon: Users, label: "Clients",
         children: [
           { path: "/clients", label: "All Clients" },
-          { path: "/customer-health", label: "Customer Health" },
-          { path: "/client-health", label: "RMM Health" },
-          { path: "/client-timeline", label: "Timeline" },
+          { path: "/client-insights", label: "Client Insights Hub" },
+          { path: "/client-insights?tab=customer-health", label: "Customer Health" },
+          { path: "/client-insights?tab=client-health", label: "RMM Health" },
+          { path: "/client-insights?tab=client-timeline", label: "Timeline" },
           { path: "/comms-timeline", label: "Comms Timeline" },
           { path: "/client-compare", label: "Compare" },
-          { path: "/client-risk", label: "Risk" },
-          { path: "/sentiment", label: "Sentiment" },
+          { path: "/client-insights?tab=client-risk", label: "Risk" },
+          { path: "/client-insights?tab=sentiment", label: "Sentiment" },
         ]
       },
       {
@@ -281,8 +291,8 @@ export const navGroups = [
         children: [
           { path: "/compliance", label: "Compliance Center" },
           { path: "/cyber-insurance", label: "Cyber Insurance Export" },
-          { path: "/mfa-management", label: "MFA Management" },
-          { path: "/password-rotation", label: "Password Rotation" },
+          { path: "/credentials?tab=mfa-management", label: "MFA Management" },
+          { path: "/credentials?tab=password-rotation", label: "Password Rotation" },
           { path: "/audit-trail", label: "Audit Trail" },
         ]
       },
@@ -296,8 +306,11 @@ export const navGroups = [
         path: "/nlp-query", icon: BrainCircuit, label: "AI Copilot",
         children: [
           { path: "/nlp-query", label: "NLP Search" },
-          { path: "/ai-resolution", label: "Auto-Resolve" },
-          { path: "/self-healing", label: "Self-Healing" },
+          { path: "/auto-ops", label: "Auto-Ops Hub" },
+          { path: "/auto-ops?tab=ai-resolution", label: "Auto-Resolve" },
+          { path: "/auto-ops?tab=self-healing", label: "Self-Healing" },
+          { path: "/auto-ops?tab=triage-queue", label: "Triage Queue" },
+          { path: "/auto-ops?tab=intelligent-routing", label: "Smart Routing" },
           { path: "/predictive-failure", label: "Predictive Intelligence" },
         ]
       },
@@ -354,12 +367,21 @@ export const navGroups = [
         path: "/settings", icon: Settings, label: "Settings",
         children: [
           { path: "/settings", label: "General" },
-          { path: "/ticket-settings", label: "Ticket Settings" },
-          { path: "/ticket-ping-settings", label: "Ping & Escalation" },
-          { path: "/white-label", label: "White Label" },
-          { path: "/channel-mode", label: "Channel / MSP Mode" },
-          { path: "/settings-api-tokens", label: "API Tokens" },
-          { path: "/security-2fa", label: "2FA / Security" },
+          { path: "/settings?tab=branding", label: "Platform Branding" },
+          { path: "/settings?tab=tiers", label: "Service Tiers" },
+          { path: "/settings?tab=auth", label: "Authentication" },
+          { path: "/settings?tab=mailbox", label: "Mailbox & Email" },
+          { path: "/settings?tab=integrations", label: "Integrations" },
+          { path: "/settings?tab=ai", label: "AI & Automation" },
+          { path: "/settings?tab=notifications", label: "Notifications" },
+          { path: "/settings?tab=tickets", label: "Ticket Defaults" },
+          { path: "/settings?tab=ping", label: "Ping & Escalation" },
+          { path: "/settings?tab=white-label", label: "White Label" },
+          { path: "/settings?tab=channel", label: "Channel / MSP Mode" },
+          { path: "/settings?tab=tokens", label: "API Tokens" },
+          { path: "/settings?tab=twofa", label: "2FA / Security" },
+          { path: "/settings?tab=comms", label: "Notify Channels" },
+          { path: "/settings?tab=my-settings", label: "My Workspace" },
         ]
       },
       {
