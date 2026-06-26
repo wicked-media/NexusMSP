@@ -1176,6 +1176,25 @@ async def list_help_articles(q: Optional[str] = None, current_user: dict = Depen
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
             })
+
+    # Ensure modern articles + prunes are applied at least once
+    try:
+        from app.routers._help_seed_modern import STALE_SLUGS, MODERN_ARTICLES
+        # Run once: presence of whats-new doc is the sentinel
+        sentinel = await db.help_articles.find_one({"slug": "whats-new"}, {"_id": 0})
+        if not sentinel:
+            if STALE_SLUGS:
+                await db.help_articles.delete_many({"slug": {"$in": STALE_SLUGS}})
+            for a in MODERN_ARTICLES:
+                doc = {**a, "updated_at": _now_iso()}
+                existing = await db.help_articles.find_one({"slug": a["slug"]}, {"_id": 0})
+                if existing:
+                    await db.help_articles.update_one({"slug": a["slug"]}, {"$set": doc})
+                else:
+                    doc["created_at"] = _now_iso()
+                    await db.help_articles.insert_one(doc)
+    except Exception:
+        pass
     qry = {}
     if q:
         qry["$or"] = [
@@ -1237,14 +1256,47 @@ async def delete_help_article(slug: str, current_user: dict = Depends(get_curren
 
 @router.post("/help/seed")
 async def reseed(current_user: dict = Depends(get_current_user)):
+    """Reseed default + modern articles. Also prunes stale slugs from prior versions."""
+    try:
+        from app.routers._help_seed_modern import STALE_SLUGS, MODERN_ARTICLES
+    except Exception:
+        STALE_SLUGS, MODERN_ARTICLES = [], []
+
+    stale = set(STALE_SLUGS or [])
+
+    # 1) Overwrite the legacy default articles (idempotent) — but skip any that are now stale
+    default_to_seed = [a for a in DEFAULT_ARTICLES if a["slug"] not in stale]
     await db.help_articles.delete_many({"slug": {"$in": [a["slug"] for a in DEFAULT_ARTICLES]}})
-    for a in DEFAULT_ARTICLES:
+    for a in default_to_seed:
         await db.help_articles.insert_one({
             **a,
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         })
-    return {"seeded": len(DEFAULT_ARTICLES)}
+
+    # 2) Prune any leftover stale slugs (e.g. custom-authored copies)
+    pruned_count = 0
+    if stale:
+        res = await db.help_articles.delete_many({"slug": {"$in": list(stale)}})
+        pruned_count = res.deleted_count or 0
+
+    # 3) Upsert the modern (post-dedup) articles — overwrite any prior versions
+    modern_seeded = 0
+    for a in MODERN_ARTICLES:
+        doc = {**a, "updated_at": _now_iso()}
+        existing = await db.help_articles.find_one({"slug": a["slug"]}, {"_id": 0})
+        if existing:
+            await db.help_articles.update_one({"slug": a["slug"]}, {"$set": doc})
+        else:
+            doc["created_at"] = _now_iso()
+            await db.help_articles.insert_one(doc)
+        modern_seeded += 1
+
+    return {
+        "seeded": len(default_to_seed),
+        "modern_seeded": modern_seeded,
+        "pruned": pruned_count,
+    }
 
 
 # ═══════════════════════ HELP CO-PILOT (AI ask anything) ═══════════════════════

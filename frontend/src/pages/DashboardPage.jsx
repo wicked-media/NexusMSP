@@ -41,6 +41,7 @@ const WIDGET_META = {
   "team-pins":    { label: "Team Pins / NOC Strip",  icon: Users },
   "hero-banner":  { label: "Welcome Banner",         icon: Sparkles },
   "standup":      { label: "Morning Standup",        icon: Activity },
+  "whats-new":    { label: "What's New",              icon: Sparkles },
   "threat":       { label: "Threat Radar",           icon: Shield },
   "sla-radar":    { label: "SLA Radar",              icon: Clock },
   "blueprint":    { label: "Blueprint Insights",     icon: Eye },
@@ -62,6 +63,7 @@ const DEFAULT_LAYOUT_LG = [
   { i: "team-pins",   x: 0, y: 7,  w: 12, h: 3, minH: 2, minW: 4 },
   { i: "hero-banner", x: 0, y: 10, w: 12, h: 3, minH: 2, minW: 6 },
   { i: "standup",     x: 0, y: 13, w: 12, h: 3, minH: 2, minW: 4 },
+  { i: "whats-new",   x: 0, y: 16, w: 4,  h: 6, minH: 4, minW: 3 },
   { i: "threat",      x: 0, y: 16, w: 12, h: 2, minH: 1, minW: 4 },
   { i: "sla-radar",   x: 0, y: 18, w: 12, h: 3, minH: 2, minW: 4 },
   { i: "blueprint",   x: 0, y: 21, w: 6,  h: 5, minH: 3, minW: 3 },
@@ -79,6 +81,7 @@ const DEFAULT_LAYOUT_LG = [
 const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v2";
 const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v2";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
+import WhatsNewTile from "@/components/dashboard/WhatsNewTile";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
 import { BlueprintInsightsTile } from "@/components/ai/BlueprintInsightsTile";
 import { ThreatRadarTicker } from "@/components/ai/ThreatRadarTicker";
@@ -501,6 +504,12 @@ export default function DashboardPage() {
       <div key="standup" className="nx-widget-card">
         <button onClick={(e) => { e.stopPropagation(); hideWidget("standup"); }} className="nx-widget-hide" data-testid="hide-widget-standup" aria-label="Hide Standup"><X className="w-3 h-3" /></button>
         <StandupDigestBanner />
+      </div>
+      )}
+      {!hiddenWidgets.has("whats-new") && (
+      <div key="whats-new" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("whats-new"); }} className="nx-widget-hide" data-testid="hide-widget-whats-new" aria-label="Hide What's New"><X className="w-3 h-3" /></button>
+        <WhatsNewTile />
       </div>
       )}
       {!hiddenWidgets.has("threat") && (

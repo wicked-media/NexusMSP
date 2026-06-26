@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 172 — What's New changelog tile + Help Center modern seed. Backend: 7/7 pytest cases passed (changelog entries, since, auth gate, help articles include 11 modern slugs and exclude 7 stale slugs, whats-new article body, admin reseed prune). Frontend: dashboard WhatsNewTile renders with 4 entries, '6 new' counter badge, category pills (merge/feature/feature/feature), 'View full changelog' link to /help/whats-new, and 'Mark all as seen' clears the badge and writes '2026-06-25' to nx-whats-new-seen-v1. /help/whats-new article opens with 'Latest Releases', '2026-06-25 — Big Cleanup' headings.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Dashboard (existing users with persisted layout)",
+        "issues": [
+          "Existing users with a pre-existing `nx-dashboard-layout-v2` localStorage entry will NOT see the new What's-New tile until they reset their layout. The tile only appears for users whose layout was rebuilt from DEFAULT_LAYOUT_LG. Consider auto-injecting the new widget when reading the persisted layout (e.g. if 'whats-new' missing from saved layout, append it at y=16) so the feature lights up automatically for everyone."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration172_whats_new_and_help.py",
+    "/app/test_reports/pytest/pytest_results_iter172.xml"
+  ],
+  "action_items": [
+    "Optional: migrate existing persisted dashboard layouts to include the new 'whats-new' widget so users don't have to wipe localStorage to see it."
+  ],
+  "critical_code_review_comments": [
+    "WhatsNewTile.jsx uses axios directly with manual Authorization header; project should consider centralising via an API client instance (DRY).",
+    "Changelog list lives inline in /app/backend/app/routers/changelog.py — fine for now (<200 lines) but if it grows beyond ~50 entries, move CHANGELOG to a JSON/Markdown source file.",
+    "Frontend dashboard layout persistence does not migrate when WIDGET_META adds new widgets — minor UX gap that affects every future widget release."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration172_whats_new_and_help.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (tile + counter + mark-seen + view-all + /help/whats-new article all verified)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "None — changelog is static; /api/help/seed was exercised during the reseed test which idempotently upserts the 13 modern articles and prunes stale slugs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Changelog endpoints (/api/changelog/entries, /api/changelog/since) live in /app/backend/app/routers/changelog.py with 6 static CHANGELOG entries. Help articles are seeded from /app/backend/app/routers/_help_seed_modern.py with 13 MODERN_ARTICLES and a STALE_SLUGS prune list. POST /api/help/seed response shape: {seeded, modern_seeded, pruned}. Frontend tile testids: whats-new-tile (root), whats-new-counter (badge, only when entries newer than nx-whats-new-seen-v1), whats-new-mark-seen (button), whats-new-view-all (link to /help/whats-new), whats-new-entry-{id} (per entry), whats-new-link-{id} (primary deep-link). Dashboard tile lives at grid y=16; to verify on existing accounts you must clear localStorage key 'nx-dashboard-layout-v2'. Verified that mark-seen writes '2026-06-25' (newest entry date) to localStorage and hides the badge.",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  }
+}
