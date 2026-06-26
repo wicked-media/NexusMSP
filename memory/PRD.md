@@ -7,6 +7,54 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-26 — DEVICES COMMAND CENTER v2 (Full Send Feature-Rich Upgrade)
+
+User said the Devices page was "too bland" and asked for it to be feature-rich and better than Syncro. Full-sent all 20 proposed features (a–t).
+
+### New backend router: `/app/backend/app/routers/device_pulse.py`
+11 endpoints:
+- `GET /api/devices/pulse` — every device with health score (0-100), criticality, and 24-point CPU/RAM/Disk sparklines (deterministic hash-based)
+- `GET /api/devices/risk-heatmap` — Client × Type 2D matrix with avg health + offline/warning/critical_disks counts
+- `GET /api/devices/lifecycle` — devices on age axis with EOL policy (laptop 4y, ws 5y, srv 5y, network 7y); summary buckets overdue/due_now/refresh_soon/ok
+- `GET /api/devices/top-risks` — up to 5 AI-aggregated callouts (disks>90%, RAM>90%, offline>24h, unpatched, predictive-failure)
+- `GET /api/devices/anomalies` — rolling stream of unusual behavior with backfill
+- `GET /api/devices/activity-ticker` — last 15 min checkins/alerts/maintenance runs
+- `GET /api/devices/top-talkers` — top 5 CPU/RAM/Disk pressure devices
+- `GET /api/devices/offline-watch` — devices offline in last N minutes
+- `GET/POST/DELETE /api/devices/saved-views` — per-user named filter combinations
+- `GET /api/devices/quick-scripts` + `POST /api/devices/quick-scripts/run` — 10-script catalog with fan-out & audit log
+- `POST /api/devices/{id}/tags` — bulk tag updates
+
+### New frontend components in `/app/frontend/src/components/devices/`
+- `Sparkline.jsx` — 60×18 inline SVG sparkline
+- `StatusOrb.jsx` — animated status orb (pulse for online/warning)
+- `DeviceThumbnail.jsx` — OS-aware mini icon w/ W/M/L badge
+- `FleetPulseWall.jsx` — cinematic glowing-tile grid; hover = pop-card with health + tags
+- `TopRisksStrip.jsx` — horizontal scrolling AI risk callouts (clickable filters)
+- `ActivityTicker.jsx` — Bloomberg-style scrolling ticker with LIVE indicator (auto-refresh 20s)
+- `TopTalkersPanel.jsx` — top 5 CPU/RAM/Disk pressure (auto-refresh 15s)
+- `OfflineWatch.jsx` — recently offline devices (auto-refresh 30s)
+- `SavedViewsBar.jsx` — pin/apply/delete named filter combos
+- `QuickScriptDialog.jsx` — bulk script picker with one-click fan-out
+- `RiskHeatmapCanvas.jsx` — clickable Client × Type matrix
+- `LifecycleTimeline.jsx` — 7-year age axis with EOL pip clusters
+- `AnomalyInbox.jsx` — rolling severity-coded anomaly stream
+- `DeviceCommandPalette.jsx` — Cmd+K type-to-command (reboot/iso/diagnose/wake/ticket/script with fuzzy device match)
+
+### `DevicesPage.jsx` upgrades
+- ActivityTicker injected at top
+- TopRisksStrip injected below ticker
+- 4 tabs now: **Fleet Pulse** (default) · Directory · Insights · Site Map
+- Pulse tab: FleetPulseWall + filter strip + right column (OfflineWatch + AnomalyInbox)
+- Insights tab: TopTalkersPanel + RiskHeatmapCanvas + LifecycleTimeline
+- Directory tab: SavedViewsBar + density toggle (comfortable/compact/dense) + `/ticket <name>` shortcut + bulk Quick-Script button
+- Row visuals: DeviceThumbnail (OS-aware) + StatusOrb + inline CPU/RAM/Disk sparklines + glow-on-hover (violet inset border + violet/6 bg)
+- QuickScriptDialog + DeviceCommandPalette mounted globally (Cmd/Ctrl+K from anywhere on the page)
+
+### Tested
+Iteration 173: 17/17 backend pytest passed (all 11 endpoints, including auth + error cases). All 22 frontend flows verified (135 pulse tiles rendered with sparklines, saved view CRUD, density toggle, bulk quick-script fan-out, Cmd+K palette). 0 console errors.
+
+
 ## 2026-06-25 — DEDUP & MERGE AUDIT (Full Send)
 
 User asked to "go through every module to see what has been duplicated or can be merged" — full consolidation across all tiers executed.
