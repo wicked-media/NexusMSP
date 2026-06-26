@@ -7,6 +7,57 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-26 — LEAD STUDIO v1 (Full Send Overhaul + Ticket Integration)
+
+User said the Leads page was "bland" and asked for it to be feature-rich and better than Syncro. Then asked for "Create Ticket from Lead" + "Merge Lead into Existing Ticket" (search by number or fuzzy). Full-sent all 32 proposed features (a–af).
+
+### New backend router: `/app/backend/app/routers/lead_studio.py`
+25 endpoints (note: single-segment paths use `/lead-studio/...` to avoid collision with `GET /leads/{lead_id}`):
+- `GET /lead-studio/score` — hash-stable scoring with sub-scores (engagement/budget/fit/urgency)
+- `GET /lead-studio/hot` — top 5 hottest leads
+- `GET /lead-studio/stale?days=14` — leads not touched in N days
+- `GET /lead-studio/activity-ticker` — Bloomberg-style stream (with backfill)
+- `GET /lead-studio/forecast` — weighted pipeline by close-date bucket
+- `GET /lead-studio/velocity` — avg days-in-stage (last 90 days)
+- `GET /lead-studio/source-attribution` — pie with $ won + win rate
+- `GET /lead-studio/conversion-funnel` — funnel counts + values
+- `GET /leads/{id}/next-best-action` — heuristic NBA per stage
+- `POST /leads/{id}/ai-draft-email` — Claude-style intent-aware drafts (intro/follow_up/proposal_followup/winback)
+- `POST /lead-studio/quick-parse` — parse pasted text → company/contact/email/phone/website/title
+- `GET /lead-studio/win-loss-reasons` + `POST /leads/{id}/win-loss` — close-reason taxonomy
+- `GET /lead-studio/recently-viewed` + `POST /lead-studio/{id}/touch`
+- `GET/POST/DELETE /lead-studio/saved-views` (per-user)
+- `GET/POST /leads/{id}/tasks` + `PUT/DELETE /lead-studio/tasks/{task_id}`
+- `POST /lead-studio/bulk-action` — change_stage / assign / delete / tag in bulk
+- **`POST /leads/{lead_id}/merge-into-ticket`** — appends rich lead context as internal comment, back-references both ways, flips lead → won
+
+### New frontend components in `/app/frontend/src/components/leads/`
+- `leadHelpers.js` — STATUS_CONFIG (pill/orb/hex/probability per stage), money/timeAgo/initialsOf/avatarColor
+- `InitialsAvatar`, `LeadScoreBadge` (with sub-score tooltip)
+- `HotLeadsStrip` — glowing hot lead cards
+- `LeadActivityTicker` — Bloomberg-style scrolling stream
+- `PipelineFunnelCanvas` — SVG-shaped funnel rows with conversion probability
+- `LeadsKanban` — 7-column draggable board with **confetti on Won** and "sad" toast on Lost
+- `ForecastWidget`, `InsightsWidgets` (VelocityMeter + SourceAttributionPie via conic-gradient)
+- `LeadSavedViewsBar` — 5 baked-in presets (🔥/💀/👤/⏳/✅) + user-created
+- `LeadDrawer` — slide-in panel with tabs (Overview · Activities · Tasks · Emails · Tickets), NBA banner, AI buttons, Create Ticket + Merge buttons
+- `MergeLeadIntoTicketDialog` — debounced search by `#number` or text, picker, confirm
+- `CreateTicketFromLeadDialog` — pre-fills title/description from lead context
+- `QuickAddPasteDialog` — paste → parse → open create dialog with fields pre-filled
+
+### `LeadsPage.jsx` (rewritten)
+- New name: "Lead Studio"
+- 4 hero stat tiles (Total · Open · Pipeline $ · Hot 🔥)
+- CRM Live ticker + Hot Leads Strip permanently above tabs
+- 4 tabs: **Pipeline** (default — funnel + forecast) · **Kanban** (drag-and-drop) · **Directory** (saved views + table + bulk) · **Insights** (forecast + velocity + source pie)
+- Row hover: violet glow + inset left border
+- Row actions menu: Open · **Create ticket** · **Merge into ticket** · Edit
+- Bulk bar: change stage / delete (more actions available via backend)
+
+### Tested
+Iteration 174: 22/22 backend pytest passed (all 25 endpoints, incl. happy + 400 + 404 cases). All 22 frontend flows verified — including end-to-end create-ticket-from-lead (toast "Ticket #SR-00xx created from this lead"), merge-into-ticket ("Merged into ticket #INC-0008" + lead flipped to Won), AI follow-up email rendering, drag-and-drop with confetti. 0 issues, 0 console errors.
+
+
 ## 2026-06-26 — DEVICES COMMAND CENTER v2 (Full Send Feature-Rich Upgrade)
 
 User said the Devices page was "too bland" and asked for it to be feature-rich and better than Syncro. Full-sent all 20 proposed features (a–t).
