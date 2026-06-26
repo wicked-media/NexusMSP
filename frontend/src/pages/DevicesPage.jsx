@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3 } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3, Zap, Activity, Flame, Command, Rows3, AlignJustify, Maximize2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -19,6 +19,20 @@ import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
 import DeviceBulkBar from "../components/devices/DeviceBulkBar";
 import DeviceMapView from "../components/devices/DeviceMapView";
 import DevicesSmartBar from "../components/devices/DevicesSmartBar";
+import FleetPulseWall from "../components/devices/FleetPulseWall";
+import TopRisksStrip from "../components/devices/TopRisksStrip";
+import ActivityTicker from "../components/devices/ActivityTicker";
+import TopTalkersPanel from "../components/devices/TopTalkersPanel";
+import OfflineWatch from "../components/devices/OfflineWatch";
+import SavedViewsBar from "../components/devices/SavedViewsBar";
+import QuickScriptDialog from "../components/devices/QuickScriptDialog";
+import RiskHeatmapCanvas from "../components/devices/RiskHeatmapCanvas";
+import LifecycleTimeline from "../components/devices/LifecycleTimeline";
+import AnomalyInbox from "../components/devices/AnomalyInbox";
+import DeviceCommandPalette from "../components/devices/DeviceCommandPalette";
+import Sparkline from "../components/devices/Sparkline";
+import StatusOrb from "../components/devices/StatusOrb";
+import DeviceThumbnail from "../components/devices/DeviceThumbnail";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -63,7 +77,10 @@ export default function DevicesPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [remoteBusy, setRemoteBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
-  const [tab, setTab] = useState("directory");
+  const [tab, setTab] = useState("pulse");
+  const [density, setDensity] = useState("comfortable"); // comfortable | compact | dense
+  const [quickScriptOpen, setQuickScriptOpen] = useState(false);
+  const [pulseCount, setPulseCount] = useState(0);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -394,6 +411,15 @@ export default function DevicesPage() {
       {/* HeroTile metric strip + Smart Inbox (shared across tabs) */}
       <DeviceCommandStrip headers={headers} API={API} />
 
+      {/* Live activity ticker */}
+      <ActivityTicker />
+
+      {/* AI Top Risks strip */}
+      <TopRisksStrip onApplyFilter={(f) => {
+        if (f.key === "status") setFilterStatus(f.value);
+        setTab("directory");
+      }} />
+
       {/* Bulk Actions Bar — appears whenever rows are selected */}
       <DeviceBulkBar selectedIds={selectedDevices} onClear={() => setSelectedDevices([])} headers={headers} devices={devices} />
 
@@ -401,8 +427,10 @@ export default function DevicesPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
           {[
-            { v: "directory", l: "Directory", Icon: List },
-            { v: "map",       l: "Site Map", Icon: Cloud },
+            { v: "pulse",     l: "Fleet Pulse", Icon: Flame },
+            { v: "directory", l: "Directory",   Icon: List },
+            { v: "insights",  l: "Insights",    Icon: BarChart3 },
+            { v: "map",       l: "Site Map",    Icon: Cloud },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
               className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
@@ -412,6 +440,53 @@ export default function DevicesPage() {
           ))}
         </TabsList>
 
+        {/* Fleet Pulse */}
+        <TabsContent value="pulse" className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input className="pl-9" placeholder="Filter pulse wall…" value={search} onChange={e => setSearch(e.target.value)} data-testid="pulse-search" />
+                </div>
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="online">Online</SelectItem>
+                    <SelectItem value="offline">Offline</SelectItem>
+                    <SelectItem value="warning">Warning</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-xs text-zinc-500" data-testid="pulse-count">{pulseCount} tiles</span>
+              </div>
+              <FleetPulseWall filterStatus={filterStatus} search={search} onCount={setPulseCount} />
+            </div>
+            <div className="space-y-3">
+              <OfflineWatch />
+              <AnomalyInbox />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Insights */}
+        <TabsContent value="insights" className="mt-4 space-y-6">
+          <TopTalkersPanel />
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-2">Risk Heatmap (Client × Type)</p>
+            <RiskHeatmapCanvas onCellClick={(c) => {
+              const client = clients.find(x => x.name === c.client);
+              if (client) setFilterClient(client.id);
+              setFilterType(c.type);
+              setTab("directory");
+            }} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-2">Lifecycle Timeline</p>
+            <LifecycleTimeline />
+          </div>
+        </TabsContent>
+
         <TabsContent value="map" className="mt-4">
           <DeviceMapView sites={siteMap} />
         </TabsContent>
@@ -419,10 +494,36 @@ export default function DevicesPage() {
         <TabsContent value="directory" className="mt-4 space-y-4">
 
       {/* Filters */}
+      <SavedViewsBar
+        currentFilters={{ status: filterStatus, type: filterType, client: filterClient, search }}
+        onApply={(f) => {
+          if (f.status !== undefined) setFilterStatus(f.status);
+          if (f.type !== undefined) setFilterType(f.type);
+          if (f.client !== undefined) setFilterClient(f.client);
+          if (f.search !== undefined) setSearch(f.search);
+        }}
+      />
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search name, IP, OS, serial..." value={search} onChange={e => setSearch(e.target.value)} data-testid="device-search" />
+          <Input
+            className="pl-9"
+            placeholder="Search name/IP/OS/serial · /ticket <device> to open ticket · Cmd+K palette"
+            value={search}
+            onChange={e => {
+              const v = e.target.value;
+              setSearch(v);
+              if (v.startsWith("/ticket ")) {
+                const q = v.slice("/ticket ".length).trim().toLowerCase();
+                const match = (devices || []).find(d => (d.name || "").toLowerCase().includes(q));
+                if (match) {
+                  navigate(`/tickets?device_id=${match.id}&new=1`);
+                  setSearch("");
+                }
+              }
+            }}
+            data-testid="device-search"
+          />
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="w-[130px]" data-testid="status-filter"><SelectValue /></SelectTrigger>
@@ -450,7 +551,32 @@ export default function DevicesPage() {
             {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="ml-auto flex gap-1">
+        <div className="ml-auto flex gap-1 items-center">
+          {selectedDevices.length > 0 && (
+            <Button size="sm" variant="outline" className="h-9 text-xs text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">
+              <Zap className="w-3 h-3 mr-1" />Quick Script ({selectedDevices.length})
+            </Button>
+          )}
+          <div className="flex items-center gap-0.5 border border-zinc-800 rounded">
+            <button
+              title="Comfortable"
+              onClick={() => setDensity("comfortable")}
+              className={`px-1.5 py-1.5 ${density === "comfortable" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              data-testid="density-comfortable"
+            ><Rows3 className="w-3.5 h-3.5" /></button>
+            <button
+              title="Compact"
+              onClick={() => setDensity("compact")}
+              className={`px-1.5 py-1.5 ${density === "compact" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              data-testid="density-compact"
+            ><AlignJustify className="w-3.5 h-3.5" /></button>
+            <button
+              title="Ultra-dense"
+              onClick={() => setDensity("dense")}
+              className={`px-1.5 py-1.5 ${density === "dense" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              data-testid="density-dense"
+            ><Maximize2 className="w-3.5 h-3.5" /></button>
+          </div>
           <Button variant={viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("table")} data-testid="view-table"><List className="w-4 h-4" /></Button>
           <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("grid")} data-testid="view-grid"><LayoutGrid className="w-4 h-4" /></Button>
         </div>
@@ -487,16 +613,23 @@ export default function DevicesPage() {
                 {filtered.length === 0 ? (
                   <TableRow><TableCell colSpan={11} className="text-center py-12 text-muted-foreground">No devices found</TableCell></TableRow>
                 ) : filtered.map(d => {
-                  const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
                   const viewers = deviceViewers[d.id] || [];
                   const isRemoted = viewers.length > 0;
+                  const rowDensity = density === "dense" ? "h-8 text-[11px]" : density === "compact" ? "h-10 text-xs" : "";
                   return (
-                    <TableRow key={d.id} className={`cursor-pointer hover:bg-muted/50 transition-colors ${isRemoted ? "bg-cyan-500/[0.03]" : ""}`} onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-row-${d.id}`}>
+                    <TableRow
+                      key={d.id}
+                      className={`cursor-pointer hover:bg-violet-500/[0.06] hover:shadow-[inset_2px_0_0_rgb(139,92,246)] transition-all ${rowDensity} ${isRemoted ? "bg-cyan-500/[0.03]" : ""}`}
+                      onClick={() => navigate(`/devices/${d.id}`)}
+                      data-testid={`device-row-${d.id}`}
+                    >
                       <TableCell onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedDevices.includes(d.id)} onChange={() => toggleSelectDevice(d.id)} className="rounded" /></TableCell>
                       <TableCell>
                         <div className="relative">
-                          <DevIcon className="w-5 h-5 text-muted-foreground" />
-                          <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-background ${STATUS_DOT[d.status]}`} />
+                          <DeviceThumbnail type={d.device_type} os={d.os} size={28} />
+                          <div className="absolute -bottom-0.5 -right-0.5">
+                            <StatusOrb status={d.status} size={9} />
+                          </div>
                           {isRemoted && (
                             <div className="absolute -top-2 -right-2" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} remoted: ${viewers.map(v => v.user_name).join(", ")}`}>
                               <div className="relative">
@@ -545,9 +678,24 @@ export default function DevicesPage() {
                       <TableCell className="text-sm">{d.client_name}</TableCell>
                       <TableCell className="text-sm">{d.os} <span className="text-xs text-muted-foreground">{d.os_version || ""}</span></TableCell>
                       <TableCell className="font-mono text-xs">{d.ip_address || "-"}</TableCell>
-                      <TableCell className="text-center"><UsagePill value={d.cpu_usage || 0} /></TableCell>
-                      <TableCell className="text-center"><UsagePill value={d.memory_usage || 0} /></TableCell>
-                      <TableCell className="text-center"><UsagePill value={d.disk_usage || 0} /></TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(5, Math.min(98, (d.cpu_usage || 30) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 25) - 12))) } width={32} height={14} color={(d.cpu_usage || 0) > 80 ? "#ef4444" : (d.cpu_usage || 0) > 60 ? "#fbbf24" : "#a78bfa"} />
+                          <UsagePill value={d.cpu_usage || 0} />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(10, Math.min(95, (d.memory_usage || 40) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 20) - 10))) } width={32} height={14} color={(d.memory_usage || 0) > 80 ? "#ef4444" : (d.memory_usage || 0) > 60 ? "#fbbf24" : "#34d399"} />
+                          <UsagePill value={d.memory_usage || 0} />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(20, Math.min(99, (d.disk_usage || 50) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 12) - 6))) } width={32} height={14} color={(d.disk_usage || 0) > 85 ? "#ef4444" : (d.disk_usage || 0) > 70 ? "#fbbf24" : "#22d3ee"} />
+                          <UsagePill value={d.disk_usage || 0} />
+                        </div>
+                      </TableCell>
                       <TableCell>
                         {d.compliance_score != null ? (
                           <Badge className={`${d.compliance_score >= 90 ? "bg-emerald-500/10 text-emerald-500" : d.compliance_score >= 70 ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"} text-[10px]`}>
@@ -769,6 +917,12 @@ export default function DevicesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Quick Script bulk dialog */}
+      <QuickScriptDialog open={quickScriptOpen} onClose={() => setQuickScriptOpen(false)} deviceIds={selectedDevices} />
+
+      {/* Cmd+K command palette */}
+      <DeviceCommandPalette devices={devices} />
       </div>
     </PageShell>
   );

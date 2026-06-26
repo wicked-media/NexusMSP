@@ -1,0 +1,72 @@
+{
+  "summary": "Iteration 173 — Devices Command Center (Fleet Pulse v1). Backend: 17/17 pytest passed for all 11 endpoints (pulse, risk-heatmap, lifecycle, top-risks, anomalies, activity-ticker, top-talkers, offline-watch, saved-views CRUD, quick-scripts catalog+run+404+400, tags ok+400+404). Frontend: Pulse is the default tab, ActivityTicker shows LIVE, TopRisksStrip renders 2 cards (risk-offline, risk-predict), all 4 tabs render correctly, fleet-pulse-wall renders 135 pulse-tile-* cards with sparklines, anomaly-inbox visible, Insights tab shows top-talkers (cpu/ram/disk) + risk-heatmap-canvas + lifecycle-timeline, Directory tab shows saved-views-bar + density toggles + device-search + 135 status-orbs. Saved view create works end-to-end. '/ticket TECH' in device-search correctly routes to /tickets?device_id=<id>&new=1. Bulk Quick Script: selecting rows reveals bulk-quick-script-btn, dialog lists 11 quick-script rows, clicking run-quick-script-qs-cleanup-temp queues script and shows toast 'Queued Cleanup Temp Files for 2 device(s)'. Cmd+K opens device-command-palette and ESC closes it. 0 console errors during testing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "DeviceCommandPalette",
+        "issue": "Ctrl+K opens TWO command palettes simultaneously — the new DeviceCommandPalette AND the global app-shell command palette. The global palette's DialogOverlay (z-50 fixed inset-0 bg-black/80) sits above the new palette and intercepts pointer events, so the device palette's input cannot be focused/typed into via mouse and palette-suggestion-* never renders. Typing 'TECH' or 'reboot TECH' via keyboard returned 0 suggestions. ESC closes both at once which masks the conflict.",
+        "selector": "[data-testid=\"device-command-palette\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Density toggle (Directory tab)",
+        "issue": "Clicking data-testid=\"density-dense\" does not visibly change row height (measured tr bounding-box stayed at 40px before and after). The buttons exist and are clickable but the height class/state change is not propagating to <tr> rows. Either the density state is not wired to the table rows, or the dense class is being overridden.",
+        "selector": "[data-testid=\"density-dense\"]",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "OfflineWatch",
+        "issue": "Component returns null when the offline-watch API has 0 results (no devices went offline in last 15 min). The spec lists offline-watch as 'visible in the right column' — at minimum it should render an empty/idle state (e.g. 'No recent offline events') so the right column feels populated and the testid is always assertable.",
+        "selector": "[data-testid=\"offline-watch\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Pulse tab right column",
+        "issues": [
+          "Right column under Pulse only shows AnomalyInbox when offline-watch is empty, making the column look light. Consider always rendering OfflineWatch with an empty state.",
+          "TopRisksStrip rendered only 2 of the possible 5 callouts in demo data — this is correct given the data, but worth seeding 'risk-disks' / 'risk-ram' / 'risk-patches' fixtures so QA reliably covers all 5 templates."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration173_device_pulse.py",
+    "/app/test_reports/pytest/pytest_iter173.xml"
+  ],
+  "action_items": [
+    "Fix Ctrl+K conflict: when on /devices, either suppress the global command palette or have DeviceCommandPalette claim the shortcut (stopPropagation + capture-phase). Right now the global palette's overlay blocks all clicks/typing in the device palette making palette-suggestion-* unreachable via mouse.",
+    "Wire density-compact / density-dense state to the actual table row classes (currently buttons toggle but tr heights stay 40px).",
+    "Render OfflineWatch even when list is empty (idle state) so the right column under Pulse never collapses."
+  ],
+  "critical_code_review_comments": [
+    "device_pulse.py: _sparkline is fully deterministic from device_id+salt — values never change between calls so the 'live' sparkline is actually static. Either re-seed with a time bucket (e.g. salt += hour) or persist last 24 polls in a small ring collection. Right now refreshing /devices/pulse gives identical arrays, which contradicts the 'live telemetry' framing.",
+    "device_pulse.py imports `random as _r` and instantiates `_rand = _r.Random()` but never uses it — dead code, remove.",
+    "device_pulse.py uses md5 for hashing — fine for non-security pseudo-random but consider hashlib.blake2b which is faster and not flagged by security scanners.",
+    "DevicesPage.jsx is now wiring 13+ new sub-components and likely well over 900 lines. Consider extracting Pulse / Insights / Directory tab bodies into their own files (DevicesPulseTab.jsx, DevicesInsightsTab.jsx, DevicesDirectoryTab.jsx) — DRY/file-size guideline says >700 lines should split.",
+    "DeviceCommandPalette listens for window 'keydown' Ctrl+K with preventDefault but the global command palette likely uses the same listener — they currently both fire. Wrap the device listener so it only activates when route starts with /devices AND the global one is not already open, or add e.stopImmediatePropagation() once the device palette opens."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration173_device_pulse.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "85% (21 of ~24 acceptance checks verified; Cmd+K typing blocked by overlay, density rows not shrinking, OfflineWatch hidden when empty)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Tests created/deleted one TEST_view_iter173 saved view (cleaned up in the lifecycle test). One TEST_iter173_view created via UI was left behind in device_saved_views collection — safe to ignore (user-scoped to aaron@stech.com.au).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend: 11 endpoints under /api/devices/* are all healthy and shape-validated. Frontend tab testids: devices-tab-{pulse,directory,insights,map}; pulse is the default. Pulse tab: fleet-pulse-wall + pulse-tile-<id> + offline-watch (HIDDEN when empty) + anomaly-inbox. Insights: top-talkers-panel + top-talkers-{cpu,ram,disk} + risk-heatmap-canvas + lifecycle-timeline. Directory: saved-views-bar + saved-view-add + saved-view-create-btn + saved-view-<id> + saved-view-remove-<id> + density-compact + density-dense + device-search + 135 status-orb-* + bulk-quick-script-btn (only after row checkbox selected) + quick-script-<id> + run-quick-script-<id>. Cmd+K opens device-command-palette but the GLOBAL command palette also opens on the same shortcut and its overlay blocks interaction — palette-suggestion-0 never rendered in my run. /ticket <name> in device-search works perfectly. Backend test file: /app/backend/tests/test_iteration173_device_pulse.py (17 tests, all green, runs in <3s).",
+  "rca_of_the_issue": "Cmd+K double-palette: both DeviceCommandPalette.jsx (lines 54-64) and the global app-shell command palette register a window keydown listener for (metaKey||ctrlKey)+k. Neither stops propagation, so both setOpen(true) fire. The global palette renders second/higher in the DOM tree, placing its Radix DialogOverlay over the device palette's input. Fix: in DeviceCommandPalette useEffect, after setOpen(o=>!o), call e.stopImmediatePropagation(), OR gate the global palette listener with `if (location.pathname.startsWith('/devices')) return;`. Density toggle: density state likely lives in DevicesPage but tr rows render from a child table component that doesn't receive the density prop — verify the prop drilling or context binding.",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  }
+}
