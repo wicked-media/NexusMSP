@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 174 — Lead Studio v1. Backend: 22/22 pytest passed for all 25 endpoints (score, hot, stale, activity-ticker, forecast, velocity, source-attribution, conversion-funnel, NBA, ai-draft-email x4 intents, quick-parse, win-loss-reasons, win-loss POST, recently-viewed, touch, saved-views CRUD + 400/404, tasks CRUD + 400/404, bulk-action change_stage/tag + 400, merge-into-ticket happy + 400 + 404x2, create-ticket-from-lead). Frontend: /leads loads cleanly with leads-page testid, hero stats (total/open/pipeline-value/hot) all visible, CRM Live ticker rendering events, hot-leads-strip showing 5 hot-lead-* cards, all 4 tabs render (pipeline default + kanban + directory + insights). Pipeline tab: pipeline-funnel-canvas with 6 funnel-stage-* rows + forecast-widget with 4 forecast-bucket-* tiles. Kanban tab: leads-kanban with all 7 kanban-col-* columns + 19 kanban-card-* cards. Insights tab: velocity-meter + source-attribution-pie. Directory tab: lead-saved-views-bar with all 5 preset chips ('🔥 Hot leads', '💀 Stalled > 14d', '👤 Mine', '⏳ Proposal sent', '✅ Won this month') + leads-search + 19 rows. Drawer: opens on row click with lead-drawer-nba banner and all 5 drawer-tab-* tabs. AI follow-up: drawer-ai-draft-followup successfully calls /api/leads/{id}/ai-draft-email and renders drawer-draft-email + drawer-copy-email button (verified subject 'Following up — TEST_iter174_ct' visible). Create Ticket dialog: drawer-create-ticket-btn opens dialog with pre-filled title + description, confirm-create-ticket button posts and toast 'Ticket #SR-00xx created from this lead' appears. Merge into Ticket: drawer-merge-into-ticket-btn opens dialog, typing 'INC' in merge-ticket-search debounced-fetches 15 results, selecting + confirm-merge-into-ticket posts and shows toast 'Merged into ticket #INC-0008'; lead status flips to 'Won' as expected. Quick Add: leads-quick-add opens QuickAddPasteDialog, pasting parsed text and clicking quick-add-parse-btn shows toast 'Parsed — review and save the new lead' and opens New Lead create dialog pre-filled (Brightleaf / Sarah Reynolds / sarah@brightleaf.com.au / +61 411 234 567 / brightleaf.com.au / CTO). Bulk bar: leads-bulk-bar renders correctly when two checkboxes are selected programmatically.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/leads/{id}/touch", "issue": "Spec in review_request said POST /api/lead-studio/{id}/touch but the actual route is POST /api/leads/{lead_id}/touch (which is what the frontend calls). Either align the docs/spec to the implemented path, or add a /lead-studio/{id}/touch alias so both forms work."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Directory row checkbox", "issue": "Clicking the row-level checkbox via mouse opens the drawer instead of toggling selection — the <tr> onClick handler fires before/instead of the input change because the checkbox cell is not stopping propagation. Workaround in test: programmatic click via JS. Real users will be unable to multi-select with the mouse, which breaks the bulk-bar flow entirely.", "selector": "[data-testid^=\"lead-select-\"]", "priority": "HIGH"},
+      {"component": "Directory row actions", "issue": "row-create-ticket-<id> and row-merge-ticket-<id> testids do NOT exist in the DOM until the row's MoreVertical menu is opened (count = 0 on a fresh page). That's expected only if the menu lazy-renders, but the spec implies they should be reachable from a known testid pattern. Document the trigger (click row's [aria-haspopup=menu] first) or pre-render the items in a hidden DropdownMenuContent for testability.", "selector": "[data-testid^=\"row-create-ticket-\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Lead Studio header", "issues": ["Hero stats card 'TOTAL LEADS 19' spans full width and dwarfs the 4-stat layout the spec describes — only 1 of the 4 stat-* tiles is visible above the fold; stat-open/stat-pipeline-value/stat-hot exist in the DOM but are likely hidden behind the CRM Live ticker or stacked vertically. Verify the flex/grid is rendering them side-by-side at 1920×1100."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration174_lead_studio.py",
+    "/app/test_reports/pytest/pytest_iter174.xml"
+  ],
+  "action_items": [
+    "Fix row-level checkbox click hijacking — stopPropagation on the checkbox cell so clicking the box toggles selection without opening the drawer (critical for the bulk-bar flow to be usable by real users).",
+    "Either align /touch endpoint path with the spec or add an alias under /lead-studio/{id}/touch.",
+    "Make row-create-ticket-<id>/row-merge-ticket-<id> testids assertable from the row level (consider pre-rendering hidden DropdownMenuItem so QA can target them without opening the menu, or document the menu-open prerequisite in the spec).",
+    "Audit Lead Studio hero layout — only stat-total visibly renders above the fold at 1920×1100; the other 3 stat-* tiles need to be in a 4-up grid alongside it."
+  ],
+  "critical_code_review_comments": [
+    "lead_studio.py is 742 lines — at the >700 line guideline. Split into lead_studio_analytics.py (score/hot/stale/forecast/velocity/source/funnel/ticker), lead_studio_ai.py (NBA/draft-email/quick-parse), lead_studio_crud.py (saved-views/tasks/recently-viewed/touch), lead_studio_actions.py (win-loss/bulk-action/merge-into-ticket).",
+    "/api/leads/{lead_id}/touch lives in lead_studio.py but routes under /leads/{lead_id} — make sure the existing GET /api/leads/{lead_id} in the legacy crm.py router still wins for GET (it does, since methods are different) and document that lead_studio.py owns POST /leads/{id}/touch + /win-loss + /merge-into-ticket + /ai-draft-email + /next-best-action + /tasks to avoid future prefix collisions.",
+    "ai-draft-email returns {subject, body, intent} per spec — confirmed for all 4 intents, but the body is templated, not LLM-generated. Consider noting this in the docs or wiring it through the existing _llm_complete helper for richer output.",
+    "Frontend LeadsPage.jsx (417 lines) wires 13+ subcomponents — acceptable but row-click vs checkbox-click event bubbling is fragile. Use event.stopPropagation in the <td> wrapping the checkbox, or move selection to a click on the avatar instead.",
+    "merge-into-ticket force-sets lead.status='won' — this is correct per spec but skips win-loss reason capture. Consider opening the win-loss reason modal client-side after a successful merge so the source-attribution pie stays accurate."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration174_lead_studio.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed)",
+    "frontend": "92% (24/26 acceptance checks verified; row checkbox click hijack is the only HIGH bug; row-action testids reachable only after opening menu)"
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "Tests created leads with prefix TEST_iter174_* (TEST_iter174_co, TEST_iter174_merge, TEST_iter174_ct, TEST_iter174_ct duplicates via UI). Some are now status='won' from win-loss + merge tests. Saved view TEST_iter174_view was deleted after test_saved_views_crud. Tag 'TEST_iter174' applied to first 2 leads via bulk-action test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 25 Lead Studio endpoints are healthy under /api/lead-studio/* (analytics, NBA, draft-email, quick-parse, win-loss, recently-viewed, saved-views, tasks, bulk-action, merge-into-ticket) plus /api/leads/{id}/{touch,win-loss,merge-into-ticket,ai-draft-email,next-best-action,tasks,create-ticket}. Spec said /api/lead-studio/{id}/touch but the actual route is /api/leads/{id}/touch — use the latter. Frontend tabs: leads-tab-{pipeline,kanban,directory,insights}; pipeline is default. Directory rows: row click opens lead-drawer with drawer-tab-{overview,activities,tasks,emails,tickets} + lead-drawer-nba + drawer-ai-draft-followup + drawer-create-ticket-btn + drawer-merge-into-ticket-btn. Row-level testids row-create-ticket-<id>/row-merge-ticket-<id> only render once the MoreVertical dropdown is opened. Bulk-bar testid is leads-bulk-bar; selecting via mouse on the checkbox CURRENTLY OPENS THE DRAWER instead of selecting — use JS-click in playwright to verify the bar. Merge dialog testids: merge-ticket-search (debounced), merge-ticket-result-<id>, confirm-merge-into-ticket. Create dialog testid: confirm-create-ticket. Quick add testids: leads-quick-add, quick-add-text, quick-add-parse-btn.",
+  "rca_of_the_issue": "Bulk checkbox UX bug: the table row uses an onClick handler to open the drawer, and the checkbox cell does NOT stopPropagation, so mouse-clicking the checkbox both toggles its checked state (briefly) and bubbles up to the row, which opens the drawer and re-renders the row — net effect: checkbox state never sticks for the user. Fix: wrap checkbox <td> with onClick={(e)=>e.stopPropagation()} or move the checkbox into a separate clickable area that swallows the click. Programmatic click via JS works in tests because the synthetic click doesn't trigger the bubble path the same way."
+}
