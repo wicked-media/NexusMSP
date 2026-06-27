@@ -1,21 +1,20 @@
 """
 Ticket → Device action wrappers.
 
-Every action is run against the TRMM agent linked to the ticket's device, and
+Every action is queued on the NexusOps Agent linked to the ticket's device, and
 automatically posts an internal ticket note + audit row so the action is
-auditable in-context (rather than buried in a separate TRMM log).
-
-This is the cockpit that turns a ticket into a remote-control panel.
+auditable in-context.
 """
 
 from fastapi import APIRouter, Depends, Body, HTTPException, Query
 from datetime import datetime, timezone
 import uuid
 import logging
+import asyncio
 
 from app.database import db
 from app.routers.auth import get_current_user
-from app.routers.tactical_rmm import _trmm_call, _data, _audit
+from app.routers.nexus_agent import queue_command_for_device, _audit as _agent_audit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,13 +24,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _ticket_with_agent(ticket_id: str, device_id: str | None = None) -> tuple[dict, str, dict]:
-    """Resolve ticket → linked device → TRMM agent_id.
-
-    If device_id is provided, that explicit device is targeted (must be linked to the
-    ticket via device_id or device_ids). Otherwise the ticket's primary device_id is used.
-    Raises 404/400 cleanly. Returns (ticket, agent_id, device_doc).
-    """
+async def _ticket_with_agent(ticket_id: str, device_id: str | None = None) -> tuple[dict, dict]:
+    """Resolve ticket → linked device. Raises 404/400 cleanly. Returns (ticket, device)."""
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(404, "Ticket not found")
@@ -47,14 +41,12 @@ async def _ticket_with_agent(ticket_id: str, device_id: str | None = None) -> tu
     device = await db.devices.find_one({"id": target_id}, {"_id": 0})
     if not device:
         raise HTTPException(404, "Linked device not found")
-    agent_id = device.get("trmm_agent_id")
-    if not agent_id:
-        raise HTTPException(400, f"Device '{device.get('hostname') or device.get('name')}' is not linked to a TRMM agent")
-    return ticket, agent_id, device
+    if not device.get("nexus_agent_id"):
+        raise HTTPException(400, f"Device '{device.get('hostname') or device.get('name')}' has no NexusOps Agent installed")
+    return ticket, device
 
 
 async def _post_action_note(ticket_id: str, user: dict, action_label: str, detail: str = ""):
-    """Append an internal note + audit row so the action is visible in the conversation timeline."""
     body = f"⚙️ **{action_label}**" + (f" — {detail}" if detail else "")
     await db.ticket_notes.insert_one({
         "id": uuid.uuid4().hex,
@@ -81,136 +73,100 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
 
 @router.post("/tickets/{ticket_id}/device/reboot")
 async def device_reboot(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("POST", f"agents/{agent_id}/reboot/")
-    await _audit("reboot", agent_id, current_user.get("name"), result)
-    await _post_action_note(ticket_id, current_user, "Reboot triggered", f"{device.get('name', agent_id)} via TRMM")
-    return {"success": True, "result": result}
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    cmd_id = await queue_command_for_device(device, "reboot", {"delay_sec": 30}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Reboot queued", f"{device.get('name')} via NexusOps Agent")
+    return {"success": True, "command_id": cmd_id}
 
 
 @router.post("/tickets/{ticket_id}/device/shutdown")
 async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body={"cmd": "shutdown /s /t 60", "shell": "cmd", "timeout": 60})
-    await _audit("shutdown", agent_id, current_user.get("name"), result)
-    await _post_action_note(ticket_id, current_user, "Shutdown triggered", f"{device.get('name', agent_id)} · 60s grace")
-    return {"success": True, "result": result}
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    cmd_id = await queue_command_for_device(device, "shutdown", {"delay_sec": 60}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Shutdown queued", f"{device.get('name')} · 60s grace")
+    return {"success": True, "command_id": cmd_id}
 
 
 @router.post("/tickets/{ticket_id}/device/wol")
 async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    """Wake-on-LAN — TRMM doesn't expose this directly; we log the intent and return 501.
-    Implementations can hook this to a LAN agent or UniFi controller separately."""
-    _, _agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    await _post_action_note(ticket_id, current_user, "Wake-on-LAN requested", f"{device.get('name','')} — Note: requires a LAN proxy agent — pending integration")
+    """Wake-on-LAN requires a LAN proxy agent — log the intent."""
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    await _post_action_note(ticket_id, current_user, "Wake-on-LAN requested", f"{device.get('name', '')} — requires LAN proxy agent")
     return {"success": False, "message": "Wake-on-LAN not yet wired to a LAN proxy. Action logged on the ticket."}
 
 
 @router.post("/tickets/{ticket_id}/device/run-checks")
 async def device_run_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("POST", f"agents/{agent_id}/runchecks/")
-    await _audit("run-checks", agent_id, current_user.get("name"), result)
-    await _post_action_note(ticket_id, current_user, "Checks triggered", f"{device.get('name','')} — all monitoring checks running now")
-    return {"success": True, "result": result}
+    """Trigger an immediate telemetry refresh (no-op ping at the moment)."""
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    cmd_id = await queue_command_for_device(device, "ping", {}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Telemetry refresh queued", device.get("name", ""))
+    return {"success": True, "command_id": cmd_id}
 
 
 @router.post("/tickets/{ticket_id}/device/install-patches")
 async def device_install_patches(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("POST", f"agents/{agent_id}/installpatches/")
-    await _audit("install-patches", agent_id, current_user.get("name"), result)
-    await _post_action_note(ticket_id, current_user, "Patch install started", f"{device.get('name','')} — Windows updates installing now")
-    return {"success": True, "result": result}
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    # Requires PSWindowsUpdate module on the endpoint
+    script = "if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) { Install-PackageProvider NuGet -Force; Install-Module PSWindowsUpdate -Force -SkipPublisherCheck }; Import-Module PSWindowsUpdate; Get-WindowsUpdate -Install -AcceptAll -IgnoreReboot"
+    cmd_id = await queue_command_for_device(device, "run_script", {"shell": "powershell", "script": script, "timeout_sec": 3600}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Patch install queued", f"{device.get('name','')} — Windows updates")
+    return {"success": True, "command_id": cmd_id}
 
 
 @router.post("/tickets/{ticket_id}/device/send-message")
 async def device_send_message(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    """Pop a message on the user's screen via TRMM broadcast (single agent)."""
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    title = (payload.get("title") or "Message from IT").strip()
-    body = (payload.get("body") or "").strip()
+    """Pop a message on the user's screen via msg.exe."""
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    title = (payload.get("title") or "Message from IT").strip().replace("'", "")
+    body = (payload.get("body") or "").strip().replace("'", "")
     if not body:
         raise HTTPException(400, "body required")
-    result = await _trmm_call("POST", "core/sendnotification/", json_body={"agent_ids": [agent_id], "title": title, "message": body})
+    script = f"msg * /TIME:60 '{title}: {body}'"
+    cmd_id = await queue_command_for_device(device, "run_script", {"shell": "powershell", "script": script, "timeout_sec": 30}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Message sent to user", f"{device.get('name','')} — \"{body[:120]}\"")
-    return {"success": True, "result": result}
+    return {"success": True, "command_id": cmd_id}
 
 
-# ─────────────────────── Remote control ───────────────────────
+@router.post("/tickets/{ticket_id}/device/run-script")
+async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+    """Generic script runner — pass {shell, script, timeout_sec}."""
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    shell = payload.get("shell", "powershell")
+    script = (payload.get("script") or "").strip()
+    if not script:
+        raise HTTPException(400, "script required")
+    timeout = int(payload.get("timeout_sec") or 120)
+    cmd_id = await queue_command_for_device(device, "run_script", {"shell": shell, "script": script, "timeout_sec": timeout}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Script queued", f"{device.get('name','')} ({shell})")
+    return {"success": True, "command_id": cmd_id}
+
+
+@router.post("/tickets/{ticket_id}/device/kill-process")
+async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    pid = int(payload.get("pid") or 0)
+    if pid <= 0:
+        raise HTTPException(400, "pid required")
+    cmd_id = await queue_command_for_device(device, "kill_process", {"pid": pid}, current_user.get("email") or "system")
+    await _post_action_note(ticket_id, current_user, "Process kill queued", f"PID {pid}")
+    return {"success": True, "command_id": cmd_id}
+
+
+# ─────────────────────── Remote control (Splashtop — Phase 4) ───────────────────────
 
 @router.get("/tickets/{ticket_id}/device/remote-url")
 async def device_remote_url(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    """One-time MeshCentral URLs for control/terminal/file."""
-    _, agent_id, device = await _ticket_with_agent(ticket_id, device_id)
-    try:
-        result = await _trmm_call("GET", f"agents/{agent_id}/meshcentral/")
-        await _post_action_note(ticket_id, current_user, "Remote control session opened", f"{device.get('name','')} — via MeshCentral")
-        return {"success": True, "urls": result}
-    except HTTPException as e:
-        return {"success": False, "message": str(e.detail), "status": e.status_code}
-
-
-# ─────────────────────── Read endpoints (services / processes / patches) ───────────────────────
-
-@router.get("/tickets/{ticket_id}/device/services")
-async def device_services(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    return await _trmm_call("GET", f"services/{agent_id}/")
-
-
-@router.post("/tickets/{ticket_id}/device/services/{service_name}/{action}")
-async def device_service_action(ticket_id: str, service_name: str, action: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    if action not in {"start", "stop", "restart"}:
-        raise HTTPException(400, "action must be start | stop | restart")
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("POST", f"services/{agent_id}/{service_name}/{action}/")
-    await _post_action_note(ticket_id, current_user, f"Service {action}", service_name)
-    return {"success": True, "result": result}
-
-
-@router.get("/tickets/{ticket_id}/device/processes")
-async def device_processes(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    raw = await _trmm_call("GET", f"agents/{agent_id}/processes/")
-    return _data(raw)
-
-
-@router.post("/tickets/{ticket_id}/device/processes/{pid}/kill")
-async def device_kill_process(ticket_id: str, pid: int, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    result = await _trmm_call("DELETE", f"agents/{agent_id}/processes/{pid}/")
-    await _post_action_note(ticket_id, current_user, "Process killed", f"PID {pid}")
-    return {"success": True, "result": result}
-
-
-@router.get("/tickets/{ticket_id}/device/winupdates")
-async def device_winupdates(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    raw = await _trmm_call("GET", f"winupdate/{agent_id}/")
-    return _data(raw)
-
-
-@router.get("/tickets/{ticket_id}/device/agent")
-async def device_agent_summary(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    """Live agent details — CPU, RAM, disk, uptime, etc."""
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    return await _trmm_call("GET", f"agents/{agent_id}/")
-
-
-@router.get("/tickets/{ticket_id}/device/checks")
-async def device_failing_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
-    """All checks for the linked device, with failing ones highlighted."""
-    _, agent_id, _ = await _ticket_with_agent(ticket_id, device_id)
-    raw = await _trmm_call("GET", f"agents/{agent_id}/checks/")
-    return _data(raw)
+    """Splashtop session URL — implementation pending Splashtop API integration."""
+    _, device = await _ticket_with_agent(ticket_id, device_id)
+    await _post_action_note(ticket_id, current_user, "Remote control requested", f"{device.get('name','')} — Splashtop integration pending")
+    return {"success": False, "message": "Splashtop integration not yet wired. Coming in Phase 4."}
 
 
 # ─────────────────────── Linked devices listing (for cockpit) ───────────────────────
 
 @router.get("/tickets/{ticket_id}/devices")
 async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Return every device linked to this ticket with a quick status snapshot."""
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(404, "Ticket not found")
@@ -232,27 +188,19 @@ async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_c
             "ip_address": d.get("ip_address"),
             "device_type": d.get("device_type"),
             "last_seen": d.get("last_seen"),
-            "trmm_agent_id": d.get("trmm_agent_id"),
-            "has_agent": bool(d.get("trmm_agent_id")),
+            "nexus_agent_id": d.get("nexus_agent_id"),
+            "has_agent": bool(d.get("nexus_agent_id")),
             "is_primary": d.get("id") == primary,
         })
-    # Order: primary first, then by name
     devices.sort(key=lambda x: (not x["is_primary"], (x.get("name") or "").lower()))
     return {"primary_id": primary, "devices": devices}
 
 
-# ─────────────────────── Fan-out: run an action on every linked device ───────────────────────
-
-import asyncio
-
+# ─────────────────────── Fan-out ───────────────────────
 
 @router.post("/tickets/{ticket_id}/device/fanout/{action}")
 async def device_fanout(ticket_id: str, action: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    """Run a single action against every linked device that has a TRMM agent.
-
-    Supported actions: run-checks · install-patches · reboot · shutdown · send-message
-    Returns per-device result so the UI can show a progress strip.
-    """
+    """Run a single action against every linked device that has a NexusOps Agent."""
     allowed = {"run-checks", "install-patches", "reboot", "shutdown", "send-message"}
     if action not in allowed:
         raise HTTPException(400, f"Action must be one of {sorted(allowed)}")
@@ -267,47 +215,35 @@ async def device_fanout(ticket_id: str, action: str, payload: dict = Body(defaul
     if not ids:
         return {"results": [], "summary": {"total": 0, "ok": 0, "failed": 0, "skipped": 0}}
 
-    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "hostname": 1, "trmm_agent_id": 1, "status": 1})
+    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
     targets = [d async for d in cursor]
 
     async def _run_one(d: dict) -> dict:
         name = d.get("name") or d.get("hostname") or d.get("id")
-        agent_id = d.get("trmm_agent_id")
-        if not agent_id:
-            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No TRMM agent linked"}
-        # Power-state guards
+        if not d.get("nexus_agent_id"):
+            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No NexusOps Agent"}
         if action in ("reboot", "shutdown", "send-message") and d.get("status") != "online":
-            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "Device offline"}
+            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "Offline"}
         try:
-            if action == "run-checks":
-                r = await _trmm_call("POST", f"agents/{agent_id}/runchecks/")
-            elif action == "install-patches":
-                r = await _trmm_call("POST", f"agents/{agent_id}/installpatches/")
-            elif action == "reboot":
-                r = await _trmm_call("POST", f"agents/{agent_id}/reboot/")
-            elif action == "shutdown":
-                r = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body={"cmd": "shutdown /s /t 60", "shell": "cmd", "timeout": 60})
+            kind_map = {"reboot": "reboot", "shutdown": "shutdown", "run-checks": "ping", "install-patches": "run_script", "send-message": "run_script"}
+            cmd_payload: dict = {}
+            if action == "install-patches":
+                cmd_payload = {"shell": "powershell", "script": "Get-WindowsUpdate -Install -AcceptAll -IgnoreReboot", "timeout_sec": 3600}
             elif action == "send-message":
-                title = (payload.get("title") or "Message from IT").strip()
-                body = (payload.get("body") or "").strip()
+                title = (payload.get("title") or "Message from IT").replace("'", "")
+                body = (payload.get("body") or "").replace("'", "")
                 if not body:
                     return {"device_id": d["id"], "device_name": name, "status": "failed", "message": "body required"}
-                r = await _trmm_call("POST", "core/sendnotification/", json_body={"agent_ids": [agent_id], "title": title, "message": body})
-            return {"device_id": d["id"], "device_name": name, "status": "ok", "result": r}
+                cmd_payload = {"shell": "powershell", "script": f"msg * /TIME:60 '{title}: {body}'", "timeout_sec": 30}
+            cmd_id = await queue_command_for_device(d, kind_map[action], cmd_payload, current_user.get("email") or "fanout")
+            return {"device_id": d["id"], "device_name": name, "status": "ok", "command_id": cmd_id}
         except Exception as e:
             return {"device_id": d["id"], "device_name": name, "status": "failed", "message": str(e)[:200]}
 
     results = await asyncio.gather(*[_run_one(d) for d in targets])
-
     ok = sum(1 for r in results if r["status"] == "ok")
     failed = sum(1 for r in results if r["status"] == "failed")
     skipped = sum(1 for r in results if r["status"] == "skipped")
-
     detail = f"{ok} succeeded · {failed} failed · {skipped} skipped"
     await _post_action_note(ticket_id, current_user, f"Fan-out: {action}", detail)
-
-    return {
-        "action": action,
-        "results": results,
-        "summary": {"total": len(results), "ok": ok, "failed": failed, "skipped": skipped},
-    }
+    return {"action": action, "results": results, "summary": {"total": len(results), "ok": ok, "failed": failed, "skipped": skipped}}

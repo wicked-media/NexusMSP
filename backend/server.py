@@ -120,8 +120,6 @@ async def startup_event():
     asyncio.create_task(_recurring_invoice_scheduler())
     # Start 7am morning standup-digest delivery scheduler
     asyncio.create_task(_standup_digest_scheduler())
-    # Start TRMM scheduled-broadcast runner
-    asyncio.create_task(_trmm_scheduled_broadcast_loop())
     asyncio.create_task(_warroom_escalation_loop())
     asyncio.create_task(_chain_reactions_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
@@ -200,18 +198,8 @@ async def _rustdesk_auto_sync_loop():
             await asyncio.sleep(60)
 
 async def _trmm_scheduled_broadcast_loop():
-    """Background loop that fires TRMM scheduled broadcasts whose run_at has elapsed."""
-    import asyncio
-    await asyncio.sleep(20)  # let the app warm up
-    while True:
-        try:
-            from app.routers.tactical_rmm import execute_due_scheduled_broadcasts
-            fired = await execute_due_scheduled_broadcasts()
-            if fired:
-                logger.info(f"TRMM scheduler fired {fired} broadcast(s)")
-        except Exception as e:
-            logger.debug(f"TRMM scheduler loop error: {e}")
-        await asyncio.sleep(30)
+    """Removed — TRMM has been replaced by NexusOps Agent. This stub keeps backwards-compat with any old references."""
+    return
 
 
 async def _warroom_escalation_loop():
@@ -253,17 +241,7 @@ async def _chain_reactions_loop():
                 except Exception as _e:
                     logger.debug(f"Storm broadcast skipped: {_e}")
 
-                # TRMM live sync — every tick (fast/idempotent).
-                try:
-                    from app.routers.tactical_rmm_sync import run_trmm_sync
-                    sync_res = await run_trmm_sync()
-                    logger.info(
-                        f"TRMM sync: updated={sync_res.get('devices_updated')} "
-                        f"demo={sync_res.get('demo_mode')} transitions={len(sync_res.get('transitions') or [])} "
-                        f"outages={sync_res.get('outages_created')}"
-                    )
-                except Exception as _e:
-                    logger.warning(f"TRMM sync skipped: {_e}")
+                # TRMM live sync removed — devices are now updated in real-time by the NexusOps Agent heartbeat.
             await asyncio.sleep(interval_min * 60)
         except Exception as e:
             logger.debug(f"Chain-reactions loop error: {e}")

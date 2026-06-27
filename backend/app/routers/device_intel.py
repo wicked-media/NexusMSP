@@ -340,7 +340,7 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
     Body: { device_ids: [...], action: "run-checks"|"install-patches"|"reboot"|"send-message"|"tag", value?: any }
     Returns per-device result + summary.
     """
-    from app.routers.tactical_rmm import _trmm_call
+    from app.routers.nexus_agent import queue_command_for_device
     ids = list(payload.get("device_ids") or [])
     action = payload.get("action")
     if not ids or not action:
@@ -365,27 +365,29 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
             await db.devices.update_one({"id": d["id"]}, {"$set": {"tags": tags}})
             return {"device_id": d["id"], "device_name": name, "status": "ok"}
 
-        agent_id = d.get("trmm_agent_id")
-        if not agent_id:
-            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No TRMM agent"}
+        if not d.get("nexus_agent_id"):
+            return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No NexusOps Agent installed"}
         if action in ("reboot", "shutdown", "send-message") and d.get("status") != "online":
             return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "Offline"}
         try:
-            if action == "run-checks":
-                r = await _trmm_call("POST", f"agents/{agent_id}/runchecks/")
-            elif action == "install-patches":
-                r = await _trmm_call("POST", f"agents/{agent_id}/installpatches/")
-            elif action == "reboot":
-                r = await _trmm_call("POST", f"agents/{agent_id}/reboot/")
-            elif action == "shutdown":
-                r = await _trmm_call("POST", f"agents/{agent_id}/cmd/", json_body={"cmd": "shutdown /s /t 60", "shell": "cmd", "timeout": 60})
+            kind_map = {
+                "reboot": "reboot",
+                "shutdown": "shutdown",
+                "run-checks": "ping",
+                "install-patches": "run_script",
+                "send-message": "run_script",
+            }
+            cmd_payload: dict = {}
+            if action == "install-patches":
+                cmd_payload = {"shell": "powershell", "script": "Get-WindowsUpdate -Install -AcceptAll -AutoReboot:$false", "timeout_sec": 1800}
             elif action == "send-message":
                 title = (payload.get("title") or "Message from IT").strip()
                 body = (payload.get("body") or "").strip()
                 if not body:
                     return {"device_id": d["id"], "device_name": name, "status": "failed", "message": "body required"}
-                r = await _trmm_call("POST", "core/sendnotification/", json_body={"agent_ids": [agent_id], "title": title, "message": body})
-            return {"device_id": d["id"], "device_name": name, "status": "ok"}
+                cmd_payload = {"shell": "powershell", "script": f"msg * /TIME:60 '{title}: {body}'", "timeout_sec": 30}
+            cmd_id = await queue_command_for_device(d, kind_map[action], cmd_payload, queued_by=current_user.get("email") or "bulk")
+            return {"device_id": d["id"], "device_name": name, "status": "ok", "command_id": cmd_id}
         except Exception as e:
             return {"device_id": d["id"], "device_name": name, "status": "failed", "message": str(e)[:200]}
 

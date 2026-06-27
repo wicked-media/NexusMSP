@@ -86,7 +86,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "cipp-settings-card", label: "CIPP (M365 management)", keywords: "cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
-  { tab: "integrations", anchor: "trmm-settings-card", label: "Tactical RMM", keywords: "tactical rmm trmm self-hosted agents endpoints remote meshcentral patches scripts checks" },
+  { tab: "integrations", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", keywords: "nexus agent rmm in-house windows agent patches scripts splashtop" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
@@ -161,10 +161,14 @@ export default function SettingsPage() {
   const [cippBusy, setCippBusy] = useState(false);
   const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
-  const [trmm, setTrmm] = useState({ base_url: "", api_key: "", verify_tls: true, configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
-  const [trmmBusy, setTrmmBusy] = useState(false);
-  const [trmmNotif, setTrmmNotif] = useState({ slack_webhook_url: "", teams_webhook_url: "", notify_on: "all", include_per_agent: true, configured: false });
-  const [trmmNotifBusy, setTrmmNotifBusy] = useState(false);
+  const [trmm] = useState({ configured: false }); // legacy — TRMM removed, kept for backwards-compat with old loadAll
+  const trmmBusy = false;
+  const setTrmmBusy = () => {};
+  const trmmNotif = { configured: false, slack_webhook_url: "", teams_webhook_url: "", notify_on: "all" };
+  const trmmNotifBusy = false;
+  const setTrmm = () => {};
+  const setTrmmNotif = () => {};
+  const setTrmmNotifBusy = () => {};
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -2170,230 +2174,31 @@ export default function SettingsPage() {
       </Card>
 
 
-      {/* Tactical RMM (Self-hosted) */}
-      <Card id="trmm-settings-card" data-testid="trmm-settings-card">
+      {/* NexusOps Agent (in-house RMM) */}
+      <Card id="nexus-agent-settings-card" data-testid="nexus-agent-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <Server className="w-5 h-5 text-emerald-500" />
-            <CardTitle>Tactical RMM · Self-Hosted</CardTitle>
+            <Server className="w-5 h-5 text-cyan-500" />
+            <CardTitle>NexusOps Agent · In-House RMM</CardTitle>
           </div>
           <CardDescription>
-            Connect your self-hosted Tactical RMM instance to surface agents, run scripts, push patches,
-            reboot endpoints, and launch MeshCentral remote sessions directly from NexusOps.
+            Our own cross-platform agent (Windows-first) replaces Tactical RMM. Per-client installers ship from
+            the Agent Command Center — each ZIP bakes in a unique enrollment token and registers itself as the
+            <code> NexusOpsAgent </code> Windows service. Splashtop bundling lands in Phase 4.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge className={trmm.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="trmm-status-badge">
-              {trmm.configured ? "Configured" : "Not Configured"}
-            </Badge>
-            {trmm.api_key_preview && (
-              <Badge variant="outline" className="font-mono text-[10px]">Key: {trmm.api_key_preview}</Badge>
-            )}
-            {trmm.last_test_status && (
-              <Badge variant="outline" className="text-[10px]">Last test: {trmm.last_test_status}</Badge>
-            )}
-            {trmm.last_synced_at && (
-              <Badge variant="outline" className="text-[10px]">Synced: {new Date(trmm.last_synced_at).toLocaleString()}</Badge>
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label>TRMM API Base URL</Label>
-              <Input
-                value={trmm.base_url || ""}
-                onChange={(e) => setTrmm({ ...trmm, base_url: e.target.value })}
-                placeholder="https://api.your-trmm.example.com"
-                data-testid="trmm-base-url"
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Use the API endpoint of your TRMM stack (typically <code>https://api.&lt;your-domain&gt;</code>).
-              </p>
-            </div>
-            <div>
-              <Label>API Key (X-API-KEY)</Label>
-              <Input
-                type="password"
-                value={trmm.api_key}
-                onChange={(e) => setTrmm({ ...trmm, api_key: e.target.value })}
-                placeholder={trmm.configured ? "•••••• (enter to replace)" : "Generate at TRMM → Settings → Global → API Keys"}
-                data-testid="trmm-api-key"
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Create a key for a user with the <code>Admin</code> role. The key is sent as <code>X-API-KEY</code> on every request.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="trmm-verify-tls"
-              checked={trmm.verify_tls !== false}
-              onCheckedChange={(v) => setTrmm({ ...trmm, verify_tls: v })}
-              data-testid="trmm-verify-tls"
-            />
-            <Label htmlFor="trmm-verify-tls" className="text-sm">Verify TLS certificate (disable only for self-signed staging instances)</Label>
-          </div>
+        <CardContent className="space-y-3">
           <div className="flex gap-2 flex-wrap">
-            <Button
-              onClick={async () => {
-                if (!trmm.api_key) {
-                  if (!trmm.configured) { toast.error("Enter an API key"); return; }
-                  toast.error("Enter a new API key to update");
-                  return;
-                }
-                if (!trmm.base_url) { toast.error("Enter your TRMM base URL"); return; }
-                setTrmmBusy(true);
-                try {
-                  await axios.post(`${API}/trmm/settings`, { base_url: trmm.base_url, api_key: trmm.api_key, verify_tls: trmm.verify_tls !== false }, { headers });
-                  toast.success("Tactical RMM credentials saved");
-                  const st = await axios.get(`${API}/trmm/status`, { headers });
-                  setTrmm(prev => ({ ...prev, ...st.data, api_key: "" }));
-                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-                finally { setTrmmBusy(false); }
-              }}
-              disabled={trmmBusy}
-              data-testid="trmm-save-btn"
-            >
-              {trmmBusy ? "Saving…" : "Save credentials"}
+            <Button variant="outline" onClick={() => window.open("/nexus-agent", "_self")} data-testid="open-agent-cc-btn">
+              <Activity className="w-4 h-4 mr-1" /> Open Agent Command Center
             </Button>
-            <Button
-              variant="outline"
-              onClick={async () => {
-                setTrmmBusy(true);
-                try {
-                  const res = await axios.get(`${API}/trmm/test`, { headers });
-                  if (res.data.success) toast.success(res.data.message);
-                  else toast.error(res.data.message || "Connection failed");
-                  const st = await axios.get(`${API}/trmm/status`, { headers });
-                  setTrmm(prev => ({ ...prev, ...st.data, api_key: "" }));
-                } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-                finally { setTrmmBusy(false); }
-              }}
-              disabled={trmmBusy || !trmm.configured}
-              data-testid="trmm-test-btn"
-            >
-              <TestTube className="w-4 h-4 mr-1" />
-              Test connection
-            </Button>
-            <Button
-              variant="outline"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              onClick={() => window.open("/tactical-rmm", "_self")}
-              disabled={!trmm.configured}
-              data-testid="trmm-open-cc-btn"
-            >
-              <Activity className="w-4 h-4 mr-1" />
-              Open Command Center
-            </Button>
-            {trmm.configured && (
-              <Button
-                variant="ghost" className="text-red-400 hover:bg-red-500/10"
-                onClick={async () => {
-                  if (!window.confirm("Remove Tactical RMM credentials?")) return;
-                  setTrmmBusy(true);
-                  try {
-                    await axios.delete(`${API}/trmm/settings`, { headers });
-                    setTrmm({ base_url: "", api_key: "", verify_tls: true, configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
-                    toast.success("Tactical RMM credentials removed");
-                  } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-                  finally { setTrmmBusy(false); }
-                }}
-                data-testid="trmm-clear-btn"
-              >
-                Remove
-              </Button>
-            )}
           </div>
-
-          {/* Slack / Teams notifications */}
-          <div className="border-t border-border pt-4 mt-2 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-violet-500" /> Broadcast notifications
-                </Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Push a summary of every broadcast (success / failure counts + per-command output) to Slack or Microsoft Teams. Perfect for unattended 2 AM patch runs.
-                </p>
-              </div>
-              {trmmNotif.configured && <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 bg-emerald-500/5 text-[10px]">Notifications active</Badge>}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Slack incoming-webhook URL</Label>
-                <Input
-                  value={trmmNotif.slack_webhook_url}
-                  onChange={(e) => setTrmmNotif({ ...trmmNotif, slack_webhook_url: e.target.value })}
-                  placeholder="https://hooks.slack.com/services/T0…/B0…/…"
-                  data-testid="trmm-slack-webhook"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Microsoft Teams webhook URL</Label>
-                <Input
-                  value={trmmNotif.teams_webhook_url}
-                  onChange={(e) => setTrmmNotif({ ...trmmNotif, teams_webhook_url: e.target.value })}
-                  placeholder="https://your-tenant.webhook.office.com/…"
-                  data-testid="trmm-teams-webhook"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <div>
-                <Label className="text-xs">Notify on</Label>
-                <select
-                  value={trmmNotif.notify_on}
-                  onChange={(e) => setTrmmNotif({ ...trmmNotif, notify_on: e.target.value })}
-                  className="bg-background border border-border rounded-md px-3 py-2 text-sm h-10"
-                  data-testid="trmm-notify-on"
-                >
-                  <option value="all">Every broadcast</option>
-                  <option value="failures">Only when failures present</option>
-                  <option value="none">Disabled (drafts saved)</option>
-                </select>
-              </div>
-              <div className="flex items-end gap-2 ml-auto">
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    setTrmmNotifBusy(true);
-                    try {
-                      await axios.post(`${API}/trmm/notifications/settings`, trmmNotif, { headers });
-                      const r = await axios.get(`${API}/trmm/notifications/settings`, { headers });
-                      setTrmmNotif(prev => ({ ...prev, ...r.data }));
-                      toast.success("Notification settings saved");
-                    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-                    finally { setTrmmNotifBusy(false); }
-                  }}
-                  disabled={trmmNotifBusy}
-                  data-testid="trmm-notif-save"
-                >
-                  Save
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-                  disabled={trmmNotifBusy || (!trmmNotif.slack_webhook_url && !trmmNotif.teams_webhook_url)}
-                  onClick={async () => {
-                    setTrmmNotifBusy(true);
-                    try {
-                      // Save first so the test uses the latest values
-                      await axios.post(`${API}/trmm/notifications/settings`, trmmNotif, { headers });
-                      const res = await axios.post(`${API}/trmm/notifications/test`, { target: "both" }, { headers });
-                      if (res.data?.success) toast.success("Test notification sent — check your channel");
-                      else toast.error(`Test failed: ${(res.data?.results || []).map(r => `${r.target}=${r.status || r.error}`).join(", ")}`);
-                    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-                    finally { setTrmmNotifBusy(false); }
-                  }}
-                  data-testid="trmm-notif-test"
-                >
-                  <Activity className="w-4 h-4 mr-1" /> Send test
-                </Button>
-              </div>
-            </div>
-          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Configure heartbeat / poll intervals and the public server URL on the Agent Command Center.
+          </p>
         </CardContent>
       </Card>
+
 
 
       {/* Splynx ISP Billing Integration */}

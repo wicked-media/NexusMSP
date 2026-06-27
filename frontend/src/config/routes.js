@@ -13,7 +13,7 @@ export const routeConfig = [
   { path: "/cipp", component: page("CippCommandCenterPage"), auth: true, layout: true },
   { path: "/m365", component: page("M365CommandCenter"), auth: true, layout: true },
   { path: "/unifi", component: page("UnifiCommandCenterPage"), auth: true, layout: true },
-  { path: "/tactical-rmm", component: page("TacticalRmmCommandCenterPage"), auth: true, layout: true },
+  { path: "/nexus-agent", component: page("NexusAgentCenterPage"), auth: true, layout: true },
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
   { path: "/warroom/:id", component: page("WarRoomPage"), auth: true, layout: false },
   { path: "/warroom/public/:slug", component: page("WarRoomPublicPage"), auth: false, layout: false },

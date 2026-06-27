@@ -100,9 +100,8 @@ export const navGroups = [
         path: "/devices", icon: Monitor, label: "Devices",
         children: [
           { path: "/devices", label: "All Devices" },
-          { path: "/device-reliability", label: "Reliability & TRMM Sync" },
+          { path: "/nexus-agent", label: "NexusOps Agent" },
           { path: "/bulk-actions", label: "Bulk Actions" },
-          { path: "/tactical-rmm", label: "Remote & Patching (TRMM)" },
           { path: "/maintenance-scheduler", label: "Maintenance" },
           { path: "/patch-tuesday", label: "Patch Tuesday" },
           { path: "/custom-monitors", label: "Custom Monitors" },

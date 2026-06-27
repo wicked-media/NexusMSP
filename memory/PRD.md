@@ -7,6 +7,50 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-27 — HeroTile Overhaul + NexusOps Agent (TRMM Replacement)
+
+### HeroTile v2 — Tactical Holographic
+- `/app/frontend/src/components/HeroTile.jsx` rewritten (backwards-compatible API)
+- `/app/frontend/src/styles/hero-tile.css` new
+- Per-tile layers: glass+grain base, animated conic-gradient aurora border, cursor-tracking radial spotlight, inner gradient wash, floating corner blob (7s breathing), scan-line overlay, gradient text with palette glow, hover lift+rotate icon, value-change shockwave (re-fires on update), auto-tracked sparkline ghost behind value, staggered entrance, animated active-state ring, reduced-motion respected
+- Added 2 new palette options: `indigo`, `sky` (existing 6 still work)
+- All 13 HeroTile call sites pick up new look automatically
+
+### NexusOps Agent (in-house RMM replacing TRMM)
+- **Go-based agent** in `/app/agent/` (Windows-first, compiles cleanly via `make windows`)
+  - `cmd/nexus-agent/main.go` + Windows `sc`-based service install/uninstall hooks
+  - `internal/config` — JSON config persistence with atomic writes
+  - `internal/enroll` — first-boot enrollment exchanging token for device_id+agent_token
+  - `internal/transport` — auth-aware HTTP client with X-Agent-Token
+  - `internal/telemetry` — gopsutil-driven snapshots (CPU/RAM/disks/NICs/uptime)
+  - `internal/heartbeat` — 60s loop (configurable) reporting full snapshot
+  - `internal/commands` — 10s poll loop, executes run_script (powershell/cmd/bash), reboot, shutdown, kill_process, ping; reports stdout/stderr/exit/duration
+  - Compiled Windows .exe: `5.4MB` at `/app/agent/dist/nexus-agent.exe`
+- **Backend router** `/app/backend/app/routers/nexus_agent.py` (25 endpoints):
+  - Agent-facing: `POST /api/nexus-agent/enroll`, `/heartbeat`, `GET /commands/poll`, `POST /command-result` (X-Agent-Token auth)
+  - Admin-facing: `GET /agents`, `/agents/{id}` with telemetry+command history, `POST /agents/{id}/command`, installer builder, settings, stats
+  - Auto-mirrors enrolled agents into existing `db.devices` collection (`nexus_agent_id` link) so the standard Devices page picks them up with live CPU/RAM/disk%
+  - Public helpers `queue_command_for_device()` + `get_nexus_agent_for_device()` exposed for cross-router use
+- **Installer builder** — `POST /api/nexus-agent/installers/build` returns a ZIP per client containing nexus-agent.exe + config.json (with unique enrollment_token) + install.bat + uninstall.bat. Hosted on Emergent object storage with token-scoped download URLs.
+- **Frontend** `/app/frontend/src/pages/NexusAgentCenterPage.jsx` — Hero tiles, live fleet table (auto-refresh 5s), per-agent detail drawer with telemetry/script-runner/command-history/info tabs, installer builder dialog with copy-paste one-line PowerShell deploy, settings card
+- **TRMM removed**:
+  - Deleted: `tactical_rmm.py`, `tactical_rmm_sync.py`, `TacticalRmmCommandCenterPage.jsx`
+  - Removed `_trmm_scheduled_broadcast_loop` from server startup, `run_trmm_sync` from chain reactions
+  - Rewrote `device_intel.py` bulk-action to use nexus-agent (action map: run-checks→ping, install-patches→PSWindowsUpdate script, reboot→reboot, shutdown→shutdown, send-message→msg.exe)
+  - Rewrote `ticket_device_actions.py` from scratch — now uses `queue_command_for_device()` for reboot/shutdown/run-checks/install-patches/send-message/run-script/kill-process/fanout
+  - Replaced TRMM card in SettingsPage with NexusOps Agent card + open-Agent-CC link
+  - Nav: `/tactical-rmm` → `/nexus-agent`
+
+### Tested end-to-end (this session)
+- Linux test agent enrolled, heartbeated with CPU/RAM/disk telemetry, polled for commands, executed `bash` scripts (echo+uname+whoami) in <50ms with full stdout, executed `ping` returning "pong"
+- Installer ZIP downloaded (2.4MB) and verified contains exe+config+install.bat+uninstall.bat
+
+### Pending follow-ups
+- **Phase 4**: Splashtop bundling — wire Splashtop API for per-client deployment packs, bake Streamer install into the ZIP. Requires user to provide Splashtop Remote Support Premium API credentials.
+- **Phase 5**: Auto-update on heartbeat, Windows code signing (EV cert), proper MSI/WiX bundle, Mac+Linux installer flavors
+- Live install on actual Windows endpoint to verify the `sc create` service install path
+
+
 ## 2026-06-27 — CLIENT STUDIO Overhaul (Full Send)
 
 User asked for Clients to be "out of this world" and "interconnected" — each client showing its devices, subscriptions, tier, VIP, etc. Backend + frontend full overhaul matching the depth of Devices Command Center / Lead Studio.
