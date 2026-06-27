@@ -1,0 +1,348 @@
+/* ------------------------------------------------------------------ */
+/* NexusOps HeroTile — Tactical Holographic v2                         */
+/* ------------------------------------------------------------------ */
+
+.nx-hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 14px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  isolation: isolate;
+  overflow: hidden;
+  cursor: default;
+  transform: translateY(8px);
+  opacity: 0;
+  transition:
+    transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms ease-out,
+    border-color 280ms ease-out;
+  box-shadow:
+    0 4px 18px -6px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.nx-hero--entered {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.nx-hero--clickable {
+  cursor: pointer;
+}
+
+.nx-hero:hover {
+  box-shadow:
+    0 14px 42px -10px var(--hue-shadow, rgba(56, 189, 248, 0.35)),
+    0 0 0 1px color-mix(in srgb, var(--hue-from, #22d3ee) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-color: color-mix(in srgb, var(--hue-from, #22d3ee) 28%, transparent);
+}
+
+.nx-hero--clickable:hover {
+  transform: translateY(-2px);
+}
+
+.nx-hero--clickable:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: 80ms;
+}
+
+/* ---------- Layer 1 — Glass base + grain ----------------------------- */
+.nx-hero__base {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(24, 24, 27, 0.92) 0%,
+      rgba(9, 9, 11, 0.94) 100%
+    );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 0;
+}
+
+.nx-hero__base::after {
+  /* subtle film grain */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.6) 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+
+/* ---------- Layer 2 — Aurora animated border ------------------------- */
+.nx-hero__aurora {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background:
+    conic-gradient(
+      from var(--ang, 0deg),
+      transparent 0%,
+      var(--hue-from) 22%,
+      transparent 40%,
+      var(--hue-to) 62%,
+      transparent 78%,
+      var(--hue-from) 100%
+    );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0.55;
+  z-index: 1;
+  animation: nx-hero-aurora 6s linear infinite;
+}
+
+.nx-hero:hover .nx-hero__aurora {
+  opacity: 0.95;
+}
+
+@property --ang {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes nx-hero-aurora {
+  to { --ang: 360deg; }
+}
+
+/* Fallback for browsers without @property (Firefox-ish older) */
+@supports not (background: conic-gradient(from 0deg, red, blue)) {
+  .nx-hero__aurora { display: none; }
+}
+
+/* ---------- Layer 3 — Inner gradient wash ---------------------------- */
+.nx-hero__wash {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      120% 80% at 0% 0%,
+      color-mix(in srgb, var(--hue-from) 22%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      120% 80% at 100% 100%,
+      color-mix(in srgb, var(--hue-to) 18%, transparent) 0%,
+      transparent 60%
+    );
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ---------- Layer 4 — Cursor spotlight ------------------------------- */
+.nx-hero__spotlight {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    radial-gradient(
+      280px circle at var(--mx) var(--my),
+      color-mix(in srgb, var(--hue-from) 28%, transparent) 0%,
+      transparent 60%
+    );
+  opacity: calc(var(--mouse-active) * 0.9);
+  transition: opacity 220ms ease-out;
+  mix-blend-mode: screen;
+}
+
+/* ---------- Layer 5 — Subtle horizontal scan lines ------------------- */
+.nx-hero__scan {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.018) 0px,
+      rgba(255, 255, 255, 0.018) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  opacity: 0.45;
+  mix-blend-mode: overlay;
+}
+
+/* ---------- Layer 6 — Corner blob ------------------------------------ */
+.nx-hero__blob {
+  position: absolute;
+  top: -20px;
+  right: -20px;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: var(--hue-glow);
+  filter: blur(36px);
+  opacity: 0.38;
+  z-index: 2;
+  pointer-events: none;
+  animation: nx-hero-blob 7s ease-in-out infinite;
+}
+
+@keyframes nx-hero-blob {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.32; }
+  50%      { transform: translate(-8px, 6px) scale(1.12); opacity: 0.46; }
+}
+
+/* ---------- Layer 7 — Sparkline ghost --------------------------------- */
+.nx-hero__spark {
+  position: absolute;
+  inset: auto 0 0 0;
+  width: 100%;
+  height: 60%;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* ---------- Layer 8 — Value-change shockwave ------------------------- */
+.nx-hero__shockwave {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 5;
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--hue-from) 55%, transparent) 0%,
+      transparent 70%
+    );
+  opacity: 0;
+  animation: nx-hero-shock 900ms cubic-bezier(0.22, 1, 0.36, 1) 1 forwards;
+}
+
+@keyframes nx-hero-shock {
+  0%   { opacity: 0;    transform: scale(0.94); }
+  35%  { opacity: 0.55; transform: scale(1.01); }
+  100% { opacity: 0;    transform: scale(1.04); }
+}
+
+/* ---------- Content -------------------------------------------------- */
+.nx-hero__content {
+  position: relative;
+  z-index: 6;
+  padding: 16px 18px 14px;
+}
+
+.nx-hero__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.nx-hero__label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--hue-text) 75%, white 0%);
+  opacity: 0.88;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--hue-glow) 60%, transparent);
+}
+
+.nx-hero__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--hue-text);
+  background: color-mix(in srgb, var(--hue-from) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hue-from) 22%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--hue-glow) 35%, transparent);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease-out;
+}
+
+.nx-hero:hover .nx-hero__icon {
+  transform: rotate(-6deg) scale(1.08);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--hue-glow) 65%, transparent);
+}
+
+.nx-hero__value {
+  font-family: ui-monospace, SF Mono, Menlo, Consolas, monospace;
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  margin: 0;
+  color: #f4f4f5;
+  background: linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--hue-text) 35%, #d4d4d8) 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--hue-glow) 40%, transparent);
+  transition: text-shadow 240ms ease-out;
+}
+
+.nx-hero:hover .nx-hero__value {
+  text-shadow: 0 0 32px color-mix(in srgb, var(--hue-glow) 75%, transparent);
+}
+
+.nx-hero__sub {
+  margin: 4px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--hue-text) 50%, #a1a1aa);
+  opacity: 0.78;
+}
+
+/* ---------- Active state ring ---------------------------------------- */
+.nx-hero--active {
+  border-color: color-mix(in srgb, var(--hue-ring) 55%, transparent);
+}
+
+.nx-hero__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 7;
+  box-shadow:
+    0 0 0 1px var(--hue-ring),
+    0 0 18px color-mix(in srgb, var(--hue-ring) 70%, transparent);
+  animation: nx-hero-ring-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes nx-hero-ring-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1;    }
+}
+
+/* ---------- Reduced motion ------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .nx-hero,
+  .nx-hero__aurora,
+  .nx-hero__blob,
+  .nx-hero__shockwave,
+  .nx-hero__ring,
+  .nx-hero__icon {
+    animation: none !important;
+    transition: none !important;
+  }
+  .nx-hero { transform: none; opacity: 1; }
+}
