@@ -621,6 +621,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
 function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
+  const [briefingOpen, setBriefingOpen] = useState(false);
   useEffect(() => { setClientLocal(clientProp); }, [clientProp]);
   const client = clientLocal || clientProp;
   const mrrData = client.mrr_trend || [];

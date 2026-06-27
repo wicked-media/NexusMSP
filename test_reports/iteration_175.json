@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 175 — Client Studio overhaul. Backend: 22/22 pytest passed covering all 25 endpoints under /api/client-studio/* (universe, pulse, my-accounts, renewal-watch, 360-context, expansion, renewal-forecast, account-briefing, account-plan GET+POST with persistence, stakeholders CRUD POST+PUT+DELETE, achievements, lifecycle, churn-radar, activity-heatmap, hours-burndown, contracts, scorecard, compliance, vip toggle true/false, recompute-tiers) + unauth 401 guard + /api/clients path-collision check. /api/client-studio/* does NOT collide with /api/clients/* — both return 200 under the same admin token. Frontend (/clients with aaron@stech.com.au): clients-page renders, auto-selects first client (Acme Corporation), client-detail-pane renders with PLATINUM tier badge (client-tier-platinum + client-tier-chip), VIP star (vip-toggle-btn — click flips class from zinc to amber/active and persists), HeroTile metrics (MONTHLY RECURRING $2,500, OPEN TICKETS 37, ASSETS 10, CONTACTS 0), Quick Actions strip (Create Ticket / Add Device / Send Email / Call / Schedule / Health Check / War Room / Invoice / Directions). AI Brief button (ai-briefing-btn) opens dialog with role='dialog' containing '30-second briefing — Acme Corporation is a Platinum-tier account with $13,750 MRR, 10 endpoints, and 37 open tickets. Sentiment: 75/100.' (briefing-summary testid present). Studio ✨ tab (tab-studio) renders all expected widgets: expansion-engine-tile (with 5 expansion-opp-* rows), renewal-forecast-tile, churn-radar-card, lifecycle-timeline-card (lifecycle-milestone-m-{create,first-ticket,first-invoice,contract}), activity-heatmap-card, stakeholder-map-card (+ stakeholder-add-btn), achievements-card (+ achievement-platinum), contract-watch-card, compliance-card (with 5 compliance-fw-* rows), scorecard-card, hours-burndown-card. Strategic Plan tab (tab-plan) renders account-plan-canvas with plan-section-{goals,risks,opportunities,people,next_actions} + account-plan-save + account-plan-ai-generate.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ClientsPage auto-select", "issue": "client-studio-home view is effectively unreachable. ClientsPage.jsx line 215 auto-selects the first client on initial data load and there is no UI affordance (close-detail / back-to-home / clear-selection button) to set selectedId back to null. RenewalWatchTable, MyAccountsTable, ClientUniverseMap, ClientPulseWall are all wired correctly with the expected testids but real users can never reach the home view after first paint.", "selector": "[data-testid=\"client-studio-home\"]", "priority": "HIGH"},
+      {"component": "Widget testid naming drift", "issue": "Spec calls out testids 'lifecycle-timeline', 'activity-heatmap', 'stakeholder-map', 'contract-watch' but the implementation uses 'lifecycle-timeline-card', 'activity-heatmap-card', 'stakeholder-map-card', 'contract-watch-card'. Functionally equivalent but spec/code drift — update one or the other to keep QA-targetable.", "selector": "[data-testid$=\"-card\"]", "priority": "LOW"},
+      {"component": "AccountBriefingDialog wrapper", "issue": "Dialog opens correctly (role='dialog' with briefing content rendered, briefing-summary testid present inside) but the outer Dialog/Content wrapper has no testid like 'account-briefing-dialog'. Add a wrapper data-testid for easier targeting in tests.", "selector": "[role=\"dialog\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration175_client_studio.py",
+    "/app/test_reports/pytest/pytest_iter175.xml"
+  ],
+  "action_items": [
+    "Add a way for users to deselect a client (e.g. a 'Back to Studio Home' button on ClientDetailPane header, or click-the-selected-row-to-deselect, or clear-selection chip in the search bar) so client-studio-home (RenewalWatchTable + MyAccountsTable + ClientUniverseMap + ClientPulseWall) is actually reachable.",
+    "(Optional) Rename widget testids in spec OR in components to be consistent — drop the '-card' suffix to match spec, OR update spec to mention '-card' suffix.",
+    "(Optional) Add data-testid='account-briefing-dialog' on the AccountBriefingDialog DialogContent wrapper."
+  ],
+  "critical_code_review_comments": [
+    "ClientsPage.jsx is 1438 lines (>700 guideline). Should be split: ClientDetailPane + ClientStudioHome + ClientList sidebar + helpers into separate files. The 1438-line file is the primary maintainability risk.",
+    "Auto-select-first-client on data load (ClientsPage.jsx:215) hides the Studio Home feature. Either make Studio Home reachable, or remove RenewalWatchTable/MyAccountsTable/ClientUniverseMap/ClientPulseWall from the Studio Home block and surface them as a dedicated route or as a tab on the detail pane.",
+    "client_studio.py exposes /client-studio/{client_id}/360-context — long path; consider /api/client-studio/clients/{id}/context or 360 as a sub-resource. Current path-routing works (verified — /api/client-studio/* and /api/clients/* both return 200) but the {client_id} positional is sandwiched between two static segments which can confuse FastAPI ordering if more routes get added.",
+    "PUT /api/client-studio/stakeholders/{sid} and DELETE same — these are not prefixed with the client_id, so a stakeholder could in theory be updated/deleted by anyone who knows the sid regardless of client membership. Verify the handler scopes the update by ownership/tenant, not just sid lookup.",
+    "POST /api/client-studio/recompute-tiers returned 200 in ~ <1s — confirm this is doing real work over all clients (or returning a background-job id). If it's synchronously recomputing 22 clients in <1s the implementation is likely lightweight (good); if it grows to thousands of clients, push it to a background task to avoid request timeout."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration175_client_studio.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed, all 25 endpoints covered)",
+    "frontend": "95% — clients-page, client-detail-pane, tier badge, VIP toggle, HeroTile metrics, Quick Actions, AI Brief dialog, tab-studio (all 11 widgets), tab-plan (canvas + 5 sections + save + ai-generate) all verified. Only gap: client-studio-home view is unreachable (no deselect UI)."
+  },
+  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "seed_data_creation": "test_account_plan_get_and_post wrote a plan with goals=['TEST_iter175 goal A'] for client-001. test_stakeholders_crud created+updated+deleted a stakeholder (cleaned up). test_vip_toggle flipped client-001 VIP true then false (net no change). test_recompute_tiers ran against all clients.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 25 Client Studio endpoints live under /api/client-studio/* and pass with admin token. /api/client-studio/* does NOT collide with /api/clients/*. Frontend ClientsPage.jsx auto-selects the first client on load (line 215), so client-studio-home testid will not appear in normal navigation — to test the home widgets, you must either modify state via React DevTools or have a deselect affordance added. Widget testids on the Studio tab use the '-card' suffix: lifecycle-timeline-card, activity-heatmap-card, stakeholder-map-card, contract-watch-card, hours-burndown-card (others — expansion-engine-tile, renewal-forecast-tile, churn-radar-card, achievements-card, compliance-card, scorecard-card — match spec). Strategic Plan tab uses plan-section-{goals,risks,opportunities,people,next_actions} + account-plan-{canvas,save,ai-generate}. AI Brief dialog has no wrapper testid; assert via [role='dialog'] + briefing-summary content.",
+  "rca_of_the_issue": "client-studio-home unreachability: ClientsPage.jsx useEffect at line 215 calls setSelectedId(res.data.clients[0].id) the first time data arrives if selectedId is null. selectedId is never set back to null anywhere in the component, and ClientDetailPane has no close/back button. Fix options: (a) add a 'Back to Studio Home' / X button in ClientDetailPane header that calls setSelectedId(null); (b) remove the auto-select so users land on home first; (c) treat home as a separate route /clients/studio while /clients/:id shows the detail pane."
+}
