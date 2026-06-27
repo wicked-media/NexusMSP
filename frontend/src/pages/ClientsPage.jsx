@@ -27,6 +27,15 @@ import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
 import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStrip";
 import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
+import ClientTierBadge from "@/components/clients/ClientTierBadge";
+import ClientPulseWall from "@/components/clients/ClientPulseWall";
+import ClientUniverseMap from "@/components/clients/ClientUniverseMap";
+import {
+  AccountBriefingDialog, ExpansionEngineTile, RenewalForecastTile, ChurnRadarCard,
+  LifecycleTimelineCard, ActivityHeatmapCard, HoursBurndownCard, AchievementsCard,
+  ContractWatchCard, ScorecardCard, ComplianceCard, AccountPlanCanvas, StakeholderMapCard,
+  RenewalWatchTable, MyAccountsTable
+} from "@/components/clients/ClientStudioWidgets";
 import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -399,7 +408,26 @@ export default function ClientsPage() {
           {/* Detail pane */}
           <main className="flex-1 bg-zinc-900/30 overflow-y-auto relative">
             {!selectedClient ? (
-              <div className="h-full flex items-center justify-center text-zinc-500 text-sm">Select a client to view details</div>
+              <div className="p-4 space-y-4" data-testid="client-studio-home">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-violet-300" />Client Studio
+                    </h2>
+                    <p className="text-xs text-muted-foreground">Pick a client from the sidebar, or explore the universe below.</p>
+                  </div>
+                </div>
+                <RenewalWatchTable onOpen={setSelectedId} />
+                <MyAccountsTable onOpen={setSelectedId} />
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2 px-1">Universe Map</p>
+                  <ClientUniverseMap />
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2 px-1">Pulse Wall</p>
+                  <ClientPulseWall search={search} tierFilter={tierFilter} />
+                </div>
+              </div>
             ) : (
               <ClientDetailPane
                 client={selectedClient}
@@ -613,9 +641,25 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
         <div className="flex-1 min-w-0 pt-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight">{client.name}</h1>
+            <ClientTierBadge tier={client.tier} vip={client.vip} />
             <ClientServiceTierChip client={client} isAdmin={isAdmin} onUpdated={applyClientPatch} />
             <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{(client.lifecycle || "active").replace("_", " ")}</span>
-            {client.vip && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-400/40 bg-amber-500/10 text-amber-300 font-bold">VIP</span>}
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const newVip = !client.vip;
+                  await axios.post(`${API}/client-studio/${client.id}/vip`, { vip: newVip }, { headers: { Authorization: `Bearer ${token}` } });
+                  applyClientPatch({ vip: newVip });
+                  toast.success(newVip ? "VIP enabled ⭐" : "VIP removed");
+                } catch { toast.error("Failed to toggle VIP"); }
+              }}
+              data-testid="vip-toggle-btn"
+              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-bold transition-colors ${client.vip ? "border-amber-400/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-zinc-700 text-zinc-500 hover:border-amber-400/40 hover:text-amber-300"}`}
+              title={client.vip ? "Remove VIP status" : "Mark as VIP"}
+            >
+              ⭐ VIP
+            </button>
           </div>
           <div className="flex items-center gap-4 text-[11px] text-zinc-500 font-mono mt-1 flex-wrap">
             {client.industry && <span>{client.industry}</span>}
@@ -640,6 +684,14 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           <HealthDial score={client.health_score} size={56} />
           <button
             type="button"
+            className="text-[10px] px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+            onClick={() => setBriefingOpen(true)}
+            data-testid="ai-briefing-btn"
+          >
+            ✨ AI Brief
+          </button>
+          <button
+            type="button"
             className="text-[10px] px-2 py-1 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
             onClick={() => window.open(`${API}/clients/${client.id}/health-certificate.pdf?token=${encodeURIComponent(token)}`, "_blank")}
             data-testid={`health-cert-btn-${client.id}`}
@@ -648,6 +700,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </button>
         </div>
       </div>
+      <AccountBriefingDialog clientId={client.id} open={briefingOpen} onClose={() => setBriefingOpen(false)} />
 
       {/* Quick Actions strip */}
       <div className="px-6 pb-3 border-b border-zinc-800">
@@ -700,6 +753,8 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
         <TabsList className="h-auto rounded-none border-b border-zinc-800 bg-transparent p-0 justify-start gap-1 px-6">
           {[
             { v: "overview", l: "Overview" },
+            { v: "studio", l: "Studio ✨" },
+            { v: "plan", l: "Strategic Plan" },
             { v: "warroom", l: "War Room" },
             { v: "tickets", l: "Tickets" },
             { v: "assets", l: "Assets" },
@@ -722,6 +777,32 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <TabsContent value="overview" className="mt-0 space-y-3">
             <ClientOverviewGrid client={client} activity={activity} healthDetail={healthDetail} />
+          </TabsContent>
+
+          <TabsContent value="studio" className="mt-0 space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <RenewalForecastTile clientId={client.id} />
+              <ExpansionEngineTile clientId={client.id} />
+              <HoursBurndownCard clientId={client.id} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <ChurnRadarCard clientId={client.id} />
+              <LifecycleTimelineCard clientId={client.id} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <ActivityHeatmapCard clientId={client.id} />
+              <StakeholderMapCard clientId={client.id} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <AchievementsCard clientId={client.id} />
+              <ContractWatchCard clientId={client.id} />
+              <ComplianceCard clientId={client.id} />
+            </div>
+            <ScorecardCard clientId={client.id} onExport={(d) => { try { window.print(); } catch {} }} />
+          </TabsContent>
+
+          <TabsContent value="plan" className="mt-0 space-y-3">
+            <AccountPlanCanvas clientId={client.id} />
           </TabsContent>
 
           <TabsContent value="tickets" className="mt-0">
