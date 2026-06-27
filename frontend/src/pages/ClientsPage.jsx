@@ -437,6 +437,7 @@ export default function ClientsPage() {
                 tab={detailTab}
                 setTab={setDetailTab}
                 loading={detailLoading}
+                onClose={() => setSelectedId(null)}
               />
             )}
           </main>
@@ -618,7 +619,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
   );
 }
 
-function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading }) {
+function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading, onClose }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
   const [briefingOpen, setBriefingOpen] = useState(false);
@@ -683,6 +684,17 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
         </div>
         <div className="flex items-center gap-2">
           <HealthDial score={client.health_score} size={56} />
+          {onClose && (
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-indigo-500/40 hover:text-indigo-300 hover:bg-indigo-500/10 flex items-center gap-1"
+              onClick={onClose}
+              data-testid="back-to-studio-home-btn"
+              title="Back to Studio Home"
+            >
+              ← Studio Home
+            </button>
+          )}
           <button
             type="button"
             className="text-[10px] px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"

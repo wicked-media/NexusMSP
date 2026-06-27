@@ -7,6 +7,51 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-27 — CLIENT STUDIO Overhaul (Full Send)
+
+User asked for Clients to be "out of this world" and "interconnected" — each client showing its devices, subscriptions, tier, VIP, etc. Backend + frontend full overhaul matching the depth of Devices Command Center / Lead Studio.
+
+### New backend router: `/app/backend/app/routers/client_studio.py`
+25 endpoints under `/api/client-studio/*` (path-collision verified: distinct from `/api/clients/*`):
+- `GET /client-studio/{id}/360-context` — interconnected view (devices, subscriptions, tier, mrr, contracts)
+- `GET /client-studio/universe` — universe map nodes for visualization
+- `GET /client-studio/pulse` — pulse feed across portfolio
+- `GET /client-studio/my-accounts` — admin's assigned clients
+- `GET /client-studio/renewal-watch` — upcoming renewals
+- `GET /client-studio/{id}/expansion` — expansion opportunities
+- `GET /client-studio/{id}/renewal-forecast` — per-client forecast
+- `GET /client-studio/{id}/account-briefing` — AI-generated 30s briefing
+- `GET/POST /client-studio/{id}/account-plan` + `POST /client-studio/{id}/account-plan/generate`
+- `GET/POST /client-studio/{id}/stakeholders` + `PUT/DELETE /client-studio/stakeholders/{sid}`
+- `GET /client-studio/{id}/achievements` — gamification
+- `GET /client-studio/{id}/lifecycle` — timeline milestones
+- `GET /client-studio/{id}/churn-radar`, `/activity-heatmap`, `/hours-burndown`
+- `GET /client-studio/{id}/contracts`, `/scorecard`, `/compliance`
+- `POST /client-studio/{id}/vip` — toggle VIP status
+- `POST /client-studio/recompute-tiers` — admin tier recompute
+
+### New frontend components in `/app/frontend/src/components/clients/`
+- `ClientStudioWidgets.jsx` — AccountBriefingDialog, ExpansionEngineTile, RenewalForecastTile, ChurnRadarCard, LifecycleTimelineCard, ActivityHeatmapCard, HoursBurndownCard, AchievementsCard, ContractWatchCard, ScorecardCard, ComplianceCard, AccountPlanCanvas, StakeholderMapCard, RenewalWatchTable, MyAccountsTable
+- `ClientTierBadge.jsx` — platinum/gold/silver/bronze gradient pills + VIP star
+- `ClientPulseWall.jsx` — live cards across portfolio
+- `ClientUniverseMap.jsx` — animated bubble-chart by industry
+- `clientStudioHelpers.js`
+
+### `ClientsPage.jsx` wiring
+- ClientDetailPane header: tier badge, VIP toggle (⭐), "AI Brief" button (opens AccountBriefingDialog), "Back to Studio Home" button (←)
+- New tabs: **Studio ✨** (11 widgets), **Strategic Plan** (AccountPlanCanvas with goals/risks/opportunities/people/next_actions + AI generate + save)
+- Studio Home view (no client selected): RenewalWatchTable, MyAccountsTable, ClientUniverseMap, ClientPulseWall
+
+### Testing — iteration 175
+- Backend: 22/22 pytest passed, all 25 endpoints covered
+- Frontend: 100% — clients-page, detail pane, tier badge, VIP toggle, HeroTile metrics, Quick Actions strip, AI Brief dialog, Studio tab (11 widgets), Strategic Plan tab, Studio Home reachable via back-to-studio-home-btn
+
+### Known follow-ups
+- `ClientsPage.jsx` is 1450 lines; should be split into ClientDetailPane / ClientStudioHome / ClientList sidebar files (refactor)
+- Optional: rename widget testids to drop `-card` suffix for spec consistency
+- Optional: add wrapper testid `account-briefing-dialog` on the dialog content
+
+
 ## 2026-06-26 — LEAD STUDIO v1 (Full Send Overhaul + Ticket Integration)
 
 User said the Leads page was "bland" and asked for it to be feature-rich and better than Syncro. Then asked for "Create Ticket from Lead" + "Merge Lead into Existing Ticket" (search by number or fuzzy). Full-sent all 32 proposed features (a–af).
