@@ -7,6 +7,39 @@ NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud
 - Admin: `aaron@stech.com.au` / `Lucky@2871$!`
 - Portal: `john@acmecorp.com` / `portal123`
 
+## 2026-06-28 — NexusOps Agent Auto-Update on Heartbeat
+
+Self-updating agent shipped end-to-end. Verified live in test mode:
+v0.0.1-old agent enrolled → heartbeated → server replied with `update {version: 0.2.0, sha256, size}` →
+agent downloaded → SHA256 verified → spawned updater script → exited → updater swapped binary →
+new process (v0.2.0) running. **Full cycle: <15 seconds.**
+
+### Backend changes (`/app/backend/app/routers/nexus_agent.py`)
+- `_binary_info()` — mtime-cached SHA256 + size lookup over the binary at `NEXUS_AGENT_BINARY`
+- `GET /api/nexus-agent/version` — public manifest endpoint
+- Heartbeat response now embeds `update: {version, url, sha256, size}` when agent's reported version mismatches latest (gated by `auto_update_enabled` setting, default ON)
+- `auto_update_enabled` added to `NexusAgentSettings` model + GET/PUT endpoints
+
+### Agent changes (`/app/agent/`)
+- New module `/app/agent/internal/updater/updater.go`:
+  - Mutex-protected `Apply(info, serverBase, version, token)` — guards against concurrent runs
+  - HTTP download with `X-Agent-Token` header
+  - SHA256 verification before swap
+  - OS-specific spawn:
+    - **Windows**: writes `_update.bat` that does `sc stop NexusOpsAgent` → retry-loop `move /Y .new .exe` → `sc start NexusOpsAgent` → self-delete
+    - **Unix**: writes `_update.sh` that swaps + re-execs with `nohup`
+  - Parent process exits ~800ms after spawn so the swap can proceed atomically
+- `heartbeat/heartbeat.go` — now parses `update` field from response and invokes `updater.Apply()`
+
+### Frontend changes (`/app/frontend/src/pages/NexusAgentCenterPage.jsx`)
+- Auto-update toggle in Settings card (`data-testid="agent-setting-auto-update"`)
+- Shows latest-binary SHA256 prefix + size
+
+### Env vars
+- `NEXUS_AGENT_BINARY` — path to latest binary (default `/app/agent/dist/nexus-agent.exe`)
+- `NEXUS_AGENT_VERSION` — current version string (now `0.2.0`)
+
+
 ## 2026-06-27 — HeroTile Overhaul + NexusOps Agent (TRMM Replacement)
 
 ### HeroTile v2 — Tactical Holographic

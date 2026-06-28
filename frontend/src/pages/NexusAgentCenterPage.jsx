@@ -380,13 +380,13 @@ function InstallerBuilder({ open, onClose }) {
 function SettingsCard() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "" });
+  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true });
   const [busy, setBusy] = useState(false);
-  const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false });
+  const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0 });
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/settings`, { headers })
-      .then(r => { setS({ ...s, ...r.data }); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists }); })
+      .then(r => { setS({ ...s, ...r.data }); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); })
       .catch(() => {});
     // eslint-disable-next-line
   }, []);
@@ -427,6 +427,29 @@ function SettingsCard() {
         <div>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500">Server URL (the agent calls this on heartbeat)</label>
           <Input value={s.server_url} onChange={e => setS({ ...s, server_url: e.target.value })} placeholder="https://your-domain.com" data-testid="agent-setting-server-url" />
+        </div>
+        <div className="border-t border-zinc-800 pt-3">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={s.auto_update_enabled}
+              onClick={() => setS({ ...s, auto_update_enabled: !s.auto_update_enabled })}
+              data-testid="agent-setting-auto-update"
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.auto_update_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}
+            >
+              <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${s.auto_update_enabled ? "translate-x-4" : "translate-x-0.5"} mt-0.5`} />
+            </button>
+            <div className="flex-1">
+              <div className="text-sm font-medium flex items-center gap-2">Auto-update on heartbeat
+                <Badge variant="outline" className="text-[10px]">{s.auto_update_enabled ? "ENABLED" : "DISABLED"}</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-500 mt-0.5">Agents check their version on each heartbeat. Mismatched agents auto-download the latest binary (SHA256-verified) and self-restart.</p>
+              {meta.agent_binary_sha256 && (
+                <p className="text-[10px] font-mono text-zinc-600 mt-1 truncate" title={meta.agent_binary_sha256}>sha256: {meta.agent_binary_sha256.slice(0, 32)}… · {Math.round((meta.agent_binary_size || 0) / 1024 / 1024 * 10) / 10} MB</p>
+              )}
+            </div>
+          </div>
         </div>
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-center gap-2 mb-2">

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import logging
 import os
 import secrets
@@ -46,7 +47,25 @@ router = APIRouter(tags=["NexusOps Agent"])
 
 # Where the compiled Windows agent binary lives in the backend filesystem.
 AGENT_BINARY_PATH = Path(os.environ.get("NEXUS_AGENT_BINARY") or "/app/agent/dist/nexus-agent.exe")
-AGENT_VERSION = "0.1.0-dev"
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.0-dev"
+
+# Cached binary fingerprint (computed lazily; invalidated when mtime changes).
+_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
+
+
+def _binary_info() -> dict[str, Any]:
+    """Return {version, sha256, size, exists} for the current Windows binary.
+    Re-computes the SHA256 only when the file mtime changes."""
+    if not AGENT_BINARY_PATH.exists():
+        return {"version": AGENT_VERSION, "sha256": "", "size": 0, "exists": False}
+    st = AGENT_BINARY_PATH.stat()
+    if _binary_cache["mtime"] != st.st_mtime or not _binary_cache["sha256"]:
+        h = hashlib.sha256()
+        with AGENT_BINARY_PATH.open("rb") as fp:
+            for chunk in iter(lambda: fp.read(1024 * 64), b""):
+                h.update(chunk)
+        _binary_cache.update({"mtime": st.st_mtime, "sha256": h.hexdigest(), "size": st.st_size})
+    return {"version": AGENT_VERSION, "sha256": _binary_cache["sha256"], "size": _binary_cache["size"], "exists": True}
 
 # Emergent object storage prefix (for hosting installer ZIPs)
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -218,6 +237,7 @@ class NexusAgentSettings(BaseModel):
     server_url: str = ""           # full https URL the agent should call back to
     splashtop_enabled: bool = False
     splashtop_deploy_code_default: str = ""
+    auto_update_enabled: bool = True
 
 
 # ----------------------------------------------------------------------
@@ -376,7 +396,23 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
         })
     except Exception:
         pass
-    return {"ok": True}
+
+    # Auto-update advertisement
+    update_info = None
+    settings = await db.nexus_agent_settings.find_one({"_id": "settings"}) or {}
+    auto_update_enabled = settings.get("auto_update_enabled", True)
+    if auto_update_enabled:
+        info = _binary_info()
+        agent_ver = (p.agent_version or "").strip()
+        if info["exists"] and agent_ver and agent_ver != info["version"]:
+            update_info = {
+                "version": info["version"],
+                "url": "/api/nexus-agent/binary/latest",
+                "sha256": info["sha256"],
+                "size": info["size"],
+            }
+
+    return {"ok": True, "update": update_info, "server_time": now}
 
 
 @router.get("/nexus-agent/commands/poll")
@@ -648,6 +684,13 @@ async def latest_binary():
     )
 
 
+@router.get("/nexus-agent/version")
+async def version_manifest():
+    """Returns the current latest-binary version + SHA256 + size. Used by agents
+    for auto-update verification (also embedded in heartbeat responses)."""
+    return _binary_info()
+
+
 # ----------------------------------------------------------------------
 # ADMIN SETTINGS
 # ----------------------------------------------------------------------
@@ -661,8 +704,11 @@ async def get_settings(user=Depends(get_current_user)):
         "server_url": s.get("server_url", ""),
         "splashtop_enabled": s.get("splashtop_enabled", False),
         "splashtop_deploy_code_default": s.get("splashtop_deploy_code_default", ""),
+        "auto_update_enabled": s.get("auto_update_enabled", True),
         "agent_version": AGENT_VERSION,
         "agent_binary_exists": AGENT_BINARY_PATH.exists(),
+        "agent_binary_sha256": _binary_info()["sha256"],
+        "agent_binary_size": _binary_info()["size"],
     }
 
 
@@ -676,6 +722,7 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(get_current_use
             "server_url": payload.server_url,
             "splashtop_enabled": payload.splashtop_enabled,
             "splashtop_deploy_code_default": payload.splashtop_deploy_code_default,
+            "auto_update_enabled": payload.auto_update_enabled,
             "updated_at": _now(),
             "updated_by": user.get("email") or user.get("id"),
         }},
