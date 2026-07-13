@@ -1,15 +1,19 @@
 /**
- * NexusOps Agent Center — fleet management for the in-house RMM agent.
+ * NexusOps Agent · Fleet Control Room
  *
- * Sections:
- *  - Hero metrics strip (agents online/offline/pending commands)
- *  - Agent list (per-client filterable) with live CPU/RAM/disk%
- *  - Agent detail drawer (telemetry, command history, run-script panel)
- *  - "Generate Installer" dialog per client (ZIP with exe + config)
- *  - Settings card (heartbeat/poll intervals, server URL, Splashtop hooks)
+ * Differentiated MSP features:
+ *  - Version-distribution donut (canary visibility)
+ *  - Live activity ticker (Bloomberg-style fleet feed)
+ *  - Multi-device parallel script runner with live result streaming
+ *  - Per-client installer builder
+ *  - Recent enrollments timeline
+ *  - Settings: heartbeat/poll intervals, auto-update toggle, server URL, Splashtop
+ *
+ * Per-device telemetry/management lives on the Devices page (single source of truth).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import axios from "axios";
+import { Link, useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,24 +22,29 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
-  Server, Activity, Cpu, HardDrive, Download, Plus, RefreshCw, Terminal,
-  Power, Zap, FileDown, Settings as SettingsIcon, ShieldCheck, Loader2,
-  ChevronRight, Wifi, WifiOff, Sparkles, Copy, CheckCircle2,
+  Server, Activity, Download, Plus, RefreshCw, Terminal, Zap, FileDown,
+  Settings as SettingsIcon, ShieldCheck, Loader2, Sparkles, Copy,
+  CheckCircle2, ChevronRight, WifiOff, Users, History, TrendingUp,
+  AlertCircle, XCircle, Clock, ExternalLink,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 
-const KIND_LABELS = {
-  run_script: "Script", run_powershell: "PS", run_cmd: "CMD",
-  reboot: "Reboot", shutdown: "Shutdown", kill_process: "Kill PID", ping: "Ping",
-};
-
 function pct(v) { return typeof v === "number" ? v.toFixed(1) : "—"; }
 function ago(iso) { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : "—"; } catch { return "—"; } }
+
+const TONE_CLASSES = {
+  emerald: "text-emerald-300 border-emerald-500/30 bg-emerald-500/5",
+  cyan:    "text-cyan-300    border-cyan-500/30    bg-cyan-500/5",
+  amber:   "text-amber-300   border-amber-500/30   bg-amber-500/5",
+  rose:    "text-rose-300    border-rose-500/30    bg-rose-500/5",
+  violet:  "text-violet-300  border-violet-500/30  bg-violet-500/5",
+  zinc:    "text-zinc-400    border-zinc-700       bg-zinc-800/40",
+};
+
+const VERSION_DONUT_COLORS = ["#22d3ee", "#a78bfa", "#34d399", "#fbbf24", "#fb7185", "#818cf8", "#f97316"];
 
 function CopyChip({ value, label = "copy", testId }) {
   const [done, setDone] = useState(false);
@@ -54,240 +63,335 @@ function CopyChip({ value, label = "copy", testId }) {
   );
 }
 
-function StatusDot({ online }) {
-  return (
-    <span className={`relative inline-flex w-2 h-2 rounded-full ${online ? "bg-emerald-400" : "bg-zinc-600"}`}>
-      {online && <span className="absolute inset-0 rounded-full bg-emerald-400/60 animate-ping" />}
-    </span>
-  );
-}
+// ───────── Version Distribution Donut ─────────
 
-function AgentRow({ agent, selected, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={`agent-row-${agent.id}`}
-      className={`w-full text-left flex items-center gap-3 px-3 py-2 border-b border-zinc-800/80 transition-colors
-        ${selected ? "bg-zinc-900 border-l-2 border-l-cyan-500 pl-[10px]" : "hover:bg-zinc-900/50 border-l-2 border-l-transparent pl-[10px]"}`}
-    >
-      <StatusDot online={agent.online} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-zinc-100 truncate">{agent.hostname || "(unnamed)"}</span>
-          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-500">{agent.os || "?"}</span>
-        </div>
-        <div className="flex items-center gap-3 mt-0.5 text-[10px] text-zinc-500 font-mono">
-          <span>cpu {pct(agent.cpu_percent)}%</span>
-          <span>mem {pct(agent.mem_percent)}%</span>
-          <span>v{agent.agent_version || "?"}</span>
-        </div>
-      </div>
-      <ChevronRight className="w-3 h-3 text-zinc-600 shrink-0" />
-    </button>
-  );
-}
-
-function AgentDetail({ deviceId, onClose }) {
+function VersionDonut() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("telemetry");
-  const [scriptShell, setScriptShell] = useState("powershell");
-  const [scriptBody, setScriptBody] = useState("Get-Date");
-  const [running, setRunning] = useState(false);
+  const [data, setData] = useState({ rows: [], total_agents: 0, latest_version: "" });
 
-  const reload = async () => {
-    if (!deviceId) return;
-    setLoading(true);
-    try {
-      const r = await axios.get(`${API}/nexus-agent/agents/${deviceId}`, { headers });
-      setData(r.data);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to load agent");
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [deviceId]);
   useEffect(() => {
-    if (!deviceId) return;
-    const t = setInterval(reload, 5000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [deviceId]);
+    const load = () => axios.get(`${API}/nexus-agent/fleet/version-distribution`, { headers })
+      .then(r => setData(r.data))
+      .catch(() => {});
+    load();
+    const i = setInterval(load, 10000);
+    return () => clearInterval(i);
+  }, [headers]);
 
-  const quickAction = async (kind, payload = {}) => {
-    setRunning(true);
-    try {
-      await axios.post(`${API}/nexus-agent/agents/${deviceId}/command`, { kind, payload }, { headers });
-      toast.success(`Queued: ${KIND_LABELS[kind] || kind}`);
-      setTimeout(reload, 1200);
-    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
-    finally { setRunning(false); }
-  };
-
-  const runScript = async () => {
-    if (!scriptBody.trim()) return;
-    await quickAction("run_script", { shell: scriptShell, script: scriptBody, timeout_sec: 120 });
-  };
-
-  if (!deviceId) return null;
-  const agent = data?.agent || {};
-  const commands = data?.commands || [];
+  const total = data.total_agents || 0;
+  const size = 200, stroke = 28, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  let acc = 0;
+  const latestPct = data.rows.find(r => r.is_latest)?.pct || 0;
 
   return (
-    <Sheet open={!!deviceId} onOpenChange={(o) => !o && onClose?.()}>
-      <SheetContent className="w-[640px] sm:max-w-[640px] bg-zinc-950 border-l border-zinc-800 overflow-y-auto" data-testid="agent-detail-pane">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
-            <StatusDot online={agent.online} />
-            <span>{agent.hostname || "—"}</span>
-            <Badge variant="outline" className="text-[10px]">{agent.os || "?"}</Badge>
-            <Badge variant="outline" className="text-[10px] font-mono">v{agent.agent_version || "?"}</Badge>
-            <Button size="sm" variant="ghost" className="ml-auto h-6 w-6 p-0" onClick={reload} title="Refresh">
-              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            </Button>
-          </SheetTitle>
-        </SheetHeader>
-
-        {/* Quick actions */}
-        <div className="grid grid-cols-2 gap-2 mt-4">
-          <Button size="sm" variant="outline" className="h-9 text-xs" onClick={() => quickAction("ping")} disabled={running} data-testid="agent-action-ping">
-            <Activity className="w-3 h-3 mr-1" />Ping
-          </Button>
-          <Button size="sm" variant="outline" className="h-9 text-xs text-amber-300 border-amber-500/30" onClick={() => quickAction("reboot", { delay_sec: 30 })} disabled={running} data-testid="agent-action-reboot">
-            <Power className="w-3 h-3 mr-1" />Reboot (30s)
-          </Button>
-        </div>
-
-        <Tabs value={tab} onValueChange={setTab} className="mt-5">
-          <TabsList className="bg-zinc-900 border border-zinc-800">
-            <TabsTrigger value="telemetry" data-testid="agent-tab-telemetry">Telemetry</TabsTrigger>
-            <TabsTrigger value="script" data-testid="agent-tab-script">Run Script</TabsTrigger>
-            <TabsTrigger value="commands" data-testid="agent-tab-commands">History</TabsTrigger>
-            <TabsTrigger value="info" data-testid="agent-tab-info">Info</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="telemetry" className="mt-3 space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="text-[9px] uppercase text-zinc-500 tracking-wider">CPU</div>
-                <div className="text-2xl font-mono">{pct(agent.cpu_percent)}<span className="text-xs text-zinc-500">%</span></div>
-                <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{agent.cpu_model || "—"}</div>
-              </div>
-              <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="text-[9px] uppercase text-zinc-500 tracking-wider">Memory</div>
-                <div className="text-2xl font-mono">{pct(agent.mem_percent)}<span className="text-xs text-zinc-500">%</span></div>
-                <div className="text-[10px] text-zinc-500 mt-0.5">{Math.round(agent.mem_used_mb || 0)} / {Math.round(agent.mem_total_mb || 0)} MB</div>
-              </div>
-              <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="text-[9px] uppercase text-zinc-500 tracking-wider">Uptime</div>
-                <div className="text-2xl font-mono">{Math.round((agent.uptime_sec || 0) / 3600)}<span className="text-xs text-zinc-500">h</span></div>
-                <div className="text-[10px] text-zinc-500 mt-0.5">last seen {ago(agent.last_seen)}</div>
+    <Card className="bg-zinc-950 border-zinc-800" data-testid="version-donut-card">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-violet-400" />Version Distribution
+          <Badge variant="outline" className="ml-auto text-[10px] font-mono">latest v{data.latest_version || "?"}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {total === 0 ? (
+          <div className="text-center text-xs text-zinc-500 py-8">No agents enrolled yet.</div>
+        ) : (
+          <div className="flex items-center gap-5">
+            <div className="relative shrink-0">
+              <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={stroke} />
+                {data.rows.map((row, i) => {
+                  const frac = (row.count || 0) / total;
+                  const dash = c * frac;
+                  const gap  = c - dash;
+                  const offset = c * (acc / total) * -1;
+                  acc += row.count || 0;
+                  return (
+                    <circle key={row.version} cx={size / 2} cy={size / 2} r={r}
+                      fill="none"
+                      stroke={row.is_latest ? "#22d3ee" : VERSION_DONUT_COLORS[(i + 1) % VERSION_DONUT_COLORS.length]}
+                      strokeWidth={stroke}
+                      strokeDasharray={`${dash} ${gap}`}
+                      strokeDashoffset={offset}
+                      style={{ transition: "stroke-dasharray 600ms ease-out, stroke-dashoffset 600ms ease-out" }}
+                    />
+                  );
+                })}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-mono text-zinc-100">{latestPct.toFixed(0)}%</span>
+                <span className="text-[9px] uppercase tracking-widest text-zinc-500">on latest</span>
               </div>
             </div>
-            <div>
-              <div className="text-[10px] uppercase text-zinc-500 tracking-wider mb-1">Disks</div>
-              <div className="space-y-1">
-                {(agent.disks || []).map((d, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <HardDrive className="w-3 h-3 text-zinc-500 shrink-0" />
-                    <span className="font-mono text-zinc-400 w-28 truncate" title={d.mount}>{d.mount}</span>
-                    <div className="flex-1 h-1.5 bg-zinc-800 rounded overflow-hidden">
-                      <div className={`h-full ${d.percent >= 90 ? "bg-rose-500" : d.percent >= 75 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, d.percent || 0)}%` }} />
-                    </div>
-                    <span className="text-[10px] text-zinc-500 font-mono w-20 text-right">{d.used_gb}/{d.total_gb} GB</span>
-                  </div>
-                ))}
-                {(agent.disks || []).length === 0 && <div className="text-xs text-zinc-600">No disk data yet</div>}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase text-zinc-500 tracking-wider mb-1">Network</div>
-              <div className="space-y-0.5 text-xs">
-                {(agent.nics || []).map((n, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Wifi className="w-3 h-3 text-zinc-500 shrink-0" />
-                    <span className="font-mono text-zinc-400 w-32 truncate">{n.name}</span>
-                    <span className="text-[10px] text-zinc-500">{(n.ipv4 || []).join(", ")}</span>
-                  </div>
-                ))}
-                {(agent.nics || []).length === 0 && <div className="text-xs text-zinc-600">No NIC data yet</div>}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="script" className="mt-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <Select value={scriptShell} onValueChange={setScriptShell}>
-                <SelectTrigger className="w-40 h-8 text-xs" data-testid="agent-script-shell">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="powershell">PowerShell</SelectItem>
-                  <SelectItem value="cmd">CMD</SelectItem>
-                  <SelectItem value="bash">Bash</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button size="sm" onClick={runScript} disabled={running || !scriptBody.trim()} className="ml-auto" data-testid="agent-script-run">
-                <Zap className="w-3 h-3 mr-1" />Run
-              </Button>
-            </div>
-            <Textarea
-              value={scriptBody}
-              onChange={(e) => setScriptBody(e.target.value)}
-              rows={10}
-              placeholder="Get-Date"
-              className="font-mono text-xs bg-zinc-950 border-zinc-800"
-              data-testid="agent-script-body"
-            />
-            <div className="text-[10px] text-zinc-500">Output appears in the History tab.</div>
-          </TabsContent>
-
-          <TabsContent value="commands" className="mt-3 space-y-2">
-            {commands.length === 0 && <div className="text-xs text-zinc-600 text-center py-6">No commands yet</div>}
-            {commands.map((c) => (
-              <div key={c.id} className="border border-zinc-800 rounded p-2 text-xs space-y-1" data-testid={`agent-cmd-${c.id}`}>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">{KIND_LABELS[c.kind] || c.kind}</Badge>
-                  <span className={`text-[10px] uppercase tracking-wider ${c.status === "ok" ? "text-emerald-400" : c.status === "timeout" ? "text-amber-400" : c.status === "error" ? "text-rose-400" : "text-zinc-500"}`}>{c.status}</span>
-                  <span className="text-[10px] text-zinc-500 ml-auto font-mono">{ago(c.created_at)}</span>
+            <div className="flex-1 min-w-0 space-y-1.5">
+              {data.rows.map((row, i) => (
+                <div key={row.version} className="flex items-center gap-2 text-xs" data-testid={`version-row-${row.version}`}>
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: row.is_latest ? "#22d3ee" : VERSION_DONUT_COLORS[(i + 1) % VERSION_DONUT_COLORS.length] }} />
+                  <span className="font-mono text-zinc-300 flex-1 truncate">v{row.version}</span>
+                  {row.is_latest && <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[9px]">LATEST</Badge>}
+                  <span className="text-zinc-500 font-mono">{row.count}</span>
+                  <span className="text-zinc-600 font-mono w-12 text-right">{row.pct}%</span>
                 </div>
-                {c.payload?.script && (
-                  <div className="font-mono text-[10px] text-zinc-400 bg-zinc-950/60 border border-zinc-900 rounded px-2 py-1 truncate" title={c.payload.script}>
-                    $ {c.payload.script}
-                  </div>
-                )}
-                {c.stdout && <pre className="text-[10px] text-emerald-200 bg-zinc-950/60 border border-zinc-900 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap">{c.stdout}</pre>}
-                {c.stderr && <pre className="text-[10px] text-rose-300 bg-zinc-950/60 border border-zinc-900 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap">{c.stderr}</pre>}
-              </div>
-            ))}
-          </TabsContent>
-
-          <TabsContent value="info" className="mt-3 space-y-1.5 text-xs">
-            {[
-              ["Device ID", agent.id],
-              ["Client ID", agent.client_id],
-              ["Hostname", agent.hostname],
-              ["OS / Arch", `${agent.os || "?"} / ${agent.arch || "?"}`],
-              ["OS Version", agent.os_version],
-              ["Primary MAC", agent.primary_mac],
-              ["Agent Version", agent.agent_version],
-              ["Enrolled", ago(agent.enrolled_at)],
-              ["Last Seen", ago(agent.last_seen)],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between border-b border-zinc-900 py-1">
-                <span className="text-zinc-500">{k}</span>
-                <span className="font-mono text-zinc-300 truncate max-w-[60%] text-right" title={String(v || "")}>{v || "—"}</span>
-              </div>
-            ))}
-          </TabsContent>
-        </Tabs>
-      </SheetContent>
-    </Sheet>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
+
+// ───────── Activity Ticker ─────────
+
+function ActivityTicker() {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [events, setEvents] = useState([]);
+
+  useEffect(() => {
+    const load = () => axios.get(`${API}/nexus-agent/fleet/activity?limit=60`, { headers })
+      .then(r => setEvents(r.data?.events || []))
+      .catch(() => {});
+    load();
+    const i = setInterval(load, 5000);
+    return () => clearInterval(i);
+  }, [headers]);
+
+  return (
+    <Card className="bg-zinc-950 border-zinc-800" data-testid="activity-ticker-card">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />Live Fleet Activity
+          <Badge variant="outline" className="ml-auto text-[10px] font-mono">{events.length} events</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="max-h-[420px] overflow-y-auto divide-y divide-zinc-900/60">
+          {events.length === 0 && <div className="text-center text-xs text-zinc-500 py-8">Quiet so far.</div>}
+          {events.map((e, i) => (
+            <div key={`${e.kind}-${e.at}-${i}`} className="px-3 py-1.5 flex items-center gap-2 text-xs hover:bg-zinc-900/40" data-testid={`activity-event-${i}`}>
+              <span className={`px-1.5 py-0.5 rounded border text-[9px] font-mono uppercase tracking-wider ${TONE_CLASSES[e.tone] || TONE_CLASSES.zinc}`}>{e.label}</span>
+              <span className="text-zinc-300 truncate">{e.hostname || e.device_id?.slice(0, 8)}</span>
+              {e.kind === "heartbeat" && (e.cpu_percent != null) && (
+                <span className="text-[10px] text-zinc-500 font-mono">cpu {pct(e.cpu_percent)}% · mem {pct(e.mem_percent)}%</span>
+              )}
+              {e.kind === "command" && e.by && <span className="text-[10px] text-zinc-500">by {e.by}</span>}
+              <span className="text-[10px] text-zinc-600 font-mono ml-auto shrink-0">{ago(e.at)}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────── Recent Enrollments ─────────
+
+function RecentEnrollments() {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${API}/nexus-agent/fleet/recent-enrollments?limit=8`, { headers })
+      .then(r => setRows(r.data || []))
+      .catch(() => {});
+  }, [headers]);
+
+  return (
+    <Card className="bg-zinc-950 border-zinc-800" data-testid="recent-enrollments-card">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Users className="w-4 h-4 text-cyan-400" />Recent Enrollments
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <div className="text-center text-xs text-zinc-500 py-6">No agents enrolled yet.</div>
+        ) : (
+          <div className="divide-y divide-zinc-900/60">
+            {rows.map(r => (
+              <Link key={r.id} to={`/devices/${r.id}`} className="block px-3 py-2 text-xs hover:bg-zinc-900/40">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${r.online ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                  <span className="font-medium text-zinc-200 truncate flex-1">{r.hostname || "(unnamed)"}</span>
+                  <Badge variant="outline" className="text-[9px]">{r.os || "?"}</Badge>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-zinc-500 font-mono">
+                  <span>v{r.agent_version || "?"}</span>
+                  <span>·</span>
+                  <span>{ago(r.enrolled_at)}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────── Multi-Device Script Runner ─────────
+
+function FleetScriptRunner() {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [agents, setAgents] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [shell, setShell] = useState("powershell");
+  const [script, setScript] = useState("Get-Date\nGet-ComputerInfo | Select-Object CsName, OsName, OsVersion, CsTotalPhysicalMemory");
+  const [busy, setBusy] = useState(false);
+  const [batchId, setBatchId] = useState(null);
+  const [batch, setBatch] = useState({ commands: [], counts: {} });
+  const [filter, setFilter] = useState("");
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    axios.get(`${API}/nexus-agent/agents`, { headers })
+      .then(r => setAgents(r.data || []))
+      .catch(() => {});
+  }, [headers]);
+
+  const filtered = useMemo(() => {
+    const q = filter.toLowerCase();
+    if (!q) return agents;
+    return agents.filter(a => (a.hostname || "").toLowerCase().includes(q));
+  }, [agents, filter]);
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map(a => a.id)));
+  };
+
+  const launch = async () => {
+    if (selected.size === 0 || !script.trim()) { toast.error("Pick devices and write a script"); return; }
+    setBusy(true);
+    try {
+      const r = await axios.post(`${API}/nexus-agent/fleet/run-script`, {
+        device_ids: Array.from(selected),
+        shell,
+        script,
+        timeout_sec: 120,
+      }, { headers });
+      setBatchId(r.data.batch_id);
+      setBatch({ commands: [], counts: {} });
+      toast.success(`Launched on ${r.data.targets.length} devices`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Launch failed"); }
+    finally { setBusy(false); }
+  };
+
+  // Poll batch results
+  useEffect(() => {
+    if (!batchId) return;
+    const tick = () => axios.get(`${API}/nexus-agent/fleet/batch/${batchId}`, { headers })
+      .then(r => setBatch(r.data))
+      .catch(() => {});
+    tick();
+    pollRef.current = setInterval(tick, 2500);
+    return () => clearInterval(pollRef.current);
+    // eslint-disable-next-line
+  }, [batchId]);
+
+  return (
+    <Card className="bg-zinc-950 border-zinc-800" data-testid="fleet-script-runner-card">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-400" />Multi-Device Script Runner
+          <Badge variant="outline" className="ml-auto text-[10px] font-mono">{selected.size} selected</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Device picker */}
+        <div className="border border-zinc-800 rounded">
+          <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800">
+            <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleAll} className="accent-cyan-500" data-testid="select-all-agents" />
+            <span className="text-[10px] uppercase text-zinc-500 tracking-wider">All</span>
+            <Input value={filter} onChange={e => setFilter(e.target.value)} placeholder="filter…" className="h-6 text-xs max-w-[200px] ml-auto" />
+          </div>
+          <div className="max-h-32 overflow-y-auto divide-y divide-zinc-900/60">
+            {filtered.length === 0 && <div className="text-center text-xs text-zinc-500 py-4">No agents</div>}
+            {filtered.map(a => (
+              <label key={a.id} className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-zinc-900/40 cursor-pointer">
+                <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggle(a.id)} className="accent-cyan-500" data-testid={`select-agent-${a.id}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${a.online ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                <span className="text-zinc-200 truncate flex-1">{a.hostname || a.id.slice(0, 8)}</span>
+                <Badge variant="outline" className="text-[9px]">{a.os || "?"}</Badge>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Shell + script */}
+        <div className="flex items-center gap-2">
+          <Select value={shell} onValueChange={setShell}>
+            <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="powershell">PowerShell</SelectItem>
+              <SelectItem value="cmd">CMD</SelectItem>
+              <SelectItem value="bash">Bash</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button onClick={launch} disabled={busy || selected.size === 0 || !script.trim()} className="ml-auto bg-amber-500 hover:bg-amber-400 text-zinc-950" data-testid="fleet-script-launch">
+            {busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
+            Launch on {selected.size}
+          </Button>
+        </div>
+        <Textarea
+          value={script}
+          onChange={e => setScript(e.target.value)}
+          rows={6}
+          className="font-mono text-xs bg-zinc-950 border-zinc-800"
+          data-testid="fleet-script-body"
+        />
+
+        {/* Batch results */}
+        {batchId && (
+          <div className="border-t border-zinc-800 pt-3 space-y-2" data-testid="fleet-script-results">
+            <div className="flex items-center gap-2 text-[10px] font-mono">
+              <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30">{batch.counts?.ok || 0} OK</Badge>
+              <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30">{batch.counts?.dispatched || 0} RUNNING</Badge>
+              <Badge className="bg-zinc-700 text-zinc-300">{batch.counts?.pending || 0} PENDING</Badge>
+              <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30">{batch.counts?.timeout || 0} TIMEOUT</Badge>
+              <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30">{batch.counts?.error || 0} ERROR</Badge>
+              <span className="ml-auto text-zinc-500">batch {batchId.slice(0, 8)}…</span>
+            </div>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {(batch.commands || []).map(c => {
+                const tone = c.status === "ok" ? "emerald" : c.status === "error" ? "rose" : c.status === "timeout" ? "amber" : c.status === "dispatched" ? "cyan" : "zinc";
+                return (
+                  <div key={c.id} className="border border-zinc-800 rounded text-xs" data-testid={`batch-cmd-${c.id}`}>
+                    <div className="px-2 py-1 flex items-center gap-2 border-b border-zinc-900">
+                      <span className={`w-1.5 h-1.5 rounded-full bg-${tone}-400`} />
+                      <span className="text-zinc-200 truncate flex-1">{c.hostname || c.device_id.slice(0, 8)}</span>
+                      <span className={`text-[9px] uppercase tracking-wider ${TONE_CLASSES[tone]} border-0 bg-transparent px-1`}>{c.status}</span>
+                      {c.duration_ms != null && c.status !== "pending" && c.status !== "dispatched" && (
+                        <span className="text-[9px] font-mono text-zinc-500">{c.duration_ms}ms</span>
+                      )}
+                    </div>
+                    {(c.stdout || c.stderr) && (
+                      <pre className={`text-[10px] p-2 max-h-32 overflow-auto whitespace-pre-wrap bg-zinc-950/60 ${c.status === "error" ? "text-rose-300" : "text-emerald-200"}`}>
+                        {c.stdout || c.stderr}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────── Installer Builder (kept) ─────────
 
 function InstallerBuilder({ open, onClose }) {
   const { token } = useAuth();
@@ -300,9 +404,7 @@ function InstallerBuilder({ open, onClose }) {
 
   useEffect(() => {
     if (!open) return;
-    axios.get(`${API}/clients-enriched`, { headers })
-      .then(r => setClients(r.data?.clients || []))
-      .catch(() => setClients([]));
+    axios.get(`${API}/clients-enriched`, { headers }).then(r => setClients(r.data?.clients || [])).catch(() => setClients([]));
   }, [open, headers]);
 
   const submit = async () => {
@@ -317,48 +419,38 @@ function InstallerBuilder({ open, onClose }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose?.(); setResult(null); } }}>
+    <Dialog open={open} onOpenChange={o => { if (!o) { onClose?.(); setResult(null); } }}>
       <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
-          <DialogDescription>Builds a Windows ZIP containing nexus-agent.exe + a per-client enrollment token. Run install.bat as Administrator on the endpoint.</DialogDescription>
+          <DialogDescription>Builds a Windows ZIP containing nexus-agent.exe + a per-client enrollment token.</DialogDescription>
         </DialogHeader>
-
         {!result ? (
           <div className="space-y-3">
             <div>
               <label className="text-[10px] uppercase tracking-wider text-zinc-500">Client</label>
               <Select value={clientId} onValueChange={setClientId}>
                 <SelectTrigger data-testid="installer-client-select"><SelectValue placeholder="Pick a client…" /></SelectTrigger>
-                <SelectContent>
-                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <Input placeholder="Note (optional — e.g. 'pilot deploy')" value={note} onChange={e => setNote(e.target.value)} />
+            <Input placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} />
           </div>
         ) : (
           <div className="space-y-3">
             <div className="rounded border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
-              <div className="flex items-center gap-2 text-emerald-300 mb-2"><CheckCircle2 className="w-4 h-4" />Installer ready · {(result.size_bytes / 1024 / 1024).toFixed(1)} MB</div>
-              <a
-                href={result.download_url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 underline"
-                data-testid="installer-download-link"
-              >
+              <div className="flex items-center gap-2 text-emerald-300 mb-2"><CheckCircle2 className="w-4 h-4" />Ready · {(result.size_bytes / 1024 / 1024).toFixed(1)} MB</div>
+              <a href={result.download_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 underline" data-testid="installer-download-link">
                 <FileDown className="w-3 h-3" />{result.filename}
               </a>
             </div>
             <div className="text-[10px] text-zinc-500 space-y-1">
-              <div>Enrollment token (one-line PowerShell):</div>
+              <div>One-line PowerShell deploy:</div>
               <pre className="bg-zinc-950 border border-zinc-800 rounded p-2 font-mono text-[10px] text-zinc-300 whitespace-pre-wrap break-all">{`Invoke-WebRequest "${result.download_url}" -OutFile $env:TEMP\\NexusOpsAgent.zip; Expand-Archive $env:TEMP\\NexusOpsAgent.zip -DestinationPath $env:TEMP\\NexusOpsAgent -Force; & "$env:TEMP\\NexusOpsAgent\\install.bat"`}</pre>
               <CopyChip value={`Invoke-WebRequest "${result.download_url}" -OutFile $env:TEMP\\NexusOpsAgent.zip; Expand-Archive $env:TEMP\\NexusOpsAgent.zip -DestinationPath $env:TEMP\\NexusOpsAgent -Force; & "$env:TEMP\\NexusOpsAgent\\install.bat"`} label="copy install command" testId="installer-copy-cmd" />
             </div>
           </div>
         )}
-
         <DialogFooter>
           {!result ? (
             <>
@@ -377,6 +469,8 @@ function InstallerBuilder({ open, onClose }) {
   );
 }
 
+// ───────── Settings (kept) ─────────
+
 function SettingsCard() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -386,7 +480,7 @@ function SettingsCard() {
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/settings`, { headers })
-      .then(r => { setS({ ...s, ...r.data }); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); })
+      .then(r => { setS(prev => ({ ...prev, ...r.data })); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); })
       .catch(() => {});
     // eslint-disable-next-line
   }, []);
@@ -402,51 +496,47 @@ function SettingsCard() {
 
   return (
     <Card className="bg-zinc-950 border-zinc-800" data-testid="agent-settings-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <SettingsIcon className="w-4 h-4" />NexusOps Agent Settings
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <SettingsIcon className="w-4 h-4" />Agent Settings
           <Badge variant="outline" className="ml-auto text-[10px] font-mono">v{meta.agent_version}</Badge>
           {meta.agent_binary_exists ? (
             <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">Binary OK</Badge>
           ) : (
-            <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-[10px]">Binary missing</Badge>
+            <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-[10px]">Missing</Badge>
           )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Heartbeat interval (seconds)</label>
+            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Heartbeat (sec)</label>
             <Input type="number" value={s.heartbeat_secs} onChange={e => setS({ ...s, heartbeat_secs: Number(e.target.value) || 60 })} data-testid="agent-setting-heartbeat" />
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Command poll interval (seconds)</label>
+            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Poll (sec)</label>
             <Input type="number" value={s.poll_secs} onChange={e => setS({ ...s, poll_secs: Number(e.target.value) || 10 })} data-testid="agent-setting-poll" />
           </div>
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Server URL (the agent calls this on heartbeat)</label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Server URL</label>
           <Input value={s.server_url} onChange={e => setS({ ...s, server_url: e.target.value })} placeholder="https://your-domain.com" data-testid="agent-setting-server-url" />
         </div>
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-start gap-3">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={s.auto_update_enabled}
+            <button type="button" role="switch" aria-checked={s.auto_update_enabled}
               onClick={() => setS({ ...s, auto_update_enabled: !s.auto_update_enabled })}
               data-testid="agent-setting-auto-update"
-              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.auto_update_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}
-            >
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.auto_update_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}>
               <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${s.auto_update_enabled ? "translate-x-4" : "translate-x-0.5"} mt-0.5`} />
             </button>
             <div className="flex-1">
               <div className="text-sm font-medium flex items-center gap-2">Auto-update on heartbeat
-                <Badge variant="outline" className="text-[10px]">{s.auto_update_enabled ? "ENABLED" : "DISABLED"}</Badge>
+                <Badge variant="outline" className="text-[10px]">{s.auto_update_enabled ? "ON" : "OFF"}</Badge>
               </div>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Agents check their version on each heartbeat. Mismatched agents auto-download the latest binary (SHA256-verified) and self-restart.</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">SHA256-verified self-restart when versions mismatch.</p>
               {meta.agent_binary_sha256 && (
-                <p className="text-[10px] font-mono text-zinc-600 mt-1 truncate" title={meta.agent_binary_sha256}>sha256: {meta.agent_binary_sha256.slice(0, 32)}… · {Math.round((meta.agent_binary_size || 0) / 1024 / 1024 * 10) / 10} MB</p>
+                <p className="text-[10px] font-mono text-zinc-600 mt-1 truncate" title={meta.agent_binary_sha256}>sha256: {meta.agent_binary_sha256.slice(0, 24)}…</p>
               )}
             </div>
           </div>
@@ -454,66 +544,51 @@ function SettingsCard() {
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-center gap-2 mb-2">
             <ShieldCheck className="w-4 h-4 text-violet-300" />
-            <span className="text-sm font-medium">Splashtop (Phase 4 — coming soon)</span>
-            <Badge variant="outline" className="text-[10px] text-zinc-500">Pending wiring</Badge>
+            <span className="text-sm font-medium">Splashtop</span>
+            <Badge variant="outline" className="text-[10px] text-zinc-500">Phase 4</Badge>
           </div>
-          <Input value={s.splashtop_deploy_code_default} onChange={e => setS({ ...s, splashtop_deploy_code_default: e.target.value })} placeholder="Default deployment code (optional)" />
+          <Input value={s.splashtop_deploy_code_default} onChange={e => setS({ ...s, splashtop_deploy_code_default: e.target.value })} placeholder="Default deployment code" />
         </div>
-        <div className="pt-2">
-          <Button onClick={save} disabled={busy} data-testid="agent-settings-save">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}Save settings</Button>
+        <div className="pt-1">
+          <Button onClick={save} disabled={busy} data-testid="agent-settings-save">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}Save</Button>
         </div>
       </CardContent>
     </Card>
   );
 }
 
+// ───────── Page ─────────
+
 export default function NexusAgentCenterPage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [stats, setStats] = useState({});
-  const [agents, setAgents] = useState([]);
-  const [filter, setFilter] = useState("");
-  const [selected, setSelected] = useState(null);
   const [installerOpen, setInstallerOpen] = useState(false);
-  const pollRef = useRef(null);
-
-  const reload = async () => {
-    try {
-      const [a, s] = await Promise.all([
-        axios.get(`${API}/nexus-agent/agents`, { headers }),
-        axios.get(`${API}/nexus-agent/stats`, { headers }),
-      ]);
-      setAgents(a.data || []);
-      setStats(s.data || {});
-    } catch (e) {
-      // silent — admin may have no agents yet
-    }
-  };
+  const navigate = useNavigate();
 
   useEffect(() => {
-    reload();
-    pollRef.current = setInterval(reload, 5000);
-    return () => clearInterval(pollRef.current);
-    // eslint-disable-next-line
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = filter.toLowerCase();
-    if (!q) return agents;
-    return agents.filter(a => (a.hostname || "").toLowerCase().includes(q) || (a.os || "").toLowerCase().includes(q));
-  }, [agents, filter]);
+    const load = () => axios.get(`${API}/nexus-agent/stats`, { headers }).then(r => setStats(r.data || {})).catch(() => {});
+    load();
+    const i = setInterval(load, 5000);
+    return () => clearInterval(i);
+  }, [headers]);
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 p-6 space-y-5" data-testid="nexus-agent-center">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-            <Server className="w-5 h-5 text-cyan-400" />NexusOps Agent · Command Center
+            <Server className="w-5 h-5 text-cyan-400" />NexusOps Agent · Fleet Control Room
           </h1>
-          <p className="text-xs text-zinc-500">In-house RMM agent — Windows-first. Splashtop bundling coming in Phase 4.</p>
+          <p className="text-xs text-zinc-500 flex items-center gap-1.5">
+            In-house RMM agent · per-device views live on
+            <Link to="/devices" className="text-cyan-400 hover:underline inline-flex items-center gap-0.5">Devices<ExternalLink className="w-3 h-3" /></Link>
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={reload}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/devices?source=nexus-agent")} data-testid="goto-devices-btn">
+            <Server className="w-3 h-3 mr-1" />Open in Devices
+          </Button>
           <Button size="sm" onClick={() => setInstallerOpen(true)} className="bg-cyan-500 text-zinc-950 hover:bg-cyan-400" data-testid="open-installer-builder">
             <Plus className="w-3 h-3 mr-1" />Generate Installer
           </Button>
@@ -527,40 +602,18 @@ export default function NexusAgentCenterPage() {
         <HeroTile label="Commands Queued" value={stats.pending_commands || 0} icon={Terminal} glow={stats.pending_commands ? "amber" : "violet"} testId="hero-agents-pending" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
-        <Card className="bg-zinc-950 border-zinc-800">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm">Fleet</CardTitle>
-              <Badge variant="outline" className="text-[10px]">{filtered.length}</Badge>
-              <Input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter hostname/OS…"
-                className="h-7 text-xs max-w-xs ml-auto"
-                data-testid="agent-filter-input"
-              />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {filtered.length === 0 ? (
-              <div className="text-center text-sm text-zinc-500 py-12">
-                <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                No agents enrolled yet.<br />
-                <button onClick={() => setInstallerOpen(true)} className="text-cyan-400 hover:underline mt-2 inline-flex items-center gap-1">
-                  <Plus className="w-3 h-3" />Generate your first installer
-                </button>
-              </div>
-            ) : (
-              filtered.map(a => <AgentRow key={a.id} agent={a} selected={selected === a.id} onClick={() => setSelected(a.id)} />)
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <VersionDonut />
+        <ActivityTicker />
+      </div>
 
+      <FleetScriptRunner />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RecentEnrollments />
         <SettingsCard />
       </div>
 
-      <AgentDetail deviceId={selected} onClose={() => setSelected(null)} />
       <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} />
     </div>
   );

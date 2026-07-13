@@ -692,6 +692,165 @@ async def version_manifest():
 
 
 # ----------------------------------------------------------------------
+# FLEET OPERATIONS — the differentiator surface
+# ----------------------------------------------------------------------
+
+@router.get("/nexus-agent/fleet/version-distribution")
+async def fleet_version_distribution(user=Depends(get_current_user)):
+    """Version-distribution donut data for the Fleet Control Room."""
+    pipeline = [
+        {"$match": {"is_active": True}},
+        {"$group": {"_id": {"$ifNull": ["$agent_version", "unknown"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    rows = []
+    async for r in db.nexus_agents.aggregate(pipeline):
+        rows.append({"version": r["_id"], "count": r["count"]})
+    latest = _binary_info()["version"]
+    total = sum(r["count"] for r in rows) or 1
+    for r in rows:
+        r["pct"] = round(r["count"] * 100 / total, 1)
+        r["is_latest"] = r["version"] == latest
+    return {
+        "latest_version": latest,
+        "total_agents": sum(r["count"] for r in rows),
+        "rows": rows,
+    }
+
+
+@router.get("/nexus-agent/fleet/activity")
+async def fleet_activity(limit: int = 60, user=Depends(get_current_user)):
+    """Bloomberg-style ticker of recent fleet events: enrollments + commands +
+    heartbeat anomalies. Most-recent first."""
+    events: list[dict] = []
+    # Recent enrollments
+    cur = db.nexus_agent_audit.find({"kind": {"$in": ["enroll", "re-enroll"]}}, {"_id": 0}).sort("at", -1).limit(20)
+    async for a in cur:
+        p = a.get("payload") or {}
+        events.append({
+            "kind": "enrollment",
+            "label": "ENROLLED" if a["kind"] == "enroll" else "RE-ENROLLED",
+            "at": a.get("at"),
+            "device_id": p.get("device_id"),
+            "hostname": p.get("hostname") or "",
+            "client_id": p.get("client_id"),
+            "tone": "emerald",
+        })
+    # Recent commands
+    cur = db.nexus_agent_commands.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    async for c in cur:
+        events.append({
+            "kind": "command",
+            "label": (c.get("kind") or "?").upper(),
+            "at": c.get("completed_at") or c.get("dispatched_at") or c.get("created_at"),
+            "device_id": c.get("device_id"),
+            "status": c.get("status"),
+            "by": c.get("queued_by"),
+            "tone": "emerald" if c.get("status") == "ok" else "rose" if c.get("status") == "error" else "amber" if c.get("status") == "timeout" else "cyan",
+        })
+    # Pulse rows are heavy; only flag the agents that went offline/online recently
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    cur = db.nexus_agents.find({"last_seen": {"$gte": cutoff}}, {"_id": 0}).sort("last_seen", -1).limit(20)
+    async for a in cur:
+        events.append({
+            "kind": "heartbeat",
+            "label": "HEARTBEAT",
+            "at": a.get("last_seen"),
+            "device_id": a.get("id"),
+            "hostname": a.get("hostname"),
+            "cpu_percent": a.get("cpu_percent"),
+            "mem_percent": a.get("mem_percent"),
+            "tone": "cyan",
+        })
+    # Hydrate hostname for command events
+    ids = list({e.get("device_id") for e in events if e.get("device_id") and not e.get("hostname")})
+    if ids:
+        host_map = {}
+        cur = db.nexus_agents.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1})
+        async for a in cur:
+            host_map[a["id"]] = {"hostname": a.get("hostname"), "client_id": a.get("client_id")}
+        for e in events:
+            m = host_map.get(e.get("device_id"))
+            if m:
+                e["hostname"] = e.get("hostname") or m.get("hostname")
+                e["client_id"] = e.get("client_id") or m.get("client_id")
+
+    events.sort(key=lambda e: e.get("at") or "", reverse=True)
+    return {"events": events[:limit]}
+
+
+@router.get("/nexus-agent/fleet/recent-enrollments")
+async def fleet_recent_enrollments(limit: int = 20, user=Depends(get_current_user)):
+    cur = db.nexus_agents.find({}, {"_id": 0, "agent_token": 0}).sort("enrolled_at", -1).limit(limit)
+    return await cur.to_list(length=limit)
+
+
+class FleetScriptRequest(BaseModel):
+    device_ids: list[str] = Field(default_factory=list)
+    client_id: str | None = None    # if set, target every online agent for this client
+    shell: str = "powershell"        # powershell | cmd | bash
+    script: str
+    timeout_sec: int = 120
+
+
+@router.post("/nexus-agent/fleet/run-script")
+async def fleet_run_script(req: FleetScriptRequest, user=Depends(get_current_user)):
+    """Fan out a single script across many endpoints in parallel.
+    Returns a batch_id + the list of queued command IDs so the UI can stream results."""
+    if not (req.script or "").strip():
+        raise HTTPException(400, "script required")
+
+    targets: list[dict] = []
+    if req.device_ids:
+        cur = db.nexus_agents.find({"id": {"$in": req.device_ids}, "is_active": True}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1})
+        targets = await cur.to_list(length=len(req.device_ids))
+    elif req.client_id:
+        cur = db.nexus_agents.find({"client_id": req.client_id, "is_active": True}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1})
+        targets = await cur.to_list(length=10000)
+    else:
+        raise HTTPException(400, "device_ids or client_id required")
+
+    if not targets:
+        return {"batch_id": str(uuid.uuid4()), "command_ids": [], "targets": []}
+
+    batch_id = str(uuid.uuid4())
+    payload = {"shell": req.shell, "script": req.script, "timeout_sec": req.timeout_sec, "batch_id": batch_id}
+    cmd_ids: list[str] = []
+    now = _now()
+    for t in targets:
+        cmd_id = str(uuid.uuid4())
+        await db.nexus_agent_commands.insert_one({
+            "id": cmd_id,
+            "device_id": t["id"],
+            "hostname": t.get("hostname"),
+            "kind": "run_script",
+            "payload": payload,
+            "status": "pending",
+            "queued_by": user.get("email") or user.get("id"),
+            "created_at": now,
+            "batch_id": batch_id,
+        })
+        cmd_ids.append(cmd_id)
+    await _audit(db, "fleet_script", {"batch_id": batch_id, "count": len(cmd_ids), "by": user.get("email")})
+    return {
+        "batch_id": batch_id,
+        "command_ids": cmd_ids,
+        "targets": [{"id": t["id"], "hostname": t.get("hostname")} for t in targets],
+    }
+
+
+@router.get("/nexus-agent/fleet/batch/{batch_id}")
+async def fleet_batch_status(batch_id: str, user=Depends(get_current_user)):
+    cur = db.nexus_agent_commands.find({"batch_id": batch_id}, {"_id": 0}).sort("created_at", 1)
+    cmds = await cur.to_list(length=10000)
+    counts = {"pending": 0, "dispatched": 0, "ok": 0, "error": 0, "timeout": 0}
+    for c in cmds:
+        s = c.get("status", "pending")
+        counts[s] = counts.get(s, 0) + 1
+    return {"batch_id": batch_id, "total": len(cmds), "counts": counts, "commands": cmds}
+
+
+# ----------------------------------------------------------------------
 # ADMIN SETTINGS
 # ----------------------------------------------------------------------
 

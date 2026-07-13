@@ -650,6 +650,11 @@ export default function DevicesPage() {
                         <div>
                           <div className="font-medium flex items-center gap-2">
                             {d.name}
+                            {d.nexus_agent_id && (
+                              <Badge className="bg-cyan-500/15 text-cyan-300 border-cyan-500/30 text-[9px] uppercase tracking-wider gap-1 px-1.5" title="NexusOps Agent installed">
+                                <Sparkles className="w-2.5 h-2.5" />Agent
+                              </Badge>
+                            )}
                             {(() => {
                               const rdLive = d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null;
                               const effectiveStatus = rdLive || d.status;
