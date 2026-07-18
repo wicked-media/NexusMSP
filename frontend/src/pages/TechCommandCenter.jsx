@@ -3,7 +3,7 @@
  * Matches the Devices Command Center / Clients module aesthetic.
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { MetricStrip, MetricTile } from "@/components/design-system";
@@ -51,6 +51,7 @@ const ROLE_OPTIONS = [
   { value: "dispatcher", label: "Dispatcher" },
   { value: "admin", label: "Admin" },
 ];
+const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
 
 // ---------- Skill radar (CSS-only) ----------
 function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
@@ -929,7 +930,11 @@ function AuditTab({ headers }) {
 export default function TechCommandCenter() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [tab, setTab] = useState("directory");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const requested = searchParams.get("view");
+    return COMMAND_TAB_IDS.has(requested) ? requested : "directory";
+  });
   const [capacity, setCapacity] = useState(null);
   const [presets, setPresets] = useState({});
   const [addOpen, setAddOpen] = useState(false);
@@ -946,6 +951,18 @@ export default function TechCommandCenter() {
   }, [headers]);
 
   useEffect(() => { loadCapacity(); loadPresets(); }, [loadCapacity, loadPresets]);
+
+  useEffect(() => {
+    const requested = searchParams.get("view");
+    if (COMMAND_TAB_IDS.has(requested) && requested !== tab) setTab(requested);
+  }, [searchParams, tab]);
+
+  const selectTab = value => {
+    setTab(value);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("view", value);
+    setSearchParams(nextParams);
+  };
 
   const summary = capacity?.summary || { total: 0, idle: 0, active: 0, busy: 0, overloaded: 0, on_call: 0, avg_util: 0 };
 
@@ -981,7 +998,7 @@ export default function TechCommandCenter() {
       </MetricStrip>
 
       {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={selectTab}>
         <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
           {[
             { v: "directory", l: "Directory",   Icon: Users },
