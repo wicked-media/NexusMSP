@@ -590,7 +590,7 @@ export default function ContractsPage() {
                   {filteredContracts.length > 0 ? filteredContracts.map(contract => {
                     const contractLineItems = lineItems.filter(li => li.contract_id === contract.id);
                     return (
-                      <TableRow key={contract.id} className="table-row-hover">
+                      <TableRow key={contract.id} className="table-row-hover cursor-pointer" onClick={() => openEditDialog(contract)} title="Open contract workspace">
                         <TableCell>
                           <div>
                             <p className="font-medium">{contract.name}</p>
@@ -621,7 +621,7 @@ export default function ContractsPage() {
                         <TableCell>
                           <span className="text-sm">{contractLineItems.length} items</span>
                         </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(event) => event.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8">
