@@ -468,6 +468,28 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
     cmd = parts[0].lower() if parts else ""
     args = parts[1:]
 
+    # A single reference links the work item into the conversation. Keep this
+    # distinct from the multi-argument /ticket command below, which updates a
+    # ticket field.
+    if cmd in {"ticket", "invoice", "po"} and len(args) == 1:
+        reference = args[0]
+        collection, number_field, label = {
+            "ticket": (db.tickets, "ticket_number", "Ticket"),
+            "invoice": (db.invoices, "invoice_number", "Invoice"),
+            "po": (db.purchase_orders, "po_number", "Purchase order"),
+        }[cmd]
+        item = await collection.find_one(
+            {"$or": [{number_field: reference}, {"id": reference}]},
+            {"_id": 0, "id": 1, number_field: 1},
+        )
+        if not item:
+            return await _post_system_msg(channel_id, f"{label} {reference} not found")
+        canonical_reference = item.get(number_field) or item.get("id")
+        return await _post_system_msg(
+            channel_id,
+            f"{label} linked by {current_user.get('name')}: /{cmd} {canonical_reference}",
+        )
+
     if cmd == "assign" and len(args) >= 2:
         # /assign @bob TKT-001
         who = args[0].lstrip("@")
@@ -601,6 +623,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             "â€¢ `/ticket TKT-### priority <low|medium|high|critical>` â€” change priority\n"
             "â€¢ `/close TKT-###` â€” quick close\n"
             "â€¢ `/assign @user TKT-###` â€” assign ticket\n"
+            "â€¢ `/ticket|invoice|po <reference>` â€” link a work item\n"
             "â€¢ `/sla TKT-###` â€” show SLA timers\n"
             "â€¢ `/note TKT-### <body>` â€” add internal note\n"
             "â€¢ `/summarize` â€” AI summary of last 40 messages\n"
