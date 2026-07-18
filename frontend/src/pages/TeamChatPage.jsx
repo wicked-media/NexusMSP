@@ -330,8 +330,7 @@ export default function TeamChatPage() {
     nearBottomRef.current = true;
     try {
       const commandName = body.startsWith("/") ? body.split(/\s+/)[0].slice(1).toLowerCase() : "";
-      const ticketReferenceOnly = /^\/(?:ticket|invoice|po)\s+[\w-]+\s*$/i.test(body);
-      const response = body.startsWith("/") && SLASH_NAMES.has(commandName) && !ticketReferenceOnly
+      const response = body.startsWith("/") && SLASH_NAMES.has(commandName)
         ? await axios.post(`${API}/chat/slash`, { channel_id: activeId, raw: body }, { headers })
         : await axios.post(`${API}/chat/channels/${activeId}/messages`, { body }, { headers });
       setMessages(current => [...current.filter(message => message.id !== temporaryId), response.data]);
