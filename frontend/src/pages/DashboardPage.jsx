@@ -362,7 +362,7 @@ export default function DashboardPage() {
                   { icon: Monitor, label: "Add Device", path: "/devices", color: "text-purple-500" },
                   { icon: Terminal, label: "Run Script", path: "/scripting", color: "text-orange-500" },
                   { icon: CalendarDays, label: "Dispatch Calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
-                  { icon: UserCog, label: "Team Hub", path: "/team-hub?tab=technicians", color: "text-pink-500" },
+                  { icon: UserCog, label: "Team Hub", path: "/team-hub?tab=command&view=directory", color: "text-pink-500" },
                 ].map((item, i) => (
                   <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
                     <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>

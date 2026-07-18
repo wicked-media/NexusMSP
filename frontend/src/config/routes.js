@@ -99,12 +99,12 @@ export const routeConfig = [
   { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
 
-  // People & Scheduling
-  { path: "/tech-command", component: page("TechCommandCenter"), auth: true, layout: true },
-  { path: "/technicians", component: page("TechniciansPage"), auth: true, layout: true },
-  { path: "/skills-matrix", component: page("SkillsMatrixPage"), auth: true, layout: true },
-  { path: "/tech-utilization", component: page("TechUtilizationPage"), auth: true, layout: true },
-  { path: "/leaderboard", component: page("LeaderboardPage"), auth: true, layout: true },
+  // People & Scheduling — Team Command is the single workspace; retain old URLs as redirects.
+  { path: "/tech-command", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=directory" },
+  { path: "/technicians", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=directory" },
+  { path: "/skills-matrix", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=skills" },
+  { path: "/tech-utilization", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=capacity" },
+  { path: "/leaderboard", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=leaderboard" },
   { path: "/scheduling", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/dispatch-board?tab=calendar" },
   { path: "/smart-scheduling", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/dispatch-board?tab=availability" },
 

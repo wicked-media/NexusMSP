@@ -3,7 +3,7 @@
  * Matches the Devices Command Center / Clients module aesthetic.
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import TechRosterPage from "./TechRosterPage";
@@ -26,7 +26,7 @@ import {
   Sparkles, Search, Loader2, Users, Shield, AlertTriangle, Zap, Activity,
   Crown, Lock, Unlock, History, Target, ChevronRight, RefreshCw,
   TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
-  Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Network, Trophy, BarChart3,
+  Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
   CheckCircle2, XCircle, Clock,
 } from "lucide-react";
 
@@ -1054,16 +1054,6 @@ export default function TechCommandCenter() {
         <TabsContent value="skills" className="mt-4"><SkillsMatrixPage /></TabsContent>
         <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
       </Tabs>
-
-      {/* Deep links to legacy pages — preserved for power users */}
-      <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-900">
-        <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-600 self-center">Open as full page:</span>
-        <Link to="/tech-roster"><Button size="sm" variant="ghost" className="h-7 text-[10px]"><Calendar className="w-3 h-3 mr-1" />On-Call Roster</Button></Link>
-        <Link to="/skills-matrix"><Button size="sm" variant="ghost" className="h-7 text-[10px]"><Network className="w-3 h-3 mr-1" />Skills Matrix</Button></Link>
-        <Link to="/tech-utilization"><Button size="sm" variant="ghost" className="h-7 text-[10px]"><BarChart3 className="w-3 h-3 mr-1" />Utilisation</Button></Link>
-        <Link to="/leaderboard"><Button size="sm" variant="ghost" className="h-7 text-[10px]"><Trophy className="w-3 h-3 mr-1" />Leaderboard</Button></Link>
-        <Link to="/technicians"><Button size="sm" variant="ghost" className="h-7 text-[10px]"><Users className="w-3 h-3 mr-1" />Legacy Directory</Button></Link>
-      </div>
 
       <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} headers={headers} presets={presets} />
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} headers={headers} presets={presets} />
