@@ -1,15 +1,17 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Loader2, UserCog, Users, CalendarDays, Activity, Target, Trophy } from "lucide-react";
+import { Loader2, UserCog, CalendarDays, Target, Trophy } from "lucide-react";
 
 const TABS = [
-  { id: "command", label: "Command Center", icon: UserCog, page: () => import("./TechCommandCenter") },
-  { id: "technicians", label: "Technicians", icon: Users, page: () => import("./TechniciansPage") },
+  { id: "command", label: "Team Command", icon: UserCog, page: () => import("./TechCommandCenter") },
   { id: "roster", label: "Roster", icon: CalendarDays, page: () => import("./TechRosterPage") },
-  { id: "utilization", label: "Utilization", icon: Activity, page: () => import("./TechUtilizationPage") },
   { id: "skills", label: "Skills Matrix", icon: Target, page: () => import("./SkillsMatrixPage") },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy, page: () => import("./LeaderboardPage") },
 ];
+const LEGACY_TAB_DESTINATIONS = {
+  technicians: { tab: "command", view: "directory" },
+  utilization: { tab: "command", view: "capacity" },
+};
 
 const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
 
@@ -19,8 +21,16 @@ export default function TeamHubPage() {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
+    const legacyDestination = LEGACY_TAB_DESTINATIONS[tab];
+    if (legacyDestination) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("tab", legacyDestination.tab);
+      nextParams.set("view", legacyDestination.view);
+      setSearchParams(nextParams, { replace: true });
+      return;
+    }
     if (tab && TABS.some(item => item.id === tab) && tab !== activeTab) setActiveTab(tab);
-  }, [activeTab, searchParams]);
+  }, [activeTab, searchParams, setSearchParams]);
 
   const selectTab = tab => {
     setActiveTab(tab);
