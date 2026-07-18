@@ -89,8 +89,8 @@ const DEFAULT_LAYOUT_LG = [
 ];
 
 const DEFAULT_HIDDEN_WIDGETS = new Set(["cross-bridge", "hero-banner", "whats-new", "churn", "huntress"]);
-const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v6";
-const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v6";
+const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v7";
+const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v7";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import WhatsNewTile from "@/components/dashboard/WhatsNewTile";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
@@ -105,6 +105,9 @@ import WeatherStrip from "@/components/ambient/WeatherStrip";
 export default function DashboardPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
+  const dashboardStorageSuffix = user?.id || "anonymous";
+  const layoutStorageKey = `${LAYOUT_STORAGE_KEY}:${dashboardStorageSuffix}`;
+  const hiddenStorageKey = `${HIDDEN_STORAGE_KEY}:${dashboardStorageSuffix}`;
   const [stats, setStats] = useState(null);
   const [enhancedStats, setEnhancedStats] = useState(null);
   const [ticketTrends, setTicketTrends] = useState([]);
@@ -170,27 +173,22 @@ export default function DashboardPage() {
 
   // Dashboard widget layout — persisted per user in localStorage
   const [editMode, setEditMode] = useState(false);
-  const [layouts, setLayouts] = useState(() => {
+  const [layouts, setLayouts] = useState({ lg: DEFAULT_LAYOUT_LG });
+  const [hiddenWidgets, setHiddenWidgets] = useState(new Set(DEFAULT_HIDDEN_WIDGETS));
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // New core widgets need an explicit layout entry. This prevents a
-        // hot-reloaded or older saved grid from silently omitting them.
-        if (parsed?.lg?.some(item => item.i === "focus-queue")) return parsed;
-      }
-    } catch { /* ignore */ }
-    return { lg: DEFAULT_LAYOUT_LG };
-  });
-  const [hiddenWidgets, setHiddenWidgets] = useState(() => {
-    try {
-      const saved = localStorage.getItem(HIDDEN_STORAGE_KEY);
-      if (saved) return new Set(JSON.parse(saved));
-    } catch { /* ignore */ }
-    return new Set(DEFAULT_HIDDEN_WIDGETS);
-  });
+      const savedLayout = localStorage.getItem(layoutStorageKey);
+      const parsed = savedLayout ? JSON.parse(savedLayout) : null;
+      setLayouts(parsed?.lg?.some(item => item.i === "focus-queue") ? parsed : { lg: DEFAULT_LAYOUT_LG });
+      const savedHidden = localStorage.getItem(hiddenStorageKey);
+      setHiddenWidgets(savedHidden ? new Set(JSON.parse(savedHidden)) : new Set(DEFAULT_HIDDEN_WIDGETS));
+    } catch {
+      setLayouts({ lg: DEFAULT_LAYOUT_LG });
+      setHiddenWidgets(new Set(DEFAULT_HIDDEN_WIDGETS));
+    }
+  }, [layoutStorageKey, hiddenStorageKey]);
   const persistHidden = (next) => {
-    try { localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify([...next])); } catch { /* */ }
+    try { localStorage.setItem(hiddenStorageKey, JSON.stringify([...next])); } catch { /* */ }
   };
   const hideWidget = (id) => {
     setHiddenWidgets(prev => {
@@ -206,14 +204,14 @@ export default function DashboardPage() {
   };
   const onLayoutChange = (_currentLayout, allLayouts) => {
     setLayouts(allLayouts);
-    try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(allLayouts)); } catch { /* */ }
+    try { localStorage.setItem(layoutStorageKey, JSON.stringify(allLayouts)); } catch { /* */ }
   };
   const resetLayout = () => {
     setLayouts({ lg: DEFAULT_LAYOUT_LG });
     setHiddenWidgets(new Set(DEFAULT_HIDDEN_WIDGETS));
     try {
-      localStorage.removeItem(LAYOUT_STORAGE_KEY);
-      localStorage.removeItem(HIDDEN_STORAGE_KEY);
+      localStorage.removeItem(layoutStorageKey);
+      localStorage.removeItem(hiddenStorageKey);
     } catch { /* */ }
     toast.success("Dashboard layout reset to defaults");
   };
