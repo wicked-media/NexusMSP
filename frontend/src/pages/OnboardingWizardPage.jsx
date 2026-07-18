@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -967,6 +968,7 @@ function GoLiveForm({ session, preflight, onPreflightChange, firstTicket, onFirs
 // ─── Wizard View ───────────────────────────────────────────────────────────────
 function WizardView({ session: initialSession, onBack, onRefresh }) {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const headers = { Authorization: `Bearer ${token}` };
   const [session, setSession] = useState(initialSession);
   const [stepData, setStepData] = useState({});
@@ -1091,7 +1093,9 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
           <p className="text-muted-foreground mb-1">{session.client_name} has been successfully onboarded.</p>
           <p className="text-xs text-muted-foreground">Session {session.id} | Completed {session.completed_at?.slice(0, 10)} by {session.completed_by}</p>
           {session.first_ticket_id && (
-            <Badge className="mt-3 bg-blue-500/20 text-blue-400">First Ticket: {session.first_ticket_id}</Badge>
+            <Button variant="outline" size="sm" className="mt-3 border-blue-500/30 text-blue-300 hover:bg-blue-500/10" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(session.first_ticket_id)}`)} data-testid="open-first-onboarding-ticket">
+              <Ticket className="mr-1.5 h-3.5 w-3.5" />Open first ticket: {session.first_ticket_id}
+            </Button>
           )}
         </div>
         <Card className="border-border/40">
