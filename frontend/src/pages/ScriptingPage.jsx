@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import {
   Terminal, Plus, Search, Play, Clock, RefreshCw, Loader2, Code, Cpu,
   CheckCircle, XCircle, MoreVertical, Copy, Trash2, BookOpen, Calendar,
-  Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard, Wrench
+  Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard, Wrench, Eye
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
