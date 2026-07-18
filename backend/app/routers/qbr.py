@@ -1,12 +1,12 @@
-"""QBR Auto-Generator — Quarterly Business Reviews drafted by Claude Sonnet 4.5.
+"""QBR Auto-Generator â€” Quarterly Business Reviews drafted by Claude Sonnet 4.5.
 
 For a given client + quarter, gather:
-  • Ticket volume + categories + SLA performance + top issues
-  • Device health (online/warning/offline counts)
-  • Backup health
-  • Active alerts + critical incidents
-  • Cross-client pattern surges that affected this client (Blueprint Insights bridge)
-  • Invoice / spend totals
+  â€¢ Ticket volume + categories + SLA performance + top issues
+  â€¢ Device health (online/warning/offline counts)
+  â€¢ Backup health
+  â€¢ Active alerts + critical incidents
+  â€¢ Cross-client pattern surges that affected this client (Blueprint Insights bridge)
+  â€¢ Invoice / spend totals
 Then ask Claude to write a 6-section QBR ready for client delivery, plus a structured
 JSON for the frontend to render + export to branded PDF.
 
@@ -173,7 +173,7 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
 def _format_qbr_prompt(quarter: str, snap: dict) -> str:
     pat_lines = "\n".join([
         f"  - '{p['name']}': {p['client_tickets']} tickets at this client (this issue affected "
-        f"{p['msp_clients']} other MSP clients · {p['msp_tickets']} total) — recommend rolling out a Blueprint."
+        f"{p['msp_clients']} other MSP clients Â· {p['msp_tickets']} total) â€” recommend rolling out a Blueprint."
         for p in snap.get("pattern_hits", [])
     ]) or "  - none significant"
     top = "\n".join([f"  - {t['category']}: {t['count']}" for t in snap.get("top_issues", [])]) or "  - none"
@@ -186,9 +186,9 @@ def _format_qbr_prompt(quarter: str, snap: dict) -> str:
         f"SLA breaches: {snap['sla_breaches']}\n"
         f"Top categories:\n{top}\n\n"
         f"=== INFRASTRUCTURE ===\n"
-        f"Devices: {snap['devices']['online']}/{snap['devices']['total']} online · "
-        f"{snap['devices']['warning']} warning · {snap['devices']['offline']} offline\n"
-        f"Backups: {snap['backup']['healthy']} healthy · {snap['backup']['failed']} failed\n"
+        f"Devices: {snap['devices']['online']}/{snap['devices']['total']} online Â· "
+        f"{snap['devices']['warning']} warning Â· {snap['devices']['offline']} offline\n"
+        f"Backups: {snap['backup']['healthy']} healthy Â· {snap['backup']['failed']} failed\n"
         f"Critical alerts: {snap['critical_alerts']}\n\n"
         f"=== FINANCIALS ===\n"
         f"Quarter spend: ${snap['spend']:.2f}\n\n"
@@ -203,14 +203,14 @@ async def generate_qbr(client_id: str, quarter: str | None = None, current_user:
     quarter_label, start, end = _quarter_window(quarter)
     snap = await _gather_qbr_data(client_id, start, end)
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return {
             "quarter": quarter_label,
             "client_id": client_id,
             "client_name": snap["client_name"],
             "stats": snap,
-            "ai_brief": "AI briefing unavailable (EMERGENT_LLM_KEY not configured). Stats only.",
+            "ai_brief": "AI briefing unavailable (OPENAI_API_KEY not configured). Stats only.",
             "sections": {},
         }
 
@@ -224,14 +224,14 @@ async def generate_qbr(client_id: str, quarter: str | None = None, current_user:
         "'incident_breakdown' (1 paragraph + 'sla_assessment' string: 'excellent' | 'on_track' | 'at_risk' | 'breach'), "
         "'infrastructure_health' (1 paragraph), "
         "'risks_and_recommendations' (array of {area, risk, recommendation}), "
-        "'msp_intelligence' (paragraph weaving in cross-client pattern insights — explain how their "
+        "'msp_intelligence' (paragraph weaving in cross-client pattern insights â€” explain how their "
         "issues compare to peer clients and which standardised Blueprints could reduce future tickets), "
         "'next_quarter_focus' (array of 3-4 bullet strings)."
     )
     user_msg = _format_qbr_prompt(quarter_label, snap) + "\nReturn only the JSON."
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         chat = LlmChat(
             api_key=api_key,
             session_id=f"qbr-{uuid.uuid4().hex[:8]}",
@@ -300,7 +300,7 @@ async def get_qbr(qbr_id: str, current_user: dict = Depends(get_current_user)):
     return doc
 
 
-# ─────────────────────── PDF generation ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ PDF generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def _qbr_user_from_token(token: str = Query(None)):
@@ -319,11 +319,11 @@ async def _qbr_user_from_token(token: str = Query(None)):
 
 
 def _safe(text) -> str:
-    """fpdf default helvetica supports latin-1 only — strip/replace unicode."""
+    """fpdf default helvetica supports latin-1 only â€” strip/replace unicode."""
     if text is None:
         return ""
     s = str(text)
-    repl = {"—": "-", "–": "-", "•": "*", "“": '"', "”": '"', "‘": "'", "’": "'", "…": "...", "→": "->", "·": "-"}
+    repl = {"â€”": "-", "â€“": "-", "â€¢": "*", "â€œ": '"', "â€": '"', "â€˜": "'", "â€™": "'", "â€¦": "...", "â†’": "->", "Â·": "-"}
     for k, v in repl.items():
         s = s.replace(k, v)
     return s.encode("latin-1", "replace").decode("latin-1")
@@ -335,7 +335,7 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
     branding = branding or {}
     company_name = branding.get("company_name") or "NexusOps"
     accent = branding.get("primary_color") or "#10B981"
-    # Convert hex → RGB
+    # Convert hex â†’ RGB
     try:
         r = int(accent[1:3], 16)
         g = int(accent[3:5], 16)
@@ -398,10 +398,10 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
     bk = stats.get("backup", {})
     pdf.set_font("Helvetica", "", 10)
     _p(
-        f"Tickets: {stats.get('tix_total', 0)} (Critical {by_p.get('critical', 0)} · "
-        f"High {by_p.get('high', 0)} · Medium {by_p.get('medium', 0)} · Low {by_p.get('low', 0)})"
+        f"Tickets: {stats.get('tix_total', 0)} (Critical {by_p.get('critical', 0)} Â· "
+        f"High {by_p.get('high', 0)} Â· Medium {by_p.get('medium', 0)} Â· Low {by_p.get('low', 0)})"
     )
-    _p(f"Resolved this quarter: {stats.get('resolved_this_q', 0)} · SLA breaches: {stats.get('sla_breaches', 0)}")
+    _p(f"Resolved this quarter: {stats.get('resolved_this_q', 0)} Â· SLA breaches: {stats.get('sla_breaches', 0)}")
     _p(f"Devices: {devs.get('online', 0)}/{devs.get('total', 0)} online, {devs.get('warning', 0)} warning, {devs.get('offline', 0)} offline")
     _p(f"Backups: {bk.get('healthy', 0)} healthy, {bk.get('failed', 0)} failed")
     _p(f"Spend: ${stats.get('spend', 0):.2f}")

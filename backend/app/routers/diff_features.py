@@ -1,8 +1,8 @@
 """Differentiator features bundle:
-  • POST /api/ai/why-on-fire/{entity_type}/{entity_id} — AI senior-engineer triage
-  • POST /api/tickets/{ticket_id}/auto-quote        — Conversation -> quote draft
-  • GET  /api/threat-radar                          — MSP-wide threat ticker
-  • GET  /api/clients/{client_id}/health-certificate.pdf?token=  — printable cert
+  â€¢ POST /api/ai/why-on-fire/{entity_type}/{entity_id} â€” AI senior-engineer triage
+  â€¢ POST /api/tickets/{ticket_id}/auto-quote        â€” Conversation -> quote draft
+  â€¢ GET  /api/threat-radar                          â€” MSP-wide threat ticker
+  â€¢ GET  /api/clients/{client_id}/health-certificate.pdf?token=  â€” printable cert
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -23,10 +23,10 @@ MODEL_NAME = "claude-sonnet-4-5-20250929"
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "x") -> str:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(503, "AI not configured")
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from app.services.ai_provider import LlmChat, UserMessage
     chat = LlmChat(api_key=api_key, session_id=f"{session_prefix}-{uuid.uuid4().hex[:8]}",
                    system_message=system).with_model(MODEL_PROVIDER, MODEL_NAME)
     raw = await chat.send_message(UserMessage(text=user_msg))
@@ -43,7 +43,7 @@ def _safe_json(text: str) -> dict:
         raise HTTPException(502, "AI returned invalid JSON")
 
 
-# ─────────────────────── 1. Why is this on fire? ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 1. Why is this on fire? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/ai/why-on-fire/{entity_type}/{entity_id}")
 async def why_on_fire(entity_type: str, entity_id: str, current_user: dict = Depends(get_current_user)):
@@ -124,7 +124,7 @@ async def why_on_fire(entity_type: str, entity_id: str, current_user: dict = Dep
     return out
 
 
-# ─────────────────────── 2. Auto-Quote from Conversation ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 2. Auto-Quote from Conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/tickets/{ticket_id}/auto-quote")
 async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -137,7 +137,7 @@ async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(ge
     products = await db.products.find({}, {"_id": 0, "id": 1, "name": 1, "description": 1, "price": 1, "category": 1}).limit(200).to_list(200) if "products" in await db.list_collection_names() else []
 
     convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:300]}" for n in notes])
-    catalog = "\n".join([f"  - {p.get('name')} (${p.get('price', 0)}): {(p.get('description') or '')[:90]}" for p in products[:60]]) or "  (catalog empty — invent reasonable pricing)"
+    catalog = "\n".join([f"  - {p.get('name')} (${p.get('price', 0)}): {(p.get('description') or '')[:90]}" for p in products[:60]]) or "  (catalog empty â€” invent reasonable pricing)"
 
     system = (
         "You are an MSP sales engineer. Read a support-ticket conversation and draft a QUOTE for the work "
@@ -163,7 +163,7 @@ async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(ge
     return draft
 
 
-# ─────────────────────── 3. Threat Radar ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 3. Threat Radar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/threat-radar")
 async def threat_radar(current_user: dict = Depends(get_current_user)):
@@ -241,7 +241,7 @@ async def threat_radar(current_user: dict = Depends(get_current_user)):
     return {"items": items[:20], "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
-# ─────────────────────── 4. Client Health Certificate PDF ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 4. Client Health Certificate PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def _user_from_qtoken(token: str = Query(None)):
@@ -261,7 +261,7 @@ def _safe_pdf(text) -> str:
     if text is None:
         return ""
     s = str(text)
-    repl = {"—": "-", "–": "-", "•": "*", "·": "-", "“": '"', "”": '"', "‘": "'", "’": "'", "…": "...", "→": "->", "✓": "v", "✗": "x", "★": "*"}
+    repl = {"â€”": "-", "â€“": "-", "â€¢": "*", "Â·": "-", "â€œ": '"', "â€": '"', "â€˜": "'", "â€™": "'", "â€¦": "...", "â†’": "->", "âœ“": "v", "âœ—": "x", "â˜…": "*"}
     for k, v in repl.items():
         s = s.replace(k, v)
     return s.encode("latin-1", "replace").decode("latin-1")
@@ -355,7 +355,7 @@ async def health_certificate_pdf(client_id: str, user: dict = Depends(_user_from
                     headers={"Content-Disposition": f"attachment; filename={cert_id}.pdf"})
 
 
-# ─────────────────────── 5. Churn Risk Score ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 5. Churn Risk Score â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/clients/{client_id}/churn-risk")
 async def client_churn_risk(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -455,7 +455,7 @@ async def churn_risk_overview(current_user: dict = Depends(get_current_user)):
     return {"top": results[:10], "total_clients": len(clients), "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
-# ─────────────────────── 6. Invoice DisputeShield ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 6. Invoice DisputeShield â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/invoices/{invoice_id}/dispute-shield.pdf")
 async def invoice_dispute_shield(invoice_id: str, user: dict = Depends(_user_from_qtoken)):
@@ -573,7 +573,7 @@ async def invoice_dispute_shield(invoice_id: str, user: dict = Depends(_user_fro
                     headers={"Content-Disposition": f"attachment; filename=dispute_shield_{invoice.get('invoice_number', invoice_id)}.pdf"})
 
 
-# ─────────────────────── 7. Auto-Incident Postmortem ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 7. Auto-Incident Postmortem â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/warroom/{wr_id}/postmortem")
 async def warroom_postmortem(wr_id: str, current_user: dict = Depends(get_current_user)):
@@ -636,7 +636,7 @@ async def get_postmortem(pm_id: str, current_user: dict = Depends(get_current_us
     return doc
 
 
-# ─────────────────────── 8. Client Whisper Mode (VIP context) ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 8. Client Whisper Mode (VIP context) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/whisper/contact")
 async def whisper_contact(email: str, current_user: dict = Depends(get_current_user)):
@@ -724,7 +724,7 @@ async def whisper_contact(email: str, current_user: dict = Depends(get_current_u
     }
 
 
-# ─────────────────────── 9. Conversation Sentiment Tracker ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 9. Conversation Sentiment Tracker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/tickets/{ticket_id}/sentiment")
 async def ticket_sentiment(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -764,7 +764,7 @@ async def ticket_sentiment(ticket_id: str, current_user: dict = Depends(get_curr
     }
 
 
-# ─────────────────────── 10. Predictive SLA Breach Radar ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 10. Predictive SLA Breach Radar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/sla-radar")
 async def sla_radar(current_user: dict = Depends(get_current_user)):
@@ -773,8 +773,8 @@ async def sla_radar(current_user: dict = Depends(get_current_user)):
     Score 0-100 by:
       - hours_elapsed_vs_target (weight 40)
       - priority (weight 20, critical more risk)
-      - activity_gap — time since last note (weight 20)
-      - assignee_workload — how many active tickets tech has (weight 20)
+      - activity_gap â€” time since last note (weight 20)
+      - assignee_workload â€” how many active tickets tech has (weight 20)
     Tickets >=60 are 'at risk'; >=80 are 'danger zone' (<2h to breach heuristically).
     """
     now = datetime.now(timezone.utc)
@@ -846,7 +846,7 @@ async def sla_radar(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ─────────────────────── 11. Payment Promise Tracker ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 11. Payment Promise Tracker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/invoices/{invoice_id}/promises")
 async def record_payment_promise(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -923,7 +923,7 @@ async def update_payment_promise(pp_id: str, data: dict, current_user: dict = De
     return await db.payment_promises.find_one({"id": pp_id}, {"_id": 0})
 
 
-# ─────────────────────── 12. Estimate Follow-up AI ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 12. Estimate Follow-up AI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/estimates/{estimate_id}/followup-draft")
 async def estimate_followup_draft(estimate_id: str, current_user: dict = Depends(get_current_user)):
@@ -971,7 +971,7 @@ async def estimate_followup_draft(estimate_id: str, current_user: dict = Depends
     return draft
 
 
-# ─────────────────────── 13. Invoice Explainer ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 13. Invoice Explainer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/invoices/{invoice_id}/explainer")
 async def invoice_explainer(invoice_id: str, current_user: dict = Depends(get_current_user)):

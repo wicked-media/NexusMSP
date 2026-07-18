@@ -54,7 +54,7 @@ const LazySecurity2FA = lazy(() => import("./Security2FAPage"));
 const LazyNotifyChannels = lazy(() => import("./NotifyChannelsPage"));
 const LazyTechSettings = lazy(() => import("./TechSettingsPage"));
 
-// Search index: maps keywords → (tab, card anchor, human label)
+// Search index: maps keywords â†’ (tab, card anchor, human label)
 const SETTINGS_INDEX = [
   // Branding
   { tab: "branding", anchor: "branding-section", label: "Platform Branding", keywords: "branding logo company name colors favicon login tagline" },
@@ -91,7 +91,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
   // AI
-  { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai anthropic gemini claude gpt model provider emergent llm key" },
+  { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai anthropic gemini claude gpt model provider openai api key" },
   // Notifications
   { tab: "notifications", anchor: "notifications-prefs-card", label: "Email Alerts & Preferences", keywords: "notification email alerts preferences sla warnings device offline" },
 ];
@@ -147,7 +147,7 @@ export default function SettingsPage() {
   const [sms, setSms] = useState({ username: "", password: "", default_sender: "", signature: "Kind Regards, NexusMSP", append_signature: true, password_set: false, enabled: false, status_webhook_url: "", inbound_webhook_url: "", last_balance: null, last_balance_at: null, last_test_result: null, last_test_at: null, last_test_message: "", updated_at: null, updated_by: null });
   const [smsSenders, setSmsSenders] = useState([]);
   const [smsTestTo, setSmsTestTo] = useState("");
-  const [smsTestMessage, setSmsTestMessage] = useState("NexusOps SMS test — integration working correctly.");
+  const [smsTestMessage, setSmsTestMessage] = useState("NexusOps SMS test â€” integration working correctly.");
   const [smsSaving, setSmsSaving] = useState(false);
   const [smsTesting, setSmsTesting] = useState(false);
   const [acronis, setAcronis] = useState({ api_url: "", client_id: "", client_secret: "", connected: false, testing: false });
@@ -161,7 +161,7 @@ export default function SettingsPage() {
   const [cippBusy, setCippBusy] = useState(false);
   const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
-  const [trmm] = useState({ configured: false }); // legacy — TRMM removed, kept for backwards-compat with old loadAll
+  const [trmm] = useState({ configured: false }); // legacy â€” TRMM removed, kept for backwards-compat with old loadAll
   const trmmBusy = false;
   const setTrmmBusy = () => {};
   const trmmNotif = { configured: false, slack_webhook_url: "", teams_webhook_url: "", notify_on: "all" };
@@ -402,7 +402,7 @@ export default function SettingsPage() {
           <Input
             value={settingSearch}
             onChange={e => setSettingSearch(e.target.value)}
-            placeholder="Search settings… (e.g. 'resend', 'stripe', 'logo')"
+            placeholder="Search settingsâ€¦ (e.g. 'resend', 'stripe', 'logo')"
             className="pl-9 h-10"
             data-testid="settings-search-input"
           />
@@ -448,26 +448,26 @@ export default function SettingsPage() {
         })}
       </div>
 
-      {/* Other settings hub — quick-access cards to dedicated settings sub-pages */}
+      {/* Other settings hub â€” quick-access cards to dedicated settings sub-pages */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-6" data-testid="settings-hub-row">
         <button onClick={() => navigate("/tickets/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-violet-500/40 p-3 transition-all" data-testid="hub-ticket-settings">
           <div className="text-[10px] uppercase tracking-[0.2em] text-violet-300/80 font-mono mb-1">Ticket Settings</div>
-          <div className="text-sm font-medium">SLA · Workflows · Templates</div>
+          <div className="text-sm font-medium">SLA Â· Workflows Â· Templates</div>
           <div className="text-[10px] text-muted-foreground mt-0.5">Configure ticket numbering, SLA tiers, workflows</div>
         </button>
         <button onClick={() => navigate("/ticket-ping/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-cyan-500/40 p-3 transition-all" data-testid="hub-ticket-ping">
           <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 font-mono mb-1">Ticket Ping</div>
-          <div className="text-sm font-medium">Live alerts · Sound</div>
+          <div className="text-sm font-medium">Live alerts Â· Sound</div>
           <div className="text-[10px] text-muted-foreground mt-0.5">Notification rules &amp; sounds</div>
         </button>
         <button onClick={() => navigate("/tech/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-amber-500/40 p-3 transition-all" data-testid="hub-tech-settings">
           <div className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80 font-mono mb-1">Tech Settings</div>
           <div className="text-sm font-medium">Per-user prefs</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Density · views · personal toggles</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Density Â· views Â· personal toggles</div>
         </button>
         <button onClick={() => navigate("/profile")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-emerald-500/40 p-3 transition-all" data-testid="hub-tech-profile">
           <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80 font-mono mb-1">My Profile</div>
-          <div className="text-sm font-medium">Bio · Skills · CSAT · Achievements</div>
+          <div className="text-sm font-medium">Bio Â· Skills Â· CSAT Â· Achievements</div>
           <div className="text-[10px] text-muted-foreground mt-0.5">Public tech profile &amp; gamification</div>
         </button>
       </div>
@@ -650,7 +650,7 @@ export default function SettingsPage() {
           {/* Rich Text Email Signature */}
           <div className="space-y-2">
             <Label>Email Signature (Rich Text)</Label>
-            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting, tables, and inline images. <strong>Pro tip:</strong> click the <span className="font-mono bg-muted px-1 rounded">HTML</span> toggle in the editor to paste a full raw HTML signature (e.g. exported from Outlook → File → Save As → Web Page). Outlook <code>cid:</code> inline images won't render — host images on a public URL or paste them as base64 data URIs.</p>
+            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting, tables, and inline images. <strong>Pro tip:</strong> click the <span className="font-mono bg-muted px-1 rounded">HTML</span> toggle in the editor to paste a full raw HTML signature (e.g. exported from Outlook â†’ File â†’ Save As â†’ Web Page). Outlook <code>cid:</code> inline images won't render â€” host images on a public URL or paste them as base64 data URIs.</p>
             <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="300px" />
             <Button onClick={async () => {
               setSigSaving(true);
@@ -940,7 +940,7 @@ export default function SettingsPage() {
             </Select>
           </div>
           <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-sm text-blue-400">
-            <strong>Setup instructions:</strong> Register an app in <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline">Azure Portal → App registrations</a>. Add a Web redirect URI pointing to your NexusOps callback URL. Grant <code>User.Read</code>, <code>email</code>, <code>profile</code>, <code>openid</code> delegated permissions.
+            <strong>Setup instructions:</strong> Register an app in <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline">Azure Portal â†’ App registrations</a>. Add a Web redirect URI pointing to your NexusOps callback URL. Grant <code>User.Read</code>, <code>email</code>, <code>profile</code>, <code>openid</code> delegated permissions.
           </div>
           <Button onClick={async () => {
             setMsSSOSaving(true);
@@ -1252,7 +1252,7 @@ export default function SettingsPage() {
               data-testid="stripe-api-key" 
             />
             <p className="text-xs text-muted-foreground">
-              Get your API key from <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer" className="text-primary underline">Stripe Dashboard → Developers → API keys</a>. 
+              Get your API key from <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer" className="text-primary underline">Stripe Dashboard â†’ Developers â†’ API keys</a>. 
               Use your <strong>Secret key</strong> (starts with sk_live_ or sk_test_).
             </p>
           </div>
@@ -1355,7 +1355,7 @@ export default function SettingsPage() {
           </div>
 
           {resend.updated_at && (
-            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(resend.updated_at).toLocaleString()} by {resend.updated_by || "—"}</p>
+            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(resend.updated_at).toLocaleString()} by {resend.updated_by || "â€”"}</p>
           )}
 
           <div className="flex flex-wrap gap-2">
@@ -1387,7 +1387,7 @@ export default function SettingsPage() {
                 try {
                   const res = await axios.post(`${API}/settings/resend/test`, { to_email: resendTestEmail || user?.email }, { headers });
                   if (res.data.status === "sent") toast.success(`Test email sent to ${resendTestEmail || user?.email}`);
-                  else if (res.data.status === "mocked") toast.warning("Resend not configured — email was logged only");
+                  else if (res.data.status === "mocked") toast.warning("Resend not configured â€” email was logged only");
                   else toast.error(`Test failed: ${res.data.message}`);
                   const fresh = await axios.get(`${API}/settings/resend`, { headers });
                   setResend({ ...fresh.data, api_key: "" });
@@ -1447,7 +1447,7 @@ export default function SettingsPage() {
                 type="password"
                 value={sms.password}
                 onChange={e => setSms({ ...sms, password: e.target.value })}
-                placeholder={sms.password_set ? "(saved — leave blank to keep)" : "Paste your API password"}
+                placeholder={sms.password_set ? "(saved â€” leave blank to keep)" : "Paste your API password"}
                 data-testid="sms-password"
               />
               <p className="text-[11px] text-muted-foreground">Type <span className="font-mono">clear</span> to remove the saved password.</p>
@@ -1485,7 +1485,7 @@ export default function SettingsPage() {
                       className={`cursor-pointer text-[10px] ${sms.default_sender === s.sender ? "bg-primary/10 border-primary" : ""}`}
                       onClick={() => setSms({ ...sms, default_sender: s.sender })}
                     >
-                      {s.sender} · {s.label}{s.is_default ? " (default)" : ""}
+                      {s.sender} Â· {s.label}{s.is_default ? " (default)" : ""}
                     </Badge>
                   ))}
                 </div>
@@ -1547,12 +1547,12 @@ export default function SettingsPage() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-[10px] shrink-0">Delivery Status</Badge>
-                <code className="text-[11px] flex-1 truncate" data-testid="sms-status-webhook">{sms.status_webhook_url || "—"}</code>
+                <code className="text-[11px] flex-1 truncate" data-testid="sms-status-webhook">{sms.status_webhook_url || "â€”"}</code>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { navigator.clipboard.writeText(sms.status_webhook_url); toast.success("Copied"); }} data-testid="copy-status-webhook"><Copy className="w-3 h-3" /></Button>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-[10px] shrink-0">Inbound Replies</Badge>
-                <code className="text-[11px] flex-1 truncate" data-testid="sms-inbound-webhook">{sms.inbound_webhook_url || "—"}</code>
+                <code className="text-[11px] flex-1 truncate" data-testid="sms-inbound-webhook">{sms.inbound_webhook_url || "â€”"}</code>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { navigator.clipboard.writeText(sms.inbound_webhook_url); toast.success("Copied"); }} data-testid="copy-inbound-webhook"><Copy className="w-3 h-3" /></Button>
               </div>
             </div>
@@ -1582,7 +1582,7 @@ export default function SettingsPage() {
           </div>
 
           {sms.updated_at && (
-            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(sms.updated_at).toLocaleString()} by {sms.updated_by || "—"}</p>
+            <p className="text-[11px] text-muted-foreground">Last saved: {new Date(sms.updated_at).toLocaleString()} by {sms.updated_by || "â€”"}</p>
           )}
 
           <div className="flex flex-wrap gap-2">
@@ -1714,7 +1714,7 @@ export default function SettingsPage() {
             )}
             {pax8.last_sync_at && (
               <span className="text-[11px] text-muted-foreground">
-                Last sync: {new Date(pax8.last_sync_at).toLocaleString()} — {pax8.last_sync_stats?.companies || 0} companies / {pax8.last_sync_stats?.subscriptions || 0} subs
+                Last sync: {new Date(pax8.last_sync_at).toLocaleString()} â€” {pax8.last_sync_stats?.companies || 0} companies / {pax8.last_sync_stats?.subscriptions || 0} subs
               </span>
             )}
           </div>
@@ -1729,10 +1729,10 @@ export default function SettingsPage() {
                 type="password"
                 value={pax8.client_secret || ""}
                 onChange={e => setPax8({ ...pax8, client_secret: e.target.value })}
-                placeholder={pax8.client_secret_set ? "••••••••  (enter new value to replace)" : "Enter client secret"}
+                placeholder={pax8.client_secret_set ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢  (enter new value to replace)" : "Enter client secret"}
                 data-testid="pax8-client-secret"
               />
-              {pax8.client_secret_set && <p className="text-[10px] text-muted-foreground mt-1">Secret is stored — leave blank to keep existing.</p>}
+              {pax8.client_secret_set && <p className="text-[10px] text-muted-foreground mt-1">Secret is stored â€” leave blank to keep existing.</p>}
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -1765,7 +1765,7 @@ export default function SettingsPage() {
               setPax8Busy(true);
               try {
                 const r = await axios.post(`${API}/pax8/sync`, {}, { headers, timeout: 180000 });
-                toast.success(`Synced ${r.data.companies} companies · ${r.data.subscriptions} subs`);
+                toast.success(`Synced ${r.data.companies} companies Â· ${r.data.subscriptions} subs`);
                 const fresh = await axios.get(`${API}/settings/pax8`, { headers });
                 setPax8({ ...fresh.data, client_secret: "" });
               } catch (e) { toast.error(e.response?.data?.detail || "Sync failed"); }
@@ -1790,7 +1790,7 @@ export default function SettingsPage() {
             }} data-testid="save-pax8-btn"><Save className="w-4 h-4 mr-2" />Save Pax8 Settings</Button>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Get your client ID + secret from the Pax8 Partner Portal → Integrations → API Credentials. Uses OAuth2 client_credentials against <code>https://api.pax8.com/v1/token</code>.
+            Get your client ID + secret from the Pax8 Partner Portal â†’ Integrations â†’ API Credentials. Uses OAuth2 client_credentials against <code>https://api.pax8.com/v1/token</code>.
           </p>
         </CardContent>
       </Card>
@@ -1827,7 +1827,7 @@ export default function SettingsPage() {
               <Input
                 value={huntress.api_key}
                 onChange={(e) => setHuntress({ ...huntress, api_key: e.target.value })}
-                placeholder={huntress.configured ? "•••••• (enter to replace)" : "Enter API key"}
+                placeholder={huntress.configured ? "â€¢â€¢â€¢â€¢â€¢â€¢ (enter to replace)" : "Enter API key"}
                 data-testid="huntress-api-key"
               />
             </div>
@@ -1837,13 +1837,13 @@ export default function SettingsPage() {
                 type="password"
                 value={huntress.secret_key}
                 onChange={(e) => setHuntress({ ...huntress, secret_key: e.target.value })}
-                placeholder={huntress.configured ? "•••••• (enter to replace)" : "Enter secret key"}
+                placeholder={huntress.configured ? "â€¢â€¢â€¢â€¢â€¢â€¢ (enter to replace)" : "Enter secret key"}
                 data-testid="huntress-secret-key"
               />
             </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Generate keys from the Huntress dashboard → Account Settings → API Credentials
+            Generate keys from the Huntress dashboard â†’ Account Settings â†’ API Credentials
             (<a href="https://support.huntress.io/hc/en-us/articles/4416826761235" target="_blank" rel="noreferrer" className="text-primary underline">docs</a>).
             Uses HTTP Basic auth against <code>https://api.huntress.io</code>.
           </p>
@@ -1867,7 +1867,7 @@ export default function SettingsPage() {
               disabled={huntressBusy}
               data-testid="huntress-save-btn"
             >
-              {huntressBusy ? "Saving…" : "Save credentials"}
+              {huntressBusy ? "Savingâ€¦" : "Save credentials"}
             </Button>
             <Button
               variant="outline"
@@ -1957,7 +1957,7 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-orange-500" />
-            <CardTitle>CIPP · M365 Tenant Management</CardTitle>
+            <CardTitle>CIPP Â· M365 Tenant Management</CardTitle>
           </div>
           <CardDescription>
             Connect your hosted CIPP (CyberDrain Improved Partner Portal) Azure function URL to manage
@@ -1998,11 +1998,11 @@ export default function SettingsPage() {
                 type="password"
                 value={cipp.api_key}
                 onChange={(e) => setCipp({ ...cipp, api_key: e.target.value })}
-                placeholder={cipp.configured ? "•••••• (enter to replace)" : "Enter CIPP function key"}
+                placeholder={cipp.configured ? "â€¢â€¢â€¢â€¢â€¢â€¢ (enter to replace)" : "Enter CIPP function key"}
                 data-testid="cipp-api-key"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                In CIPP Azure Functions → App Keys → copy the <code>default</code> host key.
+                In CIPP Azure Functions â†’ App Keys â†’ copy the <code>default</code> host key.
               </p>
             </div>
           </div>
@@ -2032,7 +2032,7 @@ export default function SettingsPage() {
               disabled={cippBusy}
               data-testid="cipp-save-btn"
             >
-              {cippBusy ? "Saving…" : "Save credentials"}
+              {cippBusy ? "Savingâ€¦" : "Save credentials"}
             </Button>
             <Button
               variant="outline"
@@ -2079,7 +2079,7 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Wifi className="w-5 h-5 text-sky-500" />
-            <CardTitle>UniFi · Site Manager</CardTitle>
+            <CardTitle>UniFi Â· Site Manager</CardTitle>
           </div>
           <CardDescription>
             Connect to Ubiquiti's hosted UniFi Site Manager (api.ui.com) to pull sites, devices,
@@ -2121,11 +2121,11 @@ export default function SettingsPage() {
                 type="password"
                 value={unifi.api_key}
                 onChange={(e) => setUnifi({ ...unifi, api_key: e.target.value })}
-                placeholder={unifi.configured ? "•••••• (enter to replace)" : "Enter UniFi Site Manager API key"}
+                placeholder={unifi.configured ? "â€¢â€¢â€¢â€¢â€¢â€¢ (enter to replace)" : "Enter UniFi Site Manager API key"}
                 data-testid="unifi-api-key"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                Create at <a href="https://unifi.ui.com" target="_blank" rel="noreferrer" className="text-primary underline">unifi.ui.com</a> → Settings → API Keys.
+                Create at <a href="https://unifi.ui.com" target="_blank" rel="noreferrer" className="text-primary underline">unifi.ui.com</a> â†’ Settings â†’ API Keys.
               </p>
             </div>
           </div>
@@ -2149,7 +2149,7 @@ export default function SettingsPage() {
               disabled={unifiBusy}
               data-testid="unifi-save-btn"
             >
-              {unifiBusy ? "Saving…" : "Save credentials"}
+              {unifiBusy ? "Savingâ€¦" : "Save credentials"}
             </Button>
             <Button
               variant="outline"
@@ -2201,11 +2201,11 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Server className="w-5 h-5 text-cyan-500" />
-            <CardTitle>NexusOps Agent · In-House RMM</CardTitle>
+            <CardTitle>NexusOps Agent Â· In-House RMM</CardTitle>
           </div>
           <CardDescription>
             Our own cross-platform agent (Windows-first) replaces Tactical RMM. Per-client installers ship from
-            the Agent Command Center — each ZIP bakes in a unique enrollment token and registers itself as the
+            the Agent Command Center â€” each ZIP bakes in a unique enrollment token and registers itself as the
             <code> NexusOpsAgent </code> Windows service. Splashtop bundling lands in Phase 4.
           </CardDescription>
         </CardHeader>
@@ -2354,7 +2354,7 @@ export default function SettingsPage() {
               </Select>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">AI is used for ticket auto-categorization, spell check/grammar, and device diagnostics. Powered by Emergent Universal Key.</p>
+          <p className="text-xs text-muted-foreground">AI is used for ticket auto-categorization, spell check/grammar, and device diagnostics. Powered by OpenAI-compatible API key.</p>
           <Button onClick={async () => {
             setAiSaving(true);
             try {
@@ -2516,42 +2516,42 @@ export default function SettingsPage() {
 
       {/* === Merged sub-pages (lazy) === */}
       {activeTab === "tickets" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ticket defaults…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ticket defaultsâ€¦</div>}>
           <LazyTicketSettings />
         </Suspense>
       )}
       {activeTab === "ping" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ping & escalation…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading ping & escalationâ€¦</div>}>
           <LazyTicketPingSettings />
         </Suspense>
       )}
       {activeTab === "white-label" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading white label…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading white labelâ€¦</div>}>
           <LazyWhiteLabel />
         </Suspense>
       )}
       {activeTab === "channel" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading channel mode…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading channel modeâ€¦</div>}>
           <LazyChannelMode />
         </Suspense>
       )}
       {activeTab === "tokens" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading API tokens…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading API tokensâ€¦</div>}>
           <LazyApiTokens />
         </Suspense>
       )}
       {activeTab === "twofa" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading 2FA settings…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading 2FA settingsâ€¦</div>}>
           <LazySecurity2FA />
         </Suspense>
       )}
       {activeTab === "comms" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading notify channels…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading notify channelsâ€¦</div>}>
           <LazyNotifyChannels />
         </Suspense>
       )}
       {activeTab === "my-settings" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading my workspace…</div>}>
+        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading my workspaceâ€¦</div>}>
           <LazyTechSettings />
         </Suspense>
       )}

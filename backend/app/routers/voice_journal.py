@@ -1,6 +1,6 @@
 """
-Voice Journal — one-tap audio → transcript → auto ticket note + time entry.
-Uses OpenAI Whisper via Emergent LLM key (emergentintegrations).
+Voice Journal Ã¢â‚¬â€ one-tap audio Ã¢â€ â€™ transcript Ã¢â€ â€™ auto ticket note + time entry.
+Uses OpenAI Whisper via OpenAI API key (OpenAI-compatible provider).
 """
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from datetime import datetime, timezone
@@ -17,12 +17,12 @@ MAX_BYTES = 25 * 1024 * 1024  # Whisper hard limit
 
 
 async def _whisper_transcribe(raw_bytes: bytes, filename: str) -> str:
-    """Call Whisper via Emergent LLM key. Returns transcript string or raises."""
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    """Call Whisper via OpenAI API key. Returns transcript string or raises."""
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "Voice transcription not configured (EMERGENT_LLM_KEY missing)")
+        raise HTTPException(503, "Voice transcription not configured (OPENAI_API_KEY missing)")
     try:
-        from emergentintegrations.llm.openai import OpenAISpeechToText
+        from app.services.ai_provider import OpenAISpeechToText
         stt = OpenAISpeechToText(api_key=api_key)
         # BytesIO needs a .name for OpenAI SDK format detection.
         bio = io.BytesIO(raw_bytes)
@@ -67,7 +67,7 @@ async def voice_journal_log_entry(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    One-shot flow: upload audio → transcribe → create ticket comment + time entry.
+    One-shot flow: upload audio Ã¢â€ â€™ transcribe Ã¢â€ â€™ create ticket comment + time entry.
     Perfect for field techs who finish work and speak into the phone.
     """
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
@@ -92,7 +92,7 @@ async def voice_journal_log_entry(
         "ticket_id": ticket_id,
         "user_id": current_user.get("id", ""),
         "user_name": current_user.get("name", ""),
-        "content": f"[Voice Journal · {duration_minutes:g}m]\n{transcript}",
+        "content": f"[Voice Journal Ã‚Â· {duration_minutes:g}m]\n{transcript}",
         "is_internal": True,
         "source": "voice_journal",
         "created_at": now_iso,

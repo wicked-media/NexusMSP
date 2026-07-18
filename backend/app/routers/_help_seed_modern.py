@@ -36,99 +36,99 @@ STALE_SLUGS = [
 
 
 MODERN_ARTICLES = [
-    # ── What's New (auto-updated mirror of /api/changelog) ──
+    # â”€â”€ What's New (auto-updated mirror of /api/changelog) â”€â”€
     {
         "slug": "whats-new",
         "title": "What's New in NexusMSP",
         "category": "Release Notes",
-        "icon": "🆕",
+        "icon": "ðŸ†•",
         "order": -1,
-        "summary": "Latest features, merges and fixes — newest first.",
+        "summary": "Latest features, merges and fixes â€” newest first.",
         "body_md": """## Latest Releases
 
 > Tip: the dashboard tile **What's New** shows the most recent 3 entries with a "new since you visited" counter. Click any entry to jump to the corresponding module.
 
-### 2026-06-25 — Big Cleanup (modules merged & dedup'd)
+### 2026-06-25 â€” Big Cleanup (modules merged & dedup'd)
 - Deleted 27 orphan files (25 unused frontend pages, 2 empty backend stubs).
-- 12 backend routers merged into 6 canonical ones — endpoint paths unchanged.
+- 12 backend routers merged into 6 canonical ones â€” endpoint paths unchanged.
 - Settings now has 16 tabs (was 8). Deep-links work via `?tab=<id>`.
 - Four new conceptual hubs introduced:
-  - **Client Insights** — `/client-insights` — Customer Health · RMM Health · Risk · Sentiment · Timeline.
-  - **Auto-Ops Hub** — `/auto-ops` — Triage Queue · Smart Routing · Auto-Resolve · Self-Healing.
-  - **Credentials Hub** — `/credentials` — Vault · Rotation · MFA.
-  - **Team Hub** — `/team-hub` — Command Center · Technicians · Roster · Utilization · Skills · Leaderboard.
+  - **Client Insights** â€” `/client-insights` â€” Customer Health Â· RMM Health Â· Risk Â· Sentiment Â· Timeline.
+  - **Auto-Ops Hub** â€” `/auto-ops` â€” Triage Queue Â· Smart Routing Â· Auto-Resolve Â· Self-Healing.
+  - **Credentials Hub** â€” `/credentials` â€” Vault Â· Rotation Â· MFA.
+  - **Team Hub** â€” `/team-hub` â€” Command Center Â· Technicians Â· Roster Â· Utilization Â· Skills Â· Leaderboard.
 
-### 2026-06-24 — Tactical Ticket Console v2
+### 2026-06-24 â€” Tactical Ticket Console v2
 - New `TicketConsoleHeader.jsx` is a single-row header that fits all status + SLA + owner + actions in 64px.
 - **Change Customer** button reassigns a ticket to a different client in 2 clicks (POST `/api/tickets/{id}/change-customer`).
-- The legacy header is still available — toggle it in the widget layout settings.
+- The legacy header is still available â€” toggle it in the widget layout settings.
 
-### 2026-06-23 — M365 Command Center (CIPP-killer)
+### 2026-06-23 â€” M365 Command Center (CIPP-killer)
 - Multi-tenant lens for M365: tenants, users, standards, GDAP, security & alerts.
 - 15 seeded standards, 8 Conditional Access templates, 5 scripted alerts.
-- Currently using **mock data** — wire up MS Partner Center credentials in Settings → Integrations to switch live.
+- Currently using **mock data** â€” wire up MS Partner Center credentials in Settings â†’ Integrations to switch live.
 
-### 2026-06-22 — Autonomous Maintenance Windows
+### 2026-06-22 â€” Autonomous Maintenance Windows
 - Schedule cron-style fan-out maintenance: reboot, install patches, run scripts.
 - Per-device success/failure with Claude-generated summary.
 - Schedule one from the Devices page.
 
-### 2026-06-21 — Syncro-killer Device Smart Bar
-- Inline action strip on every device row (diagnose · restart agent · push script · live metrics).
+### 2026-06-21 â€” Syncro-killer Device Smart Bar
+- Inline action strip on every device row (diagnose Â· restart agent Â· push script Â· live metrics).
 - AI Diagnose for one-click "why is this device sad?" answer.
 
-### 2026-06-20 — Invoice Studio + Smart Billing Engine
+### 2026-06-20 â€” Invoice Studio + Smart Billing Engine
 - Drag-and-drop invoice template builder.
 - AI drafts invoices from ticket time + parts.
 - Aged AR insights, renewal risk, smart recurring billing.
 """,
     },
 
-    # ── Getting Started (refreshed) ──
+    # â”€â”€ Getting Started (refreshed) â”€â”€
     {
         "slug": "getting-started",
         "title": "Getting Started with NexusMSP",
         "category": "Basics",
-        "icon": "🚀",
+        "icon": "ðŸš€",
         "order": 0,
         "summary": "Your first 10 minutes inside the platform.",
         "body_md": """## Welcome
 NexusMSP is your MSP command-and-control hub. Here's what to do in your first session:
 
 1. **Sign in** at the login screen with the credentials your admin provided.
-2. **Open the Dashboard** — your default landing page. The **What's New** tile (top-right) keeps you in the loop as features land.
+2. **Open the Dashboard** â€” your default landing page. The **What's New** tile (top-right) keeps you in the loop as features land.
 3. **Press Cmd/Ctrl+K** anywhere to open the command palette and jump to any module.
 4. **Open Tickets** to see queued work assigned to you.
-5. **Set your status** — click the LED dot beside your name (bottom-right). 🟢 Active · 🟠 DND · 🔵 Break.
+5. **Set your status** â€” click the LED dot beside your name (bottom-right). ðŸŸ¢ Active Â· ðŸŸ  DND Â· ðŸ”µ Break.
 
 ## Sidebar layout
-- **Service Desk** — Dashboard · Workspace · Tickets · Dispatch · Change · Team · Scheduling · Live Support.
-- **Infrastructure** — Devices · Network · Assets · Backup · Automation · Vault & Credentials.
-- **Business** — Clients · Client Portal · CRM · Billing · Financial Analytics · Products · POs · Projects · Contracts.
-- **Security** — SOC · Endpoint · Ransomware · Compliance.
-- **AI & Intelligence** — Copilot · Auto-Ops · Knowledge & Docs.
-- **Reports & Comms** — Command Center · Insights · Reports · Communications.
-- **Platform** — Settings · System Health · Integrations.
+- **Service Desk** â€” Dashboard Â· Workspace Â· Tickets Â· Dispatch Â· Change Â· Team Â· Scheduling Â· Live Support.
+- **Infrastructure** â€” Devices Â· Network Â· Assets Â· Backup Â· Automation Â· Vault & Credentials.
+- **Business** â€” Clients Â· Client Portal Â· CRM Â· Billing Â· Financial Analytics Â· Products Â· POs Â· Projects Â· Contracts.
+- **Security** â€” SOC Â· Endpoint Â· Ransomware Â· Compliance.
+- **AI & Intelligence** â€” Copilot Â· Auto-Ops Â· Knowledge & Docs.
+- **Reports & Comms** â€” Command Center Â· Insights Â· Reports Â· Communications.
+- **Platform** â€” Settings Â· System Health Â· Integrations.
 """,
     },
 
-    # ── Hubs ──
+    # â”€â”€ Hubs â”€â”€
     {
         "slug": "client-insights-hub",
         "title": "Client Insights Hub",
         "category": "Business",
-        "icon": "👥",
+        "icon": "ðŸ‘¥",
         "order": 10,
         "summary": "All client lenses in one tabbed view.",
         "body_md": """## Where
-`/client-insights` (Sidebar → Business → Clients → Client Insights Hub)
+`/client-insights` (Sidebar â†’ Business â†’ Clients â†’ Client Insights Hub)
 
 ## Tabs
-- **Customer Health** — NPS, CSAT, churn signal.
-- **RMM Health** — uptime, agent status, alert volume.
-- **Risk** — composite churn-risk score per client.
-- **Sentiment** — AI-derived sentiment from ticket threads.
-- **Timeline** — chronological feed of every touchpoint.
+- **Customer Health** â€” NPS, CSAT, churn signal.
+- **RMM Health** â€” uptime, agent status, alert volume.
+- **Risk** â€” composite churn-risk score per client.
+- **Sentiment** â€” AI-derived sentiment from ticket threads.
+- **Timeline** â€” chronological feed of every touchpoint.
 
 Deep-link directly to a tab: `/client-insights?tab=customer-health`.
 """,
@@ -137,17 +137,17 @@ Deep-link directly to a tab: `/client-insights?tab=customer-health`.
         "slug": "auto-ops-hub",
         "title": "Auto-Ops Hub",
         "category": "AI & Intelligence",
-        "icon": "🤖",
+        "icon": "ðŸ¤–",
         "order": 11,
-        "summary": "Triage, route, resolve and self-heal — all automation surfaces in one place.",
+        "summary": "Triage, route, resolve and self-heal â€” all automation surfaces in one place.",
         "body_md": """## Where
-`/auto-ops` (Sidebar → AI & Intelligence → AI Copilot → Auto-Ops Hub)
+`/auto-ops` (Sidebar â†’ AI & Intelligence â†’ AI Copilot â†’ Auto-Ops Hub)
 
 ## Tabs
-- **Triage Queue** — unassigned tickets ordered by AI-scored urgency.
-- **Smart Routing** — rules that auto-assign tickets based on tech skills, load and availability.
-- **Auto-Resolve** — tickets that Claude can close end-to-end (with audit trail).
-- **Self-Healing** — devices that recovered on their own thanks to runbooks.
+- **Triage Queue** â€” unassigned tickets ordered by AI-scored urgency.
+- **Smart Routing** â€” rules that auto-assign tickets based on tech skills, load and availability.
+- **Auto-Resolve** â€” tickets that Claude can close end-to-end (with audit trail).
+- **Self-Healing** â€” devices that recovered on their own thanks to runbooks.
 
 Deep-link: `/auto-ops?tab=ai-resolution`.
 """,
@@ -156,16 +156,16 @@ Deep-link: `/auto-ops?tab=ai-resolution`.
         "slug": "credentials-hub",
         "title": "Credentials Hub",
         "category": "Security",
-        "icon": "🔐",
+        "icon": "ðŸ”",
         "order": 12,
-        "summary": "Password vault, rotation and MFA — single pane.",
+        "summary": "Password vault, rotation and MFA â€” single pane.",
         "body_md": """## Where
-`/credentials` (Sidebar → Infrastructure → Vault & Credentials → Credentials Hub)
+`/credentials` (Sidebar â†’ Infrastructure â†’ Vault & Credentials â†’ Credentials Hub)
 
 ## Tabs
-- **Password Vault** — encrypted credentials per client and per device.
-- **Rotation** — cadence + audit of password rotations.
-- **MFA Management** — enrolment, factor reset and bypass approvals.
+- **Password Vault** â€” encrypted credentials per client and per device.
+- **Rotation** â€” cadence + audit of password rotations.
+- **MFA Management** â€” enrolment, factor reset and bypass approvals.
 
 Deep-link: `/credentials?tab=mfa-management`.
 """,
@@ -174,34 +174,34 @@ Deep-link: `/credentials?tab=mfa-management`.
         "slug": "team-hub",
         "title": "Team Hub",
         "category": "Service Desk",
-        "icon": "🧑‍💼",
+        "icon": "ðŸ§‘â€ðŸ’¼",
         "order": 13,
         "summary": "Six team lenses, one tabbed surface.",
         "body_md": """## Where
-`/team-hub` (Sidebar → Service Desk → Team → Team Hub)
+`/team-hub` (Sidebar â†’ Service Desk â†’ Team â†’ Team Hub)
 
 ## Tabs
-- **Command Center** — live who-is-on-what.
-- **Technicians** — roster and contact details.
-- **Roster** — shift planning calendar.
-- **Utilization** — billable vs non-billable per tech.
-- **Skills Matrix** — competency grid.
-- **Leaderboard** — gamified perf board.
+- **Command Center** â€” live who-is-on-what.
+- **Technicians** â€” roster and contact details.
+- **Roster** â€” shift planning calendar.
+- **Utilization** â€” billable vs non-billable per tech.
+- **Skills Matrix** â€” competency grid.
+- **Leaderboard** â€” gamified perf board.
 
 Deep-link: `/team-hub?tab=utilization`.
 """,
     },
 
-    # ── Settings hub ──
+    # â”€â”€ Settings hub â”€â”€
     {
         "slug": "settings-hub",
         "title": "Settings (16-tab hub)",
         "category": "Platform",
-        "icon": "⚙️",
+        "icon": "âš™ï¸",
         "order": 20,
         "summary": "Everything you used to chase across 10 pages is now one tabbed Settings page.",
         "body_md": """## Where
-`/settings` (Sidebar → Platform → Settings)
+`/settings` (Sidebar â†’ Platform â†’ Settings)
 
 ## Tabs (in order)
 | Tab | Purpose |
@@ -212,7 +212,7 @@ Deep-link: `/team-hub?tab=utilization`.
 | Authentication | Microsoft SSO, JWT settings |
 | Mailbox & Email | O365 inbox, email signatures |
 | Integrations | Xero, Stripe, Microsoft 365 Email, SMS, Acronis, Pax8, Huntress, SupED, CIPP, UniFi, TRMM, Splynx, Hudu, Syncro |
-| AI & Automation | Provider, model, Emergent LLM key |
+| AI & Automation | Provider, model, OpenAI API key |
 | Notifications | Email/SMS alert preferences |
 | Ticket Defaults | Numbering, SLA, workflows |
 | Ping & Escalation | Live alerts, sounds, notification rules |
@@ -227,45 +227,45 @@ Deep-link any tab: `/settings?tab=integrations` or `/settings?tab=tickets`.
 """,
     },
 
-    # ── Marquee features ──
+    # â”€â”€ Marquee features â”€â”€
     {
         "slug": "tactical-ticket-console-v2",
         "title": "Tactical Ticket Console v2",
         "category": "Service Desk",
-        "icon": "🎫",
+        "icon": "ðŸŽ«",
         "order": 30,
         "summary": "Cleaner ticket detail header, Change Customer flow, legacy toggle.",
         "body_md": """## What changed
 The old ticket detail view stacked four header panels and felt cluttered. v2 collapses everything into a single-row `TicketConsoleHeader` with status, SLA pill, priority, owner, client and quick actions.
 
 ## Change Customer
-Click the client name in the console header → search → confirm. The ticket reassigns instantly. Thread history, time entries and devices stay attached.
+Click the client name in the console header â†’ search â†’ confirm. The ticket reassigns instantly. Thread history, time entries and devices stay attached.
 
 ## Where the old header went
-Power users can restore the old multi-panel header via the layout settings (`legacyHeader` toggle). Nothing was deleted — just tucked away.
+Power users can restore the old multi-panel header via the layout settings (`legacyHeader` toggle). Nothing was deleted â€” just tucked away.
 
 ## Endpoints
-- `POST /api/tickets/{ticket_id}/change-customer` — body `{ "client_id": "..." }`.
+- `POST /api/tickets/{ticket_id}/change-customer` â€” body `{ "client_id": "..." }`.
 """,
     },
     {
         "slug": "m365-command-center",
         "title": "M365 Command Center",
         "category": "Integrations",
-        "icon": "🟦",
+        "icon": "ðŸŸ¦",
         "order": 31,
         "summary": "CIPP-style multi-tenant lens for Microsoft 365.",
         "body_md": """## Where
-`/m365` (Sidebar → Platform → Integrations → M365 Center)
+`/m365` (Sidebar â†’ Platform â†’ Integrations â†’ M365 Center)
 
 ## Tabs
-- **Tenants** — list/search, secure score, MFA %, deep links to Entra/Exchange/Intune/SharePoint/Defender.
-- **Users** — search across tenants, license assignment, sign-in status.
-- **Standards** — 15 baseline standards; toggle, schedule, run and auto-remediate.
-- **GDAP** — relationship health, expiry alerts, +1y extend, 4 role templates.
-- **Security** — MFA analytics by method, 30-day Secure Score trend, 8 Conditional Access templates, 5 scripted alerts.
-- **Alerts** — impossible travel, new admin, mass delete, inbox forward external, guest admin.
-- **Connection** — paste app_id / tenant_id / app_secret / refresh_token to go live.
+- **Tenants** â€” list/search, secure score, MFA %, deep links to Entra/Exchange/Intune/SharePoint/Defender.
+- **Users** â€” search across tenants, license assignment, sign-in status.
+- **Standards** â€” 15 baseline standards; toggle, schedule, run and auto-remediate.
+- **GDAP** â€” relationship health, expiry alerts, +1y extend, 4 role templates.
+- **Security** â€” MFA analytics by method, 30-day Secure Score trend, 8 Conditional Access templates, 5 scripted alerts.
+- **Alerts** â€” impossible travel, new admin, mass delete, inbox forward external, guest admin.
+- **Connection** â€” paste app_id / tenant_id / app_secret / refresh_token to go live.
 
 ## Currently
 Mock data. The MOCK badge in the top-right will disappear once Connection credentials are saved.
@@ -275,9 +275,9 @@ Mock data. The MOCK badge in the top-right will disappear once Connection creden
         "slug": "maintenance-windows",
         "title": "Maintenance Windows",
         "category": "Infrastructure",
-        "icon": "🛠️",
+        "icon": "ðŸ› ï¸",
         "order": 32,
-        "summary": "Schedule fan-out maintenance: reboot, patch, scripts — across many devices.",
+        "summary": "Schedule fan-out maintenance: reboot, patch, scripts â€” across many devices.",
         "body_md": """## Schedule one
 1. Open **Devices**.
 2. Select target devices (multi-select).
@@ -285,68 +285,68 @@ Mock data. The MOCK badge in the top-right will disappear once Connection creden
 4. Pick the start time, cadence (one-off, weekly, monthly) and the action (reboot, run script, install patch).
 5. Confirm.
 
-The backend scheduler executes the actions at the scheduled time and writes a per-device audit trail. Each run gets a Claude-generated summary (e.g. "23/25 succeeded, 2 timed out — both are Windows 7 boxes scheduled for retirement").
+The backend scheduler executes the actions at the scheduled time and writes a per-device audit trail. Each run gets a Claude-generated summary (e.g. "23/25 succeeded, 2 timed out â€” both are Windows 7 boxes scheduled for retirement").
 
 ## Endpoints
-- `POST /api/maintenance/windows` — create.
-- `GET /api/maintenance/windows` — list.
-- `GET /api/maintenance/windows/{id}/runs` — execution history.
+- `POST /api/maintenance/windows` â€” create.
+- `GET /api/maintenance/windows` â€” list.
+- `GET /api/maintenance/windows/{id}/runs` â€” execution history.
 """,
     },
     {
         "slug": "device-smart-bar",
         "title": "Device Smart Bar",
         "category": "Infrastructure",
-        "icon": "🖥️",
+        "icon": "ðŸ–¥ï¸",
         "order": 33,
         "summary": "Inline action strip on every device row.",
         "body_md": """## What you get on every row
-- **Diagnose** — AI summary of CPU/RAM/Disk/temperature/recent tickets.
-- **Restart agent** — bounces the RMM agent without opening the remote tools.
-- **Push script** — drop into the script picker pre-targeted to this device.
-- **Live metrics** — opens a drawer streaming CPU/RAM/Disk.
-- **Remote** — launch RustDesk/Mesh/Splashtop instantly.
+- **Diagnose** â€” AI summary of CPU/RAM/Disk/temperature/recent tickets.
+- **Restart agent** â€” bounces the RMM agent without opening the remote tools.
+- **Push script** â€” drop into the script picker pre-targeted to this device.
+- **Live metrics** â€” opens a drawer streaming CPU/RAM/Disk.
+- **Remote** â€” launch RustDesk/Mesh/Splashtop instantly.
 
 ## Bulk
-Select multiple rows → the Smart Bar appears at the top with bulk actions.
+Select multiple rows â†’ the Smart Bar appears at the top with bulk actions.
 """,
     },
     {
         "slug": "invoice-studio",
         "title": "Invoice Studio + Smart Billing",
         "category": "Business",
-        "icon": "💸",
+        "icon": "ðŸ’¸",
         "order": 34,
         "summary": "Drag-and-drop invoice templates plus AI-powered billing intelligence.",
         "body_md": """## Invoice Studio
-`/invoice-templates` (Sidebar → Business → Billing & Finance → PDF Templates)
+`/invoice-templates` (Sidebar â†’ Business â†’ Billing & Finance â†’ PDF Templates)
 
 Block-based template editor:
 - Drag blocks (logo, address, line items, totals, signature, notes) into a page.
 - Pick a preset from the **Gallery** if you don't want to start from scratch.
-- Save as the active template — every invoice PDF uses it.
+- Save as the active template â€” every invoice PDF uses it.
 
 ## Smart Billing
-- **AI Invoice Draft** (`/api/invoices/smart/draft`) — pulls ticket time + parts and drafts the invoice.
-- **Aged AR Insights** — AI summary of who owes what and why.
-- **Renewal Risk** — contracts at risk of churn.
-- **Smart Recurring** — generates and dispatches recurring invoices on a schedule.
+- **AI Invoice Draft** (`/api/invoices/smart/draft`) â€” pulls ticket time + parts and drafts the invoice.
+- **Aged AR Insights** â€” AI summary of who owes what and why.
+- **Renewal Risk** â€” contracts at risk of churn.
+- **Smart Recurring** â€” generates and dispatches recurring invoices on a schedule.
 """,
     },
 
-    # ── Help center itself ──
+    # â”€â”€ Help center itself â”€â”€
     {
         "slug": "using-help-center",
         "title": "Using the Help Center",
         "category": "Basics",
-        "icon": "📘",
+        "icon": "ðŸ“˜",
         "order": 99,
         "summary": "How to find docs, ask the AI co-pilot, and contribute.",
         "body_md": """## Browse
 Use the left rail to jump between categories. Articles are ordered by importance within each category.
 
 ## Search
-Type into the search box at the top — title, summary and body all match.
+Type into the search box at the top â€” title, summary and body all match.
 
 ## AI co-pilot
 Press the **Ask Co-Pilot** button. It answers using only the article corpus, with citations.

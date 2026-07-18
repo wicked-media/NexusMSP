@@ -43,7 +43,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        print(f"✓ GET /api/invoices - returns {len(data)} invoices")
+        print(f"âœ“ GET /api/invoices - returns {len(data)} invoices")
     
     def test_get_invoice_stats_summary(self, headers):
         """GET /api/invoices/stats/summary - returns stats with all required fields"""
@@ -58,7 +58,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert "total_revenue" in data
         assert "total_collected" in data
         assert "total_outstanding" in data
-        print(f"✓ GET /api/invoices/stats/summary - total:{data['total']}, paid:{data['paid']}, unpaid:{data['unpaid']}, overdue:{data['overdue']}")
+        print(f"âœ“ GET /api/invoices/stats/summary - total:{data['total']}, paid:{data['paid']}, unpaid:{data['unpaid']}, overdue:{data['overdue']}")
         print(f"  Revenue: ${data['total_revenue']}, Collected: ${data['total_collected']}, Outstanding: ${data['total_outstanding']}")
     
     def test_create_invoice_with_line_items_and_tax(self, headers):
@@ -98,7 +98,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert data["tax"] == 35.0
         assert data["total"] == 385.0
         
-        print(f"✓ POST /api/invoices - created {data['invoice_number']}, subtotal=${data['subtotal']}, tax=${data['tax']}, total=${data['total']}")
+        print(f"âœ“ POST /api/invoices - created {data['invoice_number']}, subtotal=${data['subtotal']}, tax=${data['tax']}, total=${data['total']}")
         
         # Store for later tests
         self.__class__.test_invoice_id = data["id"]
@@ -116,7 +116,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert data["id"] == invoice_id
         assert "line_items" in data
         assert "payments" in data
-        print(f"✓ GET /api/invoices/{invoice_id} - returned invoice with {len(data['line_items'])} line items")
+        print(f"âœ“ GET /api/invoices/{invoice_id} - returned invoice with {len(data['line_items'])} line items")
     
     def test_record_manual_payment_partial(self, headers):
         """POST /api/invoices/{id}/record-payment - record partial payment"""
@@ -143,7 +143,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert inv["payment_status"] == "partial"
         assert inv["amount_paid"] == payment_amount
         assert len(inv["payments"]) >= 1
-        print(f"✓ POST /api/invoices/{invoice_id}/record-payment - partial payment ${payment_amount}, status=partial")
+        print(f"âœ“ POST /api/invoices/{invoice_id}/record-payment - partial payment ${payment_amount}, status=partial")
     
     def test_record_manual_payment_full(self, headers):
         """POST /api/invoices/{id}/record-payment - complete payment to mark as paid"""
@@ -171,7 +171,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         assert inv2["payment_status"] == "paid"
         assert inv2["amount_paid"] == inv2["total"]
         assert len(inv2["payments"]) >= 2
-        print(f"✓ POST /api/invoices/{invoice_id}/record-payment - full payment, status=paid, payments={len(inv2['payments'])}")
+        print(f"âœ“ POST /api/invoices/{invoice_id}/record-payment - full payment, status=paid, payments={len(inv2['payments'])}")
     
     def test_stripe_pay_endpoint_returns_url(self, headers):
         """POST /api/invoices/{id}/pay - Stripe payment returns checkout URL"""
@@ -194,17 +194,17 @@ class TestInvoiceEndpoints(TestAuthentication):
         
         # Now try Stripe pay
         response = requests.post(f"{BASE_URL}/api/invoices/{stripe_test_inv['id']}/pay", 
-                                 json={"origin_url": "https://rmm-psa-build.preview.emergentagent.com"}, 
+                                 json={"origin_url": "http://127.0.0.1:8001"}, 
                                  headers=headers)
         
         # Stripe endpoint should return a URL or error if Stripe not fully configured
         if response.status_code == 200:
             data = response.json()
             assert "url" in data
-            print(f"✓ POST /api/invoices/{stripe_test_inv['id']}/pay - Stripe checkout URL returned")
+            print(f"âœ“ POST /api/invoices/{stripe_test_inv['id']}/pay - Stripe checkout URL returned")
         else:
             # May fail with test key, but API should be reachable
-            print(f"⚠ POST /api/invoices/pay - Stripe returned {response.status_code}: {response.text}")
+            print(f"âš  POST /api/invoices/pay - Stripe returned {response.status_code}: {response.text}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/invoices/{stripe_test_inv['id']}", headers=headers)
@@ -217,7 +217,7 @@ class TestInvoiceEndpoints(TestAuthentication):
         
         response = requests.delete(f"{BASE_URL}/api/invoices/{invoice_id}", headers=headers)
         assert response.status_code == 200
-        print(f"✓ DELETE /api/invoices/{invoice_id} - test invoice deleted")
+        print(f"âœ“ DELETE /api/invoices/{invoice_id} - test invoice deleted")
 
 
 class TestNoNotesThresholdSettings(TestAuthentication):
@@ -233,7 +233,7 @@ class TestNoNotesThresholdSettings(TestAuthentication):
         assert "threshold_hours" in data
         assert "escalate_to" in data
         assert "escalate_to_name" in data
-        print(f"✓ GET /api/settings/no-notes-threshold - enabled={data['enabled']}, hours={data['threshold_hours']}")
+        print(f"âœ“ GET /api/settings/no-notes-threshold - enabled={data['enabled']}, hours={data['threshold_hours']}")
     
     def test_save_threshold_settings(self, headers):
         """PUT /api/settings/no-notes-threshold - save threshold settings"""
@@ -257,7 +257,7 @@ class TestNoNotesThresholdSettings(TestAuthentication):
         saved = get_resp.json()
         assert saved["enabled"] == True
         assert saved["threshold_hours"] == 4
-        print(f"✓ PUT /api/settings/no-notes-threshold - saved enabled=True, hours=4, escalate_to={saved.get('escalate_to_name', 'N/A')}")
+        print(f"âœ“ PUT /api/settings/no-notes-threshold - saved enabled=True, hours=4, escalate_to={saved.get('escalate_to_name', 'N/A')}")
     
     def test_check_escalation_endpoint(self, headers):
         """POST /api/tickets/check-escalation - verify escalation check runs"""
@@ -265,14 +265,14 @@ class TestNoNotesThresholdSettings(TestAuthentication):
         assert response.status_code == 200
         data = response.json()
         assert "escalated" in data
-        print(f"✓ POST /api/tickets/check-escalation - escalated={data.get('escalated', 0)} tickets")
+        print(f"âœ“ POST /api/tickets/check-escalation - escalated={data.get('escalated', 0)} tickets")
     
     def test_disable_threshold(self, headers):
         """PUT /api/settings/no-notes-threshold - disable threshold"""
         threshold_data = {"enabled": False, "threshold_hours": 24, "escalate_to": "", "escalate_to_name": ""}
         response = requests.put(f"{BASE_URL}/api/settings/no-notes-threshold", json=threshold_data, headers=headers)
         assert response.status_code == 200
-        print(f"✓ PUT /api/settings/no-notes-threshold - disabled threshold for cleanup")
+        print(f"âœ“ PUT /api/settings/no-notes-threshold - disabled threshold for cleanup")
 
 
 class TestXeroSettings(TestAuthentication):
@@ -286,7 +286,7 @@ class TestXeroSettings(TestAuthentication):
         # Should have expected fields (connected/configured are aliases)
         assert "client_id" in data
         assert "connected" in data or "configured" in data
-        print(f"✓ GET /api/settings/xero - connected={data.get('connected', data.get('configured', False))}")
+        print(f"âœ“ GET /api/settings/xero - connected={data.get('connected', data.get('configured', False))}")
     
     def test_save_xero_settings(self, headers):
         """PUT /api/settings/xero - save Xero settings"""
@@ -302,7 +302,7 @@ class TestXeroSettings(TestAuthentication):
         get_resp = requests.get(f"{BASE_URL}/api/settings/xero", headers=headers)
         saved = get_resp.json()
         assert saved["client_id"] == "TEST_XERO_CLIENT_ID"
-        print(f"✓ PUT /api/settings/xero - saved Xero credentials")
+        print(f"âœ“ PUT /api/settings/xero - saved Xero credentials")
 
 
 class TestEnhancedDashboard(TestAuthentication):
@@ -325,7 +325,7 @@ class TestEnhancedDashboard(TestAuthentication):
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
         
-        print(f"✓ GET /api/dashboard/enhanced-stats - all fields present")
+        print(f"âœ“ GET /api/dashboard/enhanced-stats - all fields present")
         print(f"  Revenue: ${data['total_revenue']}, Collected: ${data['total_collected']}, Outstanding: ${data['outstanding']}")
         print(f"  No-Notes Tickets: {data['no_notes_tickets']}, SLA Breaches: {data['sla_breaches']}")
         print(f"  Low Stock: {data['low_stock_products']}, Pending POs: {data['pending_purchase_orders']}")
@@ -340,7 +340,7 @@ class TestEnhancedDashboard(TestAuthentication):
         assert isinstance(data["no_notes_tickets"], int)
         assert isinstance(data["low_stock_products"], int)
         assert isinstance(data["pending_purchase_orders"], int)
-        print(f"✓ GET /api/dashboard/enhanced-stats - all values are numeric types")
+        print(f"âœ“ GET /api/dashboard/enhanced-stats - all values are numeric types")
 
 
 class TestProductsStillWork(TestAuthentication):
@@ -352,7 +352,7 @@ class TestProductsStillWork(TestAuthentication):
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        print(f"✓ GET /api/products - returns {len(data)} products")
+        print(f"âœ“ GET /api/products - returns {len(data)} products")
 
 
 class TestPurchaseOrdersStillWork(TestAuthentication):
@@ -364,7 +364,7 @@ class TestPurchaseOrdersStillWork(TestAuthentication):
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        print(f"✓ GET /api/purchase-orders - returns {len(data)} POs")
+        print(f"âœ“ GET /api/purchase-orders - returns {len(data)} POs")
 
 
 if __name__ == "__main__":

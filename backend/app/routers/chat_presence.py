@@ -2,21 +2,21 @@
 
 Endpoints:
   Presence:
-    POST /api/presence/heartbeat       — client pings every 15s; sets status
-    GET  /api/presence                  — everyone's live status
-    POST /api/presence/status           — manual state (active/busy/dnd/break/away)
+    POST /api/presence/heartbeat       â€” client pings every 15s; sets status
+    GET  /api/presence                  â€” everyone's live status
+    POST /api/presence/status           â€” manual state (active/busy/dnd/break/away)
 
   Channels & DMs:
-    GET  /api/chat/channels             — list channels visible to me
-    POST /api/chat/channels             — create channel
-    POST /api/chat/dm/{user_id}         — get-or-create a DM with another user
-    POST /api/chat/channels/{id}/messages — send message
-    GET  /api/chat/channels/{id}/messages?since=iso — fetch recent
-    POST /api/chat/channels/{id}/read   — mark all read for me
-    GET  /api/chat/unread               — unread counts per channel
+    GET  /api/chat/channels             â€” list channels visible to me
+    POST /api/chat/channels             â€” create channel
+    POST /api/chat/dm/{user_id}         â€” get-or-create a DM with another user
+    POST /api/chat/channels/{id}/messages â€” send message
+    GET  /api/chat/channels/{id}/messages?since=iso â€” fetch recent
+    POST /api/chat/channels/{id}/read   â€” mark all read for me
+    GET  /api/chat/unread               â€” unread counts per channel
 
   Slash commands:
-    POST /api/chat/slash {channel_id, raw}  — process /command
+    POST /api/chat/slash {channel_id, raw}  â€” process /command
 
 LED computation rule (frontend):
   - active (green pulse): heartbeat <30s ago, no busy_state
@@ -55,7 +55,7 @@ def _now_iso() -> str:
     return _now().isoformat()
 
 
-# ═══════════════════════ PRESENCE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• PRESENCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/presence/heartbeat")
 async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
@@ -161,7 +161,7 @@ async def work_activity(
     return {"work_item": work_item, "events": rows}
 
 
-# ═══════════════════════ CHANNELS & DMs ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• CHANNELS & DMs â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def _ensure_channel(
     name: str,
@@ -319,7 +319,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
             await db.notifications.insert_one({
                 "id": uuid.uuid4().hex,
                 "type": "chat_mention",
-                "title": f"💬 {current_user.get('name')} mentioned you",
+                "title": f"ðŸ’¬ {current_user.get('name')} mentioned you",
                 "body": body[:200],
                 "message": body[:200],
                 "ref_type": "chat_channel",
@@ -330,7 +330,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
                 "created_at": _now_iso(),
             })
 
-    # @channel / @here / @everyone — notify every channel member
+    # @channel / @here / @everyone â€” notify every channel member
     if broadcast:
         member_ids = list(eligible_ids)
         # @here is intentionally narrower than @channel: only technicians
@@ -359,7 +359,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
             await db.notifications.insert_one({
                 "id": uuid.uuid4().hex,
                 "type": "chat_broadcast",
-                "title": f"📢 {current_user.get('name')} pinged #{ch_label}",
+                "title": f"ðŸ“¢ {current_user.get('name')} pinged #{ch_label}",
                 "body": body[:200],
                 "message": body[:200],
                 "ref_type": "chat_channel",
@@ -454,7 +454,7 @@ async def react(msg_id: str, payload: dict = Body(...), current_user: dict = Dep
     return {"reactions": reactions}
 
 
-# ═══════════════════════ SLASH COMMANDS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• SLASH COMMANDS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/chat/slash")
 async def slash(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
@@ -482,8 +482,8 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
                 "updated_at": _now_iso(),
             }})
             await ticket_audit(t["id"], current_user, "assigned", f"Assigned to {u.get('name')} from Team Chat")
-            return await _post_system_msg(channel_id, f"✅ {ticket_no} assigned to {u.get('name')}")
-        return await _post_system_msg(channel_id, f"❌ Couldn't assign — user or ticket not found")
+            return await _post_system_msg(channel_id, f"âœ… {ticket_no} assigned to {u.get('name')}")
+        return await _post_system_msg(channel_id, f"âŒ Couldn't assign â€” user or ticket not found")
 
     if cmd == "ticket" and len(args) >= 3:
         # /ticket TKT-001 status closed     |   /ticket TKT-001 priority high
@@ -495,53 +495,53 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             "priority": {"low", "medium", "high", "critical"},
         }
         if field not in valid:
-            return await _post_system_msg(channel_id, f"❌ Unknown field '{field}'. Use: status | priority")
+            return await _post_system_msg(channel_id, f"âŒ Unknown field '{field}'. Use: status | priority")
         if value not in valid[field]:
-            return await _post_system_msg(channel_id, f"❌ Invalid {field} '{value}'. Allowed: {', '.join(sorted(valid[field]))}")
+            return await _post_system_msg(channel_id, f"âŒ Invalid {field} '{value}'. Allowed: {', '.join(sorted(valid[field]))}")
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
-            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+            return await _post_system_msg(channel_id, f"âŒ Ticket {ticket_no} not found")
         await db.tickets.update_one({"id": t["id"]}, {"$set": {field: value, "updated_at": _now_iso()}})
         await ticket_audit(t["id"], current_user, "updated", f"{field.replace('_', ' ')} changed to {value} from Team Chat")
-        emoji = {"closed": "🔒", "resolved": "✅", "in_progress": "🟡", "on_hold": "⏸️", "open": "🔓", "pending": "⏳",
-                 "critical": "🚨", "high": "🔥", "medium": "🟦", "low": "🟢"}.get(value, "🔧")
-        return await _post_system_msg(channel_id, f"{emoji} {ticket_no} — {field} → **{value}** by {current_user.get('name')}")
+        emoji = {"closed": "ðŸ”’", "resolved": "âœ…", "in_progress": "ðŸŸ¡", "on_hold": "â¸ï¸", "open": "ðŸ”“", "pending": "â³",
+                 "critical": "ðŸš¨", "high": "ðŸ”¥", "medium": "ðŸŸ¦", "low": "ðŸŸ¢"}.get(value, "ðŸ”§")
+        return await _post_system_msg(channel_id, f"{emoji} {ticket_no} â€” {field} â†’ **{value}** by {current_user.get('name')}")
 
     if cmd == "close" and args:
         ticket_no = args[0]
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
-            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+            return await _post_system_msg(channel_id, f"âŒ Ticket {ticket_no} not found")
         await db.tickets.update_one({"id": t["id"]}, {"$set": {"status": "closed", "updated_at": _now_iso()}})
         await ticket_audit(t["id"], current_user, "updated", "Status changed to closed from Team Chat")
-        return await _post_system_msg(channel_id, f"🔒 {ticket_no} closed by {current_user.get('name')}")
+        return await _post_system_msg(channel_id, f"ðŸ”’ {ticket_no} closed by {current_user.get('name')}")
 
     if cmd == "sla" and args:
         ticket_no = args[0]
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
-            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+            return await _post_system_msg(channel_id, f"âŒ Ticket {ticket_no} not found")
         from datetime import datetime, timezone as _tz
         def _fmt_left(due_iso):
             if not due_iso:
-                return "—"
+                return "â€”"
             try:
                 due = datetime.fromisoformat(due_iso.replace("Z", "+00:00"))
             except Exception:
-                return "—"
+                return "â€”"
             mins = int((due - datetime.now(_tz.utc)).total_seconds() / 60)
             if mins <= 0:
-                return f"⛔ breached by {abs(mins)}m"
+                return f"â›” breached by {abs(mins)}m"
             if mins < 60:
-                return f"⏱️ {mins}m left"
-            return f"⏱️ {mins // 60}h {mins % 60}m left"
+                return f"â±ï¸ {mins}m left"
+            return f"â±ï¸ {mins // 60}h {mins % 60}m left"
         resp = _fmt_left(t.get("sla_response_due"))
         res = _fmt_left(t.get("sla_resolution_due"))
         body = (
-            f"📊 **SLA — {ticket_no}** ({t.get('priority', 'medium')})\n"
-            f"• Response: {resp}\n"
-            f"• Resolution: {res}\n"
-            f"• Status: {t.get('status', 'open')}"
+            f"ðŸ“Š **SLA â€” {ticket_no}** ({t.get('priority', 'medium')})\n"
+            f"â€¢ Response: {resp}\n"
+            f"â€¢ Resolution: {res}\n"
+            f"â€¢ Status: {t.get('status', 'open')}"
         )
         return await _post_system_msg(channel_id, body)
 
@@ -551,7 +551,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         note_body = " ".join(args[1:])
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
-            return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+            return await _post_system_msg(channel_id, f"âŒ Ticket {ticket_no} not found")
         await db.ticket_notes.insert_one({
             "id": uuid.uuid4().hex,
             "ticket_id": t["id"],
@@ -562,7 +562,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             "created_at": _now_iso(),
         })
         await ticket_audit(t["id"], current_user, "internal_note_added", "Added internal note from Team Chat")
-        return await _post_system_msg(channel_id, f"📝 Note added to {ticket_no} by {current_user.get('name')}: _{note_body[:80]}{'…' if len(note_body) > 80 else ''}_")
+        return await _post_system_msg(channel_id, f"ðŸ“ Note added to {ticket_no} by {current_user.get('name')}: _{note_body[:80]}{'â€¦' if len(note_body) > 80 else ''}_")
 
     if cmd == "summarize":
         # AI summary of recent channel messages
@@ -570,42 +570,42 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         if not msgs:
             return await _post_system_msg(channel_id, "Nothing to summarize.")
         msgs.reverse()
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             return await _post_system_msg(channel_id, "AI not configured.")
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         chat = LlmChat(api_key=api_key, session_id=f"slash-{uuid.uuid4().hex[:8]}",
                        system_message="You are a chat assistant. Summarize the conversation into 3-5 concise bullet points. Plain text. No preamble.").with_model(MODEL_PROVIDER, MODEL_NAME)
         text = "\n".join([f"{m.get('user_name')}: {m.get('body')}" for m in msgs])
         summary = await chat.send_message(UserMessage(text=text))
-        return await _post_system_msg(channel_id, f"📝 *Thread summary:*\n{summary}")
+        return await _post_system_msg(channel_id, f"ðŸ“ *Thread summary:*\n{summary}")
 
     if cmd == "page" and args:
         sev = args[0].lower()
         await db.notifications.insert_one({
             "id": uuid.uuid4().hex,
             "type": "chat_page",
-            "title": f"📟 PAGE ({sev.upper()})",
+            "title": f"ðŸ“Ÿ PAGE ({sev.upper()})",
             "body": f"{current_user.get('name')} paged the team in chat",
             "ref_type": "chat_channel",
             "ref_id": channel_id,
             "read": False,
             "created_at": _now_iso(),
         })
-        return await _post_system_msg(channel_id, f"📟 Team paged: {sev}")
+        return await _post_system_msg(channel_id, f"ðŸ“Ÿ Team paged: {sev}")
 
     if cmd == "help":
         return await _post_system_msg(channel_id, (
-            "🛠️ **Slash commands**\n"
-            "• `/ticket TKT-### status <open|in_progress|on_hold|resolved|closed>` — change status\n"
-            "• `/ticket TKT-### priority <low|medium|high|critical>` — change priority\n"
-            "• `/close TKT-###` — quick close\n"
-            "• `/assign @user TKT-###` — assign ticket\n"
-            "• `/sla TKT-###` — show SLA timers\n"
-            "• `/note TKT-### <body>` — add internal note\n"
-            "• `/summarize` — AI summary of last 40 messages\n"
-            "• `/page <severity>` — page the team\n"
-            "• `/help` — this list"
+            "ðŸ› ï¸ **Slash commands**\n"
+            "â€¢ `/ticket TKT-### status <open|in_progress|on_hold|resolved|closed>` â€” change status\n"
+            "â€¢ `/ticket TKT-### priority <low|medium|high|critical>` â€” change priority\n"
+            "â€¢ `/close TKT-###` â€” quick close\n"
+            "â€¢ `/assign @user TKT-###` â€” assign ticket\n"
+            "â€¢ `/sla TKT-###` â€” show SLA timers\n"
+            "â€¢ `/note TKT-### <body>` â€” add internal note\n"
+            "â€¢ `/summarize` â€” AI summary of last 40 messages\n"
+            "â€¢ `/page <severity>` â€” page the team\n"
+            "â€¢ `/help` â€” this list"
         ))
 
     return await _post_system_msg(channel_id, f"Unknown command: /{cmd}. Try /help.")

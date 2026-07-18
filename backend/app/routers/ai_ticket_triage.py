@@ -14,11 +14,11 @@ async def ai_triage_ticket(ticket_id: str, current_user: dict = Depends(get_curr
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=500, detail="LLM API key not configured")
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from app.services.ai_provider import LlmChat, UserMessage
 
     # Get technicians for assignment suggestion
     techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1, "specialties": 1}).to_list(50)
@@ -125,7 +125,7 @@ async def get_triage_stats(current_user: dict = Depends(get_current_user)):
     return {"total_triages": total}
 
 
-# ── Keyword-based triage (fast, no AI needed) ──
+# â”€â”€ Keyword-based triage (fast, no AI needed) â”€â”€
 
 def _keyword_triage(title, description):
     """Rule-based triage fallback when AI is not needed or unavailable."""

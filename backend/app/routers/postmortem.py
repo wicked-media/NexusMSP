@@ -22,8 +22,8 @@ Return ONLY valid JSON:
 {"title":"Incident Post-Mortem: ...", "summary":"1-2 sentence summary", "timeline":["HH:MM - Event 1","HH:MM - Event 2"], "root_cause":"Root cause analysis", "impact":"Impact assessment", "resolution":"How it was resolved", "prevention":["Action 1","Action 2"], "severity":"critical|high|medium|low", "duration_estimate":"Xh Ym"}"""
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        from app.services.ai_provider import LlmChat, UserMessage
+        api_key = os.environ.get("OPENAI_API_KEY")
         chat = LlmChat(api_key=api_key, session_id=f"pm-{uuid.uuid4().hex[:6]}", system_message=system)
         chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
         prompt = f"Incident: {ticket.get('title','')}\nPriority: {ticket.get('priority','')}\nClient: {ticket.get('client_name','')}\nCreated: {ticket.get('created_at','')}\nResolved: {ticket.get('resolved_at','')}\nDescription: {ticket.get('description','')}\nNotes:\n{notes_text}"

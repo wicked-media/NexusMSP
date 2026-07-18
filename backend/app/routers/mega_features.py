@@ -1,4 +1,4 @@
-"""Mega feature bundle — 21 unique differentiators.
+"""Mega feature bundle â€” 21 unique differentiators.
 
 Tickets:        doppelganger, time-machine, apology-draft, cognitive-load
 Clients:        dna-profile, ltv-forecast, anniversary-draft
@@ -30,10 +30,10 @@ MODEL_NAME = "claude-sonnet-4-5-20250929"
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "mega") -> str:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(503, "AI not configured")
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from app.services.ai_provider import LlmChat, UserMessage
     chat = LlmChat(
         api_key=api_key,
         session_id=f"{session_prefix}-{uuid.uuid4().hex[:8]}",
@@ -69,7 +69,7 @@ def _parse_iso(s) -> Optional[datetime]:
         return None
 
 
-# ═══════════════════════ 1. TICKET DOPPELGÄNGER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 1. TICKET DOPPELGÃ„NGER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/tickets/{ticket_id}/doppelganger")
 async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -140,7 +140,7 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
     }
 
 
-# ═══════════════════════ 2. TICKET TIME MACHINE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 2. TICKET TIME MACHINE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/tickets/{ticket_id}/timeline")
 async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -175,7 +175,7 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
             "ts": a.get("created_at") or a.get("timestamp"),
             "type": "status_change" if a.get("field") == "status" else "audit",
             "icon": "shuffle",
-            "label": f"{a.get('field','field')}: {a.get('old_value','—')} → {a.get('new_value','—')}",
+            "label": f"{a.get('field','field')}: {a.get('old_value','â€”')} â†’ {a.get('new_value','â€”')}",
             "actor": a.get("user_name") or a.get("changed_by") or "system",
         })
 
@@ -184,7 +184,7 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
             "ts": te.get("started_at") or te.get("created_at"),
             "type": "time_entry",
             "icon": "clock",
-            "label": f"Logged {te.get('duration_minutes', 0)} min — {te.get('description','')[:120]}",
+            "label": f"Logged {te.get('duration_minutes', 0)} min â€” {te.get('description','')[:120]}",
             "actor": te.get("tech_name") or te.get("user_name") or "?",
         })
 
@@ -227,7 +227,7 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
     }
 
 
-# ═══════════════════════ 3. AUTO-APOLOGY COMPOSER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 3. AUTO-APOLOGY COMPOSER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/tickets/{ticket_id}/apology-draft")
 async def apology_draft(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
@@ -254,7 +254,7 @@ async def apology_draft(ticket_id: str, payload: dict = Body(default={}), curren
         "Return STRICT JSON ONLY: {subject: string, body: string (3-4 short paragraphs), makegood: string, tone: 'warm'|'urgent'}"
     )
     user_msg = (
-        f"Ticket #{t.get('ticket_number','')} — {t.get('title','')}\n"
+        f"Ticket #{t.get('ticket_number','')} â€” {t.get('title','')}\n"
         f"Client: {t.get('client_name','')}\n"
         f"Priority: {t.get('priority')} | Reason for apology: {reason}\n"
         f"Severity: {severity} | SLA breached: {breached}\n"
@@ -273,7 +273,7 @@ async def apology_draft(ticket_id: str, payload: dict = Body(default={}), curren
     }
 
 
-# ═══════════════════════ 4. TECH COGNITIVE LOAD SCORE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 4. TECH COGNITIVE LOAD SCORE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/cognitive-load")
 async def cognitive_load(current_user: dict = Depends(get_current_user)):
@@ -324,7 +324,7 @@ async def cognitive_load(current_user: dict = Depends(get_current_user)):
     return {"team": rows, "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 5. CLIENT DNA PROFILE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 5. CLIENT DNA PROFILE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/dna")
 async def client_dna(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -398,7 +398,7 @@ def _dna_tags(crit_pct: int, avg_pay: Optional[float], tix: int) -> list:
     return tags or ["standard"]
 
 
-# ═══════════════════════ 6. CLIENT LTV FORECAST ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 6. CLIENT LTV FORECAST â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/ltv-forecast")
 async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -437,7 +437,7 @@ async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_
     }
 
 
-# ═══════════════════════ 7. CLIENT ANNIVERSARY DRAFT ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 7. CLIENT ANNIVERSARY DRAFT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/anniversary-draft")
 async def anniversary_draft(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -484,7 +484,7 @@ async def anniversary_draft(client_id: str, current_user: dict = Depends(get_cur
     }
 
 
-# ═══════════════════════ 8. PRE-BILLING AUDITOR ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 8. PRE-BILLING AUDITOR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/invoices/{invoice_id}/audit")
 async def prebilling_audit(invoice_id: str, current_user: dict = Depends(get_current_user)):
@@ -556,7 +556,7 @@ async def prebilling_audit(invoice_id: str, current_user: dict = Depends(get_cur
     }
 
 
-# ═══════════════════════ 9. SMART REMINDER CADENCE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 9. SMART REMINDER CADENCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/invoices/{invoice_id}/reminder-strategy")
 async def reminder_strategy(invoice_id: str, current_user: dict = Depends(get_current_user)):
@@ -621,7 +621,7 @@ async def reminder_strategy(invoice_id: str, current_user: dict = Depends(get_cu
     }
 
 
-# ═══════════════════════ 10. AGED AR HEATMAP ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 10. AGED AR HEATMAP â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/aged-ar-heatmap")
 async def aged_ar_heatmap(current_user: dict = Depends(get_current_user)):
@@ -669,7 +669,7 @@ async def aged_ar_heatmap(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 11. ESTIMATE WIN PROBABILITY ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 11. ESTIMATE WIN PROBABILITY â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/estimates/{estimate_id}/win-probability")
 async def win_probability(estimate_id: str, current_user: dict = Depends(get_current_user)):
@@ -703,22 +703,22 @@ async def win_probability(estimate_id: str, current_user: dict = Depends(get_cur
     elif base_rate <= 0.3:
         drivers.append(f"Client only approves {int(base_rate * 100)}% of estimates")
     if age_days > 14:
-        drivers.append(f"Estimate is {age_days} days old — momentum fading")
+        drivers.append(f"Estimate is {age_days} days old â€” momentum fading")
     if avg_approved > 0 and this_total > avg_approved * 1.5:
-        drivers.append(f"Total ${this_total:,.0f} is {round(this_total/avg_approved,1)}× client's avg approved size")
+        drivers.append(f"Total ${this_total:,.0f} is {round(this_total/avg_approved,1)}Ã— client's avg approved size")
 
     return {
         "estimate_id": estimate_id,
         "estimate_number": e.get("estimate_number"),
         "win_probability": score,
         "tier": "hot" if score >= 70 else "warm" if score >= 40 else "cold",
-        "drivers": drivers or ["Insufficient history — using neutral baseline"],
+        "drivers": drivers or ["Insufficient history â€” using neutral baseline"],
         "history": {"approved": approved, "declined": declined, "avg_approved_total": round(avg_approved, 2)},
         "generated_at": _now().isoformat(),
     }
 
 
-# ═══════════════════════ 12. ESTIMATE COMPETITIVE PRICING FLAGS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 12. ESTIMATE COMPETITIVE PRICING FLAGS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/estimates/{estimate_id}/pricing-flags")
 async def pricing_flags(estimate_id: str, current_user: dict = Depends(get_current_user)):
@@ -756,7 +756,7 @@ async def pricing_flags(estimate_id: str, current_user: dict = Depends(get_curre
     }
 
 
-# ═══════════════════════ 13. DEVICE HEALTH TRAJECTORY ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 13. DEVICE HEALTH TRAJECTORY â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/device-health-trajectory")
 async def health_trajectory(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
@@ -827,7 +827,7 @@ async def health_trajectory(client_id: Optional[str] = None, current_user: dict 
     }
 
 
-# ═══════════════════════ 14. PATCH ANOMALY DETECTOR ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 14. PATCH ANOMALY DETECTOR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/patches/anomalies")
 async def patch_anomalies(current_user: dict = Depends(get_current_user)):
@@ -872,7 +872,7 @@ async def patch_anomalies(current_user: dict = Depends(get_current_user)):
     return {"anomalies": anomalies, "scan_window_days": 60, "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 15. BATTERY HEALTH WALL ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 15. BATTERY HEALTH WALL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/device-battery-wall")
 async def battery_wall(current_user: dict = Depends(get_current_user)):
@@ -917,7 +917,7 @@ async def battery_wall(current_user: dict = Depends(get_current_user)):
     return {"devices": rows[:20], "checked": len(devices), "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 16. RESTORE DRILL SCHEDULER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 16. RESTORE DRILL SCHEDULER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/backup/drills")
 async def schedule_restore_drill(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
@@ -965,7 +965,7 @@ async def complete_drill(drill_id: str, payload: dict = Body(...), current_user:
     return await db.backup_drills.find_one({"id": drill_id}, {"_id": 0})
 
 
-# ═══════════════════════ 17. CYBER INSURANCE VAULT ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 17. CYBER INSURANCE VAULT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/security/insurance-vault")
 async def insurance_vault(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
@@ -1011,7 +1011,7 @@ async def insurance_vault(client_id: Optional[str] = None, current_user: dict = 
     }
 
 
-# ═══════════════════════ 18. SKILLS XP BANK ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 18. SKILLS XP BANK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/xp")
 async def skills_xp(current_user: dict = Depends(get_current_user)):
@@ -1051,7 +1051,7 @@ async def skills_xp(current_user: dict = Depends(get_current_user)):
     return {"team": rows, "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 19. 1:1 AUTO-AGENDA ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 19. 1:1 AUTO-AGENDA â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/1on1-agenda")
 async def one_on_one_agenda(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -1078,10 +1078,10 @@ async def one_on_one_agenda(tech_id: str, current_user: dict = Depends(get_curre
     system = (
         "You are a thoughtful team lead writing a 1:1 agenda for a tech. Output 4 sections in clear plain text "
         "(NOT markdown): 'Wins from last fortnight', 'Open challenges', 'Suggested questions to ask', 'Career growth nudge'. "
-        "Be specific — quote ticket numbers where useful. Output plain text only, no preamble."
+        "Be specific â€” quote ticket numbers where useful. Output plain text only, no preamble."
     )
-    closed_preview = "\n".join([f"  {c.get('ticket_number')} {c.get('priority')}: {c.get('title','')[:80]} — {c.get('client_name','')}" for c in closed[:10]])
-    open_preview = "\n".join([f"  {c.get('ticket_number')} {c.get('priority')}: {c.get('title','')[:80]} — {c.get('client_name','')}" for c in open_tx[:10]])
+    closed_preview = "\n".join([f"  {c.get('ticket_number')} {c.get('priority')}: {c.get('title','')[:80]} â€” {c.get('client_name','')}" for c in closed[:10]])
+    open_preview = "\n".join([f"  {c.get('ticket_number')} {c.get('priority')}: {c.get('title','')[:80]} â€” {c.get('client_name','')}" for c in open_tx[:10]])
     user_msg = (
         f"Tech: {tech.get('name')}\n"
         f"Closed last 14 days ({len(closed)}):\n{closed_preview or '  (none)'}\n\n"
@@ -1098,7 +1098,7 @@ async def one_on_one_agenda(tech_id: str, current_user: dict = Depends(get_curre
     }
 
 
-# ═══════════════════════ 20. MSP VOICE BRIEF (text) ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 20. MSP VOICE BRIEF (text) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/voice/morning-brief")
 async def morning_brief(current_user: dict = Depends(get_current_user)):
@@ -1130,7 +1130,7 @@ async def morning_brief(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 21. RUN-BOOK PUBLISH FROM TICKET ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 21. RUN-BOOK PUBLISH FROM TICKET â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/runbooks/from-ticket/{ticket_id}")
 async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
@@ -1159,7 +1159,7 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
         "tags: [string] (max 6), category: string}"
     )
     user_msg = (
-        f"Ticket #{t.get('ticket_number')} — {t.get('title','')}\n"
+        f"Ticket #{t.get('ticket_number')} â€” {t.get('title','')}\n"
         f"Resolution: {t.get('resolution_notes','')[:600]}\n\n"
         f"Conversation history:\n{convo or '(no notes)'}\n"
     )
@@ -1287,17 +1287,17 @@ async def list_runbooks(q: Optional[str] = None, current_user: dict = Depends(ge
     return rows
 
 
-# ═══════════════════════ 22. PATCH ANOMALY BROADCAST ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 22. PATCH ANOMALY BROADCAST â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _slack_block_for_patch(a: dict) -> dict:
     kb = a.get("patch_id")
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f"🚨 Patch alert: DO NOT DEPLOY {kb}"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"ðŸš¨ Patch alert: DO NOT DEPLOY {kb}"}},
             {"type": "section", "text": {"type": "mrkdwn",
                 "text": f"*{kb}* has caused issues at *{a.get('affected_clients')} clients* ({a.get('tickets_seen')} tickets).\n"
                          f"Severity: `{a.get('severity')}`\n"
-                         f"Sample: _{(a.get('title_samples') or ['—'])[0]}_"}},
+                         f"Sample: _{(a.get('title_samples') or ['â€”'])[0]}_"}},
             {"type": "context", "elements": [{"type": "mrkdwn", "text": "Sent by NexusOps Patch Anomaly Detector"}]},
         ]
     }
@@ -1310,12 +1310,12 @@ def _teams_card_for_patch(a: dict) -> dict:
         "@context": "https://schema.org/extensions",
         "themeColor": "E11D48" if a.get("severity") == "critical" else "F59E0B",
         "summary": f"Patch alert {kb}",
-        "title": f"🚨 DO NOT DEPLOY {kb}",
+        "title": f"ðŸš¨ DO NOT DEPLOY {kb}",
         "sections": [{
-            "activityTitle": f"Affecting {a.get('affected_clients')} clients · {a.get('tickets_seen')} tickets",
+            "activityTitle": f"Affecting {a.get('affected_clients')} clients Â· {a.get('tickets_seen')} tickets",
             "facts": [
                 {"name": "Severity", "value": a.get("severity") or "warning"},
-                {"name": "Sample issue", "value": (a.get("title_samples") or ["—"])[0]},
+                {"name": "Sample issue", "value": (a.get("title_samples") or ["â€”"])[0]},
             ],
             "markdown": True,
         }],
@@ -1398,7 +1398,7 @@ async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_use
         await db.notifications.insert_one({
             "id": uuid.uuid4().hex,
             "type": "patch_anomaly",
-            "title": f"🚨 DO NOT DEPLOY {a['patch_id']}",
+            "title": f"ðŸš¨ DO NOT DEPLOY {a['patch_id']}",
             "body": f"{a['affected_clients']} clients affected, {a['tickets_seen']} tickets. Severity: {a['severity']}.",
             "ref_type": "patch",
             "ref_id": a["patch_id"],
@@ -1415,7 +1415,7 @@ async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_use
     }
 
 
-# ═══════════════════════ 23. CYBER INSURANCE VAULT PDF ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 23. CYBER INSURANCE VAULT PDF â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _safe_pdf_text(s) -> str:
     if s is None:

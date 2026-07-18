@@ -1,4 +1,4 @@
-"""Device Smart Engine — AI Diagnose, Live Metrics Drawer, Screenshot to Ticket,
+"""Device Smart Engine â€” AI Diagnose, Live Metrics Drawer, Screenshot to Ticket,
 Health Score, and Fleet-wide AI insights.
 """
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,8 +39,8 @@ def _parse_date(s):
 
 
 async def _ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
@@ -49,9 +49,9 @@ async def _ai_chat(session_id: str, system_msg: str):
     return chat
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   1) AI DIAGNOSE — analyze telemetry + recent events + services   ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   1) AI DIAGNOSE â€” analyze telemetry + recent events + services   â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/devices/{device_id}/ai-diagnose")
 async def ai_diagnose(device_id: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
@@ -99,7 +99,7 @@ async def ai_diagnose(device_id: str, data: dict | None = None, current_user: di
     diagnosis = ""
     actions = []
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         sys = (
             "You are a senior MSP technician. Given device telemetry + events + services + patches, "
             "write a CONCISE diagnostic (3-5 bullet points) describing what's wrong (or healthy) and a "
@@ -115,7 +115,7 @@ async def ai_diagnose(device_id: str, data: dict | None = None, current_user: di
         parsed = json.loads(text)
         diagnosis = parsed.get("diagnosis", "")
         if isinstance(diagnosis, list):
-            diagnosis = "\n".join(f"• {x}" for x in diagnosis)
+            diagnosis = "\n".join(f"â€¢ {x}" for x in diagnosis)
         severity = parsed.get("severity", "medium")
         actions = parsed.get("actions", [])[:6]
         if isinstance(actions, str):
@@ -165,9 +165,9 @@ async def ai_diagnose(device_id: str, data: dict | None = None, current_user: di
         tk = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "ticket_number": 1, "comments": 1})
         if tk:
             body = (
-                f"🤖 AI Device Diagnose — {device.get('name')}  ({severity.upper()})\n"
+                f"ðŸ¤– AI Device Diagnose â€” {device.get('name')}  ({severity.upper()})\n"
                 f"{diagnosis}\n\n"
-                + ("Recommended actions:\n" + "\n".join(f"• {a}" for a in actions) if actions else "")
+                + ("Recommended actions:\n" + "\n".join(f"â€¢ {a}" for a in actions) if actions else "")
             )
             comment = {
                 "id": str(uuid.uuid4()),
@@ -186,9 +186,9 @@ async def ai_diagnose(device_id: str, data: dict | None = None, current_user: di
     return result
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   2) LIVE METRICS — last N minutes time-series for the drawer     ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   2) LIVE METRICS â€” last N minutes time-series for the drawer     â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/devices/{device_id}/live-metrics")
 async def live_metrics(device_id: str, minutes: int = 30, current_user: dict = Depends(get_current_user)):
@@ -231,9 +231,9 @@ async def live_metrics(device_id: str, minutes: int = 30, current_user: dict = D
     }
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   3) SCREENSHOT TO TICKET — capture user screen, attach to ticket║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   3) SCREENSHOT TO TICKET â€” capture user screen, attach to ticketâ•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/devices/{device_id}/screenshot-to-ticket")
 async def screenshot_to_ticket(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -268,7 +268,7 @@ async def screenshot_to_ticket(device_id: str, data: dict, current_user: dict = 
             logger.warning(f"TRMM screenshot failed: {e}")
 
     # Persist a marker comment + (if we have data) attachment record
-    comment_text = f"📸 Screenshot requested on {device.get('name')} — " + ("captured." if image_url else "pending agent response.")
+    comment_text = f"ðŸ“¸ Screenshot requested on {device.get('name')} â€” " + ("captured." if image_url else "pending agent response.")
     comment = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
@@ -287,9 +287,9 @@ async def screenshot_to_ticket(device_id: str, data: dict, current_user: dict = 
     return {"success": True, "image_url": image_url, "comment_id": comment["id"], "pending": image_url is None}
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   4) FLEET HEALTH SCORE                                           ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   4) FLEET HEALTH SCORE                                           â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/devices/fleet-health")
 async def fleet_health(current_user: dict = Depends(get_current_user)):
@@ -333,7 +333,7 @@ async def fleet_health(current_user: dict = Depends(get_current_user)):
 
 @router.get("/devices/fleet-insights")
 async def fleet_insights(current_user: dict = Depends(get_current_user)):
-    """AI commentary on the fleet — what to fix this week."""
+    """AI commentary on the fleet â€” what to fix this week."""
     health = await fleet_health(current_user)
     devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
     top_risky = sorted(devices, key=lambda d: ((d.get("disk_usage") or 0) + (d.get("cpu_usage") or 0) + (d.get("memory_usage") or 0)) / 3, reverse=True)[:5]
@@ -341,7 +341,7 @@ async def fleet_insights(current_user: dict = Depends(get_current_user)):
 
     summary = ""
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         sys = "You're a fleet operations analyst. Write 3-4 concise bullets prioritised by impact."
         prompt = json.dumps({"health": health, "top_5_risky": risky})
         chat = await _ai_chat(f"fleet-{uuid.uuid4().hex[:6]}", sys)
@@ -351,22 +351,22 @@ async def fleet_insights(current_user: dict = Depends(get_current_user)):
         logger.warning(f"fleet insights AI failed: {e}")
         bullets = []
         if health["counts"]["low_disk"] > 0:
-            bullets.append(f"- {health['counts']['low_disk']} devices have <10% free disk — clear temp + reboot.")
+            bullets.append(f"- {health['counts']['low_disk']} devices have <10% free disk â€” clear temp + reboot.")
         if health["counts"]["offline"] > 0:
-            bullets.append(f"- {health['counts']['offline']} devices offline — contact site or schedule physical check.")
+            bullets.append(f"- {health['counts']['offline']} devices offline â€” contact site or schedule physical check.")
         if health["counts"]["stale"] > 0:
-            bullets.append(f"- {health['counts']['stale']} agents stale (>7d since check-in) — reinstall agent.")
+            bullets.append(f"- {health['counts']['stale']} agents stale (>7d since check-in) â€” reinstall agent.")
         if health["counts"]["high_cpu"]:
-            bullets.append(f"- {health['counts']['high_cpu']} devices running >85% CPU — investigate runaway processes.")
+            bullets.append(f"- {health['counts']['high_cpu']} devices running >85% CPU â€” investigate runaway processes.")
         if not bullets:
             bullets.append("- Fleet looks healthy. Plan next maintenance window for patches.")
         summary = "\n".join(bullets)
     return {**health, "ai_summary": summary, "top_5_risky": risky}
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   5) FAN-OUT AI DIAGNOSE — across many devices                   ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   5) FAN-OUT AI DIAGNOSE â€” across many devices                   â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/devices/bulk-diagnose")
 async def bulk_diagnose(data: dict, current_user: dict = Depends(get_current_user)):

@@ -357,7 +357,7 @@ async def create_invoice_payment(invoice_id: str, request_data: dict, current_us
     if not stripe_key:
         raise HTTPException(status_code=500, detail="Stripe not configured. Go to Settings to add your Stripe API key.")
 
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
     origin_url = request_data.get("origin_url", "")
     webhook_url = f"{origin_url}/api/webhook/stripe"
     stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
@@ -400,7 +400,7 @@ async def check_payment_status(invoice_id: str, session_id: str, current_user: d
     if not stripe_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    from app.services.stripe_checkout import StripeCheckout
     stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
     status = await stripe_checkout.get_checkout_status(session_id)
 

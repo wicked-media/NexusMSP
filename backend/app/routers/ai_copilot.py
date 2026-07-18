@@ -7,8 +7,8 @@ from app.auth import get_current_user
 router = APIRouter()
 
 async def _get_ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
@@ -66,10 +66,10 @@ You can help with:
 Always be concise and actionable. Use the data provided above."""
 
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         chat = await _get_ai_chat(f"copilot-{session_id}", system)
         if not chat:
-            return {"reply": "AI not configured. Please set EMERGENT_LLM_KEY.", "session_id": session_id}
+            return {"reply": "AI not configured. Please set OPENAI_API_KEY.", "session_id": session_id}
         resp = await chat.send_message(UserMessage(text=message))
         reply = resp.strip() if isinstance(resp, str) else str(resp)
     except Exception as e:

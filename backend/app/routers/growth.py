@@ -4,15 +4,15 @@ Walks every client's environment to surface concrete upsell/refresh opportunitie
 with estimated $ value, ranked by priority and confidence.
 
 Detectors (v1):
-  1. EOL Windows devices        → hardware refresh
-  2. Missing/weak M365 hygiene   → managed MFA / MDR upsell
-  3. Security posture gap        → EDR upsell
-  4. Backup reliability gap      → managed backup upsell
-  5. Expiring contracts          → renewal / upgrade
-  6. Contract over-utilisation   → hour-pack upsell
+  1. EOL Windows devices        Ã¢â€ â€™ hardware refresh
+  2. Missing/weak M365 hygiene   Ã¢â€ â€™ managed MFA / MDR upsell
+  3. Security posture gap        Ã¢â€ â€™ EDR upsell
+  4. Backup reliability gap      Ã¢â€ â€™ managed backup upsell
+  5. Expiring contracts          Ã¢â€ â€™ renewal / upgrade
+  6. Contract over-utilisation   Ã¢â€ â€™ hour-pack upsell
 
 Opportunities are stored in db.growth_opportunities with status lifecycle:
-  new → quoted → won | lost | dismissed
+  new Ã¢â€ â€™ quoted Ã¢â€ â€™ won | lost | dismissed
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
@@ -24,7 +24,7 @@ from app.auth import get_current_user
 router = APIRouter()
 
 
-# ─────────────────────────── Price book (configurable) ───────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Price book (configurable) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 # These are defaults; in the future could be stored in db.settings.type='growth_pricebook'.
 PRICE = {
     "hardware_refresh": 2000,      # per device
@@ -35,18 +35,18 @@ PRICE = {
 }
 
 EOL_OS_PATTERNS = [
-    ("Windows 7", "Windows 7 · EOL Jan 2020"),
-    ("Windows 8", "Windows 8/8.1 · EOL Jan 2023"),
-    ("Windows 10", "Windows 10 · EOL Oct 2025"),
-    ("Server 2012", "Server 2012/R2 · EOL Oct 2023"),
-    ("Server 2008", "Server 2008/R2 · EOL Jan 2020"),
+    ("Windows 7", "Windows 7 Ã‚Â· EOL Jan 2020"),
+    ("Windows 8", "Windows 8/8.1 Ã‚Â· EOL Jan 2023"),
+    ("Windows 10", "Windows 10 Ã‚Â· EOL Oct 2025"),
+    ("Server 2012", "Server 2012/R2 Ã‚Â· EOL Oct 2023"),
+    ("Server 2008", "Server 2008/R2 Ã‚Â· EOL Jan 2020"),
 ]
 
 
 def _priority(monthly_value: float, one_time_value: float, confidence: float) -> int:
     """Score 0-100. Higher monthly values with high confidence score highest."""
     annual = (monthly_value * 12) + one_time_value
-    base = min(100, int(annual / 500))  # $50k annual → 100
+    base = min(100, int(annual / 500))  # $50k annual Ã¢â€ â€™ 100
     return min(100, int(base * confidence))
 
 
@@ -87,7 +87,7 @@ def _detect(snapshot: dict) -> list:
     cname = c.get("name", "Unknown")
     out = []
 
-    # 1. EOL Windows devices → hardware refresh
+    # 1. EOL Windows devices Ã¢â€ â€™ hardware refresh
     eol_matches = []
     for dev in snapshot["devices"]:
         os_name = (dev.get("os") or dev.get("operating_system") or "")
@@ -100,10 +100,10 @@ def _detect(snapshot: dict) -> list:
         one_time = len(eol_matches) * PRICE["hardware_refresh"]
         out.append({
             "type": "hardware_refresh",
-            "title": f"Hardware refresh · {len(eol_matches)} EOL device(s)",
+            "title": f"Hardware refresh Ã‚Â· {len(eol_matches)} EOL device(s)",
             "category": "Hardware",
             "severity": "high" if len(eol_matches) >= 5 else "medium",
-            "summary": f"{len(eol_matches)} endpoints running unsupported Windows versions — refresh opportunity ~${one_time:,}.",
+            "summary": f"{len(eol_matches)} endpoints running unsupported Windows versions Ã¢â‚¬â€ refresh opportunity ~${one_time:,}.",
             "evidence": eol_matches[:20],
             "monthly_value": monthly,
             "one_time_value": one_time,
@@ -111,7 +111,7 @@ def _detect(snapshot: dict) -> list:
             "suggested_action": "Quote refresh + migration; pair with MDM enrollment for managed lifecycle.",
         })
 
-    # 2. M365 hygiene gap → managed MFA / MDR upsell
+    # 2. M365 hygiene gap Ã¢â€ â€™ managed MFA / MDR upsell
     if snapshot["m365_hygiene"] is not None:
         h = snapshot["m365_hygiene"]
         score = h.get("score", 100)
@@ -121,7 +121,7 @@ def _detect(snapshot: dict) -> list:
             monthly = user_count * PRICE["mdr_per_user"]
             out.append({
                 "type": "managed_mfa_mdr",
-                "title": f"Managed MFA / MDR · M365 hygiene {score}",
+                "title": f"Managed MFA / MDR Ã‚Â· M365 hygiene {score}",
                 "category": "Security",
                 "severity": "high" if score < 50 else "medium",
                 "summary": f"M365 hygiene score {score}/100. {len(h.get('risks', []))} active risks. MDR/MFA upsell ~${monthly:,}/mo for {user_count} users.",
@@ -132,13 +132,13 @@ def _detect(snapshot: dict) -> list:
                 "suggested_action": "Propose Managed MFA tier with breach-attempt monitoring. Lead with the specific risk list.",
             })
 
-    # 3. Security posture gap → EDR upsell (if no existing EDR flag on client)
+    # 3. Security posture gap Ã¢â€ â€™ EDR upsell (if no existing EDR flag on client)
     if snapshot["security_alerts"] >= 3 and not c.get("has_edr"):
         endpoints = len([d for d in snapshot["devices"] if d.get("type") in (None, "workstation", "laptop", "server")]) or 15
         monthly = endpoints * PRICE["edr_per_device"]
         out.append({
             "type": "edr_upsell",
-            "title": f"Managed EDR · {snapshot['security_alerts']} active alerts",
+            "title": f"Managed EDR Ã‚Â· {snapshot['security_alerts']} active alerts",
             "category": "Security",
             "severity": "high" if snapshot["security_alerts"] >= 10 else "medium",
             "summary": f"{snapshot['security_alerts']} unresolved security alerts with no managed EDR. Estimated ${monthly:,}/mo for {endpoints} endpoints.",
@@ -149,7 +149,7 @@ def _detect(snapshot: dict) -> list:
             "suggested_action": "Attach Huntress or CrowdStrike Complete. Lead with dwell-time metrics from recent alerts.",
         })
 
-    # 4. Backup reliability → managed backup upsell
+    # 4. Backup reliability Ã¢â€ â€™ managed backup upsell
     if snapshot["backup_total"] >= 5:
         fail_rate = snapshot["backup_failures"] / snapshot["backup_total"]
         if fail_rate > 0.1:
@@ -157,7 +157,7 @@ def _detect(snapshot: dict) -> list:
             monthly = endpoints_needing * PRICE["managed_backup_per_device"]
             out.append({
                 "type": "managed_backup",
-                "title": f"Managed Backup upgrade · {int(fail_rate*100)}% failure rate",
+                "title": f"Managed Backup upgrade Ã‚Â· {int(fail_rate*100)}% failure rate",
                 "category": "Data Protection",
                 "severity": "high" if fail_rate > 0.25 else "medium",
                 "summary": f"{snapshot['backup_failures']}/{snapshot['backup_total']} jobs failing ({int(fail_rate*100)}%). Immutable backup tier ~${monthly:,}/mo.",
@@ -168,7 +168,7 @@ def _detect(snapshot: dict) -> list:
                 "suggested_action": "Upsell to immutable-backup tier (Veeam/Acronis Cyber Protect). Lead with the exact failure count from the last 30 days.",
             })
 
-    # 5. Expiring contracts → renewal / upgrade
+    # 5. Expiring contracts Ã¢â€ â€™ renewal / upgrade
     now = datetime.now(timezone.utc)
     for contract in snapshot["contracts"]:
         end = contract.get("end_date") or contract.get("renewal_date")
@@ -186,7 +186,7 @@ def _detect(snapshot: dict) -> list:
             uplift = int(mrr * 0.15)  # suggest 15% uplift at renewal
             out.append({
                 "type": "contract_renewal",
-                "title": f"Contract renewal · expires in {days} days",
+                "title": f"Contract renewal Ã‚Â· expires in {days} days",
                 "category": "Contracts",
                 "severity": "high" if days <= 30 else "medium",
                 "summary": f"{contract.get('name') or 'Managed Services Agreement'} ends {end_dt.date()}. Suggested renewal with 15% uplift = ${mrr + uplift:,}/mo (current ${mrr:,}).",
@@ -197,7 +197,7 @@ def _detect(snapshot: dict) -> list:
                 "suggested_action": "Open renewal conversation. Build in scope creep from last 12 months of tickets as justification for uplift.",
             })
 
-    # 6. Contract over-utilisation → hour-pack upsell
+    # 6. Contract over-utilisation Ã¢â€ â€™ hour-pack upsell
     for contract in snapshot["contracts"]:
         hours_contracted = contract.get("monthly_hours") or contract.get("included_hours")
         hours_used = contract.get("hours_used_last_month")
@@ -206,7 +206,7 @@ def _detect(snapshot: dict) -> list:
             monthly = int(extra * PRICE["hour_pack_monthly"])
             out.append({
                 "type": "hour_pack_upsell",
-                "title": f"Hour pack upsell · {extra:.1f}h/mo over cap",
+                "title": f"Hour pack upsell Ã‚Â· {extra:.1f}h/mo over cap",
                 "category": "Contracts",
                 "severity": "medium",
                 "summary": f"{contract.get('name')} ran {hours_used}h vs {hours_contracted}h contracted. Bill-by-hour or upsell hour pack = ~${monthly:,}/mo.",
@@ -233,7 +233,7 @@ def _detect(snapshot: dict) -> list:
 
 @router.post("/growth/scan")
 async def scan(data: dict = None, current_user: dict = Depends(get_current_user)):
-    """Run the scanner. Body: {client_id?: str} — if omitted, scans all clients.
+    """Run the scanner. Body: {client_id?: str} Ã¢â‚¬â€ if omitted, scans all clients.
 
     Strategy: delete existing opportunities with status='new' for the target(s)
     (keeps human-curated statuses like quoted/won/lost/dismissed intact), then
@@ -373,7 +373,7 @@ async def update_opportunity(opp_id: str, data: dict, current_user: dict = Depen
 
 @router.post("/growth/opportunities/{opp_id}/pitch")
 async def generate_pitch(opp_id: str, current_user: dict = Depends(get_current_user)):
-    """Use Emergent LLM key to generate a tailored email pitch paragraph for this opportunity."""
+    """Use OpenAI API key to generate a tailored email pitch paragraph for this opportunity."""
     opp = await db.growth_opportunities.find_one({"id": opp_id}, {"_id": 0})
     if not opp:
         raise HTTPException(404, "Opportunity not found")
@@ -382,24 +382,24 @@ async def generate_pitch(opp_id: str, current_user: dict = Depends(get_current_u
     client = await db.clients.find_one({"id": opp["client_id"]}, {"_id": 0}) or {}
     primary_contact = client.get("primary_contact") or client.get("contact_name") or "team"
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return {"success": False, "pitch": None, "message": "EMERGENT_LLM_KEY not configured"}
+        return {"success": False, "pitch": None, "message": "OPENAI_API_KEY not configured"}
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         system = (
             "You are a senior MSP account manager writing a warm, concise, outcome-focused upsell email "
             "(3-5 sentences, no fluff). Open with the client's name, cite the specific evidence, quantify the "
             "impact or risk in plain English, then present the solution and next step. Avoid hype words. "
-            "Sign-off not needed — we'll add it."
+            "Sign-off not needed Ã¢â‚¬â€ we'll add it."
         )
         prompt = (
             f"Client: {opp['client_name']} (primary contact: {primary_contact}).\n"
-            f"Opportunity type: {opp['type']} — {opp['title']}\n"
+            f"Opportunity type: {opp['type']} Ã¢â‚¬â€ {opp['title']}\n"
             f"Summary: {opp['summary']}\n"
             f"Evidence: {opp.get('evidence')}\n"
-            f"Monthly value: ${opp.get('monthly_value', 0):,} · One-time: ${opp.get('one_time_value', 0):,}\n"
+            f"Monthly value: ${opp.get('monthly_value', 0):,} Ã‚Â· One-time: ${opp.get('one_time_value', 0):,}\n"
             f"Suggested action: {opp.get('suggested_action', '')}\n\n"
             f"Write the email body only (no subject, no sign-off)."
         )

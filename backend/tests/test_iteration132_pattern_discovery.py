@@ -32,7 +32,7 @@ class TestPatternDiscovery:
         self.session.headers.update({"Authorization": f"Bearer {token}"})
         yield
     
-    # ─────────────────────── GET /api/blueprint-patterns ───────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ GET /api/blueprint-patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     
     def test_get_patterns_returns_correct_structure(self):
         """GET /api/blueprint-patterns returns patterns array with correct fields"""
@@ -93,7 +93,7 @@ class TestPatternDiscovery:
             assert isinstance(pattern["affected_client_ids"], list), "affected_client_ids should be a list"
             assert isinstance(pattern["related_blueprints"], list), "related_blueprints should be a list"
     
-    # ─────────────────────── POST /api/blueprint-patterns/suggest ───────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ POST /api/blueprint-patterns/suggest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     
     def test_suggest_requires_tokens_or_ids(self):
         """POST /api/blueprint-patterns/suggest requires tokens or sample_ticket_ids"""
@@ -110,7 +110,7 @@ class TestPatternDiscovery:
         pattern = patterns_resp.json()["patterns"][0]
         tokens = pattern["tokens"]
         
-        # This test may take time due to AI call - skip if no EMERGENT_LLM_KEY
+        # This test may take time due to AI call - skip if no OPENAI_API_KEY
         resp = self.session.post(f"{BASE_URL}/api/blueprint-patterns/suggest", json={
             "tokens": tokens
         }, timeout=60)
@@ -147,7 +147,7 @@ class TestPatternDiscovery:
         # Accept 200 (success) or 503 (AI not configured) or 502 (AI call failed)
         assert resp.status_code in [200, 502, 503], f"Unexpected status: {resp.status_code}: {resp.text}"
     
-    # ─────────────────────── POST /api/blueprints/{bp_id}/push-to-clients ───────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ POST /api/blueprints/{bp_id}/push-to-clients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     
     def test_push_to_clients_requires_client_ids(self):
         """POST /api/blueprints/{bp_id}/push-to-clients requires client_ids"""

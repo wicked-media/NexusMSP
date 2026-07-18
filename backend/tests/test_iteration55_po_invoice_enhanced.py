@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://rmm-psa-build.preview.emergentagent.com"
+    BASE_URL = "http://127.0.0.1:8001"
 
 # Test credentials
 TEST_EMAIL = "admin@nexusops.io"

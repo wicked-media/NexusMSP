@@ -1085,27 +1085,6 @@ packages:
     peerDependencies:
       postcss-selector-parser: ^6.0.10
 
-  '@emergentbase/visual-edits@https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz':
-    resolution: {integrity: sha512-n6vWWr/H8mUvuQqjtZzzGXUS6RDhcIIzT8VjX8EOFOk8sgoMjVoA9pFl6XG+wJuIOS7QAKK+QjiKipLHoVvbWA==, tarball: https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz}
-    version: 1.0.8
-    peerDependencies:
-      '@babel/core': ^7.0.0
-      '@babel/generator': ^7.0.0
-      '@babel/parser': ^7.0.0
-      '@babel/traverse': ^7.0.0
-      express: ^4.0.0
-    peerDependenciesMeta:
-      '@babel/core':
-        optional: true
-      '@babel/generator':
-        optional: true
-      '@babel/parser':
-        optional: true
-      '@babel/traverse':
-        optional: true
-      express:
-        optional: true
-
   '@eslint-community/eslint-utils@4.9.1':
     resolution: {integrity: sha512-phrYmNiYppR7znFEdqgfWHXR6NCkZEK7hwWDHZUjit/2/U0r6XvkDl0SYnoM51Hq7FhCGdLDT6zxCCOY1hexsQ==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
@@ -8101,14 +8080,6 @@ snapshots:
   '@csstools/selector-specificity@2.2.0(postcss-selector-parser@6.1.4)':
     dependencies:
       postcss-selector-parser: 6.1.4
-
-  '@emergentbase/visual-edits@https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz(@babel/core@7.29.7)(@babel/generator@7.29.7)(@babel/parser@7.29.7)(@babel/traverse@7.29.7)(express@4.22.2)':
-    optionalDependencies:
-      '@babel/core': 7.29.7
-      '@babel/generator': 7.29.7
-      '@babel/parser': 7.29.7
-      '@babel/traverse': 7.29.7
-      express: 4.22.2
 
   '@eslint-community/eslint-utils@4.9.1(eslint@8.57.1)':
     dependencies:

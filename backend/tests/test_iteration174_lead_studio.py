@@ -1,4 +1,4 @@
-"""Iteration 174 — Lead Studio backend test suite.
+"""Iteration 174 â€” Lead Studio backend test suite.
 
 Covers /api/lead-studio/* endpoints + per-lead actions (NBA, draft email,
 win-loss, tasks, merge-into-ticket, create-ticket).
@@ -7,7 +7,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://rmm-psa-build.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://127.0.0.1:8001").rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "aaron@stech.com.au"

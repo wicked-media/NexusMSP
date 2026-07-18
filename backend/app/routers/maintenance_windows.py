@@ -1,4 +1,4 @@
-"""Maintenance Window Scheduler — autonomous overnight maintenance.
+"""Maintenance Window Scheduler â€” autonomous overnight maintenance.
 
 A "window" bundles N devices + a list of actions (patches/reboot/run-checks/run-script)
 + a scheduled_at time. A background loop in server.py picks up windows that are due
@@ -50,8 +50,8 @@ def _parse_dt(s):
 
 
 async def _ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
@@ -60,7 +60,7 @@ async def _ai_chat(session_id: str, system_msg: str):
     return chat
 
 
-# ───────────────────────────── CRUD ─────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/maintenance-windows")
 async def list_windows(status: str | None = None, limit: int = 100, current_user: dict = Depends(get_current_user)):
@@ -103,7 +103,7 @@ async def create_window(data: dict, current_user: dict = Depends(get_current_use
 
     window = {
         "id": str(uuid.uuid4()),
-        "name": (data.get("name") or "").strip()[:140] or f"Maintenance — {scheduled.strftime('%Y-%m-%d %H:%M')}",
+        "name": (data.get("name") or "").strip()[:140] or f"Maintenance â€” {scheduled.strftime('%Y-%m-%d %H:%M')}",
         "description": (data.get("description") or "").strip()[:600],
         "scheduled_at": scheduled.isoformat(),
         "actions": actions,
@@ -118,7 +118,7 @@ async def create_window(data: dict, current_user: dict = Depends(get_current_use
         "created_by_id": current_user.get("id"),
     }
     await db.maintenance_windows.insert_one(window)
-    await log_activity(current_user, "maintenance_window_created", "maintenance_window", window["id"], window["name"], f"{len(device_ids)} devices · {scheduled.isoformat()}")
+    await log_activity(current_user, "maintenance_window_created", "maintenance_window", window["id"], window["name"], f"{len(device_ids)} devices Â· {scheduled.isoformat()}")
     window.pop("_id", None)
     return window
 
@@ -146,7 +146,7 @@ async def run_now(wid: str, current_user: dict = Depends(get_current_user)):
     return {"success": True, "status": "running"}
 
 
-# ───────────────────────────── Execution ─────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Execution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def _run_device_action(device: dict, action: str, window: dict) -> dict:
     """Queue a real Nexus Agent command when the device is enrolled and online.
@@ -243,7 +243,7 @@ async def execute_window(wid: str):
     # AI summary
     ai_summary = ""
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         sys = "You are a senior MSP technician writing a concise (3-4 bullet) post-maintenance report covering successes, skips, failures and next steps."
         prompt = json.dumps({
             "window_name": w.get("name"),
@@ -273,9 +273,9 @@ async def execute_window(wid: str):
         tk = await db.tickets.find_one({"id": parent}, {"_id": 0, "id": 1, "ticket_number": 1})
         if tk:
             body = (
-                f"🔧 Maintenance Window Completed — {w.get('name')}\n"
-                f"Devices: {len(devices)} · Actions: {', '.join(actions)}\n"
-                f"Results: ✓ {summary_counts.get('ok', 0)} · ✗ {summary_counts.get('failed', 0)} · — {summary_counts.get('skipped', 0)}\n\n"
+                f"ðŸ”§ Maintenance Window Completed â€” {w.get('name')}\n"
+                f"Devices: {len(devices)} Â· Actions: {', '.join(actions)}\n"
+                f"Results: âœ“ {summary_counts.get('ok', 0)} Â· âœ— {summary_counts.get('failed', 0)} Â· â€” {summary_counts.get('skipped', 0)}\n\n"
                 f"{ai_summary}"
             )
             comment = {
@@ -292,7 +292,7 @@ async def execute_window(wid: str):
             await db.tickets.update_one({"id": parent}, {"$inc": {"comments_count": 1}, "$set": {"updated_at": _now_iso()}})
 
 
-# Background scheduler loop — picks up windows whose time has come
+# Background scheduler loop â€” picks up windows whose time has come
 _SCHEDULER_STARTED = False
 
 
@@ -310,7 +310,7 @@ async def maintenance_window_scheduler():
                 {"_id": 0, "id": 1}
             ).to_list(20)
             for w in due:
-                logger.info(f"Maintenance Window {w['id']} due — executing")
+                logger.info(f"Maintenance Window {w['id']} due â€” executing")
                 asyncio.create_task(execute_window(w["id"]))
         except Exception as e:
             logger.warning(f"MW scheduler tick failed: {e}")
@@ -322,7 +322,7 @@ async def _start_scheduler():
     asyncio.create_task(maintenance_window_scheduler())
 
 
-# ───────────────────────────── Stats ─────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/maintenance-windows/stats/summary")
 async def stats_summary(current_user: dict = Depends(get_current_user)):

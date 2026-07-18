@@ -1,4 +1,4 @@
-"""Products & Invoices PLUS — 9 differentiator features.
+"""Products & Invoices PLUS â€” 9 differentiator features.
 
 1. Smart Product Catalog insights          GET  /api/products/margin-insights
                                            GET  /api/products/{id}/price-history
@@ -47,7 +47,7 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
-# ═══════════════════════ 1) SMART PRODUCT CATALOG ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 1) SMART PRODUCT CATALOG â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/finance/product-margin-insights")
 async def product_margin_insights(current_user: dict = Depends(get_current_user)):
@@ -124,7 +124,7 @@ async def record_price_change(product_id: str, payload: dict = Body(...), curren
     return {"ok": True, "entry": entry}
 
 
-# ═══════════════════════ 2) PRODUCT KITS / BUNDLES ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 2) PRODUCT KITS / BUNDLES â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/product-kits")
 async def list_kits(current_user: dict = Depends(get_current_user)):
@@ -218,7 +218,7 @@ async def apply_kit_to_ticket(ticket_id: str, kit_id: str, current_user: dict = 
     return {"ok": True, "attached_count": len(attached), "attached": attached, "kit_name": kit.get("name")}
 
 
-# ═══════════════════════ 3) PER-CLIENT PRICE BOOK ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 3) PER-CLIENT PRICE BOOK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/price-book")
 async def get_price_book(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -273,7 +273,7 @@ async def client_price_for_product(client_id: str, product_id: str, current_user
     return {"price": p.get("retail_price"), "source": "standard", "standard": p.get("retail_price")}
 
 
-# ═══════════════════════ 4) SUBSCRIPTION DRIFT DETECTOR ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 4) SUBSCRIPTION DRIFT DETECTOR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/subscription-drift")
 async def subscription_drift(current_user: dict = Depends(get_current_user)):
@@ -319,7 +319,7 @@ async def subscription_drift(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 5) CASH FLOW FORECAST ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 5) CASH FLOW FORECAST â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/finance/cash-flow-forecast")
 async def cash_flow_forecast(current_user: dict = Depends(get_current_user)):
@@ -396,10 +396,10 @@ async def cash_flow_forecast(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 6) LATE-PAYMENT PREDICTOR ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 6) LATE-PAYMENT PREDICTOR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def _score_late_risk(invoice: dict) -> dict:
-    """Heuristic 0-100 score — probability that invoice is paid late."""
+    """Heuristic 0-100 score â€” probability that invoice is paid late."""
     client_id = invoice.get("client_id")
     score = 30  # baseline
     reasons = []
@@ -479,7 +479,7 @@ async def single_late_risk(invoice_id: str, current_user: dict = Depends(get_cur
     return await _score_late_risk(inv)
 
 
-# ═══════════════════════ 7) MARGIN PER INVOICE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 7) MARGIN PER INVOICE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def _invoice_margin(inv: dict) -> dict:
     line_items = inv.get("line_items") or []
@@ -493,7 +493,7 @@ async def _invoice_margin(inv: dict) -> dict:
             total_cost += line_cost
             cost_breakdown["products"] += line_cost
         elif li.get("type") == "labor" or "hour" in (li.get("description") or "").lower():
-            # Labor cost estimate — 40% of revenue
+            # Labor cost estimate â€” 40% of revenue
             lc = float(li.get("total") or 0) * 0.4
             total_cost += lc
             cost_breakdown["labor"] += lc
@@ -554,7 +554,7 @@ async def margin_overview(days: int = 90, current_user: dict = Depends(get_curre
     }
 
 
-# ═══════════════════════ 8) PREDICTIVE AUTO-QUOTE TRIGGER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 8) PREDICTIVE AUTO-QUOTE TRIGGER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/tickets/{ticket_id}/quote-nudge")
 async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -571,7 +571,7 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     # Score
     score = 0
     signals = []
-    if comments >= 6: score += 30; signals.append(f"{comments} comments — scope expanding")
+    if comments >= 6: score += 30; signals.append(f"{comments} comments â€” scope expanding")
     elif comments >= 3: score += 15
     if mins >= 120: score += 30; signals.append(f"{mins}min logged already")
     elif mins >= 60: score += 15
@@ -596,7 +596,7 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     }
 
 
-# ═══════════════════════ 9) PRE-EMPTIVE DISPUTESHIELD SCAN ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 9) PRE-EMPTIVE DISPUTESHIELD SCAN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/invoices/{invoice_id}/dispute-scan")
 async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current_user)):
@@ -604,7 +604,7 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv: raise HTTPException(404, "invoice not found")
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     client_tickets = await db.tickets.find(
         {"client_id": inv.get("client_id"), "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "title": 1, "ticket_number": 1, "resolved_at": 1}
@@ -618,21 +618,21 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
         total = float(li.get("total") or (unit * qty))
         desc = (li.get("description") or "").lower()
         if total >= 1500 and len(desc) < 30:
-            flags.append({"line": li.get("description"), "risk": "Vague high-value line — add detail", "severity": "high"})
+            flags.append({"line": li.get("description"), "risk": "Vague high-value line â€” add detail", "severity": "high"})
         if "emergency" in desc and "after hours" not in desc:
             flags.append({"line": li.get("description"), "risk": "Emergency rate without explicit after-hours note", "severity": "medium"})
         if qty > 5 and unit > 100:
-            flags.append({"line": li.get("description"), "risk": f"{qty} × ${unit} — ensure quantity is explained", "severity": "low"})
+            flags.append({"line": li.get("description"), "risk": f"{qty} Ã— ${unit} â€” ensure quantity is explained", "severity": "low"})
 
     if not api_key:
         return {"flags": flags, "justification": None, "model": "heuristic-only"}
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         corpus = (
             f"Invoice total: ${inv.get('total',0):,.2f}\n"
             f"Line items:\n" +
-            "\n".join([f"- {li.get('description','')} × {li.get('quantity',1)} = ${li.get('total',0):.2f}" for li in inv.get('line_items') or []]) +
+            "\n".join([f"- {li.get('description','')} Ã— {li.get('quantity',1)} = ${li.get('total',0):.2f}" for li in inv.get('line_items') or []]) +
             f"\n\nRecent resolved tickets for this client:\n" +
             "\n".join([f"- {t.get('ticket_number')}: {t.get('title','')[:100]}" for t in client_tickets])
         )

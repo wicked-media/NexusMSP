@@ -1,4 +1,4 @@
-"""Ticket Blueprints — reusable worksheet + workflow templates.
+"""Ticket Blueprints â€” reusable worksheet + workflow templates.
 
 Purpose: a Syncro-Blueprints-style system that lets an MSP define a named
 "blueprint" (e.g. "New Employee Onboarding", "VPN Outage", "Printer Install")
@@ -71,7 +71,7 @@ def _validate_checklist(items):
     return out
 
 
-# ─────────────────────── CRUD: Blueprints ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CRUD: Blueprints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/blueprints")
 async def list_blueprints(active_only: bool = True, current_user: dict = Depends(get_current_user)):
@@ -151,7 +151,7 @@ async def delete_blueprint(bp_id: str, current_user: dict = Depends(get_current_
     return {"success": True}
 
 
-# ─────────────────────── Client linking ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Client linking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/clients/{client_id}/blueprints")
 async def get_client_blueprints(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -179,7 +179,7 @@ async def set_client_blueprints(client_id: str, data: dict, current_user: dict =
     return {"success": True, "blueprint_ids": bp_ids, "default_blueprint_id": default_id}
 
 
-# ─────────────────────── Ticket application ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Ticket application â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _hydrate_ticket_with_blueprint(ticket: dict, bp: dict) -> dict:
     """Merge a blueprint's defaults + worksheet shell into a ticket dict.
@@ -239,7 +239,7 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
 
 @router.put("/tickets/{ticket_id}/blueprint-fields")
 async def update_worksheet_fields(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    """Body: { fields: {key: value, ...} } — patch worksheet field values."""
+    """Body: { fields: {key: value, ...} } â€” patch worksheet field values."""
     patch = data.get("fields") or {}
     if not isinstance(patch, dict):
         raise HTTPException(400, "fields must be an object")
@@ -273,7 +273,7 @@ async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict
     return {"success": True, "checklist": cl}
 
 
-# ─────────────────────── AI: Suggest blueprint from history ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ AI: Suggest blueprint from history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/blueprints/suggest-from-history")
 async def suggest_blueprint_from_history(data: dict, current_user: dict = Depends(get_current_user)):
@@ -300,7 +300,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     if not client_id:
         raise HTTPException(400, "client_id (or ticket_id) required")
 
-    # Pull resolved/closed tickets for this client — match on title tokens to narrow scope
+    # Pull resolved/closed tickets for this client â€” match on title tokens to narrow scope
     tokens = [tok.lower() for tok in re.split(r"[\s\-_]+", title_hint) if len(tok) > 3][:6]
     q = {"client_id": client_id, "status": {"$in": ["resolved", "closed"]}}
     tix = await db.tickets.find(
@@ -328,14 +328,14 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     corpus_lines = []
     for t in matched[:12]:
         corpus_lines.append(
-            f"#{t.get('ticket_number','')} [{t.get('priority','medium')}·{t.get('category','support')}] "
+            f"#{t.get('ticket_number','')} [{t.get('priority','medium')}Â·{t.get('category','support')}] "
             f"{t.get('title','')}\n  Fix: {(t.get('resolution') or t.get('description') or '')[:400]}"
         )
     corpus = "\n\n".join(corpus_lines)
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "AI not configured (EMERGENT_LLM_KEY missing)")
+        raise HTTPException(503, "AI not configured (OPENAI_API_KEY missing)")
 
     system_msg = (
         "You are an MSP automation designer. Given a bundle of resolved support tickets of the "
@@ -343,7 +343,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
         "Return STRICT JSON only (no prose) with keys: "
         "name (short, title-case), description (1 sentence), default_priority "
         "(low|medium|high|critical), default_category (single word), sla_minutes (integer), "
-        "require_completion (bool — true if tickets tend to have data-gathering up-front), "
+        "require_completion (bool â€” true if tickets tend to have data-gathering up-front), "
         "fields (array of {key (snake_case), label, type (text|textarea|number|date|select|checkbox), "
         "required, placeholder, options? (array of strings for 'select' only)}), "
         "checklist (array of {label, required}). "
@@ -357,7 +357,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         import uuid as _uuid
         chat = LlmChat(
             api_key=api_key,
@@ -402,7 +402,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     }
 
 
-# ─────────────────────── Cross-client Pattern Library ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Cross-client Pattern Library â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import re as _re
 from collections import Counter as _Counter
@@ -522,14 +522,14 @@ async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_curr
         raise HTTPException(400, "Not enough matching tickets to learn from")
 
     corpus = "\n\n".join([
-        f"#{t.get('ticket_number','')} ({t.get('client_name','')}) [{t.get('priority','medium')}·{t.get('category','support')}] "
+        f"#{t.get('ticket_number','')} ({t.get('client_name','')}) [{t.get('priority','medium')}Â·{t.get('category','support')}] "
         f"{t.get('title','')}\n  Fix: {(t.get('resolution') or t.get('description') or '')[:400]}"
         for t in tix[:15]
     ])
 
-    api_key = _os.environ.get("EMERGENT_LLM_KEY")
+    api_key = _os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "AI not configured (EMERGENT_LLM_KEY missing)")
+        raise HTTPException(503, "AI not configured (OPENAI_API_KEY missing)")
 
     system_msg = (
         "You design shared ticket blueprints for an MSP serving many clients. Given a corpus of "
@@ -550,7 +550,7 @@ async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_curr
     )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         import uuid as _uuid
         chat = LlmChat(
             api_key=api_key,
@@ -622,7 +622,7 @@ async def push_blueprint_to_clients(bp_id: str, data: dict, current_user: dict =
     return {"success": True, "updated": updated, "blueprint": bp["name"]}
 
 
-# ─────────────────────── Trending patterns (dashboard tile) ───────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Trending patterns (dashboard tile) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 from datetime import timedelta as _td
 
@@ -630,7 +630,7 @@ from datetime import timedelta as _td
 @router.get("/blueprint-patterns/trends")
 async def pattern_trends(days: int = 7, current_user: dict = Depends(get_current_user)):
     """Compare resolved-ticket patterns between THIS window and the PREVIOUS window.
-    Returns top 3 'rising' patterns — surges or brand-new patterns.
+    Returns top 3 'rising' patterns â€” surges or brand-new patterns.
 
     Output per pattern:
       { key, name_guess, tokens, ticket_count_this, ticket_count_prev,

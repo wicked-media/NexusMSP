@@ -1,5 +1,5 @@
 """
-Client War Room — live operational dashboard for a single client.
+Client War Room â€” live operational dashboard for a single client.
 Aggregates real-time device telemetry, open tickets, on-call techs, and
 generates an AI commentary feed for outage moments / client calls.
 """
@@ -26,7 +26,7 @@ def _iso(dt):
 
 @router.get("/clients/{client_id}/war-room")
 async def war_room(client_id: str, current_user: dict = Depends(get_current_user)):
-    """Aggregate live state for a single client — devices, tickets, on-call, activity."""
+    """Aggregate live state for a single client â€” devices, tickets, on-call, activity."""
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -44,7 +44,7 @@ async def war_room(client_id: str, current_user: dict = Depends(get_current_user
                   or (d.get("memory_pct") or 0) > 85
                   or (d.get("disk_pct") or 0) > 90)
 
-    # Open tickets — newest first, last 50
+    # Open tickets â€” newest first, last 50
     open_tickets = await db.tickets.find(
         {"client_id": client_id, "status": {"$in": ["open", "in_progress", "pending"]}},
         {"_id": 0, "id": 1, "number": 1, "title": 1, "status": 1, "priority": 1,
@@ -71,7 +71,7 @@ async def war_room(client_id: str, current_user: dict = Depends(get_current_user
         {"_id": 0, "id": 1, "name": 1, "avatar": 1, "specialties": 1, "on_call_status": 1, "last_active_at": 1},
     ).to_list(20)
 
-    # Recent activity feed — last 24h
+    # Recent activity feed â€” last 24h
     since = now - timedelta(hours=24)
     activity = []
     try:
@@ -82,14 +82,14 @@ async def war_room(client_id: str, current_user: dict = Depends(get_current_user
         for t in recent_tx:
             activity.append({
                 "type": "ticket_update",
-                "title": f"#{t.get('number', t.get('id', '')[:6])} · {t.get('title', '')}",
-                "subtitle": f"{t.get('status', '').replace('_', ' ')} · {t.get('priority', 'med')}",
+                "title": f"#{t.get('number', t.get('id', '')[:6])} Â· {t.get('title', '')}",
+                "subtitle": f"{t.get('status', '').replace('_', ' ')} Â· {t.get('priority', 'med')}",
                 "timestamp": _iso(t.get("updated_at")),
             })
     except Exception as e:
         logger.warning(f"war_room ticket activity error: {e}")
 
-    # Severity computation — drives the war-room banner colour
+    # Severity computation â€” drives the war-room banner colour
     if offline > 2 or breached > 0 or critical > 0:
         severity = "critical"
     elif offline > 0 or warning > 2:
@@ -152,7 +152,7 @@ async def war_room_commentary(client_id: str, current_user: dict = Depends(get_c
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    # Snapshot — same logic but compressed
+    # Snapshot â€” same logic but compressed
     devices = await db.devices.find(
         {"client_id": client_id},
         {"_id": 0, "hostname": 1, "name": 1, "status": 1, "cpu_load": 1, "memory_pct": 1, "disk_pct": 1},
@@ -169,7 +169,7 @@ async def war_room_commentary(client_id: str, current_user: dict = Depends(get_c
 
     summary_lines = [
         f"Client: {client.get('name', '')}",
-        f"Devices: {online}/{len(devices)} online ({offline} offline{(' — ' + ', '.join(offline_names)) if offline_names else ''})",
+        f"Devices: {online}/{len(devices)} online ({offline} offline{(' â€” ' + ', '.join(offline_names)) if offline_names else ''})",
         f"Open tickets: {len(open_tickets)} ({len(critical)} critical)",
     ]
     if critical:
@@ -182,7 +182,7 @@ async def war_room_commentary(client_id: str, current_user: dict = Depends(get_c
     # Heuristic fallback commentary (used if no LLM key)
     fallback_parts = []
     if offline >= 3:
-        fallback_parts.append(f"⚠️ {offline} devices offline at {client.get('name')}. Possible site outage — check ISP/UPS/UniFi controller before triaging.")
+        fallback_parts.append(f"âš ï¸ {offline} devices offline at {client.get('name')}. Possible site outage â€” check ISP/UPS/UniFi controller before triaging.")
     elif offline > 0:
         fallback_parts.append(f"{offline} device(s) offline at {client.get('name')}: {', '.join(offline_names)}.")
     if critical:
@@ -191,12 +191,12 @@ async def war_room_commentary(client_id: str, current_user: dict = Depends(get_c
         fallback_parts.append(f"All systems nominal. {online}/{len(devices)} devices online, {len(open_tickets)} open tickets.")
     fallback = " ".join(fallback_parts)
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return {"commentary": fallback, "source": "heuristic"}
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from app.services.ai_provider import LlmChat, UserMessage
         chat = LlmChat(
             api_key=api_key,
             session_id=f"war-room-{client_id}",

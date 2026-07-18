@@ -1,4 +1,4 @@
-"""Iteration 173 — Devices Command Center (Fleet Pulse) backend tests.
+"""Iteration 173 â€” Devices Command Center (Fleet Pulse) backend tests.
 
 Covers all 11 endpoints declared in /app/backend/app/routers/device_pulse.py
 plus tag update and saved-views CRUD + quick-scripts run.
@@ -7,7 +7,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://rmm-psa-build.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://127.0.0.1:8001").rstrip("/")
 LOGIN_EMAIL = "aaron@stech.com.au"
 LOGIN_PASSWORD = "Lucky@2871$!"
 
@@ -32,7 +32,7 @@ def sample_device_id(auth_headers):
     return devs[0].get("id")
 
 
-# ─── Fleet Pulse Wall ────────────────────────────────────────────────────────
+# â”€â”€â”€ Fleet Pulse Wall â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestFleetPulse:
     def test_pulse_shape(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/pulse", headers=auth_headers, timeout=20)
@@ -50,7 +50,7 @@ class TestFleetPulse:
         assert len(t["disk_spark"]) == 24
 
 
-# ─── Risk Heatmap ────────────────────────────────────────────────────────────
+# â”€â”€â”€ Risk Heatmap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestRiskHeatmap:
     def test_heatmap_shape(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/risk-heatmap", headers=auth_headers, timeout=20)
@@ -64,7 +64,7 @@ class TestRiskHeatmap:
                 assert k in c
 
 
-# ─── Lifecycle ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestLifecycle:
     def test_lifecycle_shape(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/lifecycle", headers=auth_headers, timeout=20)
@@ -80,7 +80,7 @@ class TestLifecycle:
             assert d["status"] in ("ok", "refresh-soon", "due-now", "overdue")
 
 
-# ─── Top Risks ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Top Risks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestTopRisks:
     def test_risks(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/top-risks", headers=auth_headers, timeout=20)
@@ -93,7 +93,7 @@ class TestTopRisks:
                 assert k in risk
 
 
-# ─── Anomalies ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Anomalies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestAnomalies:
     def test_anomalies(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/anomalies", headers=auth_headers, timeout=20)
@@ -106,7 +106,7 @@ class TestAnomalies:
             assert k in a
 
 
-# ─── Activity Ticker ─────────────────────────────────────────────────────────
+# â”€â”€â”€ Activity Ticker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestActivityTicker:
     def test_ticker(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/activity-ticker", headers=auth_headers, timeout=20)
@@ -120,7 +120,7 @@ class TestActivityTicker:
         assert e["kind"] in ("checkin", "alert", "maintenance")
 
 
-# ─── Top Talkers ─────────────────────────────────────────────────────────────
+# â”€â”€â”€ Top Talkers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestTopTalkers:
     def test_top_talkers(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/top-talkers", headers=auth_headers, timeout=20)
@@ -135,7 +135,7 @@ class TestTopTalkers:
                     assert k in d
 
 
-# ─── Offline Watch ───────────────────────────────────────────────────────────
+# â”€â”€â”€ Offline Watch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestOfflineWatch:
     def test_offline_watch(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/offline-watch", headers=auth_headers, timeout=20)
@@ -145,7 +145,7 @@ class TestOfflineWatch:
         assert isinstance(data["devices"], list)
 
 
-# ─── Saved Views CRUD ────────────────────────────────────────────────────────
+# â”€â”€â”€ Saved Views CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestSavedViews:
     def test_saved_views_lifecycle(self, auth_headers):
         # Create
@@ -180,7 +180,7 @@ class TestSavedViews:
         assert r.status_code == 400
 
 
-# ─── Quick Scripts ───────────────────────────────────────────────────────────
+# â”€â”€â”€ Quick Scripts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestQuickScripts:
     def test_catalog(self, auth_headers):
         r = requests.get(f"{BASE_URL}/api/devices/quick-scripts", headers=auth_headers, timeout=20)
@@ -216,7 +216,7 @@ class TestQuickScripts:
         assert r.status_code == 400
 
 
-# ─── Tags ────────────────────────────────────────────────────────────────────
+# â”€â”€â”€ Tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestTags:
     def test_update_tags_ok(self, auth_headers, sample_device_id):
         r = requests.post(f"{BASE_URL}/api/devices/{sample_device_id}/tags",

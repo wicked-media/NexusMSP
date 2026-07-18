@@ -19,8 +19,8 @@ async def get_ai_config():
     return doc or {"provider": DEFAULT_PROVIDER, "model": DEFAULT_MODEL}
 
 async def get_chat(session_id: str, system_message: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="AI key not configured")
     config = await get_ai_config()
@@ -92,10 +92,10 @@ async def copilot_chat(data: dict, current_user: dict = Depends(get_current_user
     
     system_msg = "\n".join(context_parts)
     
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat, UserMessage
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return {"response": "AI key not configured. Add the Emergent LLM Key in your environment.", "session_id": session_id}
+        return {"response": "AI key not configured. Add the OpenAI API key in your environment.", "session_id": session_id}
     
     config = await get_ai_config()
     try:
@@ -112,7 +112,7 @@ async def proofread_text(data: dict, current_user: dict = Depends(get_current_us
     if not text or len(text) < 3:
         return {"corrected": text, "changes": []}
     
-    from emergentintegrations.llm.chat import UserMessage
+    from app.services.ai_provider import UserMessage
     session_id = f"proofread-{uuid.uuid4().hex[:8]}"
     system_msg = (
         "You are a professional proofreader for an IT support company. "
@@ -149,7 +149,7 @@ async def categorize_ticket(data: dict, current_user: dict = Depends(get_current
     categories = await db.ticket_categories.find({"is_active": True}, {"_id": 0, "name": 1}).to_list(50)
     cat_names = [c["name"] for c in categories] if categories else ["Hardware", "Software", "Network", "Security", "Email", "Access", "Other"]
     
-    from emergentintegrations.llm.chat import UserMessage
+    from app.services.ai_provider import UserMessage
     session_id = f"categorize-{uuid.uuid4().hex[:8]}"
     system_msg = (
         "You are an expert IT ticket classifier for an MSP. Analyze the ticket and classify it. "
@@ -221,7 +221,7 @@ async def analyze_device(data: dict, current_user: dict = Depends(get_current_us
             f"Antivirus: {device.get('antivirus_status','unknown')}\n"
         )
     
-    from emergentintegrations.llm.chat import UserMessage
+    from app.services.ai_provider import UserMessage
     session_id = f"analyze-{uuid.uuid4().hex[:8]}"
     system_msg = (
         "You are an expert IT technician and diagnostics specialist for an MSP. "

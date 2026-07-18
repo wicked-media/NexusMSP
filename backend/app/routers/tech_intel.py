@@ -1,5 +1,5 @@
 """
-Tech Intel — Smart Tech Finder, Skills Matrix, Permission Matrix, Permission Diff,
+Tech Intel â€” Smart Tech Finder, Skills Matrix, Permission Matrix, Permission Diff,
 Role Drift Detector, Audit Timeline, and Capacity Cockpit.
 
 Outclasses Syncro/HaloPSA/CW/Ninja by combining live ops data with AI insight.
@@ -18,7 +18,7 @@ logger = logging.getLogger("tech_intel")
 # 8 core skill axes used by the radar chart
 SKILL_AXES = ["networking", "cloud", "security", "endpoints", "backup", "m365", "voip", "hardware"]
 
-# Mapping of TECH_CATEGORIES → skills (used as fallback when explicit skills not set)
+# Mapping of TECH_CATEGORIES â†’ skills (used as fallback when explicit skills not set)
 CATEGORY_SKILL_MAP = {
     "network": ["networking"],
     "wisp": ["networking"],
@@ -145,12 +145,12 @@ async def smart_tech_finder(data: dict, current_user: dict = Depends(get_current
     cap = await capacity_cockpit(current_user)
     techs = cap["techs"]
 
-    # Parse intent — use LLM if available, else heuristic
+    # Parse intent â€” use LLM if available, else heuristic
     intent = {"skills": [], "level": None, "needs_available": False, "categories": []}
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            from app.services.ai_provider import LlmChat, UserMessage
             chat = LlmChat(
                 api_key=api_key,
                 session_id=f"tech-find-{current_user['id']}",
@@ -190,7 +190,7 @@ async def smart_tech_finder(data: dict, current_user: dict = Depends(get_current
     # Score and rank
     def score(tech):
         s = 0
-        # skill match — strongest signal
+        # skill match â€” strongest signal
         for skill in intent.get("skills", []):
             s += tech["skills"].get(skill, 0)
         # level match
@@ -226,7 +226,7 @@ async def smart_tech_finder(data: dict, current_user: dict = Depends(get_current
 
 @router.get("/tech-intel/permission-matrix")
 async def permission_matrix(current_user: dict = Depends(get_current_user)):
-    """Heatmap data: techs x modules → permission level (none/read/write/admin)."""
+    """Heatmap data: techs x modules â†’ permission level (none/read/write/admin)."""
     techs = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(200)
     modules = ["tickets", "clients", "invoices", "products", "devices", "networking",
               "assets", "reports", "knowledge_base", "it_docs", "contracts",
@@ -289,7 +289,7 @@ async def permission_diff(data: dict, current_user: dict = Depends(get_current_u
         "target_preset": target_name,
         "grants": grants,
         "revokes": revokes,
-        "summary": f"{len(grants)} grants · {len(revokes)} revokes",
+        "summary": f"{len(grants)} grants Â· {len(revokes)} revokes",
     }
 
 
@@ -324,13 +324,13 @@ async def role_drift(current_user: dict = Depends(get_current_user)):
         rationale = None
         if "L1" in title and crit_ratio > 0.30:
             flag = "upgrade"
-            rationale = f"Handling {crit}/{total} critical tickets ({int(crit_ratio*100)}%) — operating beyond L1 scope. Consider L2 promotion."
+            rationale = f"Handling {crit}/{total} critical tickets ({int(crit_ratio*100)}%) â€” operating beyond L1 scope. Consider L2 promotion."
         elif "Senior" in title and total < 5:
             flag = "underutilised"
-            rationale = f"Only {total} tickets in 30 days — Senior capacity is being wasted."
+            rationale = f"Only {total} tickets in 30 days â€” Senior capacity is being wasted."
         elif "L2" in title and crit_ratio > 0.50:
             flag = "upgrade"
-            rationale = f"Critical workload at {int(crit_ratio*100)}% — Senior-level engagement justified."
+            rationale = f"Critical workload at {int(crit_ratio*100)}% â€” Senior-level engagement justified."
 
         if flag:
             drift.append({
@@ -347,7 +347,7 @@ async def role_drift(current_user: dict = Depends(get_current_user)):
 
 @router.get("/tech-intel/audit-timeline")
 async def audit_timeline(limit: int = 100, current_user: dict = Depends(get_current_user)):
-    """Audit log of permission/role changes — newest first."""
+    """Audit log of permission/role changes â€” newest first."""
     events = await db.permission_audit.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return {"events": events}
 

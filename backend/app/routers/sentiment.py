@@ -9,8 +9,8 @@ from app.auth import get_current_user
 router = APIRouter()
 
 async def _get_ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
@@ -102,7 +102,7 @@ Client Messages (recent):
 Analyze the sentiment and churn risk."""
 
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         chat = await _get_ai_chat(f"sentiment-{uuid.uuid4().hex[:8]}", system)
         resp = await chat.send_message(UserMessage(text=prompt))
         text = resp.strip()

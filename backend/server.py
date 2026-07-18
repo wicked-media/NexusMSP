@@ -65,7 +65,7 @@ discover_and_register_routers()
 async def root():
     return {"message": "NexusOps API v3.0.0", "status": "operational"}
 
-# Health probes — MUST be lightweight + synchronous (no DB calls) so K8s readiness
+# Health probes â€” MUST be lightweight + synchronous (no DB calls) so K8s readiness
 # checks pass immediately even while seed_data / background tasks are warming up.
 # Both /health (unprefixed, used by ingress/K8s) and /api/health are exposed.
 @app.get("/health")
@@ -82,7 +82,7 @@ async def stripe_webhook(request: FastAPIRequest):
     if not stripe_key:
         return {"status": "stripe not configured"}
     try:
-        from emergentintegrations.payments.stripe.checkout import StripeCheckout
+        from app.services.stripe_checkout import StripeCheckout
         stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
         webhook_response = await stripe_checkout.handle_webhook(body, sig)
         if webhook_response.payment_status == "paid" and webhook_response.session_id:
@@ -207,7 +207,7 @@ async def _rustdesk_auto_sync_loop():
             await asyncio.sleep(60)
 
 async def _trmm_scheduled_broadcast_loop():
-    """Removed — TRMM has been replaced by NexusOps Agent. This stub keeps backwards-compat with any old references."""
+    """Removed â€” TRMM has been replaced by NexusOps Agent. This stub keeps backwards-compat with any old references."""
     return
 
 
@@ -250,7 +250,7 @@ async def _chain_reactions_loop():
                 except Exception as _e:
                     logger.debug(f"Storm broadcast skipped: {_e}")
 
-                # TRMM live sync removed — devices are now updated in real-time by the NexusOps Agent heartbeat.
+                # TRMM live sync removed â€” devices are now updated in real-time by the NexusOps Agent heartbeat.
             await asyncio.sleep(interval_min * 60)
         except Exception as e:
             logger.debug(f"Chain-reactions loop error: {e}")
@@ -342,7 +342,7 @@ async def _recurring_invoice_scheduler():
                         "new_total": round(subtotal, 2),
                         "delta": round(subtotal - old_total, 2),
                     })
-                    logger.info(f"Indexation applied (+{pct}%) → {ri.get('client_name')}: ${old_total:.2f} → ${subtotal:.2f}")
+                    logger.info(f"Indexation applied (+{pct}%) â†’ {ri.get('client_name')}: ${old_total:.2f} â†’ ${subtotal:.2f}")
             except Exception as _ie:
                 logger.debug(f"Indexation tick error: {_ie}")
 
@@ -443,14 +443,14 @@ async def _standup_digest_scheduler():
                         from app.routers.email_utils import send_email, is_resend_configured
                         if is_resend_configured():
                             html = (
-                                f"<h2>NexusOps Morning Standup · {today_tag}</h2>"
+                                f"<h2>NexusOps Morning Standup Â· {today_tag}</h2>"
                                 f"<pre style='font-family:inherit;white-space:pre-wrap'>{ai_brief}</pre>"
-                                f"<hr><small>Window: last {window_hours}h · {snap['new_ticket_count']} new tickets · "
-                                f"{len(snap['critical_open'])} critical · {snap['offline_devices']} offline devices.</small>"
+                                f"<hr><small>Window: last {window_hours}h Â· {snap['new_ticket_count']} new tickets Â· "
+                                f"{len(snap['critical_open'])} critical Â· {snap['offline_devices']} offline devices.</small>"
                             )
                             for addr in email_to:
                                 try:
-                                    await send_email(addr, f"Morning Standup Digest — {today_tag}", html)
+                                    await send_email(addr, f"Morning Standup Digest â€” {today_tag}", html)
                                 except Exception as _e:
                                     logger.warning(f"Digest email to {addr} failed: {_e}")
                     except Exception as e:

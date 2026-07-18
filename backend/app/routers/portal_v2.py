@@ -43,7 +43,7 @@ def create_portal_token(user_id: str, client_id: str, email: str):
 @router.post("/token-auth")
 async def portal_token_auth(data: dict):
     """Convert a legacy portal access token to a V2 portal session.
-    Used when users access /portal/:token links — auto-redirects to V2."""
+    Used when users access /portal/:token links â€” auto-redirects to V2."""
     token = data.get("token", "")
     if not token:
         raise HTTPException(status_code=400, detail="Token required")
@@ -64,7 +64,7 @@ async def portal_token_auth(data: dict):
             portal_user = await db.portal_users.find_one({"client_id": cid}, {"_id": 0})
 
     if not portal_user:
-        # No portal user exists — return info to show limited view
+        # No portal user exists â€” return info to show limited view
         client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
         return {"authenticated": False, "client_name": client.get("name", "") if client else "", "client_id": cid}
 
@@ -155,7 +155,7 @@ async def portal_enable_2fa(data: dict, user: dict = Depends(get_portal_user)):
 
     totp = pyotp.TOTP(secret)
     if not totp.verify(code, valid_window=1):
-        raise HTTPException(status_code=400, detail="Invalid code — try again")
+        raise HTTPException(status_code=400, detail="Invalid code â€” try again")
 
     await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_enabled": True}})
     return {"message": "2FA enabled successfully"}
@@ -502,7 +502,7 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
 
     def _fmt_dt(iso):
         if not iso:
-            return "—"
+            return "â€”"
         try:
             dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
             return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -551,7 +551,7 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
 
     row("Client", rec.get("client_name"))
     row("Initiated by", f"{rec.get('portal_user_name')} ({rec.get('portal_user_email')})")
-    row("Device", f"{rec.get('device_name')} ({rec.get('device_os', '—')})")
+    row("Device", f"{rec.get('device_name')} ({rec.get('device_os', 'â€”')})")
     row("RustDesk ID", rec.get("rustdesk_id"))
     row("Started at", _fmt_dt(rec.get("started_at")))
     row("Ended at", _fmt_dt(rec.get("ended_at")))
@@ -585,7 +585,7 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
     pdf.set_y(-25)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(120, 120, 120)
-    pdf.cell(0, 5, f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · {msp_name}", ln=1, align="C")
+    pdf.cell(0, 5, f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} Â· {msp_name}", ln=1, align="C")
     pdf.cell(0, 5, "This document is a tamper-evident audit record of a client-initiated remote access session.", ln=1, align="C")
 
     pdf_bytes = bytes(pdf.output(dest="S"))
@@ -653,8 +653,8 @@ async def portal_pay_invoice(invoice_id: str, data: dict, user: dict = Depends(g
         raise HTTPException(status_code=400, detail="Invoice already fully paid")
 
     stripe_key = os.environ.get("STRIPE_API_KEY", "")
-    if not stripe_key or stripe_key == "sk_test_emergent":
-        # Mock payment for demo — record as pending
+    if not stripe_key or stripe_key == "sk_test_placeholder":
+        # Mock payment for demo â€” record as pending
         payment = {
             "id": str(uuid.uuid4()),
             "method": "portal_payment",
@@ -670,7 +670,7 @@ async def portal_pay_invoice(invoice_id: str, data: dict, user: dict = Depends(g
     cancel_url = f"{origin_url}/portal-dashboard?payment=cancelled"
 
     try:
-        from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+        from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
         stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=f"{origin_url}/api/webhook/stripe")
         checkout_req = CheckoutSessionRequest(
             amount=balance,

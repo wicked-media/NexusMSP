@@ -91,7 +91,7 @@ async def get_payment_page_data(token: str):
         raise HTTPException(status_code=410, detail="This payment link has been revoked")
 
     if link.get("status") == "completed":
-        raise HTTPException(status_code=410, detail="This payment link has already been used — invoice is fully paid")
+        raise HTTPException(status_code=410, detail="This payment link has already been used â€” invoice is fully paid")
 
     expires_at = link.get("expires_at", "")
     if expires_at and datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
@@ -163,7 +163,7 @@ async def pay_with_card(token: str, data: dict):
     success_url = f"{origin_url}/pay/{token}?payment_status=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin_url}/pay/{token}?payment_status=cancelled"
 
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
     stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=f"{origin_url}/api/webhook/stripe")
     checkout_req = CheckoutSessionRequest(
         amount=round(amount, 2),
@@ -294,7 +294,7 @@ async def confirm_payment(token: str, session_id: str = ""):
     if not stripe_key:
         return {"status": "stripe_not_configured"}
 
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    from app.services.stripe_checkout import StripeCheckout
     stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
 
     try:

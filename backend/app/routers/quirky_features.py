@@ -1,31 +1,31 @@
-"""Quirky features bundle — gamification, easter eggs, ambient delight.
+"""Quirky features bundle â€” gamification, easter eggs, ambient delight.
 
 Achievements:
-  GET  /api/team/{id}/achievements        — earned + locked badges
-  POST /api/achievements/recompute        — recalc for everyone (scheduler)
+  GET  /api/team/{id}/achievements        â€” earned + locked badges
+  POST /api/achievements/recompute        â€” recalc for everyone (scheduler)
 
 Tech profile:
-  GET  /api/team/{id}/profile             — full radar+stats+quests page
+  GET  /api/team/{id}/profile             â€” full radar+stats+quests page
 
 Daily quests:
-  GET  /api/team/{id}/daily-quests        — 3 micro-quests for today
+  GET  /api/team/{id}/daily-quests        â€” 3 micro-quests for today
 
 Friday wrap-up:
-  GET  /api/wrap-up/friday-reel           — text-storyboard for the week
+  GET  /api/wrap-up/friday-reel           â€” text-storyboard for the week
 
 Quirky data:
-  GET  /api/clients/{id}/trading-card     — client trading card stats
-  GET  /api/clients/{id}/mood-ring        — 30-day sentiment colour
-  POST /api/network/slow-internet/{client_id} — instant "is it the VPN" verdict
-  GET  /api/devices/graveyard             — decommissioned device tombstones
-  GET  /api/devices/family-tree/{client_id} — devices grouped by model/age
-  GET  /api/team/{id}/brain-bucket  / POST — private scratchpad
-  GET  /api/security/threat-dragon        — visual hunger meter
-  GET  /api/security/password-pet/{client_id} — password hygiene avatar
-  GET  /api/clients/{id}/birthdays        — upcoming contact b'days
-  GET  /api/ambient/weather-mode          — ambient dashboard mood
-  POST /api/ambient/launch-event          — record a 'rocket launch' moment
-  GET  /api/ambient/recent-launches       — recent celebratory events
+  GET  /api/clients/{id}/trading-card     â€” client trading card stats
+  GET  /api/clients/{id}/mood-ring        â€” 30-day sentiment colour
+  POST /api/network/slow-internet/{client_id} â€” instant "is it the VPN" verdict
+  GET  /api/devices/graveyard             â€” decommissioned device tombstones
+  GET  /api/devices/family-tree/{client_id} â€” devices grouped by model/age
+  GET  /api/team/{id}/brain-bucket  / POST â€” private scratchpad
+  GET  /api/security/threat-dragon        â€” visual hunger meter
+  GET  /api/security/password-pet/{client_id} â€” password hygiene avatar
+  GET  /api/clients/{id}/birthdays        â€” upcoming contact b'days
+  GET  /api/ambient/weather-mode          â€” ambient dashboard mood
+  POST /api/ambient/launch-event          â€” record a 'rocket launch' moment
+  GET  /api/ambient/recent-launches       â€” recent celebratory events
 """
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone, timedelta
@@ -61,38 +61,38 @@ def _parse_iso(s):
         return None
 
 
-# ═══════════════════════ ACHIEVEMENTS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• ACHIEVEMENTS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 ACHIEVEMENTS = [
-    {"key": "first_blood", "title": "First Blood", "icon": "🩸", "rarity": "common",
+    {"key": "first_blood", "title": "First Blood", "icon": "ðŸ©¸", "rarity": "common",
      "description": "Close your first ticket"},
-    {"key": "decade", "title": "Decade", "icon": "🔟", "rarity": "common",
+    {"key": "decade", "title": "Decade", "icon": "ðŸ”Ÿ", "rarity": "common",
      "description": "Close 10 tickets"},
-    {"key": "century", "title": "Century", "icon": "💯", "rarity": "rare",
+    {"key": "century", "title": "Century", "icon": "ðŸ’¯", "rarity": "rare",
      "description": "Close 100 tickets"},
-    {"key": "five_alarm", "title": "Five-Alarm Hero", "icon": "🚒", "rarity": "rare",
+    {"key": "five_alarm", "title": "Five-Alarm Hero", "icon": "ðŸš’", "rarity": "rare",
      "description": "Close 5 critical tickets"},
-    {"key": "sla_savior", "title": "SLA Savior", "icon": "⏱️", "rarity": "epic",
+    {"key": "sla_savior", "title": "SLA Savior", "icon": "â±ï¸", "rarity": "epic",
      "description": "Close 5 tickets within SLA in a row"},
-    {"key": "runbook_author", "title": "Runbook Author", "icon": "📖", "rarity": "rare",
+    {"key": "runbook_author", "title": "Runbook Author", "icon": "ðŸ“–", "rarity": "rare",
      "description": "Publish your first runbook"},
-    {"key": "drill_sergeant", "title": "Drill Sergeant", "icon": "🪖", "rarity": "rare",
+    {"key": "drill_sergeant", "title": "Drill Sergeant", "icon": "ðŸª–", "rarity": "rare",
      "description": "Complete 5 restore drills"},
-    {"key": "blueprint_master", "title": "Blueprint Master", "icon": "📐", "rarity": "epic",
+    {"key": "blueprint_master", "title": "Blueprint Master", "icon": "ðŸ“", "rarity": "epic",
      "description": "Have 10 blueprint-resolved tickets"},
-    {"key": "sentiment_saver", "title": "Sentiment Saver", "icon": "😊", "rarity": "epic",
+    {"key": "sentiment_saver", "title": "Sentiment Saver", "icon": "ðŸ˜Š", "rarity": "epic",
      "description": "Turn 3 escalating tickets into resolved-positive"},
-    {"key": "early_bird", "title": "Early Bird", "icon": "🐦", "rarity": "common",
+    {"key": "early_bird", "title": "Early Bird", "icon": "ðŸ¦", "rarity": "common",
      "description": "First standup attendance of the week"},
-    {"key": "night_owl", "title": "Night Owl", "icon": "🦉", "rarity": "rare",
+    {"key": "night_owl", "title": "Night Owl", "icon": "ðŸ¦‰", "rarity": "rare",
      "description": "Resolve a ticket between 10 PM and 6 AM"},
-    {"key": "polyglot", "title": "Polyglot", "icon": "🗣️", "rarity": "epic",
+    {"key": "polyglot", "title": "Polyglot", "icon": "ðŸ—£ï¸", "rarity": "epic",
      "description": "Earn XP in 5 different skill categories"},
-    {"key": "ghost_buster", "title": "Ghost Buster", "icon": "👻", "rarity": "rare",
+    {"key": "ghost_buster", "title": "Ghost Buster", "icon": "ðŸ‘»", "rarity": "rare",
      "description": "Resolve 3 tickets re-opened by sentiment-saver"},
-    {"key": "cyber_shield", "title": "Cyber Shield", "icon": "🛡️", "rarity": "epic",
+    {"key": "cyber_shield", "title": "Cyber Shield", "icon": "ðŸ›¡ï¸", "rarity": "epic",
      "description": "Maintain client at insurable tier for 30+ days"},
-    {"key": "money_maker", "title": "Money Maker", "icon": "💰", "rarity": "legendary",
+    {"key": "money_maker", "title": "Money Maker", "icon": "ðŸ’°", "rarity": "legendary",
      "description": "Generate $100K+ in tracked revenue"},
 ]
 
@@ -120,7 +120,7 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
                                                 "blueprint_id": {"$exists": True, "$ne": None}})
     if bp_done >= 10: earned.append("blueprint_master")
 
-    # Polyglot — XP across 5+ categories
+    # Polyglot â€” XP across 5+ categories
     closed_tx = await db.tickets.find(
         {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "category": 1}
@@ -128,7 +128,7 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     cats = {t.get("category") for t in closed_tx if t.get("category")}
     if len(cats) >= 5: earned.append("polyglot")
 
-    # Night owl — any ticket resolved between 22:00 and 06:00
+    # Night owl â€” any ticket resolved between 22:00 and 06:00
     night = await db.tickets.find(
         {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
         {"_id": 0, "resolved_at": 1}
@@ -162,7 +162,7 @@ async def user_achievements(tech_id: str, current_user: dict = Depends(get_curre
     }
 
 
-# ═══════════════════════ TECH PROFILE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TECH PROFILE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/profile")
 async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -199,7 +199,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
             resolutions.append((b - a).total_seconds() / 3600)
     avg_resolve_hrs = round(sum(resolutions) / len(resolutions), 1) if resolutions else None
 
-    # ─── New: CSAT score (avg of responded surveys assigned to this tech) ───
+    # â”€â”€â”€ New: CSAT score (avg of responded surveys assigned to this tech) â”€â”€â”€
     csat_avg = None
     csat_count = 0
     try:
@@ -214,13 +214,13 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     except Exception:
         pass
 
-    # ─── New: 5 most recent closed tickets ───
+    # â”€â”€â”€ New: 5 most recent closed tickets â”€â”€â”€
     recent_closed = await db.tickets.find(
         {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
     ).sort("resolved_at", -1).limit(5).to_list(5)
 
-    # ─── New: 7-day x 24-hour activity heatmap from ticket activity (created_at + resolved_at) ───
+    # â”€â”€â”€ New: 7-day x 24-hour activity heatmap from ticket activity (created_at + resolved_at) â”€â”€â”€
     heatmap = [[0] * 24 for _ in range(7)]
     for t in closed_tx[-500:]:
         for key in ("created_at", "resolved_at"):
@@ -228,14 +228,14 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
             if d:
                 heatmap[d.weekday()][d.hour] += 1
 
-    # ─── New: Specialties / Certifications (editable via PUT /technicians/{id}/profile) ───
+    # â”€â”€â”€ New: Specialties / Certifications (editable via PUT /technicians/{id}/profile) â”€â”€â”€
     tech_doc = await db.technician_profiles.find_one({"user_id": u["id"]}, {"_id": 0}) or {}
     specialties = tech_doc.get("specialties") or []
     certifications = tech_doc.get("certifications") or []
     bio = tech_doc.get("bio") or ""
     timezone = tech_doc.get("timezone") or ""
     on_call = bool(tech_doc.get("on_call", False))
-    working_hours = tech_doc.get("working_hours") or "09:00–17:00"
+    working_hours = tech_doc.get("working_hours") or "09:00â€“17:00"
 
     return {
         "tech_id": u["id"],
@@ -264,7 +264,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     }
 
 
-# ═══════════════════════ DAILY QUESTS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DAILY QUESTS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/daily-quests")
 async def daily_quests(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -280,13 +280,13 @@ async def daily_quests(tech_id: str, current_user: dict = Depends(get_current_us
     open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": u.get("name")}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
     quest_pool = [
-        {"key": "close_one_p3", "title": "Close 1 low/normal-priority ticket", "xp": 25, "icon": "🎯"},
-        {"key": "close_one_critical", "title": "Close 1 critical ticket", "xp": 75, "icon": "🚒"},
-        {"key": "publish_runbook", "title": "Publish 1 runbook from a closed ticket", "xp": 50, "icon": "📖"},
-        {"key": "complete_drill", "title": "Complete 1 backup drill", "xp": 60, "icon": "🪖"},
-        {"key": "client_recap", "title": "Send a Monthly Recap email", "xp": 30, "icon": "✉️"},
-        {"key": "blueprint_apply", "title": "Apply a blueprint to 1 ticket", "xp": 20, "icon": "📐"},
-        {"key": "respond_under_15", "title": "Respond to 3 tickets within 15 minutes", "xp": 40, "icon": "⚡"},
+        {"key": "close_one_p3", "title": "Close 1 low/normal-priority ticket", "xp": 25, "icon": "ðŸŽ¯"},
+        {"key": "close_one_critical", "title": "Close 1 critical ticket", "xp": 75, "icon": "ðŸš’"},
+        {"key": "publish_runbook", "title": "Publish 1 runbook from a closed ticket", "xp": 50, "icon": "ðŸ“–"},
+        {"key": "complete_drill", "title": "Complete 1 backup drill", "xp": 60, "icon": "ðŸª–"},
+        {"key": "client_recap", "title": "Send a Monthly Recap email", "xp": 30, "icon": "âœ‰ï¸"},
+        {"key": "blueprint_apply", "title": "Apply a blueprint to 1 ticket", "xp": 20, "icon": "ðŸ“"},
+        {"key": "respond_under_15", "title": "Respond to 3 tickets within 15 minutes", "xp": 40, "icon": "âš¡"},
     ]
     chosen = random.sample(quest_pool, 3)
     doc = {
@@ -304,7 +304,7 @@ async def daily_quests(tech_id: str, current_user: dict = Depends(get_current_us
     return doc
 
 
-# ═══════════════════════ FRIDAY WRAP-UP REEL ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• FRIDAY WRAP-UP REEL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/wrap-up/friday-reel")
 async def friday_reel(current_user: dict = Depends(get_current_user)):
@@ -328,11 +328,11 @@ async def friday_reel(current_user: dict = Depends(get_current_user)):
     ).limit(50).to_list(50)
     funniest = sorted(funniest, key=lambda x: -len(x.get("title", "")))[:1]
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     storyboard = None
     if api_key:
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            from app.services.ai_provider import LlmChat, UserMessage
             chat = LlmChat(api_key=api_key, session_id=f"reel-{uuid.uuid4().hex[:8]}",
                            system_message="You are creating a fun, motivational 'week-in-review' for an MSP team. Output 5 short scene captions (one per scene), each 1-2 sentences. Plain text. No preamble. Number them 1. 2. 3. 4. 5."
                           ).with_model(MODEL_PROVIDER, MODEL_NAME)
@@ -355,7 +355,7 @@ async def friday_reel(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ TRADING CARD ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TRADING CARD â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/trading-card")
 async def client_trading_card(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -400,13 +400,13 @@ async def client_trading_card(client_id: str, current_user: dict = Depends(get_c
 
 
 def _client_tagline(rarity: str, tickets: int, years: float) -> str:
-    if rarity == "legendary": return "A whale of a partner — handle with care."
+    if rarity == "legendary": return "A whale of a partner â€” handle with care."
     if years > 5: return "Old-school loyal."
     if tickets > 100: return "High-touch, high-trust."
     return "Steady and reliable."
 
 
-# ═══════════════════════ MOOD RING ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MOOD RING â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/mood-ring")
 async def client_mood_ring(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -435,7 +435,7 @@ async def client_mood_ring(client_id: str, current_user: dict = Depends(get_curr
     return {"client_id": client_id, "colour": c, "score": round(avg, 2), "samples": len(sent_logs), "label": label}
 
 
-# ═══════════════════════ SLOW INTERNET DETECTIVE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• SLOW INTERNET DETECTIVE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/network/slow-internet/{client_id}")
 async def slow_internet_detective(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -456,7 +456,7 @@ async def slow_internet_detective(client_id: str, current_user: dict = Depends(g
     reasons = []
 
     if offline > online * 0.3:
-        verdict = "Wide outage — check the WAN link first"
+        verdict = "Wide outage â€” check the WAN link first"
         confidence = 0.85
         reasons.append(f"{offline} devices offline")
     elif vpn_count > 5 and avg_ping_ms > 60:
@@ -468,11 +468,11 @@ async def slow_internet_detective(client_id: str, current_user: dict = Depends(g
         confidence = 0.65
         reasons.append(f"jitter {jitter_ms}ms is high")
     elif error_devices:
-        verdict = "Device-specific — only some endpoints affected"
+        verdict = "Device-specific â€” only some endpoints affected"
         confidence = 0.7
         reasons.append(f"{len(error_devices)} devices with high error counts")
     else:
-        verdict = "Looks healthy — escalate to ISP"
+        verdict = "Looks healthy â€” escalate to ISP"
         reasons.append(f"ping {avg_ping_ms}ms, down {speed_down}Mbps, jitter {jitter_ms}ms")
 
     return {
@@ -486,7 +486,7 @@ async def slow_internet_detective(client_id: str, current_user: dict = Depends(g
     }
 
 
-# ═══════════════════════ DEVICE GRAVEYARD ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DEVICE GRAVEYARD â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/device-graveyard")
 async def device_graveyard(current_user: dict = Depends(get_current_user)):
@@ -515,10 +515,10 @@ def _epitaph(dtype, days, reason):
         return f"A faithful {dtype or 'device'} for {years} years. Rest easy, old friend."
     if years > 4:
         return f"{years} years of dependable service."
-    return f"Brief but bright — {years} years."
+    return f"Brief but bright â€” {years} years."
 
 
-# ═══════════════════════ DEVICE FAMILY TREE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DEVICE FAMILY TREE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/device-family-tree/{client_id}")
 async def device_family_tree(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -545,12 +545,12 @@ async def device_family_tree(client_id: str, current_user: dict = Depends(get_cu
     return {"families": out, "client_id": client_id}
 
 
-# ═══════════════════════ BRAIN BUCKET ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• BRAIN BUCKET â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/brain-bucket")
 async def get_brain_bucket(tech_id: str, current_user: dict = Depends(get_current_user)):
     if tech_id != current_user.get("id"):
-        raise HTTPException(403, "Brain bucket is private — not your bucket")
+        raise HTTPException(403, "Brain bucket is private â€” not your bucket")
     doc = await db.brain_bucket.find_one({"user_id": tech_id}, {"_id": 0}) or {"user_id": tech_id, "notes": ""}
     return doc
 
@@ -568,7 +568,7 @@ async def save_brain_bucket(tech_id: str, payload: dict = Body(...), current_use
     return {"ok": True}
 
 
-# ═══════════════════════ THREAT DRAGON ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• THREAT DRAGON â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/security/threat-dragon")
 async def threat_dragon(current_user: dict = Depends(get_current_user)):
@@ -576,16 +576,16 @@ async def threat_dragon(current_user: dict = Depends(get_current_user)):
     crit_alerts = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}, "severity": "critical"})
 
     if open_alerts == 0:
-        mood, label, emoji = "sleeping_kitten", "All quiet — kitten is sleeping", "😺"
+        mood, label, emoji = "sleeping_kitten", "All quiet â€” kitten is sleeping", "ðŸ˜º"
         size_pct = 10
     elif open_alerts < 5:
-        mood, label, emoji = "drowsy_dragon", "Small dragon, mostly napping", "🐉"
+        mood, label, emoji = "drowsy_dragon", "Small dragon, mostly napping", "ðŸ‰"
         size_pct = 30
     elif open_alerts < 15:
-        mood, label, emoji = "hungry_dragon", "Dragon is hungry, alert the team", "🔥🐉"
+        mood, label, emoji = "hungry_dragon", "Dragon is hungry, alert the team", "ðŸ”¥ðŸ‰"
         size_pct = 65
     else:
-        mood, label, emoji = "raging_dragon", "RAGING DRAGON — feed it now", "🔥🔥🐉🔥🔥"
+        mood, label, emoji = "raging_dragon", "RAGING DRAGON â€” feed it now", "ðŸ”¥ðŸ”¥ðŸ‰ðŸ”¥ðŸ”¥"
         size_pct = 100
 
     return {
@@ -598,7 +598,7 @@ async def threat_dragon(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ PASSWORD PET ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• PASSWORD PET â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/security/password-pet/{client_id}")
 async def password_pet(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -610,16 +610,16 @@ async def password_pet(client_id: str, current_user: dict = Depends(get_current_
     health = round((mfa / total * 100) - (weak / total * 50) - (breached / total * 100))
     health = max(0, min(100, health))
 
-    if health >= 80: state, emoji = "happy", "🐶✨"
-    elif health >= 50: state, emoji = "ok", "🐶"
-    elif health >= 25: state, emoji = "sick", "🐶💧"
-    else: state, emoji = "dying", "💀🐶"
+    if health >= 80: state, emoji = "happy", "ðŸ¶âœ¨"
+    elif health >= 50: state, emoji = "ok", "ðŸ¶"
+    elif health >= 25: state, emoji = "sick", "ðŸ¶ðŸ’§"
+    else: state, emoji = "dying", "ðŸ’€ðŸ¶"
 
     return {"client_id": client_id, "health": health, "state": state, "emoji": emoji,
             "stats": {"mfa_pct": round(mfa / total * 100), "weak": weak, "breached": breached, "total": total}}
 
 
-# ═══════════════════════ BIRTHDAYS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• BIRTHDAYS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/birthdays")
 async def upcoming_birthdays(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -662,7 +662,7 @@ async def upcoming_birthdays(client_id: str, current_user: dict = Depends(get_cu
     return {"client_id": client_id, "upcoming": upcoming}
 
 
-# ═══════════════════════ AMBIENT WEATHER MODE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• AMBIENT WEATHER MODE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/ambient/weather-mode")
 async def weather_mode(current_user: dict = Depends(get_current_user)):
@@ -691,7 +691,7 @@ async def weather_mode(current_user: dict = Depends(get_current_user)):
             "weekday": now.weekday(), "hour": now.hour}
 
 
-# ═══════════════════════ LAUNCH EVENTS (rocket animation triggers) ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• LAUNCH EVENTS (rocket animation triggers) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/ambient/launch-event")
 async def record_launch(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):

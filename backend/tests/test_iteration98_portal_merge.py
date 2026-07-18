@@ -160,7 +160,7 @@ class TestPortalInvoices:
         assert response.status_code == 200
         data = response.json()
         
-        # Should return demo mode response (Stripe key is sk_test_emergent)
+        # Should return demo mode response when Stripe uses the test placeholder.
         assert data.get("status") == "demo"
         assert "message" in data
         assert "balance" in data

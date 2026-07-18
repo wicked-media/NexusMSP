@@ -7,8 +7,8 @@ from app.auth import get_current_user
 router = APIRouter()
 
 async def _get_ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})

@@ -1,9 +1,9 @@
-"""M365 Command Center — CIPP-style multi-tenant Microsoft 365 management.
+"""M365 Command Center â€” CIPP-style multi-tenant Microsoft 365 management.
 
 This single router covers:
   M1  Tenants list, health metrics, cross-tenant user list, universal search,
       deep links, M365 Connection settings.
-  M2  Standards Engine — CRUD templates, scheduler, drift detection,
+  M2  Standards Engine â€” CRUD templates, scheduler, drift detection,
       auto-remediation, BPA reports + trend.
   M3  GDAP relationships table, role templates, expiry alerts,
       Offboarding Wizard.
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ═════════════════════════ helpers ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• helpers â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -45,8 +45,8 @@ def _days_ago(n):
 
 
 async def _ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
@@ -65,7 +65,7 @@ def _connection_status(s: dict) -> str:
     return "live" if all(s.get(k) for k in needed) else "mock"
 
 
-# ═════════════════════════ Mock data seeding ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Mock data seeding â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 MOCK_TENANT_NAMES = [
     ("Acme Corporation", "acme.onmicrosoft.com", 145, 89.5, 64),
@@ -107,12 +107,12 @@ MOCK_GDAP_ROLES = [
 
 
 async def _seed_if_empty():
-    """Insert realistic mock M365 data on first request — idempotent.
+    """Insert realistic mock M365 data on first request â€” idempotent.
     Tagged with source='m365cc' so it doesn't collide with the legacy CIPP integration
     that also writes to db.m365_users (without that tag)."""
     if await db.m365_tenants.count_documents({"source": "m365cc"}) > 0:
         return
-    logger.info("Seeding M365 mock data…")
+    logger.info("Seeding M365 mock dataâ€¦")
     rng = random.Random(42)
     now = datetime.now(timezone.utc)
     tenants = []
@@ -212,14 +212,14 @@ async def _seed_if_empty():
             {"key": "require_mfa_guest", "name": "Require MFA for guests", "source": "Open Intune Baseline", "category": "identity", "severity": "high"},
             {"key": "block_unknown_countries", "name": "Block sign-ins from unknown countries", "source": "CyberDrain Baseline", "category": "location", "severity": "medium"},
             {"key": "require_compliant_device", "name": "Require compliant device", "source": "Microsoft Baseline", "category": "device", "severity": "high"},
-            {"key": "session_lifetime_office", "name": "Session lifetime — Office apps", "source": "Open Intune Baseline", "category": "session", "severity": "medium"},
+            {"key": "session_lifetime_office", "name": "Session lifetime â€” Office apps", "source": "Open Intune Baseline", "category": "session", "severity": "medium"},
             {"key": "block_high_risk_signin", "name": "Block high-risk sign-ins", "source": "Microsoft Baseline", "category": "risk", "severity": "high"},
             {"key": "require_terms_of_use", "name": "Require Terms of Use", "source": "Custom", "category": "governance", "severity": "low"},
         ]
         await db.m365_ca_templates.insert_many([{**c, "id": f"cat-{c['key']}", "created_at": _now_iso()} for c in ca_templates])
 
 
-# ═════════════════════════ Connection Settings ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Connection Settings â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/connection")
 async def get_connection(current_user: dict = Depends(get_current_user)):
@@ -260,7 +260,7 @@ async def test_connection(current_user: dict = Depends(get_current_user)):
     return {"ok": True, "mode": "live", "scope": "GDAP.Read.All Directory.Read.All Policy.Read.All"}
 
 
-# ═════════════════════════ M1: Tenants + Users + Universal Search ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• M1: Tenants + Users + Universal Search â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/tenants")
 async def list_tenants(current_user: dict = Depends(get_current_user)):
@@ -351,7 +351,7 @@ async def universal_search(q: str = Query(..., min_length=2), current_user: dict
     return {"users": users, "tenants": tenants, "gdap": gdap, "count": len(users) + len(tenants) + len(gdap)}
 
 
-# ═════════════════════════ M2: Standards Engine ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• M2: Standards Engine â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/standards")
 async def list_standards(category: str | None = None, current_user: dict = Depends(get_current_user)):
@@ -379,7 +379,7 @@ async def update_standard(sid: str, data: dict, current_user: dict = Depends(get
 
 @router.post("/m365/standards/{sid}/run")
 async def run_standard(sid: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
-    """Run a standard now — performs BPA + (optionally) remediation. Returns per-tenant
+    """Run a standard now â€” performs BPA + (optionally) remediation. Returns per-tenant
     results with compliant / drifted / remediated counts."""
     await _seed_if_empty()
     std = await db.m365_standards.find_one({"id": sid}, {"_id": 0})
@@ -418,7 +418,7 @@ async def run_standard(sid: str, data: dict | None = None, current_user: dict = 
                 summary["remediated"] += 1
             else:
                 record["action"] = "drift_logged"
-                record["message"] = f"Drift detected for {std.get('key')} — manual review needed."
+                record["message"] = f"Drift detected for {std.get('key')} â€” manual review needed."
                 summary["drifted"] += 1
         else:
             summary["compliant"] += 1
@@ -483,7 +483,7 @@ async def bpa_report(tenant_id: str | None = None, current_user: dict = Depends(
     return {"matrix": matrix, "standards": [{"id": s["id"], "name": s["name"], "category": s.get("category"), "severity": s.get("severity")} for s in enabled]}
 
 
-# ═════════════════════════ M3: GDAP + Offboarding ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• M3: GDAP + Offboarding â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/gdap")
 async def list_gdap(expiring_only: bool = False, current_user: dict = Depends(get_current_user)):
@@ -514,9 +514,9 @@ async def list_role_templates(current_user: dict = Depends(get_current_user)):
     items = await db.m365_gdap_role_templates.find({}, {"_id": 0}).to_list(200)
     if not items:
         defaults = [
-            {"id": "tier1-helpdesk", "name": "Tier 1 — Helpdesk", "roles": ["Helpdesk Administrator", "User Administrator", "Reports Reader"]},
-            {"id": "tier2-l2-tech", "name": "Tier 2 — L2 Technician", "roles": ["User Administrator", "Authentication Administrator", "Application Administrator", "Exchange Administrator", "Intune Administrator", "Reports Reader"]},
-            {"id": "tier3-engineer", "name": "Tier 3 — Engineer", "roles": ["Cloud Application Administrator", "Conditional Access Administrator", "Security Administrator", "Intune Administrator", "Exchange Administrator", "Teams Administrator", "Reports Reader"]},
+            {"id": "tier1-helpdesk", "name": "Tier 1 â€” Helpdesk", "roles": ["Helpdesk Administrator", "User Administrator", "Reports Reader"]},
+            {"id": "tier2-l2-tech", "name": "Tier 2 â€” L2 Technician", "roles": ["User Administrator", "Authentication Administrator", "Application Administrator", "Exchange Administrator", "Intune Administrator", "Reports Reader"]},
+            {"id": "tier3-engineer", "name": "Tier 3 â€” Engineer", "roles": ["Cloud Application Administrator", "Conditional Access Administrator", "Security Administrator", "Intune Administrator", "Exchange Administrator", "Teams Administrator", "Reports Reader"]},
             {"id": "billing-only", "name": "Billing only", "roles": ["License Administrator", "Reports Reader"]},
         ]
         await db.m365_gdap_role_templates.insert_many([{**d, "created_at": _now_iso()} for d in defaults])
@@ -563,9 +563,9 @@ async def start_offboarding(data: dict, current_user: dict = Depends(get_current
     if steps.get("convert_to_shared"):
         results.append({"step": "convert_to_shared", "ok": True, "message": "Mailbox converted to shared"})
     if steps.get("forward_email_to_manager") and data.get("forward_to_upn"):
-        results.append({"step": "forward_email_to_manager", "ok": True, "message": f"Forwarding → {data['forward_to_upn']}"})
+        results.append({"step": "forward_email_to_manager", "ok": True, "message": f"Forwarding â†’ {data['forward_to_upn']}"})
     if steps.get("transfer_onedrive") and data.get("transfer_onedrive_to_upn"):
-        results.append({"step": "transfer_onedrive", "ok": True, "message": f"OneDrive transferred → {data['transfer_onedrive_to_upn']}"})
+        results.append({"step": "transfer_onedrive", "ok": True, "message": f"OneDrive transferred â†’ {data['transfer_onedrive_to_upn']}"})
 
     log = {
         "id": str(uuid.uuid4()),
@@ -590,7 +590,7 @@ async def list_offboardings(current_user: dict = Depends(get_current_user)):
     return items
 
 
-# ═════════════════════════ M4: Security & Alerts ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• M4: Security & Alerts â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/mfa-analytics")
 async def mfa_analytics(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
@@ -714,7 +714,7 @@ async def get_aitm_page(current_user: dict = Depends(get_current_user)):
     return s.get("value") or {
         "enabled": False,
         "company_name": "Your Company",
-        "warning_text": "DO NOT LOGIN — If you see this message, the page you're on is fake. Close it immediately and report to IT.",
+        "warning_text": "DO NOT LOGIN â€” If you see this message, the page you're on is fake. Close it immediately and report to IT.",
         "primary_color": "#DC2626",
     }
 
@@ -757,7 +757,7 @@ body {{ padding-top: 80px !important; }}
 """
 
 
-# ═════════════════════════ AI Tenant Brief ═════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• AI Tenant Brief â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/m365/tenants/{tid}/ai-brief")
 async def tenant_ai_brief(tid: str, current_user: dict = Depends(get_current_user)):
@@ -776,10 +776,10 @@ async def tenant_ai_brief(tid: str, current_user: dict = Depends(get_current_use
         "gdap": gdap or {},
     }
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         chat = await _ai_chat(f"m365-brief-{tid}", "You are an MSP M365 analyst. Write a 4-bullet executive brief covering posture, risks, and 3 prioritised actions. Keep under 140 words.")
         resp = await chat.send_message(UserMessage(text=json.dumps(payload)))
         return {"brief": resp.strip(), "payload": payload}
     except Exception as e:
         logger.warning(f"AI brief failed: {e}")
-        return {"brief": f"{t.get('name')} — Secure Score {t.get('secure_score')}/100 (trend {t.get('secure_score_30d_trend'):+d}). MFA {t.get('mfa_enrolled_pct')}% enrolled; {users_no_mfa} users without MFA; {risky} risky sign-ins in 30 days. Prioritise: enforce MFA on holdouts, review GDAP expiry, run Standards Engine BPA.", "payload": payload}
+        return {"brief": f"{t.get('name')} â€” Secure Score {t.get('secure_score')}/100 (trend {t.get('secure_score_30d_trend'):+d}). MFA {t.get('mfa_enrolled_pct')}% enrolled; {users_no_mfa} users without MFA; {risky} risky sign-ins in 30 days. Prioritise: enforce MFA on holdouts, review GDAP expiry, run Standards Engine BPA.", "payload": payload}

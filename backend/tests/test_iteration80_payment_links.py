@@ -20,7 +20,7 @@ import requests
 import os
 import uuid
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://rmm-psa-build.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'http://127.0.0.1:8001').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
@@ -80,7 +80,7 @@ class TestPaymentLinksAdmin:
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert isinstance(data, list), "Expected list of payment links"
-        print(f"✓ Found {len(data)} payment links")
+        print(f"âœ“ Found {len(data)} payment links")
         
         # Verify structure if links exist
         if len(data) > 0:
@@ -89,7 +89,7 @@ class TestPaymentLinksAdmin:
             assert "token" in link, "Payment link should have token"
             assert "invoice_id" in link, "Payment link should have invoice_id"
             assert "status" in link, "Payment link should have status"
-            print(f"✓ Payment link structure verified: {link.get('invoice_number')} - {link.get('status')}")
+            print(f"âœ“ Payment link structure verified: {link.get('invoice_number')} - {link.get('status')}")
     
     def test_create_payment_link(self, auth_headers, test_invoice):
         """POST /api/payment-links - Create a new payment link"""
@@ -112,7 +112,7 @@ class TestPaymentLinksAdmin:
         assert "becs" in data["allowed_methods"], "Should allow BECS payments"
         assert "bank_transfer" in data["allowed_methods"], "Should allow bank transfers"
         
-        print(f"✓ Created payment link: {data['token'][:20]}...")
+        print(f"âœ“ Created payment link: {data['token'][:20]}...")
         print(f"  Invoice: {data.get('invoice_number')}")
         print(f"  Balance: ${data.get('balance_at_creation', 0):.2f}")
         print(f"  Expires: {data.get('expires_at')}")
@@ -125,14 +125,14 @@ class TestPaymentLinksAdmin:
         """POST /api/payment-links - Should fail without invoice_id"""
         response = requests.post(f"{BASE_URL}/api/payment-links", json={}, headers=auth_headers)
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected request without invoice_id")
+        print("âœ“ Correctly rejected request without invoice_id")
     
     def test_create_payment_link_invalid_invoice(self, auth_headers):
         """POST /api/payment-links - Should fail with non-existent invoice"""
         payload = {"invoice_id": "non-existent-invoice-id"}
         response = requests.post(f"{BASE_URL}/api/payment-links", json=payload, headers=auth_headers)
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ Correctly rejected non-existent invoice")
+        print("âœ“ Correctly rejected non-existent invoice")
     
     def test_revoke_payment_link(self, auth_headers, test_invoice):
         """DELETE /api/payment-links/{id} - Revoke a payment link"""
@@ -155,18 +155,18 @@ class TestPaymentLinksAdmin:
         
         data = response.json()
         assert "message" in data, "Should have success message"
-        print(f"✓ Revoked payment link: {link_id}")
+        print(f"âœ“ Revoked payment link: {link_id}")
         
         # Verify the link is now revoked via public endpoint
         public_response = requests.get(f"{BASE_URL}/api/pay/{link_token}")
         assert public_response.status_code == 410, f"Revoked link should return 410, got {public_response.status_code}"
-        print("✓ Revoked link correctly returns 410 Gone")
+        print("âœ“ Revoked link correctly returns 410 Gone")
     
     def test_revoke_nonexistent_link(self, auth_headers):
         """DELETE /api/payment-links/{id} - Should fail for non-existent link"""
         response = requests.delete(f"{BASE_URL}/api/payment-links/non-existent-id", headers=auth_headers)
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ Correctly rejected non-existent link revocation")
+        print("âœ“ Correctly rejected non-existent link revocation")
 
 
 class TestPublicPaymentEndpoints:
@@ -184,7 +184,7 @@ class TestPublicPaymentEndpoints:
             assert "balance" in data, "Should have balance"
             assert "allowed_methods" in data, "Should have allowed_methods"
             assert "payments" in data, "Should have payments array"
-            print(f"✓ Got payment page data for existing token")
+            print(f"âœ“ Got payment page data for existing token")
             print(f"  Invoice: {data.get('invoice_number')}")
             print(f"  Client: {data.get('client_name')}")
             print(f"  Balance: ${data.get('balance', 0):.2f}")
@@ -192,7 +192,7 @@ class TestPublicPaymentEndpoints:
             print(f"  Payments: {len(data.get('payments', []))}")
         elif response.status_code == 410:
             detail = response.json().get("detail", "")
-            print(f"✓ Token returned 410 (expected for expired/revoked/completed): {detail}")
+            print(f"âœ“ Token returned 410 (expected for expired/revoked/completed): {detail}")
         else:
             pytest.fail(f"Unexpected status {response.status_code}: {response.text}")
     
@@ -200,7 +200,7 @@ class TestPublicPaymentEndpoints:
         """GET /api/pay/{token} - Should fail for invalid token"""
         response = requests.get(f"{BASE_URL}/api/pay/invalid-token-12345")
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ Correctly rejected invalid token")
+        print("âœ“ Correctly rejected invalid token")
     
     def test_get_payment_page_data_new_link(self, auth_headers, test_invoice):
         """GET /api/pay/{token} - Get data for newly created link"""
@@ -227,7 +227,7 @@ class TestPublicPaymentEndpoints:
         assert "line_items" in data, "Should have line_items"
         assert "expires_at" in data, "Should have expires_at"
         
-        print(f"✓ Got payment page data for new link")
+        print(f"âœ“ Got payment page data for new link")
         print(f"  Total: ${data.get('total', 0):.2f}")
         print(f"  Balance: ${data.get('balance', 0):.2f}")
         print(f"  Line items: {len(data.get('line_items', []))}")
@@ -257,7 +257,7 @@ class TestPaymentMethods:
         # Initiate card payment
         pay_payload = {
             "amount": min(balance, 50.00),  # Pay partial amount
-            "origin_url": "https://rmm-psa-build.preview.emergentagent.com",
+            "origin_url": "http://127.0.0.1:8001",
             "currency": "aud"
         }
         response = requests.post(f"{BASE_URL}/api/pay/{token}/card", json=pay_payload)
@@ -267,13 +267,13 @@ class TestPaymentMethods:
             data = response.json()
             assert "url" in data, "Should have Stripe checkout URL"
             assert "session_id" in data, "Should have session_id"
-            print(f"✓ Card payment initiated successfully")
+            print(f"âœ“ Card payment initiated successfully")
             print(f"  Checkout URL: {data.get('url', '')[:50]}...")
             print(f"  Session ID: {data.get('session_id')}")
         elif response.status_code == 500:
             # Stripe might not be fully configured
             detail = response.json().get("detail", "")
-            print(f"⚠ Card payment returned 500 (Stripe config issue): {detail}")
+            print(f"âš  Card payment returned 500 (Stripe config issue): {detail}")
         else:
             pytest.fail(f"Unexpected status {response.status_code}: {response.text}")
     
@@ -294,12 +294,12 @@ class TestPaymentMethods:
         # Try with zero amount
         response = requests.post(f"{BASE_URL}/api/pay/{token}/card", json={"amount": 0})
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected zero amount")
+        print("âœ“ Correctly rejected zero amount")
         
         # Try with negative amount
         response = requests.post(f"{BASE_URL}/api/pay/{token}/card", json={"amount": -50})
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected negative amount")
+        print("âœ“ Correctly rejected negative amount")
     
     def test_bank_transfer_recording(self, auth_headers, test_invoice):
         """POST /api/pay/{token}/bank-transfer - Record bank transfer"""
@@ -337,7 +337,7 @@ class TestPaymentMethods:
         assert payment["amount"] == transfer_payload["amount"], "Amount should match"
         assert payment["reference"] == transfer_payload["reference"], "Reference should match"
         
-        print(f"✓ Bank transfer recorded successfully")
+        print(f"âœ“ Bank transfer recorded successfully")
         print(f"  Payment ID: {payment.get('id')}")
         print(f"  Amount: ${payment.get('amount', 0):.2f}")
         print(f"  Status: {payment.get('status')}")
@@ -369,12 +369,12 @@ class TestPaymentMethods:
             data = response.json()
             assert "client_secret" in data, "Should have client_secret"
             assert "payment_intent_id" in data, "Should have payment_intent_id"
-            print(f"✓ BECS payment initiated successfully")
+            print(f"âœ“ BECS payment initiated successfully")
             print(f"  Payment Intent: {data.get('payment_intent_id')}")
         elif response.status_code == 500:
             # Stripe might not be fully configured
             detail = response.json().get("detail", "")
-            print(f"⚠ BECS payment returned 500 (Stripe config issue): {detail}")
+            print(f"âš  BECS payment returned 500 (Stripe config issue): {detail}")
         else:
             pytest.fail(f"Unexpected status {response.status_code}: {response.text}")
     
@@ -398,12 +398,12 @@ class TestPaymentMethods:
             "reference": "TEST"
         })
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected disallowed payment method (bank_transfer)")
+        print("âœ“ Correctly rejected disallowed payment method (bank_transfer)")
         
         # Try BECS (not allowed)
         response = requests.post(f"{BASE_URL}/api/pay/{token}/becs", json={"amount": 50.00})
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected disallowed payment method (becs)")
+        print("âœ“ Correctly rejected disallowed payment method (becs)")
 
 
 class TestAdminBankTransferConfirmation:
@@ -448,7 +448,7 @@ class TestAdminBankTransferConfirmation:
         assert "message" in data, "Should have success message"
         assert "amount" in data, "Should have confirmed amount"
         
-        print(f"✓ Bank transfer confirmed by admin")
+        print(f"âœ“ Bank transfer confirmed by admin")
         print(f"  Amount: ${data.get('amount', 0):.2f}")
         
         # Verify the payment status changed
@@ -458,7 +458,7 @@ class TestAdminBankTransferConfirmation:
             confirmed_payment = next((p for p in payments if p.get("id") == payment_id), None)
             if confirmed_payment:
                 assert confirmed_payment["status"] == "paid", "Payment should be marked as paid"
-                print(f"✓ Payment status verified as 'paid'")
+                print(f"âœ“ Payment status verified as 'paid'")
     
     def test_confirm_nonexistent_payment(self, auth_headers):
         """POST /api/payment-links/{id}/confirm-transfer - Should fail for non-existent payment"""
@@ -473,7 +473,7 @@ class TestAdminBankTransferConfirmation:
                                 json={"payment_id": "non-existent-payment"},
                                 headers=auth_headers)
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected non-existent payment confirmation")
+        print("âœ“ Correctly rejected non-existent payment confirmation")
 
 
 class TestPaymentConfirmation:
@@ -499,7 +499,7 @@ class TestPaymentConfirmation:
         
         data = response.json()
         assert data.get("status") == "no_session", "Should return no_session status"
-        print("✓ Confirm endpoint handles missing session_id correctly")
+        print("âœ“ Confirm endpoint handles missing session_id correctly")
     
     def test_confirm_payment_invalid_session(self, auth_headers, test_invoice):
         """GET /api/pay/{token}/confirm - With invalid session_id"""
@@ -522,7 +522,7 @@ class TestPaymentConfirmation:
         data = response.json()
         # Should return check_failed or similar for invalid session
         assert data.get("status") in ["check_failed", "unpaid", "no_session"], f"Unexpected status: {data.get('status')}"
-        print(f"✓ Confirm endpoint handles invalid session_id: {data.get('status')}")
+        print(f"âœ“ Confirm endpoint handles invalid session_id: {data.get('status')}")
 
 
 class TestEdgeCases:
@@ -546,10 +546,10 @@ class TestEdgeCases:
         # Try to pay more than balance via card
         response = requests.post(f"{BASE_URL}/api/pay/{token}/card", json={
             "amount": balance + 1000,  # Way more than balance
-            "origin_url": "https://rmm-psa-build.preview.emergentagent.com"
+            "origin_url": "http://127.0.0.1:8001"
         })
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Correctly rejected card payment exceeding balance")
+        print("âœ“ Correctly rejected card payment exceeding balance")
     
     def test_bank_transfer_records_any_amount(self, auth_headers, test_invoice):
         """Bank transfers can record any amount (admin confirms actual receipt)"""
@@ -571,7 +571,7 @@ class TestEdgeCases:
             "reference": "BANK-TEST"
         })
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        print("✓ Bank transfer recorded (admin will verify actual amount)")
+        print("âœ“ Bank transfer recorded (admin will verify actual amount)")
     
     def test_payment_on_revoked_link(self, auth_headers, test_invoice):
         """Test that payments on revoked links are rejected"""
@@ -597,29 +597,29 @@ class TestEdgeCases:
             "reference": "REVOKED-TEST"
         })
         assert response.status_code == 410, f"Expected 410, got {response.status_code}"
-        print("✓ Correctly rejected payment on revoked link")
+        print("âœ“ Correctly rejected payment on revoked link")
     
     def test_unauthenticated_admin_endpoints(self):
         """Test that admin endpoints require authentication"""
         # List payment links without auth
         response = requests.get(f"{BASE_URL}/api/payment-links")
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ GET /api/payment-links requires auth")
+        print("âœ“ GET /api/payment-links requires auth")
         
         # Create payment link without auth
         response = requests.post(f"{BASE_URL}/api/payment-links", json={"invoice_id": "test"})
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ POST /api/payment-links requires auth")
+        print("âœ“ POST /api/payment-links requires auth")
         
         # Delete payment link without auth
         response = requests.delete(f"{BASE_URL}/api/payment-links/test-id")
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ DELETE /api/payment-links/{id} requires auth")
+        print("âœ“ DELETE /api/payment-links/{id} requires auth")
         
         # Confirm transfer without auth
         response = requests.post(f"{BASE_URL}/api/payment-links/test-id/confirm-transfer", json={})
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ POST /api/payment-links/{id}/confirm-transfer requires auth")
+        print("âœ“ POST /api/payment-links/{id}/confirm-transfer requires auth")
 
 
 if __name__ == "__main__":

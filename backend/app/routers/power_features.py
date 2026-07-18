@@ -1,4 +1,4 @@
-"""Power Features — 24 compounding composites on top of the Mega Bundle.
+"""Power Features â€” 24 compounding composites on top of the Mega Bundle.
 
 Chain reactions / automations:
   1  smart_assign           POST /api/tickets/{id}/smart-assign
@@ -59,10 +59,10 @@ MODEL_NAME = "claude-sonnet-4-5-20250929"
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "pow") -> str:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(503, "AI not configured")
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from app.services.ai_provider import LlmChat, UserMessage
     chat = LlmChat(
         api_key=api_key,
         session_id=f"{session_prefix}-{uuid.uuid4().hex[:8]}",
@@ -98,7 +98,7 @@ def _parse_iso(s) -> Optional[datetime]:
         return None
 
 
-# ═══════════════════════ 1. SMART ASSIGN ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 1. SMART ASSIGN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/tickets/{ticket_id}/smart-assign")
 async def smart_assign(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -194,7 +194,7 @@ async def smart_assign(ticket_id: str, current_user: dict = Depends(get_current_
     }
 
 
-# ═══════════════════════ 2. DOPPELGÄNGER RESOLUTION SUGGEST ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 2. DOPPELGÃ„NGER RESOLUTION SUGGEST â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/tickets/{ticket_id}/doppelganger-resolution")
 async def doppelganger_resolution(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -249,7 +249,7 @@ async def doppelganger_resolution(ticket_id: str, current_user: dict = Depends(g
     }
 
 
-# ═══════════════════════ 3. SENTIMENT → APOLOGY QUEUE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 3. SENTIMENT â†’ APOLOGY QUEUE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/ai/apology-queue/scan")
 async def apology_queue_scan(current_user: dict = Depends(get_current_user)):
@@ -286,7 +286,7 @@ async def apology_queue_scan(current_user: dict = Depends(get_current_user)):
     return {"queued_new": len(queued), "queue": pending, "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 4. SLA AUTO-PAGE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 4. SLA AUTO-PAGE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/sla-radar/auto-page")
 async def sla_auto_page(min_score: int = 85, current_user: dict = Depends(get_current_user)):
@@ -354,8 +354,8 @@ async def sla_auto_page(min_score: int = 85, current_user: dict = Depends(get_cu
         await db.notifications.insert_one({
             "id": uuid.uuid4().hex,
             "type": "sla_auto_page",
-            "title": f"🚨 SLA risk: {t.get('ticket_number')}",
-            "body": f"Score {row['score']}/100 — {t.get('title', '')[:100]}",
+            "title": f"ðŸš¨ SLA risk: {t.get('ticket_number')}",
+            "body": f"Score {row['score']}/100 â€” {t.get('title', '')[:100]}",
             "ref_type": "ticket",
             "ref_id": tid,
             "read": False,
@@ -367,7 +367,7 @@ async def sla_auto_page(min_score: int = 85, current_user: dict = Depends(get_cu
     return {"scanned": len(tx), "new_pages_fired": len(paged), "pages": paged}
 
 
-# ═══════════════════════ 5. PAYMENT PROMISE → CHURN BUMP ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 5. PAYMENT PROMISE â†’ CHURN BUMP â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/payment-promises/reconcile")
 async def promise_reconcile(current_user: dict = Depends(get_current_user)):
@@ -399,7 +399,7 @@ async def promise_reconcile(current_user: dict = Depends(get_current_user)):
     return {"broken_count": len(broken), "clients_bumped": len(bumped_clients), "bumps": dict(bumped_clients)}
 
 
-# ═══════════════════════ 6. COGNITIVE OVERLOAD REBALANCE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 6. COGNITIVE OVERLOAD REBALANCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/rebalance-suggestions")
 async def rebalance_suggestions(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -428,7 +428,7 @@ async def rebalance_suggestions(tech_id: str, current_user: dict = Depends(get_c
     }
 
 
-# ═══════════════════════ 7. PATCH → PAUSE TRMM ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 7. PATCH â†’ PAUSE TRMM â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/patches/anomalies/{patch_id}/pause-trmm")
 async def pause_trmm_for_patch(patch_id: str, current_user: dict = Depends(get_current_user)):
@@ -447,7 +447,7 @@ async def pause_trmm_for_patch(patch_id: str, current_user: dict = Depends(get_c
     await db.notifications.insert_one({
         "id": uuid.uuid4().hex,
         "type": "patch_trmm_paused",
-        "title": f"🛑 {matched} TRMM broadcast(s) paused",
+        "title": f"ðŸ›‘ {matched} TRMM broadcast(s) paused",
         "body": f"Paused because patch {patch_id} was flagged as an anomaly.",
         "ref_type": "patch",
         "ref_id": patch_id,
@@ -458,7 +458,7 @@ async def pause_trmm_for_patch(patch_id: str, current_user: dict = Depends(get_c
     return {"patch_id": patch_id, "broadcasts_paused": matched}
 
 
-# ═══════════════════════ 8. UNBILLED DOLLARS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 8. UNBILLED DOLLARS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/finance/unbilled-dollars")
 async def unbilled_dollars(current_user: dict = Depends(get_current_user)):
@@ -519,7 +519,7 @@ async def unbilled_dollars(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 9. REVENUE AT RISK ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 9. REVENUE AT RISK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/finance/revenue-at-risk")
 async def revenue_at_risk(current_user: dict = Depends(get_current_user)):
@@ -588,7 +588,7 @@ async def revenue_at_risk(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 10. PRICING COMPLIANCE ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 10. PRICING COMPLIANCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/finance/pricing-compliance")
 async def pricing_compliance(current_user: dict = Depends(get_current_user)):
@@ -647,7 +647,7 @@ async def pricing_compliance(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 11. COMMAND CENTER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 11. COMMAND CENTER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/command-center")
 async def command_center(current_user: dict = Depends(get_current_user)):
@@ -704,7 +704,7 @@ async def command_center(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ═══════════════════════ 12. CLIENT 360 DOSSIER PDF ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 12. CLIENT 360 DOSSIER PDF â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _safe_pdf(s) -> str:
     if s is None: return ""
@@ -743,7 +743,7 @@ async def client_dossier_pdf(client_id: str, current_user: dict = Depends(get_cu
     pdf.cell(0, 10, _safe_pdf(f"{c.get('name','')}"), ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_x(12)
-    pdf.cell(0, 6, _safe_pdf(f"Client Dossier · Generated {_now().strftime('%d %B %Y')}"), ln=True)
+    pdf.cell(0, 6, _safe_pdf(f"Client Dossier Â· Generated {_now().strftime('%d %B %Y')}"), ln=True)
 
     pdf.set_text_color(0, 0, 0)
     pdf.ln(12)
@@ -788,7 +788,7 @@ async def client_dossier_pdf(client_id: str, current_user: dict = Depends(get_cu
                     headers={"Content-Disposition": f'attachment; filename="dossier-{c.get("name","client").replace(" ","-").lower()}-{_now().strftime("%Y%m%d")}.pdf"'})
 
 
-# ═══════════════════════ 13. MONDAY PREP PACK ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 13. MONDAY PREP PACK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/briefings/monday-prep")
 async def monday_prep(current_user: dict = Depends(get_current_user)):
@@ -828,15 +828,15 @@ async def monday_prep(current_user: dict = Depends(get_current_user)):
 
 def _build_focus(new_, closed, crit, overdue, cold_est, churn):
     items = []
-    if crit > 0: items.append(f"{crit} critical ticket(s) still open — triage first")
-    if new_ > closed * 1.3: items.append("Ticket backlog growing — demand > throughput")
-    if overdue > 10000: items.append(f"${overdue:,.0f} overdue — AR chase required")
-    if cold_est > 5: items.append(f"{cold_est} stale estimates — follow up this week")
-    if churn > 3: items.append(f"{churn} high-churn clients — schedule QBRs")
-    return items or ["Quiet week — push preventative work (patch drills, blueprints)"]
+    if crit > 0: items.append(f"{crit} critical ticket(s) still open â€” triage first")
+    if new_ > closed * 1.3: items.append("Ticket backlog growing â€” demand > throughput")
+    if overdue > 10000: items.append(f"${overdue:,.0f} overdue â€” AR chase required")
+    if cold_est > 5: items.append(f"{cold_est} stale estimates â€” follow up this week")
+    if churn > 3: items.append(f"{churn} high-churn clients â€” schedule QBRs")
+    return items or ["Quiet week â€” push preventative work (patch drills, blueprints)"]
 
 
-# ═══════════════════════ 14. TEAM LEADERBOARD ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 14. TEAM LEADERBOARD â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/leaderboard")
 async def team_leaderboard(current_user: dict = Depends(get_current_user)):
@@ -882,7 +882,7 @@ async def team_leaderboard(current_user: dict = Depends(get_current_user)):
     return {"leaderboard": rows, "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 15. DRILL STREAK TRACKER ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 15. DRILL STREAK TRACKER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/streaks")
 async def drill_streaks(current_user: dict = Depends(get_current_user)):
@@ -922,7 +922,7 @@ async def drill_streaks(current_user: dict = Depends(get_current_user)):
     return {"streaks": streak_rows, "generated_at": now.isoformat()}
 
 
-# ═══════════════════════ 16. MONTHLY CLIENT RECAP ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 16. MONTHLY CLIENT RECAP â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/monthly-recap")
 async def monthly_recap(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -987,7 +987,7 @@ async def monthly_recap(client_id: str, current_user: dict = Depends(get_current
     }
 
 
-# ═══════════════════════ 17. INSURANCE ACTION PLAN ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 17. INSURANCE ACTION PLAN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/insurance-action-plan")
 async def insurance_action_plan(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -1033,7 +1033,7 @@ async def insurance_action_plan(client_id: str, current_user: dict = Depends(get
     }
 
 
-# ═══════════════════════ 18. PRE-CALL BRIEF ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 18. PRE-CALL BRIEF â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/pre-call-brief")
 async def pre_call_brief(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -1083,7 +1083,7 @@ async def pre_call_brief(client_id: str, current_user: dict = Depends(get_curren
     }
 
 
-# ═══════════════════════ 19. DAILY TECH BRIEFING ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 19. DAILY TECH BRIEFING â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/team/{tech_id}/daily-briefing")
 async def daily_briefing(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -1126,7 +1126,7 @@ async def daily_briefing(tech_id: str, current_user: dict = Depends(get_current_
     }
 
 
-# ═══════════════════════ 20. SCOPE DRIFT ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 20. SCOPE DRIFT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/tickets/{ticket_id}/scope-drift")
 async def scope_drift(ticket_id: str, current_user: dict = Depends(get_current_user)):
@@ -1158,7 +1158,7 @@ async def scope_drift(ticket_id: str, current_user: dict = Depends(get_current_u
     }
 
 
-# ═══════════════════════ 21. QUALITY AUDIT ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 21. QUALITY AUDIT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/tickets/quality-audit")
 async def quality_audit(payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
@@ -1214,7 +1214,7 @@ async def quality_audit(payload: dict = Body(default={}), current_user: dict = D
     return {"audited": audited, "sample_size": len(audited), "pool_size": len(closed), "generated_at": _now().isoformat()}
 
 
-# ═══════════════════════ 22. CAPACITY FORECAST ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 22. CAPACITY FORECAST â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/forecasting/capacity")
 async def capacity_forecast(current_user: dict = Depends(get_current_user)):
@@ -1282,7 +1282,7 @@ def _forecast_headline(techs, devices_30, backup_need):
     return f"Next 90 days you should: {', '.join(parts)}" if parts else "All systems within capacity"
 
 
-# ═══════════════════════ 23. CLIENT BENCHMARK ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 23. CLIENT BENCHMARK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/clients/{client_id}/benchmark")
 async def client_benchmark(client_id: str, current_user: dict = Depends(get_current_user)):
@@ -1309,9 +1309,9 @@ async def client_benchmark(client_id: str, current_user: dict = Depends(get_curr
 
     warnings = []
     if my_mfa < avg_mfa - 20:
-        warnings.append(f"MFA coverage is {avg_mfa - my_mfa}% below benchmark — insurers typically flag this.")
+        warnings.append(f"MFA coverage is {avg_mfa - my_mfa}% below benchmark â€” insurers typically flag this.")
     if my_edr < avg_edr - 20:
-        warnings.append(f"EDR coverage is {avg_edr - my_edr}% below benchmark — breach risk elevated.")
+        warnings.append(f"EDR coverage is {avg_edr - my_edr}% below benchmark â€” breach risk elevated.")
 
     return {
         "client_id": client_id,
@@ -1323,11 +1323,11 @@ async def client_benchmark(client_id: str, current_user: dict = Depends(get_curr
     }
 
 
-# ═══════════════════════ 24. SCHEDULE INSURANCE SNAPSHOT ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 24. SCHEDULE INSURANCE SNAPSHOT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/security/insurance-vault/schedule")
 async def schedule_insurance_snapshot(payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    """Register a recurring snapshot job (persisted — a scheduler can pick it up later)."""
+    """Register a recurring snapshot job (persisted â€” a scheduler can pick it up later)."""
     doc = {
         "id": uuid.uuid4().hex,
         "client_id": payload.get("client_id"),
@@ -1349,7 +1349,7 @@ async def list_insurance_schedules(current_user: dict = Depends(get_current_user
     return rows
 
 
-# ═══════════════════════ 25. OPS TICK — AUTOMATED CHAIN REACTIONS ═══════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 25. OPS TICK â€” AUTOMATED CHAIN REACTIONS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def run_chain_reactions(triggered_by: str = "scheduler") -> dict:
     """Run the 5 zero-touch chain reactions and return a compact summary."""
@@ -1382,7 +1382,7 @@ async def run_chain_reactions(triggered_by: str = "scheduler") -> dict:
     except Exception as e:
         summary["errors"]["promise_reconcile"] = str(e)[:200]
 
-    # 4) Patch anomaly broadcast — call directly from its router
+    # 4) Patch anomaly broadcast â€” call directly from its router
     try:
         from app.routers.mega_features import broadcast_patch_anomalies
         r = await broadcast_patch_anomalies(system_user)

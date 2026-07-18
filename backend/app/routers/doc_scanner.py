@@ -35,8 +35,8 @@ Extract structured information from the provided text/description and return ONL
 Fill null for fields not found."""
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        from app.services.ai_provider import LlmChat, UserMessage
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             return {"error": "AI key not configured"}
         chat = LlmChat(api_key=api_key, session_id=f"scan-{uuid.uuid4().hex[:8]}", system_message=system)

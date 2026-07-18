@@ -1,5 +1,5 @@
 """
-NexusOps Agent — backend router.
+NexusOps Agent Ã¢â‚¬â€ backend router.
 
 Endpoints:
   AGENT-FACING (auth via X-Agent-Token):
@@ -13,11 +13,11 @@ Endpoints:
     GET    /api/nexus-agent/agents/{device_id}
     POST   /api/nexus-agent/agents/{device_id}/command
     GET    /api/nexus-agent/agents/{device_id}/commands
-    POST   /api/nexus-agent/installers/build           — generate installer for a client
-    GET    /api/nexus-agent/installers/{token}/download — download installer ZIP (public, token-protected)
-    GET    /api/nexus-agent/binary/latest              — latest agent .exe (public)
-    GET    /api/nexus-agent/settings                   — admin settings
-    PUT    /api/nexus-agent/settings                   — update settings
+    POST   /api/nexus-agent/installers/build           Ã¢â‚¬â€ generate installer for a client
+    GET    /api/nexus-agent/installers/{token}/download Ã¢â‚¬â€ download installer ZIP (public, token-protected)
+    GET    /api/nexus-agent/binary/latest              Ã¢â‚¬â€ latest agent .exe (public)
+    GET    /api/nexus-agent/settings                   Ã¢â‚¬â€ admin settings
+    PUT    /api/nexus-agent/settings                   Ã¢â‚¬â€ update settings
 """
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-import requests
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -77,61 +76,28 @@ def _binary_info() -> dict[str, Any]:
         _binary_cache.update({"mtime": st.st_mtime, "sha256": h.hexdigest(), "size": st.st_size})
     return {"version": AGENT_VERSION, "sha256": _binary_cache["sha256"], "size": _binary_cache["size"], "exists": True}
 
-# Emergent object storage prefix (for hosting installer ZIPs)
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+# Installer archives are stored locally by default. Set NEXUS_AGENT_INSTALLER_DIR
+# to a mounted volume in production; no third-party object storage is required.
 APP_NAME = "nexusops"
-_storage_key: str | None = None
-
-
-def _init_storage() -> str | None:
-    """Initialize Emergent object storage once and reuse session key."""
-    global _storage_key
-    if _storage_key:
-        return _storage_key
-    if not EMERGENT_KEY:
-        return None
-    try:
-        r = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-        r.raise_for_status()
-        _storage_key = r.json().get("storage_key")
-        logger.info("[nexus-agent] storage initialised")
-        return _storage_key
-    except Exception as e:
-        logger.warning("[nexus-agent] storage init failed: %s", e)
-        return None
+INSTALLER_STORAGE_DIR = Path(os.environ.get("NEXUS_AGENT_INSTALLER_DIR", _PROJECT_ROOT / "data" / "agent-installers"))
 
 
 def _storage_put(path: str, data: bytes, content_type: str = "application/zip") -> dict | None:
-    key = _init_storage()
-    if not key:
-        return None
     try:
-        r = requests.put(
-            f"{STORAGE_URL}/objects/{path}",
-            headers={"X-Storage-Key": key, "Content-Type": content_type},
-            data=data,
-            timeout=120,
-        )
-        r.raise_for_status()
-        return r.json()
+        target = INSTALLER_STORAGE_DIR / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return {"path": str(target), "content_type": content_type}
     except Exception as e:
         logger.warning("[nexus-agent] storage put failed for %s: %s", path, e)
         return None
 
 
 def _storage_get(path: str) -> bytes | None:
-    key = _init_storage()
-    if not key:
-        return None
     try:
-        r = requests.get(
-            f"{STORAGE_URL}/objects/{path}",
-            headers={"X-Storage-Key": key},
-            timeout=60,
-        )
-        if r.status_code == 200:
-            return r.content
+        target = INSTALLER_STORAGE_DIR / path
+        if target.exists():
+            return target.read_bytes()
     except Exception as e:
         logger.warning("[nexus-agent] storage get failed for %s: %s", path, e)
     return None
@@ -205,7 +171,7 @@ async def _audit(db, kind: str, payload: dict) -> None:
 
 
 # ----------------------------------------------------------------------
-# Public helpers — used by device_intel.bulk_action and ticket_device_actions
+# Public helpers Ã¢â‚¬â€ used by device_intel.bulk_action and ticket_device_actions
 # ----------------------------------------------------------------------
 
 async def get_nexus_agent_for_device(device_doc: dict) -> dict | None:
@@ -313,7 +279,7 @@ async def enroll(req: EnrollRequest):
 
     client_id = tok.get("client_id") or req.client_id or ""
 
-    # Idempotency — try to find an existing agent for (hostname, client_id, mac)
+    # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
     existing = None
     if req.hostname:
         existing = await db.nexus_agents.find_one({
@@ -597,7 +563,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
                     "last_inventory_at": now,
                 } for app in software])
                 await db.devices.update_one({"id": device_id}, {"$set": {"installed_software_count": len(software)}})
-            # Keep a compact, technician-useful trail—not one noisy event per
+            # Keep a compact, technician-useful trailÃ¢â‚¬â€not one noisy event per
             # minute. Heartbeat inventory is summarised at most once per hour.
             last_audit = agent.get("last_device_audit_at")
             should_audit = True
@@ -625,7 +591,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
                 security = snap.get("security") or {}
                 await db.device_events.insert_one({
                     "id": str(uuid.uuid4()), "device_id": device_id, "event_type": "agent_check_in",
-                    "message": f"NexusOps Agent checked in · CPU {telemetry['cpu_usage']:.0f}% · memory {telemetry['memory_usage']:.0f}% · {security.get('pending_update_count', 0)} updates pending.",
+                    "message": f"NexusOps Agent checked in Ã‚Â· CPU {telemetry['cpu_usage']:.0f}% Ã‚Â· memory {telemetry['memory_usage']:.0f}% Ã‚Â· {security.get('pending_update_count', 0)} updates pending.",
                     "severity": "info", "timestamp": now, "source": "nexus-agent",
                 })
                 await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"last_device_event_at": now}})
@@ -643,7 +609,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
     except Exception as exc:
         logger.warning("[nexus-agent] monitoring evaluation failed: %s", exc)
 
-    # Write a heartbeat history row (lightweight — for sparklines)
+    # Write a heartbeat history row (lightweight Ã¢â‚¬â€ for sparklines)
     try:
         await db.nexus_agent_heartbeats.insert_one({
             "device_id": agent["id"],
@@ -853,9 +819,9 @@ def _build_installer_zip(client_id: str, client_name: str, enrollment_token: str
         z.writestr("uninstall.bat", uninstall_bat)
         z.writestr("README.txt",
                    "NexusOps Agent\n\n"
-                   "1) Right-click install.bat → Run as Administrator\n"
+                   "1) Right-click install.bat Ã¢â€ â€™ Run as Administrator\n"
                    "2) Agent will register itself as the 'NexusOpsAgent' Windows service\n"
-                   "3) Within 60 seconds the device will appear in NexusOps → Devices\n\n"
+                   "3) Within 60 seconds the device will appear in NexusOps Ã¢â€ â€™ Devices\n\n"
                    "To remove: run uninstall.bat as Administrator.\n")
     return buf.getvalue()
 
@@ -902,7 +868,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         binary_bytes=binary_bytes,
     )
 
-    # Store on Emergent object storage (with a download token) and record a manifest entry
+    # Store on local installer storage (with a download token) and record a manifest entry
     download_token = secrets.token_urlsafe(20)
     storage_path = f"{APP_NAME}/agent-installers/{req.client_id}/{download_token}.zip"
     put_result = _storage_put(storage_path, zip_bytes, content_type="application/zip")
@@ -953,7 +919,7 @@ async def installer_download(token: str):
     if not zip_bytes:
         # Rebuild on the fly
         if not AGENT_BINARY_PATH.exists():
-            raise HTTPException(500, "agent binary missing — rebuild required")
+            raise HTTPException(500, "agent binary missing Ã¢â‚¬â€ rebuild required")
         zip_bytes = _build_installer_zip(
             client_id=manifest["client_id"],
             client_name=manifest["client_name"],
@@ -994,7 +960,7 @@ async def version_manifest():
 
 
 # ----------------------------------------------------------------------
-# FLEET OPERATIONS — the differentiator surface
+# FLEET OPERATIONS Ã¢â‚¬â€ the differentiator surface
 # ----------------------------------------------------------------------
 
 @router.get("/nexus-agent/fleet/version-distribution")

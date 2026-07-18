@@ -1,4 +1,4 @@
-"""Iteration 172 — What's New changelog + Help Center modern seed.
+"""Iteration 172 â€” What's New changelog + Help Center modern seed.
 
 Covers:
 - /api/changelog/entries (auth required)
@@ -11,7 +11,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://rmm-psa-build.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://127.0.0.1:8001").rstrip("/")
 
 ADMIN_EMAIL = "aaron@stech.com.au"
 ADMIN_PASS = "Lucky@2871$!"
@@ -47,7 +47,7 @@ def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-# ── Changelog ─────────────────────────────────────────────────────────
+# â”€â”€ Changelog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestChangelog:
     def test_entries_returns_at_least_six(self, headers):
         r = requests.get(f"{BASE_URL}/api/changelog/entries", headers=headers, timeout=20)
@@ -55,7 +55,7 @@ class TestChangelog:
         body = r.json()
         entries = body.get("entries", [])
         assert len(entries) >= 6, f"expected >=6 entries, got {len(entries)}"
-        # Newest first — first entry is 2026-06-25 Big Cleanup
+        # Newest first â€” first entry is 2026-06-25 Big Cleanup
         first = entries[0]
         assert first["date"] == "2026-06-25", f"first entry date {first['date']}"
         assert "Big Cleanup" in first["title"], first["title"]
@@ -89,7 +89,7 @@ class TestChangelog:
         assert r.json().get("count", 0) >= 6
 
 
-# ── Help articles ─────────────────────────────────────────────────────
+# â”€â”€ Help articles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestHelpArticles:
     def test_articles_contains_modern_and_excludes_stale(self, headers):
         r = requests.get(f"{BASE_URL}/api/help/articles", headers=headers, timeout=30)
@@ -119,7 +119,7 @@ class TestHelpArticles:
         assert "Big Cleanup" in body, "missing Big Cleanup reference"
 
 
-# ── Reseed (admin) ────────────────────────────────────────────────────
+# â”€â”€ Reseed (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class TestHelpReseed:
     def test_reseed_returns_expected_fields_and_prunes(self, headers):
         r = requests.post(f"{BASE_URL}/api/help/seed", headers=headers, timeout=30)

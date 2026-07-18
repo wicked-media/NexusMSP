@@ -64,8 +64,8 @@ async def generate_from_ticket(ticket_id: str, current_user: dict = Depends(get_
     system = """You are an IT knowledge base writer. Given a resolved support ticket, create a concise KB article.
 Return ONLY valid JSON: {"title": "clear title", "content": "## Problem\\n...\\n## Solution\\n...\\n## Prevention\\n...", "category": "hardware|software|network|security|cloud|other", "tags": ["tag1","tag2"]}"""
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        from app.services.ai_provider import LlmChat, UserMessage
+        api_key = os.environ.get("OPENAI_API_KEY")
         chat = LlmChat(api_key=api_key, session_id=f"kb-{uuid.uuid4().hex[:6]}", system_message=system)
         chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
         prompt = f"Ticket: {ticket.get('title','')}\nPriority: {ticket.get('priority','')}\nCategory: {ticket.get('category','')}\nDescription: {ticket.get('description','')}\nNotes:\n{notes_text}"

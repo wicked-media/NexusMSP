@@ -1,4 +1,4 @@
-"""Recurring Smart Engine — CPI/YoY uplift, renewal risk (AI), smart consolidation,
+"""Recurring Smart Engine â€” CPI/YoY uplift, renewal risk (AI), smart consolidation,
 pre-bill preview, pause with date range, and multi-source roll-up.
 """
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,8 +37,8 @@ def _parse_date(s):
 
 
 async def _ai_chat(session_id: str, system_msg: str):
-    from emergentintegrations.llm.chat import LlmChat
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    from app.services.ai_provider import LlmChat
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
@@ -47,9 +47,9 @@ async def _ai_chat(session_id: str, system_msg: str):
     return chat
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   1) CPI / YoY UPLIFT                                             ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   1) CPI / YoY UPLIFT                                             â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/recurring-invoices/{ri_id}/uplift-rule")
 async def set_uplift_rule(ri_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -99,13 +99,13 @@ async def apply_uplift_now(ri_id: str, current_user: dict = Depends(get_current_
         "line_items": new_items, "amount": new_amount, "uplift_rule": rule,
         "last_uplift_pct": pct, "last_uplift_at": _now_iso(),
     }})
-    await log_activity(current_user, "uplift_applied", "recurring_invoice", ri_id, ri.get("description", ""), f"+{pct}% → ${new_amount:.2f}")
+    await log_activity(current_user, "uplift_applied", "recurring_invoice", ri_id, ri.get("description", ""), f"+{pct}% â†’ ${new_amount:.2f}")
     return {"success": True, "new_amount": new_amount, "applied_pct": pct, "new_line_items": new_items}
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   2) RENEWAL RISK SCORE (AI)                                      ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   2) RENEWAL RISK SCORE (AI)                                      â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/recurring-invoices/{ri_id}/renewal-risk")
 async def renewal_risk(ri_id: str, current_user: dict = Depends(get_current_user)):
@@ -149,7 +149,7 @@ async def renewal_risk(ri_id: str, current_user: dict = Depends(get_current_user
     ai_analysis = ""
     recommended_actions = []
     try:
-        from emergentintegrations.llm.chat import UserMessage
+        from app.services.ai_provider import UserMessage
         sys = "You are an MSP renewal risk analyst. Given signals, write a 2-3 sentence analysis and 3 short action bullets. Output JSON: {analysis, actions:[..]}"
         prompt = json.dumps({
             "ri_amount": ri.get("amount"),
@@ -190,9 +190,9 @@ async def renewal_risk(ri_id: str, current_user: dict = Depends(get_current_user
     }
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   3) SMART CONSOLIDATION                                          ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   3) SMART CONSOLIDATION                                          â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/recurring-invoices/consolidate/{client_id}")
 async def consolidate_client(client_id: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
@@ -215,7 +215,7 @@ async def consolidate_client(client_id: str, data: dict | None = None, current_u
         "id": str(uuid.uuid4()),
         "client_id": client_id,
         "client_name": client.get("name"),
-        "description": f"Consolidated services — {client.get('name')}",
+        "description": f"Consolidated services â€” {client.get('name')}",
         "frequency": "monthly",
         "payment_terms": "net_30",
         "tax_rate": float(client.get("tax_rate") or 10),
@@ -240,14 +240,14 @@ async def consolidate_client(client_id: str, data: dict | None = None, current_u
             "pause_reason": "Consolidated",
             "consolidated_into": new_ri["id"],
         }})
-    await log_activity(current_user, "consolidated", "recurring_invoice", new_ri["id"], new_ri["description"], f"{len(streams)} streams → ${total:.2f}/mo")
+    await log_activity(current_user, "consolidated", "recurring_invoice", new_ri["id"], new_ri["description"], f"{len(streams)} streams â†’ ${total:.2f}/mo")
     new_ri.pop("_id", None)
     return new_ri
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   4) PRE-BILL PREVIEW (send draft to client before cutting bill)  ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   4) PRE-BILL PREVIEW (send draft to client before cutting bill)  â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/recurring-invoices/{ri_id}/pre-bill-preview")
 async def send_pre_bill_preview(ri_id: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
@@ -263,22 +263,22 @@ async def send_pre_bill_preview(ri_id: str, data: dict | None = None, current_us
     # Compose draft summary
     amt = float(ri.get("amount") or 0)
     lines = ri.get("line_items") or []
-    rows = "".join([f"<tr><td style='padding:6px;border:1px solid #eee;'>{li.get('description', '')}</td><td style='padding:6px;border:1px solid #eee;text-align:right;'>{float(li.get('quantity') or 1)} × ${float(li.get('rate') or 0):,.2f}</td><td style='padding:6px;border:1px solid #eee;text-align:right;'>${float(li.get('amount') or 0):,.2f}</td></tr>" for li in lines])
-    next_due = ri.get("next_due_date", "—")
+    rows = "".join([f"<tr><td style='padding:6px;border:1px solid #eee;'>{li.get('description', '')}</td><td style='padding:6px;border:1px solid #eee;text-align:right;'>{float(li.get('quantity') or 1)} Ã— ${float(li.get('rate') or 0):,.2f}</td><td style='padding:6px;border:1px solid #eee;text-align:right;'>${float(li.get('amount') or 0):,.2f}</td></tr>" for li in lines])
+    next_due = ri.get("next_due_date", "â€”")
     branding = (await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}).get("value", {}) or {}
     company = branding.get("company_name", "NexusOps")
     html = f"""<div style='font-family:sans-serif;max-width:640px;margin:auto;'>
-<h2 style='color:#10B981;'>{company} — Pre-Bill Preview</h2>
+<h2 style='color:#10B981;'>{company} â€” Pre-Bill Preview</h2>
 <p>Hi {client.get('name', 'team')},</p>
 <p>This is a friendly preview of your upcoming invoice, scheduled for <b>{next_due}</b>:</p>
-<table style='border-collapse:collapse;width:100%;'><thead><tr style='background:#10B981;color:white;'><th style='padding:6px;'>Item</th><th style='padding:6px;'>Qty × Rate</th><th style='padding:6px;'>Amount</th></tr></thead><tbody>{rows}</tbody></table>
+<table style='border-collapse:collapse;width:100%;'><thead><tr style='background:#10B981;color:white;'><th style='padding:6px;'>Item</th><th style='padding:6px;'>Qty Ã— Rate</th><th style='padding:6px;'>Amount</th></tr></thead><tbody>{rows}</tbody></table>
 <p style='text-align:right;font-size:18px;'><b>Total: ${amt:,.2f}</b></p>
-<p>If anything looks off, just reply — we'll fix it before invoicing.</p>
-<p>— {company}</p></div>"""
+<p>If anything looks off, just reply â€” we'll fix it before invoicing.</p>
+<p>â€” {company}</p></div>"""
     from app.routers.email_utils import send_email
     delivery = await send_email(
         email,
-        f"Upcoming invoice preview — ${amt:,.2f} due {next_due}",
+        f"Upcoming invoice preview â€” ${amt:,.2f} due {next_due}",
         html,
         category="billing",
     )
@@ -289,13 +289,13 @@ async def send_pre_bill_preview(ri_id: str, data: dict | None = None, current_us
         "sent": sent, "delivery_status": delivery.get("status"), "delivery_message": delivery.get("message"),
         "sender_mailbox": delivery.get("sender"), "sent_at": _now_iso(), "sent_by": current_user.get("name"),
     })
-    await log_activity(current_user, "pre_bill_preview", "recurring_invoice", ri_id, ri.get("description", ""), f"Preview → {email}")
+    await log_activity(current_user, "pre_bill_preview", "recurring_invoice", ri_id, ri.get("description", ""), f"Preview â†’ {email}")
     return {"sent": sent, "email": email, "preview_html": html, "delivery_status": delivery.get("status"), "delivery_message": delivery.get("message")}
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   5) PAUSE WITH DATE RANGE                                        ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   5) PAUSE WITH DATE RANGE                                        â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/recurring-invoices/{ri_id}/pause-range")
 async def pause_with_range(ri_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -320,13 +320,13 @@ async def pause_with_range(ri_id: str, data: dict, current_user: dict = Depends(
         "scheduled_pause": pause,
         "status": "paused" if datetime.now(timezone.utc) >= from_date else ri.get("status", "active"),
     }})
-    await log_activity(current_user, "pause_range_set", "recurring_invoice", ri_id, ri.get("description", ""), f"{pause['from']} → {pause['to']}")
+    await log_activity(current_user, "pause_range_set", "recurring_invoice", ri_id, ri.get("description", ""), f"{pause['from']} â†’ {pause['to']}")
     return pause
 
 
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║   6) MULTI-SOURCE ROLLUP                                          ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+# â•‘   6) MULTI-SOURCE ROLLUP                                          â•‘
+# â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/recurring-invoices/{ri_id}/rollup-usage")
 async def rollup_usage(ri_id: str, current_user: dict = Depends(get_current_user)):
@@ -343,7 +343,7 @@ async def rollup_usage(ri_id: str, current_user: dict = Depends(get_current_user
         if acronis_app_count > 0:
             unit = float(ri.get("acronis_unit_price", 8))
             new_lines.append({
-                "description": f"Acronis Cyber Protect — {acronis_app_count} endpoints",
+                "description": f"Acronis Cyber Protect â€” {acronis_app_count} endpoints",
                 "quantity": acronis_app_count, "rate": unit,
                 "amount": round(acronis_app_count * unit, 2),
                 "source": "acronis_rollup",
@@ -358,7 +358,7 @@ async def rollup_usage(ri_id: str, current_user: dict = Depends(get_current_user
         if seat_count > 0:
             unit = float(ri.get("pax8_markup_per_seat", 5))
             new_lines.append({
-                "description": f"Pax8 Subscriptions — {seat_count} seats (markup)",
+                "description": f"Pax8 Subscriptions â€” {seat_count} seats (markup)",
                 "quantity": seat_count, "rate": unit,
                 "amount": round(seat_count * unit, 2),
                 "source": "pax8_rollup",
@@ -369,7 +369,7 @@ async def rollup_usage(ri_id: str, current_user: dict = Depends(get_current_user
     if m365_count and ri.get("include_m365_usage"):
         unit = float(ri.get("m365_unit_price", 28))
         new_lines.append({
-            "description": f"Microsoft 365 — {m365_count} users",
+            "description": f"Microsoft 365 â€” {m365_count} users",
             "quantity": m365_count, "rate": unit,
             "amount": round(m365_count * unit, 2),
             "source": "m365_rollup",
