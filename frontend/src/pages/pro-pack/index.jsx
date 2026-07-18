@@ -1,7 +1,7 @@
 // All Pro-Pack pages in one shared module to keep imports light.
 // Each export is a default page used via lazy() in routes.js.
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -584,21 +584,56 @@ export function AssetPrintBatchPage() {
 
 /* ============== AUTOMATION HUB ============== */
 export function AutomationHubPage() {
+  const { headers } = useApi();
+  const navigate = useNavigate();
+  const [snapshot, setSnapshot] = useState(null);
+  const [refreshing, setRefreshing] = useState(true);
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const [runbooks, scripts, workflows, alertStats] = await Promise.all([
+        axios.get(`${API}/runbooks`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workflows`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/alert-rules/stats`, { headers }).catch(() => ({ data: {} })),
+      ]);
+      setSnapshot({
+        runbooks: (runbooks.data || []).filter(item => item.enabled !== false).length,
+        scripts: (scripts.data || []).length,
+        workflows: (workflows.data || []).filter(item => item.enabled !== false).length,
+        alertRules: alertStats.data?.active || 0,
+      });
+    } catch {
+      toast.error("Automation status could not be refreshed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tiles = [
-    { path: "/runbooks", label: "Runbooks", icon: Workflow, desc: "Step-by-step automated playbooks" },
-    { path: "/scripting", label: "Scripts Library", icon: Zap, desc: "PowerShell / Bash script repo" },
+    { path: "/runbooks", label: "Runbooks", icon: Workflow, desc: "Step-by-step automated playbooks", count: snapshot?.runbooks, countLabel: "enabled" },
+    { path: "/scripting", label: "Scripts Library", icon: Zap, desc: "PowerShell / Bash script repo", count: snapshot?.scripts, countLabel: "available" },
     { path: "/git-scripts", label: "Git Scripts Sync", icon: Workflow, desc: "Pull scripts from Git repos" },
-    { path: "/workflow-automation", label: "Workflow Builder", icon: Workflow, desc: "Visual workflow editor" },
-    { path: "/alert-rules", label: "Alert Rules Engine", icon: BellRing, desc: "Alert routing & suppression rules" },
+    { path: "/workflow-automation", label: "Workflow Builder", icon: Workflow, desc: "Visual workflow editor", count: snapshot?.workflows, countLabel: "active" },
+    { path: "/alert-rules", label: "Alert Rules Engine", icon: BellRing, desc: "Alert routing & suppression rules", count: snapshot?.alertRules, countLabel: "enabled" },
   ];
   return (
     <div className="p-6 space-y-4" data-testid="automation-hub-page">
       <PageHeader title="Automation Hub" subtitle="Runbooks · Scripts · Workflows · Alert routing" icon={Workflow} />
+      <div className="flex justify-end -mt-1">
+        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} data-testid="automation-hub-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh status</Button>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <HeroTile label="Enabled runbooks" value={snapshot?.runbooks ?? "—"} icon={Workflow} glow="violet" animated={false} onClick={() => navigate("/runbooks")} testId="automation-hub-runbooks" />
+        <HeroTile label="Scripts" value={snapshot?.scripts ?? "—"} icon={Zap} glow="amber" animated={false} onClick={() => navigate("/scripting")} testId="automation-hub-scripts" />
+        <HeroTile label="Active workflows" value={snapshot?.workflows ?? "—"} icon={GitMerge} glow="sky" animated={false} onClick={() => navigate("/workflow-automation")} testId="automation-hub-workflows" />
+        <HeroTile label="Alert rules" value={snapshot?.alertRules ?? "—"} icon={BellRing} glow="rose" animated={false} onClick={() => navigate("/alert-rules")} testId="automation-hub-alert-rules" />
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">{tiles.map(t => (
-        <Card key={t.path} className="cursor-pointer hover:border-violet-500/40" onClick={() => window.location.href = t.path}>
+        <Card key={t.path} className="cursor-pointer transition-all hover:-translate-y-0.5 hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/5" onClick={() => navigate(t.path)}>
           <CardContent className="pt-5 pb-4">
-            <t.icon className="w-7 h-7 mb-2 text-violet-400" />
-            <p className="font-semibold">{t.label}</p>
+            <div className="mb-2 flex items-start justify-between"><t.icon className="w-7 h-7 text-violet-400" />{typeof t.count === "number" && <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-300">{t.count} {t.countLabel}</Badge>}</div>
+            <p className="font-semibold flex items-center gap-1.5">{t.label}<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></p>
             <p className="text-xs text-muted-foreground mt-1">{t.desc}</p>
           </CardContent>
         </Card>
