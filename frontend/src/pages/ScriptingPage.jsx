@@ -178,6 +178,7 @@ export default function ScriptingPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isRunDialogOpen, setIsRunDialogOpen] = useState(false);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+  const [runningScheduleId, setRunningScheduleId] = useState(null);
   const [selectedScript, setSelectedScript] = useState(null);
   const [selectedDevices, setSelectedDevices] = useState([]);
   const [scheduleForm, setScheduleForm] = useState({
@@ -273,6 +274,21 @@ export default function ScriptingPage() {
       await axios.put(`${API}/scheduled-tasks/${id}`, { enabled }, { headers });
       fetchData();
     } catch { toast.error("Failed to update"); }
+  };
+
+  const handleRunScheduleNow = async (task) => {
+    if (!window.confirm(`Queue ${task.script_name} on ${task.target_ids?.length || 0} target device${task.target_ids?.length === 1 ? "" : "s"} now?`)) return;
+    setRunningScheduleId(task.id);
+    try {
+      const response = await axios.post(`${API}/scheduled-tasks/${task.id}/run-now`, {}, { headers });
+      toast.success(response.data?.message || "Scheduled task queued");
+      await fetchData();
+      setActiveTab("history");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not queue the scheduled task");
+    } finally {
+      setRunningScheduleId(null);
+    }
   };
 
   const importFromLibrary = (template) => {
@@ -660,6 +676,9 @@ export default function ScriptingPage() {
                         <Badge variant={task.enabled ? "default" : "secondary"}>{task.enabled ? "Active" : "Paused"}</Badge>
                       </div>
                       <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleRunScheduleNow(task)} disabled={runningScheduleId === task.id || !task.target_ids?.length} data-testid={`run-schedule-now-${task.id}`}>
+                          {runningScheduleId === task.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Play className="mr-1 h-3 w-3" />}Run now
+                        </Button>
                         <Switch checked={task.enabled} onCheckedChange={(v) => handleToggleSchedule(task.id, v)} />
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDeleteSchedule(task.id)}><Trash2 className="w-3 h-3" /></Button>
                       </div>

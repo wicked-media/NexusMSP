@@ -325,6 +325,37 @@ async def update_scheduled_task(task_id: str, task_data: dict, current_user: dic
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task updated"}
 
+
+@router.post("/scheduled-tasks/{task_id}/run-now")
+async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Queue a scheduled task immediately so technicians can validate it on demand."""
+    task = await db.scheduled_tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    script = await db.scripts.find_one({"id": task.get("script_id")}, {"_id": 0})
+    if not script:
+        raise HTTPException(status_code=404, detail="Script no longer exists")
+    now = datetime.now(timezone.utc)
+    executions = []
+    for device_id in task.get("target_ids", []):
+        device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+        if not device:
+            continue
+        execution = ScriptExecution(
+            script_id=script["id"], script_name=script.get("name"), device_id=device_id,
+            device_name=device.get("name") or device.get("hostname"), client_id=device.get("client_id"),
+            user_id=current_user["id"], user_name=current_user.get("name", "Technician"), status="pending"
+        ).model_dump()
+        execution.update({"created_at": now.isoformat(), "scheduled_task_id": task_id, "trigger": "manual_schedule_run"})
+        executions.append(execution)
+    if not executions:
+        raise HTTPException(status_code=400, detail="No valid target devices are configured")
+    await db.script_executions.insert_many(executions)
+    await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
+    await db.scheduled_tasks.update_one({"id": task_id}, {"$set": {"last_run": now.isoformat(), "updated_at": now.isoformat()}, "$inc": {"run_count": 1}})
+    await db.scheduled_task_runs.insert_one({"id": str(uuid.uuid4()), "task_id": task_id, "script_id": script["id"], "queued_count": len(executions), "status": "queued", "trigger": "manual", "ran_at": now.isoformat(), "actor": current_user.get("name")})
+    return {"message": f"Queued {len(executions)} executions", "queued": len(executions)}
+
 @router.delete("/scheduled-tasks/{task_id}")
 async def delete_scheduled_task(task_id: str, current_user: dict = Depends(get_current_user)):
     result = await db.scheduled_tasks.delete_one({"id": task_id})
