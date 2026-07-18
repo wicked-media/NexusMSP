@@ -209,12 +209,15 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
   }, [open]);
 
   const submit = async () => {
-    if (!form.name.trim() || !form.email.trim()) { toast.error("Name and email are required"); return; }
+    if (!form.name.trim() || !form.email.trim() || form.password.length < 12) {
+      toast.error("Name, email and an initial password of at least 12 characters are required");
+      return;
+    }
     setBusy(true);
     try {
       await axios.post(`${API}/technicians`, {
         ...form,
-        password: form.password || "nexusops123",
+        password: form.password,
         permissions: presets[form.job_title] || undefined,
       }, { headers });
       toast.success(`${form.name} added`);
@@ -261,8 +264,9 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
             <div><Label className="text-xs">Hourly rate ($)</Label><Input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} data-testid="add-user-rate" /></div>
           </div>
           <div>
-            <Label className="text-xs">Initial password (optional — defaults to <span className="font-mono">nexusops123</span>)</Label>
-            <Input type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Leave blank for default" data-testid="add-user-password" />
+            <Label className="text-xs">Initial password *</Label>
+            <Input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 12 characters" data-testid="add-user-password" />
+            <p className="mt-1 text-[10px] text-zinc-500">Set a unique temporary password, then have the technician change it after their first sign-in.</p>
           </div>
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" checked={form.is_admin} onChange={e => setForm({ ...form, is_admin: e.target.checked })} data-testid="add-user-admin-cb" />

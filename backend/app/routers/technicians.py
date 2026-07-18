@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
+from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
 
@@ -79,15 +79,25 @@ async def bulk_action_technicians(data: dict, current_user: dict = Depends(get_c
 
 @router.post("/technicians")
 async def create_technician(tech_data: dict, current_user: dict = Depends(get_current_user)):
-    from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt"])
+    if current_user.get("role") != "admin" and not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Only administrators can create technicians")
+    email = (tech_data.get("email") or "").strip().lower()
+    name = (tech_data.get("name") or "").strip()
+    password = tech_data.get("password") or ""
+    if not name or not email:
+        raise HTTPException(status_code=400, detail="Name and email are required")
+    if await db.users.find_one({"email": email}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    policy_error = password_policy_error(password, email)
+    if policy_error:
+        raise HTTPException(status_code=400, detail=policy_error)
     job_title = tech_data.get("job_title", "")
     permissions = tech_data.get("permissions")
     if not permissions and job_title in PERMISSION_PRESETS:
         permissions = PERMISSION_PRESETS[job_title]
     user = User(
-        email=tech_data["email"],
-        name=tech_data["name"],
+        email=email,
+        name=name,
         role=tech_data.get("role", "technician"),
         job_title=job_title,
         hourly_rate=float(tech_data.get("hourly_rate", 75)),
@@ -100,7 +110,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     user_dict = user.model_dump()
     if permissions:
         user_dict["permissions"] = permissions
-    user_dict["password_hash"] = pwd_context.hash(tech_data.get("password", "nexusops123"))
+    user_dict["password_hash"] = hash_password(password)
     user_dict["created_at"] = user_dict["created_at"].isoformat()
     await db.users.insert_one(user_dict)
     user_dict.pop("_id", None)
