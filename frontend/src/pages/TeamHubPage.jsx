@@ -34,11 +34,11 @@ export default function TeamHubPage() {
   return (
     <div className="min-h-screen">
       <div className="border-b border-border bg-gradient-to-br from-card via-card to-violet-500/[0.04]">
-        <div className="px-6 pt-5">
+        <div className="hidden">
           <h1 className="text-2xl font-semibold tracking-tight">Team Hub</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Command center, roster, utilization, skills and leaderboard — all the team views.</p>
         </div>
-        <div className="px-6 mt-5 flex items-center gap-1.5 overflow-x-auto">
+        <nav className="flex items-center gap-1.5 overflow-x-auto px-6 pt-3" aria-label="Team Hub sections">
           {TABS.map(t => {
             const Icon = t.icon;
             const active = activeTab === t.id;
@@ -55,7 +55,7 @@ export default function TeamHubPage() {
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
       <div>
         <Suspense fallback={<div className="p-12 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>}>
