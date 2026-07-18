@@ -9,6 +9,12 @@ from app.models import *
 
 router = APIRouter()
 
+
+async def _caller_is_admin(current_user: dict) -> bool:
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "role": 1, "is_admin": 1})
+    return bool(caller and (caller.get("role") == "admin" or caller.get("is_admin")))
+
+
 # ============== TECHNICIAN MANAGEMENT ENDPOINTS ==============
 
 @router.get("/technicians/overview")
@@ -119,13 +125,19 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
 
 @router.put("/technicians/{tech_id}")
 async def update_technician(tech_id: str, tech_data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {"name", "email", "role", "hourly_rate", "phone", "specialties", "categories", "is_active",
-               "email_signature", "email_signature_html", "signature_config", "avatar",
-               "job_title", "permissions", "is_admin", "archived", "archived_at", "enabled_modules"}
-    # Only admins can set is_admin and permissions
-    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
-    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
-        allowed -= {"is_admin", "permissions"}
+    is_admin = await _caller_is_admin(current_user)
+    admin_fields = {"name", "email", "role", "hourly_rate", "phone", "specialties", "categories", "is_active",
+                    "email_signature", "email_signature_html", "signature_config", "avatar",
+                    "job_title", "permissions", "is_admin", "archived", "archived_at", "enabled_modules"}
+    self_service_fields = {"name", "phone", "avatar", "email_signature", "email_signature_html", "signature_config", "job_title"}
+
+    if is_admin:
+        allowed = admin_fields
+    elif tech_id == current_user["id"]:
+        allowed = self_service_fields
+    else:
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
+
     update = {k: v for k, v in tech_data.items() if k in allowed}
     if "hourly_rate" in update:
         update["hourly_rate"] = float(update["hourly_rate"])
@@ -417,6 +429,8 @@ async def get_technician_history(tech_id: str, current_user: dict = Depends(get_
 
 @router.put("/technicians/{tech_id}/email-signature")
 async def update_email_signature(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    if tech_id != current_user["id"] and not await _caller_is_admin(current_user):
+        raise HTTPException(status_code=403, detail="You can only update your own email signature")
     sig_data = {
         "email_signature": data.get("email_signature", ""),
         "email_signature_html": data.get("email_signature_html", ""),
