@@ -7,6 +7,8 @@ NexusMSP is a FastAPI, React, MongoDB, and Go-based managed-services platform. T
 - `agent/` — NexusOps endpoint agent
 - `backend/tests/` — API and safety regression tests
 
+NexusMSP runs independently: it has no Emergent runtime, package, storage, or AI dependency. Agent installers are stored locally by default, Stripe uses its official SDK, and optional AI features use your own OpenAI API key.
+
 ## Prerequisites
 
 - Python 3.11 or newer
@@ -16,7 +18,7 @@ NexusMSP is a FastAPI, React, MongoDB, and Go-based managed-services platform. T
 
 ## Local setup
 
-1. Copy `backend/.env.example` to `backend/.env` and replace every placeholder. `JWT_SECRET` is mandatory; the API intentionally refuses to start without it.
+1. Copy `backend/.env.example` to `backend/.env` and replace every placeholder. `JWT_SECRET` is mandatory; the API intentionally refuses to start without it. `OPENAI_API_KEY` is optional and only enables AI-assisted features. `STRIPE_WEBHOOK_SECRET` is required only if you configure Stripe webhooks.
 2. Copy `frontend/.env.example` to `frontend/.env`.
 3. Install and start the backend:
 
