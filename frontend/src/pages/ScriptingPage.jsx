@@ -398,19 +398,38 @@ export default function ScriptingPage() {
 
   const handleLiveRun = async () => {
     if (!liveScript) { toast.error("Select a script"); return; }
+    if (!liveDevice || liveDevice === "localhost") { toast.error("Select an online Nexus Agent endpoint"); return; }
     setLiveRunning(true);
-    setLiveOutput([{ time: new Date().toISOString(), type: "info", text: "Initializing execution..." }]);
+    const startedAt = new Date().toISOString();
+    setLiveOutput([{ time: startedAt, type: "info", text: "Queuing work with Nexus Agent..." }]);
     try {
-      const res = await axios.post(`${API}/scripts/${liveScript.id}/live-run`, { device_id: liveDevice, target: liveDevice || "localhost" }, { headers });
-      const outputLines = res.data.output || [];
-      // Animate the output lines one by one
-      for (let i = 0; i < outputLines.length; i++) {
-        await new Promise(r => setTimeout(r, 120 + Math.random() * 200));
-        setLiveOutput(prev => [...prev.slice(0, i === 0 ? 0 : prev.length), outputLines[i]]);
+      const queued = await axios.post(`${API}/scripts/${liveScript.id}/execute`, [liveDevice], { headers });
+      const executionId = queued.data?.executions?.[0]?.id;
+      if (!executionId) throw new Error("No agent execution was created");
+      setLiveOutput([{ time: startedAt, type: "info", text: "Queued. Waiting for the endpoint to collect the command..." }]);
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const detail = await axios.get(`${API}/script-executions/${executionId}`, { headers });
+        const execution = detail.data;
+        const status = execution.status || "pending";
+        if (["pending", "running", "dispatched"].includes(status)) {
+          setLiveOutput([{ time: new Date().toISOString(), type: status === "running" ? "info" : "warning", text: status === "running" ? "Endpoint is executing the script..." : "Waiting for endpoint check-in..." }]);
+          continue;
+        }
+        const completedAt = execution.completed_at || new Date().toISOString();
+        const outputLines = [
+          ...(execution.output ? String(execution.output).split("\n").filter(Boolean).map(text => ({ time: completedAt, type: "output", text })) : []),
+          ...(execution.error_output ? String(execution.error_output).split("\n").filter(Boolean).map(text => ({ time: completedAt, type: "error", text })) : []),
+          { time: completedAt, type: status === "completed" ? "success" : "error", text: `Agent execution ${status}${execution.exit_code !== undefined && execution.exit_code !== null ? ` (exit code ${execution.exit_code})` : ""}.` },
+        ];
+        setLiveOutput(outputLines);
+        setLiveHistory(prev => [{ id: execution.id, script_name: execution.script_name, device_name: execution.device_name, status, duration_ms: execution.duration_ms, created_at: execution.created_at, output: outputLines }, ...prev.slice(0, 9)]);
+        toast[status === "completed" ? "success" : "error"](`Script ${status}`);
+        await fetchData();
+        return;
       }
-      setLiveHistory(prev => [{ id: res.data.id, script_name: res.data.script_name, device_name: res.data.device_name, status: res.data.status, duration_ms: res.data.duration_ms, created_at: res.data.created_at, output: outputLines }, ...prev.slice(0, 9)]);
-      toast.success(`Script ${res.data.status}`);
-    } catch { toast.error("Execution failed"); setLiveOutput(prev => [...prev, { time: new Date().toISOString(), type: "error", text: "Execution failed - check connection and try again" }]); }
+      throw new Error("Timed out waiting for endpoint result");
+    } catch (error) { toast.error(error.response?.data?.detail || error.message || "Execution failed"); setLiveOutput(prev => [...prev, { time: new Date().toISOString(), type: "error", text: error.response?.data?.detail || error.message || "Execution failed - check endpoint connection and try again" }]); }
     finally { setLiveRunning(false); }
   };
 
@@ -563,7 +582,7 @@ export default function ScriptingPage() {
         <TabsContent value="terminal" className="space-y-4" data-testid="live-terminal-tab">
           <div className="rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.07] via-transparent to-cyan-500/[0.05] p-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-violet-200">Live execution console</span><span className="text-muted-foreground">Select a saved script, choose an online endpoint, then review its output in real time.</span>
+              <span className="font-semibold text-violet-200">Agent execution console</span><span className="text-muted-foreground">Queue a saved script to an online endpoint and review the exact output returned by Nexus Agent.</span>
               {liveScript && <Badge variant="outline" className="ml-auto border-violet-500/30 text-[10px] text-violet-200">{liveScript.os_target || "cross-platform"} · {categories[liveScript.category] || "General"}</Badge>}
             </div>
           </div>
@@ -574,11 +593,11 @@ export default function ScriptingPage() {
                 <ScriptAutocomplete scripts={scripts} selectedScript={liveScript} onSelect={setLiveScript} onImport={installLibraryScriptForTerminal} />
                 <Select value={liveDevice} onValueChange={setLiveDevice}>
                   <SelectTrigger className="sm:w-[220px]" data-testid="live-device-select"><SelectValue placeholder="Target device..." /></SelectTrigger>
-                  <SelectContent><SelectItem value="localhost">localhost</SelectItem>{devices.filter(d => d.status === "online").slice(0, 30).map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.hostname}</SelectItem>)}</SelectContent>
+                  <SelectContent>{devices.filter(d => d.status === "online").slice(0, 30).map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.hostname}</SelectItem>)}</SelectContent>
                 </Select>
                 <Button onClick={handleLiveRun} disabled={liveRunning || !liveScript} className="flex-shrink-0" data-testid="live-run-btn">
                   {liveRunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}
-                  {liveRunning ? "Running..." : "Execute"}
+                  {liveRunning ? "Waiting..." : "Run on agent"}
                 </Button>
               </div>
               {liveScript ? (
