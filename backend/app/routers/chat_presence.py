@@ -43,8 +43,8 @@ from app.services.chat_access import (
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini")
 
 
 def _now() -> datetime:

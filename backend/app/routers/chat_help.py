@@ -320,7 +320,7 @@ Type `/` in any channel to access:
 - `/help` â€” list all commands
 - `/assign @user TKT-###` â€” reassign a ticket
 - `/page <severity>` â€” page the team
-- `/summarize` â€” Claude summarises the last 40 messages
+- `/summarize` â€” Nexus AI summarises the last 40 messages
 
 ## Auto-spawned channels
 - `warroom-{slug}` â€” auto-created when a war room opens. Anyone paged is invited.
