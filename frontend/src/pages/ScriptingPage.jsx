@@ -172,6 +172,7 @@ export default function ScriptingPage() {
   const [scheduledTasks, setScheduledTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("scripts");
+  const [historyFilter, setHistoryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isRunDialogOpen, setIsRunDialogOpen] = useState(false);
@@ -414,6 +415,20 @@ export default function ScriptingPage() {
   };
 
   const filteredScripts = scripts.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.description?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const executionCounts = {
+    all: executions.length,
+    queued: executions.filter((execution) => execution.status === "pending").length,
+    running: executions.filter((execution) => ["running", "dispatched"].includes(execution.status)).length,
+    completed: executions.filter((execution) => execution.status === "completed").length,
+    attention: executions.filter((execution) => ["failed", "timeout"].includes(execution.status)).length,
+  };
+  const visibleExecutions = executions.filter((execution) => {
+    if (historyFilter === "all") return true;
+    if (historyFilter === "queued") return execution.status === "pending";
+    if (historyFilter === "running") return ["running", "dispatched"].includes(execution.status);
+    if (historyFilter === "attention") return ["failed", "timeout"].includes(execution.status);
+    return execution.status === historyFilter;
+  });
   const executionOutput = executionDetail?.output
     ? (Array.isArray(executionDetail.output) ? executionDetail.output.map(line => `${line.time ? `[${new Date(line.time).toLocaleTimeString()}] ` : ""}${line.text || JSON.stringify(line)}`).join("\n") : String(executionDetail.output))
     : "No captured output yet. Pending runs will appear here after an agent reports back.";
@@ -684,30 +699,44 @@ export default function ScriptingPage() {
         </TabsContent>
 
         {/* History Tab */}
-        <TabsContent value="history">
-          <Card>
+        <TabsContent value="history" className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-muted/[0.025] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><div className="flex items-center gap-2"><Clock className="h-4 w-4 text-violet-300" /><h2 className="font-semibold">Execution activity</h2></div><p className="mt-1 text-xs text-muted-foreground">Agent results update automatically while work is queued or running.</p></div>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchData}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh history</Button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <HeroTile label="Queued" value={executionCounts.queued} subtitle="Awaiting endpoint" icon={Clock} glow="amber" animated={false} active={historyFilter === "queued"} onClick={() => setHistoryFilter("queued")} testId="history-queued-tile" />
+            <HeroTile label="Running" value={executionCounts.running} subtitle="Agent executing" icon={Loader2} glow="sky" animated={false} active={historyFilter === "running"} onClick={() => setHistoryFilter("running")} testId="history-running-tile" />
+            <HeroTile label="Successful" value={executionCounts.completed} subtitle="Completed runs" icon={CheckCircle} glow="emerald" animated={false} active={historyFilter === "completed"} onClick={() => setHistoryFilter("completed")} testId="history-success-tile" />
+            <HeroTile label="Needs attention" value={executionCounts.attention} subtitle="Failed or timed out" icon={AlertTriangle} glow="rose" animated={false} active={historyFilter === "attention"} onClick={() => setHistoryFilter("attention")} testId="history-attention-tile" />
+          </div>
+          <Card className="overflow-hidden border-border/70">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/[0.025] px-4 py-3">
+              <div className="flex flex-wrap gap-1.5">
+                {[['all', 'All'], ['queued', 'Queued'], ['running', 'Running'], ['completed', 'Successful'], ['attention', 'Needs attention']].map(([value, label]) => <Button key={value} variant={historyFilter === value ? "secondary" : "ghost"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setHistoryFilter(value)}>{label} <span className="ml-1 text-muted-foreground">{executionCounts[value]}</span></Button>)}
+              </div>
+              <span className="text-[11px] text-muted-foreground">Showing {visibleExecutions.length} of {executionCounts.all} recent runs</span>
+            </div>
             <CardContent className="p-0">
-              {executions.length > 0 ? (
+              {visibleExecutions.length > 0 ? (
                 <ScrollArea className="h-[500px]">
                   <Table>
-                    <TableHeader><TableRow><TableHead>Script</TableHead><TableHead>Device</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead><TableHead>Run By</TableHead><TableHead>Time</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead className="pl-5">Script & target</TableHead><TableHead>Status</TableHead><TableHead>Run details</TableHead><TableHead>Started</TableHead><TableHead className="pr-5 text-right">Audit</TableHead></TableRow></TableHeader>
                     <TableBody>
-                      {executions.map(exec => (
-                        <TableRow key={exec.id}>
-                          <TableCell className="font-medium">{exec.script_name}</TableCell>
-                          <TableCell>{exec.device_name}</TableCell>
+                      {visibleExecutions.map(exec => (
+                        <TableRow key={exec.id} className="group hover:bg-muted/[0.035]">
+                          <TableCell className="py-3 pl-5"><div className="flex items-center gap-3"><span className={`h-2 w-2 shrink-0 rounded-full ${exec.status === 'completed' ? 'bg-emerald-400' : ['failed', 'timeout'].includes(exec.status) ? 'bg-rose-400' : exec.status === 'running' ? 'animate-pulse bg-sky-400' : 'bg-amber-400'}`} /><div><p className="font-medium">{exec.script_name || 'Untitled script'}</p><p className="mt-0.5 text-xs text-muted-foreground">{exec.device_name || exec.device_id || 'No endpoint assigned'}</p></div></div></TableCell>
                           <TableCell><Badge variant={exec.status === 'completed' ? 'default' : ['failed', 'timeout'].includes(exec.status) ? 'destructive' : 'secondary'} className={exec.status === 'running' ? 'border-sky-400/40 bg-sky-500/10 text-sky-300' : exec.status === 'pending' ? 'border-amber-400/40 bg-amber-500/10 text-amber-200' : ''}>{exec.status === 'pending' ? 'queued' : exec.status}</Badge></TableCell>
-                          <TableCell>{exec.duration_ms ? `${Math.round(exec.duration_ms / 1000)}s` : exec.duration_seconds ? `${exec.duration_seconds}s` : '-'}</TableCell>
-                          <TableCell>{exec.user_name}</TableCell>
-                          <TableCell className="text-muted-foreground">{formatDistanceToNow(new Date(exec.created_at), { addSuffix: true })}</TableCell>
-                          <TableCell><Button variant="ghost" size="sm" className="h-7 text-[10px]" onClick={() => openExecutionDetail(exec)} data-testid={`open-execution-${exec.id}`}><Eye className="mr-1 h-3 w-3" />Inspect</Button></TableCell>
+                          <TableCell><p className="text-sm">{exec.duration_ms ? `${Math.round(exec.duration_ms / 1000)}s` : exec.duration_seconds ? `${exec.duration_seconds}s` : '—'}</p><p className="mt-0.5 text-xs text-muted-foreground">{exec.user_name || 'Scheduler'}</p></TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{exec.created_at ? formatDistanceToNow(new Date(exec.created_at), { addSuffix: true }) : '—'}</TableCell>
+                          <TableCell className="pr-5 text-right"><Button variant="ghost" size="sm" className="h-8 text-[11px] opacity-80 group-hover:opacity-100" onClick={() => openExecutionDetail(exec)} data-testid={`open-execution-${exec.id}`}><Eye className="mr-1.5 h-3.5 w-3.5" />Inspect</Button></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </ScrollArea>
               ) : (
-                <div className="flex flex-col items-center justify-center h-64"><Clock className="w-12 h-12 text-muted-foreground opacity-50 mb-4" /><p className="text-muted-foreground">No execution history</p></div>
+                <div className="flex flex-col items-center justify-center h-64"><Clock className="w-12 h-12 text-muted-foreground opacity-50 mb-4" /><p className="text-muted-foreground">No {historyFilter === 'all' ? '' : historyFilter} executions found</p><Button variant="link" size="sm" onClick={() => setHistoryFilter('all')}>Show all execution history</Button></div>
               )}
             </CardContent>
           </Card>
