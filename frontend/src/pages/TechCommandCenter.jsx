@@ -54,6 +54,9 @@ const ROLE_OPTIONS = [
   { value: "dispatcher", label: "Dispatcher" },
   { value: "admin", label: "Admin" },
 ];
+// Invites always create standard accounts. Administrator access is deliberately
+// granted only from the protected Add User / Manage technician controls.
+const INVITABLE_ROLE_OPTIONS = ROLE_OPTIONS.filter((option) => option.value !== "admin");
 const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit", "roster", "skills", "leaderboard"]);
 const OPERATIONAL_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
 const COMMAND_TAB_GROUPS = [
@@ -374,10 +377,10 @@ function InviteDialog({ open, onClose, onSent, headers, presets }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Role</Label>
+              <Label className="text-xs">Access role</Label>
               <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
                 <SelectTrigger data-testid="invite-role"><SelectValue /></SelectTrigger>
-                <SelectContent>{ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{INVITABLE_ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -387,6 +390,9 @@ function InviteDialog({ open, onClose, onSent, headers, presets }) {
                 <SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/80">
+            Administrator access is not available through email invitations. Create administrator accounts directly from Team Command so the elevation is acknowledged and audited.
           </div>
           <div><Label className="text-xs">Personal message (optional)</Label><Textarea rows={3} value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Welcome to the team!" data-testid="invite-message" /></div>
         </div>

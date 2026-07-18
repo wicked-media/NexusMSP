@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user, hash_password, password_policy_error
 from app.routers.email_utils import send_email, is_microsoft365_configured
+from app.routers.tech_intel import _log_audit
 import uuid
 import os
 
@@ -75,6 +76,13 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
     if not email or not name:
         raise HTTPException(status_code=400, detail="Name and email are required")
 
+    role = (data.get("role") or "technician").strip().lower()
+    allowed_roles = {"technician", "service_desk_manager", "dispatcher"}
+    if role == "admin":
+        raise HTTPException(status_code=400, detail="Administrator accounts must be created directly from Team Command")
+    if role not in allowed_roles:
+        raise HTTPException(status_code=400, detail="Choose a valid standard access role")
+
     # Check for existing tech with this email
     existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
     if existing:
@@ -92,7 +100,7 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
         "token": token,
         "name": name,
         "email": email,
-        "role": data.get("role", "technician"),
+        "role": role,
         "job_title": data.get("job_title", ""),
         "categories": data.get("categories", []),
         "hourly_rate": data.get("hourly_rate", 75),
@@ -106,6 +114,11 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
 
     await db.tech_invites.insert_one(invite)
     invite.pop("_id", None)
+    await _log_audit(current_user, "technician_invited", invite["id"], name, {
+        "email": email,
+        "role": role,
+        "expires_at": invite["expires_at"],
+    })
 
     # Send the email
     html = _build_invite_email_html(invite)
