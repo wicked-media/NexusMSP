@@ -251,6 +251,7 @@ async def permission_matrix(current_user: dict = Depends(get_current_user)):
             "tech_id": t.get("id"),
             "name": t.get("name"),
             "job_title": t.get("job_title", "Technician"),
+            "role": t.get("role", "technician"),
             "is_admin": bool(t.get("is_admin")),
             "cells": cells,
         })

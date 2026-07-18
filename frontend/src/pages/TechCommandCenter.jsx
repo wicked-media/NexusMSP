@@ -725,6 +725,12 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
   );
 }
 
+const MODULE_SHORT_LABELS = {
+  tickets: "Tickets", clients: "Clients", invoices: "Invoices", products: "Products", devices: "Devices", networking: "Network",
+  assets: "Assets", reports: "Reports", knowledge_base: "Knowledge", it_docs: "Docs", contracts: "Contracts", projects: "Projects",
+  time_tracking: "Time", purchase_orders: "POs", scheduling: "Schedule", settings: "Settings",
+};
+
 function PermissionMatrixTab({ headers, presets, roleOptions, onRolesChanged }) {
   const [matrix, setMatrix] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -760,45 +766,66 @@ function PermissionMatrixTab({ headers, presets, roleOptions, onRolesChanged }) 
     } catch (e) { toast.error(e.response?.data?.detail || "Apply failed"); }
   };
 
+  const coverage = useMemo(() => {
+    if (!matrix) return { admins: 0, editable: 0, readOnly: 0, gaps: 0 };
+    return matrix.rows.reduce((summary, row) => {
+      if (row.is_admin) summary.admins += 1;
+      Object.values(row.cells || {}).forEach(level => {
+        if (level === "write") summary.editable += 1;
+        else if (level === "read") summary.readOnly += 1;
+        else if (level === "none") summary.gaps += 1;
+      });
+      return summary;
+    }, { admins: 0, editable: 0, readOnly: 0, gaps: 0 });
+  }, [matrix]);
+
+  const roleLabel = value => roleOptions.find(role => role.value === value)?.label || value?.replace(/_/g, " ") || "Technician";
+
   if (loading || !matrix) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>;
 
   return (
     <div className="space-y-4" data-testid="permission-matrix-tab">
       <AccessRoleSettings headers={headers} roleOptions={roleOptions} onSaved={onRolesChanged} />
-      <Card>
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4" />Permission Heatmap</CardTitle>
-          <div className="flex items-center gap-3 text-[10px] font-mono">
-            {Object.entries(PERM_COLORS).map(([k]) => (
-              <span key={k} className="flex items-center gap-1"><span className={`w-3 h-3 rounded ${PERM_COLORS[k]}`} />{k}</span>
-            ))}
+      <MetricStrip columns={4}>
+        <MetricTile label="Administrators" value={coverage.admins} accent="rose" icon={<Crown className="h-2.5 w-2.5 text-rose-300" />} />
+        <MetricTile label="Editable grants" value={coverage.editable} accent="violet" icon={<Edit className="h-2.5 w-2.5 text-violet-300" />} />
+        <MetricTile label="Read-only grants" value={coverage.readOnly} accent="cyan" icon={<Shield className="h-2.5 w-2.5 text-cyan-300" />} />
+        <MetricTile label="No access cells" value={coverage.gaps} accent={coverage.gaps ? "amber" : "zinc"} icon={<Lock className="h-2.5 w-2.5 text-amber-300" />} />
+      </MetricStrip>
+      <Card className="overflow-hidden border-zinc-800 bg-zinc-950/60">
+        <CardHeader className="border-b border-zinc-800 bg-gradient-to-r from-violet-500/[0.07] to-transparent pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4 text-violet-300" />Access coverage</CardTitle><p className="mt-1 text-xs text-zinc-500">A quick visual read of access by technician and module. Select a preset to preview changes before applying them.</p></div>
+            <Button size="sm" variant="ghost" onClick={load} className="h-8 text-xs"><RefreshCw className="mr-1 h-3 w-3" />Refresh</Button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-medium">
+            {["admin", "write", "read", "none"].map(level => <span key={level} className={`rounded-full border px-2 py-1 uppercase tracking-wider ${PERM_COLORS[level]}`}><span className="mr-1 font-mono">{PERM_INITIAL[level]}</span>{level === "write" ? "edit" : level === "read" ? "view" : level === "none" ? "no access" : "full access"}</span>)}
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse">
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full min-w-[1120px] text-xs border-collapse">
               <thead>
-                <tr>
-                  <th className="text-left px-2 py-2 sticky left-0 bg-zinc-950 z-10 min-w-[160px]">Technician</th>
+                <tr className="bg-zinc-900/60">
+                  <th className="text-left px-4 py-3 sticky left-0 bg-zinc-900 z-10 min-w-[220px] text-[10px] uppercase tracking-widest text-zinc-500">Technician</th>
                   {matrix.modules.map(m => (
-                    <th key={m} className="px-1 py-2 text-[9px] uppercase tracking-widest text-zinc-500 font-mono whitespace-nowrap" style={{ writingMode: "vertical-rl", textOrientation: "mixed", height: 100 }}>{m.replace(/_/g, " ")}</th>
+                    <th key={m} title={m.replace(/_/g, " ")} className="min-w-[48px] px-1 py-3 text-center text-[9px] uppercase tracking-wide text-zinc-500 font-mono whitespace-nowrap">{MODULE_SHORT_LABELS[m] || m}</th>
                   ))}
-                  <th className="px-2 py-2 text-[9px] uppercase tracking-widest text-zinc-500 font-mono">Promote to</th>
+                  <th className="px-3 py-3 text-[9px] uppercase tracking-widest text-zinc-500 font-mono">Apply preset</th>
                 </tr>
               </thead>
               <tbody>
                 {matrix.rows.map(row => (
-                  <tr key={row.tech_id} className="border-t border-zinc-900 hover:bg-zinc-900/40">
-                    <td className="px-2 py-1.5 sticky left-0 bg-zinc-950 z-10">
-                      <div className="flex items-center gap-1.5">{row.is_admin && <Crown className="w-3 h-3 text-amber-400 shrink-0" />}<span className="font-medium truncate">{row.name}</span></div>
-                      <div className="text-[10px] text-zinc-500 font-mono">{row.job_title}</div>
+                  <tr key={row.tech_id} className="border-t border-zinc-900 hover:bg-violet-500/[0.035] transition-colors">
+                    <td className="px-4 py-3 sticky left-0 bg-zinc-950 z-10">
+                      <div className="flex items-center gap-2"><div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${row.is_admin ? "bg-rose-500/15 text-rose-200" : "bg-violet-500/15 text-violet-200"}`}>{(row.name || "?").split(" ").map(part => part[0]).join("").slice(0, 2)}</div><div className="min-w-0"><div className="flex items-center gap-1.5">{row.is_admin && <Crown className="h-3 w-3 text-amber-400 shrink-0" />}<span className="font-medium truncate">{row.name}</span></div><div className="mt-0.5 flex items-center gap-1.5"><Badge variant="outline" className="h-4 border-zinc-700 px-1.5 text-[8px] text-zinc-400">{roleLabel(row.role)}</Badge><span className="truncate text-[10px] text-zinc-600">{row.job_title}</span></div></div></div>
                     </td>
                     {matrix.modules.map(m => (
-                      <td key={m} className="px-0.5 py-0.5 text-center">
+                      <td key={m} className="px-1 py-2 text-center">
                         <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[9px] font-bold font-mono ${PERM_COLORS[row.cells[m]] || PERM_COLORS.none}`}>{PERM_INITIAL[row.cells[m]] || "·"}</span>
                       </td>
                     ))}
-                    <td className="px-2 py-1.5">
+                    <td className="px-3 py-2">
                       <Select value="" onValueChange={(v) => v && openDiff(row.tech_id, v)}>
                         <SelectTrigger className="h-7 text-[10px] w-[140px]"><SelectValue placeholder="Preview…" /></SelectTrigger>
                         <SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
