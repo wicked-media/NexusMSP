@@ -304,11 +304,18 @@ export default function ContractsPage() {
               New Contract
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-violet-500/20 bg-background/95">
             <DialogHeader>
-              <DialogTitle>{selectedContract ? "Edit Contract" : "Create New Contract"}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10"><FileText className="h-4 w-4 text-violet-300" /></span>{selectedContract ? "Contract workspace" : "Create contract"}</DialogTitle>
+              <p className="text-sm text-muted-foreground">{selectedContract ? "Review commercial terms, renewal settings, and the service commitment in one place." : "Start the agreement here, then add billable inclusions and create a linked recurring invoice when it is approved."}</p>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-3 gap-2 rounded-xl border border-violet-500/15 bg-violet-500/[0.035] p-3 text-xs">
+                <div><p className="text-muted-foreground">Commercial value</p><p className="mt-1 font-semibold text-emerald-300">${Number(formData.value || 0).toLocaleString()}/mo</p></div>
+                <div><p className="text-muted-foreground">Billing cadence</p><p className="mt-1 font-semibold capitalize">{formData.billing_frequency || "monthly"}</p></div>
+                <div><p className="text-muted-foreground">Renewal</p><p className={`mt-1 font-semibold ${formData.auto_renew ? "text-sky-300" : "text-muted-foreground"}`}>{formData.auto_renew ? "Auto-renew on" : "Manual review"}</p></div>
+              </div>
+              <div className="flex items-center gap-2 pt-1"><span className="h-1.5 w-1.5 rounded-full bg-violet-400" /><p className="text-xs font-semibold uppercase tracking-wider text-violet-200">Agreement details</p></div>
               <div className="space-y-2">
                 <Label>Contract Name</Label>
                 <Input
@@ -355,14 +362,8 @@ export default function ContractsPage() {
                   </Select>
         </div>
       </div>
+              <div className="flex items-center gap-2 pt-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /><p className="text-xs font-semibold uppercase tracking-wider text-emerald-200">Commercial terms</p></div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <HeroTile label="All contracts" value={contracts.length} subtitle="View full register" icon={FileText} glow="cyan" active={contractFilter === "all"} onClick={() => setContractFilter("all")} testId="contracts-metric-total" />
-        <HeroTile label="Monthly value" value={`$${totalValue.toLocaleString()}`} subtitle="Active agreements" icon={DollarSign} glow="emerald" animated={false} active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-value" />
-        <HeroTile label="Active" value={contracts.filter(c => c.status === 'active').length} subtitle="Current coverage" icon={Calendar} glow="sky" active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-active" />
-        <HeroTile label="Expiring in 90 days" value={renewalAlerts.length} subtitle="Renewal worklist" icon={Calendar} glow={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} active={contractFilter === "renewing"} onClick={() => setContractFilter("renewing")} testId="contracts-metric-expiring" />
-        <HeroTile label="Line items" value={lineItems.length} subtitle="Billable inclusions" icon={FileText} glow="violet" active={contractFilter === "line-items"} onClick={() => setContractFilter("line-items")} testId="contracts-metric-lineitems" />
-      </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Start Date</Label>
@@ -419,6 +420,7 @@ export default function ContractsPage() {
                   onCheckedChange={(checked) => setFormData({ ...formData, auto_renew: checked })}
                 />
               </div>
+              <div className="flex items-center gap-2 pt-1"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" /><p className="text-xs font-semibold uppercase tracking-wider text-sky-200">Service commitment</p></div>
               <div className="space-y-2">
                 <Label>SLA Tier</Label>
                 <Select value={formData.sla_tier || "standard"} onValueChange={(v) => setFormData({ ...formData, sla_tier: v })}>
@@ -441,13 +443,22 @@ export default function ContractsPage() {
                 />
               </div>
               <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => { setIsDialogOpen(false); resetForm(); }}>Cancel</Button>
                 <Button type="submit" data-testid="contract-submit-button">
-                  {selectedContract ? "Update" : "Create Contract"}
+                  {selectedContract ? "Save contract" : "Create contract"}
                 </Button>
               </DialogFooter>
             </form>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <HeroTile label="All contracts" value={contracts.length} subtitle="View full register" icon={FileText} glow="cyan" active={contractFilter === "all"} onClick={() => setContractFilter("all")} testId="contracts-metric-total" />
+        <HeroTile label="Monthly value" value={`$${totalValue.toLocaleString()}`} subtitle="Active agreements" icon={DollarSign} glow="emerald" animated={false} active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-value" />
+        <HeroTile label="Active" value={contracts.filter(c => c.status === 'active').length} subtitle="Current coverage" icon={Calendar} glow="sky" active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-active" />
+        <HeroTile label="Expiring in 90 days" value={renewalAlerts.length} subtitle="Renewal worklist" icon={Calendar} glow={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} active={contractFilter === "renewing"} onClick={() => setContractFilter("renewing")} testId="contracts-metric-expiring" />
+        <HeroTile label="Line items" value={lineItems.length} subtitle="Billable inclusions" icon={FileText} glow="violet" active={contractFilter === "line-items"} onClick={() => setContractFilter("line-items")} testId="contracts-metric-lineitems" />
       </div>
 
       {/* Renewal Alerts */}
