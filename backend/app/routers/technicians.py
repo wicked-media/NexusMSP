@@ -10,9 +10,72 @@ from app.models import *
 router = APIRouter()
 
 
+# These IDs are the stable access controls used by the API. Administrators can
+# customise their display labels, but cannot alter the underlying IDs or remove
+# the protected administrator role.
+DEFAULT_ACCESS_ROLES = [
+    {"id": "technician", "label": "Technician", "description": "Works assigned service requests and client systems.", "protected": False},
+    {"id": "service_desk_manager", "label": "Service Desk Manager", "description": "Leads service-desk operations and technician workflows.", "protected": False},
+    {"id": "dispatcher", "label": "Dispatcher", "description": "Coordinates queues, scheduling and client communication.", "protected": False},
+    {"id": "admin", "label": "Administrator", "description": "Full platform and team access. Elevated access is protected and audited.", "protected": True},
+]
+
+ACCESS_ROLE_IDS = {role["id"] for role in DEFAULT_ACCESS_ROLES}
+
+
+async def _access_roles() -> list:
+    stored = await db.settings.find_one({"key": "access_role_catalogue"}, {"_id": 0, "value": 1}) or {}
+    custom = {item.get("id"): item for item in stored.get("value", []) if item.get("id")}
+    return [{**role, **{key: custom[role["id"]][key] for key in ("label", "description") if key in custom.get(role["id"], {})}} for role in DEFAULT_ACCESS_ROLES]
+
+
 async def _caller_is_admin(current_user: dict) -> bool:
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "role": 1, "is_admin": 1})
     return bool(caller and (caller.get("role") == "admin" or caller.get("is_admin")))
+
+
+@router.get("/technicians/access-roles")
+async def get_access_roles(current_user: dict = Depends(get_current_user)):
+    """Return editable display labels for the platform's stable access roles."""
+    return {"roles": await _access_roles()}
+
+
+@router.put("/technicians/access-roles")
+async def update_access_roles(data: dict, current_user: dict = Depends(get_current_user)):
+    if not await _caller_is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    requested = data.get("roles")
+    if not isinstance(requested, list):
+        raise HTTPException(status_code=400, detail="A role catalogue is required")
+    expected_ids = {role["id"] for role in DEFAULT_ACCESS_ROLES}
+    by_id = {item.get("id"): item for item in requested if isinstance(item, dict) and item.get("id")}
+    if set(by_id) != expected_ids:
+        raise HTTPException(status_code=400, detail="Access role IDs cannot be added, removed or changed")
+
+    cleaned = []
+    labels = set()
+    for role in DEFAULT_ACCESS_ROLES:
+        item = by_id[role["id"]]
+        label = str(item.get("label", "")).strip()
+        description = str(item.get("description", "")).strip()
+        if not 2 <= len(label) <= 50:
+            raise HTTPException(status_code=400, detail=f"{role['id']} needs a name between 2 and 50 characters")
+        if len(description) > 180:
+            raise HTTPException(status_code=400, detail="Role descriptions must be 180 characters or less")
+        if label.casefold() in labels:
+            raise HTTPException(status_code=400, detail="Each access role needs a unique name")
+        labels.add(label.casefold())
+        cleaned.append({"id": role["id"], "label": label, "description": description})
+
+    await db.settings.update_one(
+        {"key": "access_role_catalogue"},
+        {"$set": {"key": "access_role_catalogue", "value": cleaned, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("id")}},
+        upsert=True,
+    )
+    from app.routers.tech_intel import _log_audit
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0}) or current_user
+    await _log_audit(caller, "access_role_catalogue_updated", "access-roles", "Access role catalogue", {"roles": cleaned})
+    return {"roles": await _access_roles()}
 
 
 # ============== TECHNICIAN MANAGEMENT ENDPOINTS ==============
@@ -92,6 +155,9 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     password = tech_data.get("password") or ""
     if not name or not email:
         raise HTTPException(status_code=400, detail="Name and email are required")
+    role = str(tech_data.get("role") or "technician").strip().lower()
+    if role not in ACCESS_ROLE_IDS:
+        raise HTTPException(status_code=400, detail="Choose a valid access role")
     if await db.users.find_one({"email": email}, {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
     policy_error = password_policy_error(password, email)
@@ -104,7 +170,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     user = User(
         email=email,
         name=name,
-        role=tech_data.get("role", "technician"),
+        role=role,
         job_title=job_title,
         hourly_rate=float(tech_data.get("hourly_rate", 75)),
         phone=tech_data.get("phone", ""),
@@ -145,6 +211,10 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
         raise HTTPException(status_code=403, detail="You can only update your own profile")
 
     update = {k: v for k, v in tech_data.items() if k in allowed}
+    if "role" in update:
+        update["role"] = str(update["role"] or "").strip().lower()
+        if update["role"] not in ACCESS_ROLE_IDS:
+            raise HTTPException(status_code=400, detail="Choose a valid access role")
     if "hourly_rate" in update:
         update["hourly_rate"] = float(update["hourly_rate"])
     if not update:

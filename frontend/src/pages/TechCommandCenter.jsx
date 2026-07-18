@@ -49,14 +49,11 @@ const PERM_COLORS = {
 const PERM_INITIAL = { none: "·", read: "R", write: "W", admin: "A" };
 
 const ROLE_OPTIONS = [
-  { value: "technician", label: "Technician" },
-  { value: "service_desk_manager", label: "Service Desk Manager" },
-  { value: "dispatcher", label: "Dispatcher" },
-  { value: "admin", label: "Admin" },
+  { value: "technician", label: "Technician", description: "Works assigned service requests and client systems." },
+  { value: "service_desk_manager", label: "Service Desk Manager", description: "Leads service-desk operations and technician workflows." },
+  { value: "dispatcher", label: "Dispatcher", description: "Coordinates queues, scheduling and client communication." },
+  { value: "admin", label: "Administrator", description: "Full platform and team access.", protected: true },
 ];
-// Invites always create standard accounts. Administrator access is deliberately
-// granted only from the protected Add User / Manage technician controls.
-const INVITABLE_ROLE_OPTIONS = ROLE_OPTIONS.filter((option) => option.value !== "admin");
 const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit", "roster", "skills", "leaderboard"]);
 const OPERATIONAL_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
 const COMMAND_TAB_GROUPS = [
@@ -112,7 +109,7 @@ function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
 }
 
 // ---------- DIRECTORY TAB ----------
-function DirectoryTab({ headers, capacity, presets, onChanged }) {
+function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
   const [search, setSearch] = useState("");
   const [filterTitle, setFilterTitle] = useState("all");
   const [filterStatus, setFilterStatus] = useState("active");
@@ -170,7 +167,7 @@ function DirectoryTab({ headers, capacity, presets, onChanged }) {
         </div>
       )}
 
-      <EditTechDialog tech={editing} onClose={() => setEditing(null)} headers={headers} presets={presets} onChanged={onChanged} />
+      <EditTechDialog tech={editing} onClose={() => setEditing(null)} headers={headers} presets={presets} roleOptions={roleOptions} onChanged={onChanged} />
     </div>
   );
 }
@@ -228,7 +225,7 @@ function TechCard({ tech, onEdit, headers, onChanged }) {
 }
 
 // ---------- ADD USER (direct create) DIALOG ----------
-function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
+function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions = ROLE_OPTIONS }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "", job_title: "L1 Technician", role: "technician", hourly_rate: 75, password: "", is_admin: false });
   const [busy, setBusy] = useState(false);
   const [adminConfirmOpen, setAdminConfirmOpen] = useState(false);
@@ -290,7 +287,7 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
               <Select value={form.role} onValueChange={changeAccessRole}>
                 <SelectTrigger data-testid="add-user-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? "Administrator (protected)" : o.label}</SelectItem>)}
+                  {roleOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? `${o.label} (protected)` : o.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -342,7 +339,7 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
 }
 
 // ---------- INVITE USER DIALOG ----------
-function InviteDialog({ open, onClose, onSent, headers, presets }) {
+function InviteDialog({ open, onClose, onSent, headers, presets, roleOptions = ROLE_OPTIONS }) {
   const [form, setForm] = useState({ name: "", email: "", role: "technician", job_title: "L1 Technician", hourly_rate: 75, message: "" });
   const [busy, setBusy] = useState(false);
 
@@ -380,7 +377,7 @@ function InviteDialog({ open, onClose, onSent, headers, presets }) {
               <Label className="text-xs">Access role</Label>
               <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
                 <SelectTrigger data-testid="invite-role"><SelectValue /></SelectTrigger>
-                <SelectContent>{INVITABLE_ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{roleOptions.filter(o => o.value !== "admin").map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -408,7 +405,7 @@ function InviteDialog({ open, onClose, onSent, headers, presets }) {
 }
 
 // ---------- EDIT TECH DIALOG ----------
-function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
+function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OPTIONS, onChanged }) {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [adminConfirmOpen, setAdminConfirmOpen] = useState(false);
@@ -485,7 +482,7 @@ function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
               <Label className="text-xs">Access role</Label>
               <Select value={form.role} onValueChange={changeAccessRole}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? "Administrator (protected)" : o.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{roleOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? `${o.label} (protected)` : o.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
@@ -686,7 +683,49 @@ function CapacityTab({ capacity }) {
 }
 
 // ---------- PERMISSION MATRIX TAB ----------
-function PermissionMatrixTab({ headers, presets }) {
+function AccessRoleSettings({ headers, roleOptions, onSaved }) {
+  const [roles, setRoles] = useState(roleOptions);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setRoles(roleOptions); }, [roleOptions]);
+
+  const update = (value, field, nextValue) => setRoles(current => current.map(role => role.value === value ? { ...role, [field]: nextValue } : role));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const response = await axios.put(`${API}/technicians/access-roles`, {
+        roles: roles.map(({ value, label, description }) => ({ id: value, label, description })),
+      }, { headers });
+      const next = (response.data?.roles || []).map(role => ({ value: role.id, ...role }));
+      setRoles(next);
+      onSaved?.(next);
+      toast.success("Access role names saved");
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not save access roles"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+      <CardHeader className="pb-2 flex flex-row items-start justify-between gap-4">
+        <div><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4 text-violet-300" />Access roles</CardTitle><p className="mt-1 text-xs text-zinc-500">Rename the roles shown throughout NexusMSP. Their underlying access IDs remain stable so permissions and automations continue to work.</p></div>
+        <Button size="sm" onClick={save} disabled={busy} variant="outline" className="shrink-0 border-violet-500/40 text-violet-200 hover:bg-violet-500/10">{busy && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}Save roles</Button>
+      </CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-2">
+        {roles.map(role => (
+          <div key={role.value} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">{role.value}</span>{role.value === "admin" && <Badge variant="outline" className="border-rose-500/35 text-[9px] text-rose-300">Protected</Badge>}</div>
+            <Label className="text-xs">Display name</Label>
+            <Input className="mt-1 h-8 text-sm" value={role.label} onChange={event => update(role.value, "label", event.target.value)} />
+            <Label className="mt-2 block text-xs">Purpose</Label>
+            <Input className="mt-1 h-8 text-xs" value={role.description || ""} onChange={event => update(role.value, "description", event.target.value)} placeholder="What this role is for" />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PermissionMatrixTab({ headers, presets, roleOptions, onRolesChanged }) {
   const [matrix, setMatrix] = useState(null);
   const [loading, setLoading] = useState(true);
   const [diffOpen, setDiffOpen] = useState(false);
@@ -725,6 +764,7 @@ function PermissionMatrixTab({ headers, presets }) {
 
   return (
     <div className="space-y-4" data-testid="permission-matrix-tab">
+      <AccessRoleSettings headers={headers} roleOptions={roleOptions} onSaved={onRolesChanged} />
       <Card>
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4" />Permission Heatmap</CardTitle>
@@ -1047,6 +1087,7 @@ export default function TechCommandCenter() {
   });
   const [capacity, setCapacity] = useState(null);
   const [presets, setPresets] = useState({});
+  const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -1060,7 +1101,15 @@ export default function TechCommandCenter() {
     catch { /* */ }
   }, [headers]);
 
-  useEffect(() => { loadCapacity(); loadPresets(); }, [loadCapacity, loadPresets]);
+  const loadRoles = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API}/technicians/access-roles`, { headers });
+      const roles = response.data?.roles;
+      if (Array.isArray(roles) && roles.length) setRoleOptions(roles.map(role => ({ value: role.id, ...role })));
+    } catch { /* retain safe defaults while the role catalogue loads */ }
+  }, [headers]);
+
+  useEffect(() => { loadCapacity(); loadPresets(); loadRoles(); }, [loadCapacity, loadPresets, loadRoles]);
 
   useEffect(() => {
     const requested = searchParams.get("view");
@@ -1128,11 +1177,11 @@ export default function TechCommandCenter() {
           ))}
         </TabsList>
 
-        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
+        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} roleOptions={roleOptions} onChanged={loadCapacity} /></TabsContent>
         <TabsContent value="invites" className="mt-4"><InvitesTab headers={headers} /></TabsContent>
         <TabsContent value="find" className="mt-4"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
         <TabsContent value="capacity" className="mt-4"><CapacityTab capacity={capacity} /></TabsContent>
-        <TabsContent value="matrix" className="mt-4"><PermissionMatrixTab headers={headers} presets={presets} /></TabsContent>
+        <TabsContent value="matrix" className="mt-4"><PermissionMatrixTab headers={headers} presets={presets} roleOptions={roleOptions} onRolesChanged={setRoleOptions} /></TabsContent>
         <TabsContent value="drift" className="mt-4"><RoleDriftTab headers={headers} /></TabsContent>
         <TabsContent value="jit" className="mt-4"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
         <TabsContent value="audit" className="mt-4"><AuditTab headers={headers} /></TabsContent>
@@ -1141,8 +1190,8 @@ export default function TechCommandCenter() {
         <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
       </Tabs>
 
-      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} headers={headers} presets={presets} />
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} headers={headers} presets={presets} />
+      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} headers={headers} presets={presets} roleOptions={roleOptions} />
     </div>
   );
 }
