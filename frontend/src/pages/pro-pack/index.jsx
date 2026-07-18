@@ -15,12 +15,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
+import { MetricStrip, MetricTile } from "@/components/design-system";
+import HeroTile from "@/components/HeroTile";
+import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
+import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } from "@/lib/ticketPreviewData";
 import { toast } from "sonner";
 import {
   Inbox, Loader2, Plus, Trash2, AlertTriangle, CheckCircle, Save, Webhook, Send,
   Heart, Calendar, ShoppingCart, Phone, KeySquare, Briefcase, BookOpen,
   ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet, Activity, MapPin,
-  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap
+  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt
 } from "lucide-react";
 
 const useApi = () => {
@@ -44,37 +49,40 @@ const PageHeader = ({ title, subtitle, icon: Icon = Sparkles, children }) => (
 export function TriageQueuePage() {
   const { headers } = useApi();
   const [data, setData] = useState(null);
-  const fetch = () => axios.get(`${API}/pro-pack/triage-queue`, { headers }).then(r => setData(r.data));
-  useEffect(() => { fetch(); const i = setInterval(fetch, 30000); return () => clearInterval(i); }, []); // eslint-disable-line
-  if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
+  const [loadError, setLoadError] = useState(false);
+  const load = () => axios.get(`${API}/pro-pack/triage-queue`, { headers })
+    .then(r => { setData(normaliseTriageQueue(r.data, isLocalTicketPreview() ? LOCAL_PREVIEW_TICKETS : [])); setLoadError(false); })
+    .catch(() => { setData(normaliseTriageQueue(null, isLocalTicketPreview() ? LOCAL_PREVIEW_TICKETS : [])); setLoadError(true); });
+  useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, []); // eslint-disable-line
+  if (!data) return <div className="p-6 space-y-4"><TicketModuleHeader title="Triage queue" subtitle="Loading unassigned tickets…" /><Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" /></div>;
   return (
     <div className="p-6 space-y-4" data-testid="triage-queue-page">
-      <PageHeader title="Triage Queue" subtitle={`${data.count} unassigned · oldest ${Math.floor(data.oldest_age_minutes / 60)}h ${data.oldest_age_minutes % 60}m`} icon={Inbox}>
-        <Button variant="outline" size="sm" onClick={fetch}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button>
-      </PageHeader>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {Object.entries(data.by_priority).map(([k, v]) => (
-          <Card key={k} className={k === "critical" ? "border-rose-500/30 bg-rose-500/[0.04]" : k === "high" ? "border-amber-500/30 bg-amber-500/[0.04]" : ""}>
-            <CardContent className="pt-4 pb-3">
-              <p className="text-[10px] uppercase text-muted-foreground">{k}</p>
-              <p className="text-3xl font-bold mt-1 font-mono">{v}</p>
-            </CardContent>
-          </Card>
+      <TicketModuleHeader
+        title="Triage queue"
+        subtitle={`${data.count} unassigned · oldest ${Math.floor(data.oldest_age_minutes / 60)}h ${data.oldest_age_minutes % 60}m · ordered for rapid ownership`}
+        actions={
+        <Button variant="outline" size="sm" onClick={load}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button>
+        }
+      />
+      {loadError && <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">Live triage data is unavailable. Showing the safe local queue.</div>}
+      <MetricStrip columns={4}>
+        {Object.entries(data.by_priority || {}).map(([k, v]) => (
+          <MetricTile key={k} label={k} value={v} accent={k === "critical" ? "rose" : k === "high" ? "amber" : k === "medium" ? "sky" : "zinc"} icon={<Inbox className={`w-2.5 h-2.5 ${k === "critical" ? "text-rose-400" : k === "high" ? "text-amber-400" : k === "medium" ? "text-sky-400" : "text-zinc-400"}`} />} testid={`triage-metric-${k}`} />
         ))}
-      </div>
+      </MetricStrip>
       <Card><CardContent className="p-0"><Table>
         <TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead><TableHead>Priority</TableHead><TableHead>Source</TableHead><TableHead>Age</TableHead></TableRow></TableHeader>
-        <TableBody>{data.items.map(t => (
-          <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40" onClick={() => window.location.href = `/tickets?id=${t.id}`}>
+        <TableBody>{(data.items || []).map(t => (
+          <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40" onClick={() => window.location.href = `/tickets?ticket=${encodeURIComponent(t.id)}`}>
             <TableCell className="font-mono text-xs">{t.ticket_number}</TableCell>
             <TableCell>{t.title}</TableCell>
             <TableCell>{t.client_name}</TableCell>
-            <TableCell><Badge className={`text-[10px] capitalize ${t.priority === "critical" ? "bg-rose-500/20 text-rose-300" : t.priority === "high" ? "bg-amber-500/20 text-amber-300" : ""}`}>{t.priority}</Badge></TableCell>
+            <TableCell><Badge className={`text-[10px] capitalize ${TICKET_PRIORITY_STYLES[t.priority]?.badge || TICKET_PRIORITY_STYLES.medium.badge}`}>{t.priority}</Badge></TableCell>
             <TableCell><Badge variant="outline" className="text-[10px]">{t.source || "manual"}</Badge></TableCell>
             <TableCell className="text-xs">{t.created_at?.slice(0, 16).replace("T", " ")}</TableCell>
           </TableRow>
         ))}</TableBody>
-      </Table></CardContent></Card>
+      </Table>{(data.items || []).length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No unassigned tickets need triage.</p>}</CardContent></Card>
     </div>
   );
 }
@@ -178,6 +186,8 @@ export function QuoteToCashPage() {
   useEffect(() => { axios.get(`${API}/pro-pack/quote-to-cash`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
   if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
   const fmt = (n) => `$${(n || 0).toLocaleString()}`;
+  const stageIcons = { leads: Users, estimates: FileSpreadsheet, contracts: Briefcase, invoices: Receipt, recurring: RefreshCw };
+  const stageGlows = { leads: "cyan", estimates: "sky", contracts: "violet", invoices: "amber", recurring: "emerald" };
   const stages = [
     { key: "leads", label: "Leads", icon: "🎯", color: "text-cyan-400", value: data.leads.value, count: data.leads.count, link: "/leads" },
     { key: "estimates", label: "Estimates", icon: "📋", color: "text-blue-400", value: data.estimates.value, count: data.estimates.count, link: "/estimates" },
@@ -190,14 +200,7 @@ export function QuoteToCashPage() {
       <PageHeader title="Quote → Cash Pipeline" subtitle="End-to-end revenue funnel: lead → invoice → MRR" icon={Workflow} />
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {stages.map(s => (
-          <Card key={s.key} className="cursor-pointer hover:border-violet-500/40 transition" onClick={() => window.location.href = s.link}>
-            <CardContent className="pt-4 pb-3">
-              <div className="text-3xl mb-1">{s.icon}</div>
-              <p className={`text-xs font-medium uppercase tracking-wider ${s.color}`}>{s.label}</p>
-              <p className="text-2xl font-bold font-mono mt-1">{fmt(s.value)}</p>
-              <p className="text-[11px] text-muted-foreground">{s.count} item{s.count !== 1 && "s"}{s.suffix || ""}</p>
-            </CardContent>
-          </Card>
+          <HeroTile key={s.key} label={s.label} value={fmt(s.value)} icon={stageIcons[s.key]} glow={stageGlows[s.key]} animated={false} subtitle={`${s.count} item${s.count !== 1 ? "s" : ""}${s.suffix || ""}`} onClick={() => window.location.href = s.link} testId={`qtc-stage-${s.key}`} />
         ))}
       </div>
       <Card><CardHeader><CardTitle className="text-sm">Estimate Conversion</CardTitle></CardHeader><CardContent>
@@ -336,24 +339,39 @@ export function Security2FAPage() {
   const [setup, setSetup] = useState(null);
   const [code, setCode] = useState("");
   const [verified, setVerified] = useState(false);
-  const start = async () => { try { const r = await axios.post(`${API}/pro-pack/2fa/setup`, {}, { headers }); setSetup(r.data); } catch { toast.error("Setup failed"); } };
-  const verify = async () => { try { await axios.post(`${API}/pro-pack/2fa/verify`, { code }, { headers }); toast.success("2FA verified & enabled"); setVerified(true); } catch (e) { toast.error(e.response?.data?.detail || "Invalid code"); } };
-  const disable = async () => { if (!window.confirm("Disable 2FA?")) return; await axios.delete(`${API}/pro-pack/2fa`, { headers }); setSetup(null); setVerified(false); toast.success("Disabled"); };
+  const [loading, setLoading] = useState(true);
+  const [disableMode, setDisableMode] = useState(false);
+  const [password, setPassword] = useState("");
+  useEffect(() => {
+    axios.get(`${API}/pro-pack/2fa`, { headers })
+      .then(r => setVerified(Boolean(r.data?.enabled)))
+      .catch(() => toast.error("Could not load 2FA status"))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const start = async () => { try { const r = await axios.post(`${API}/pro-pack/2fa/setup`, {}, { headers }); setSetup(r.data); setCode(""); } catch { toast.error("Setup failed"); } };
+  const verify = async () => { try { await axios.post(`${API}/pro-pack/2fa/verify`, { code }, { headers }); toast.success("2FA is now protecting your sign-in"); setSetup(null); setVerified(true); } catch (e) { toast.error(e.response?.data?.detail || "Invalid code"); } };
+  const disable = async () => {
+    try {
+      await axios.delete(`${API}/pro-pack/2fa`, { headers, data: { password } });
+      setSetup(null); setVerified(false); setDisableMode(false); setPassword(""); toast.success("2FA disabled");
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not disable 2FA"); }
+  };
   return (
     <div className="p-6 space-y-4" data-testid="security-2fa-page">
       <PageHeader title="2FA / TOTP" subtitle="Time-based one-time passcode for technician sign-in" icon={ShieldOff} />
       <Card><CardContent className="pt-6 space-y-4">
-        {!setup && !verified && <Button onClick={start} data-testid="start-2fa">Start 2FA Setup</Button>}
+        {loading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Checking account protection…</div>}
+        {!loading && !setup && !verified && <div className="space-y-3"><p className="text-sm text-muted-foreground">Protect your NexusMSP account with any TOTP authenticator app. Once enrolled, a code is required for every password sign-in.</p><Button onClick={start} data-testid="start-2fa">Set up authenticator app</Button></div>}
         {setup && !verified && (
           <>
             <p className="text-sm">1. Add the entry to your authenticator app (Google Authenticator, 1Password, Authy):</p>
             <code className="block p-3 bg-muted/30 rounded text-xs font-mono break-all">{setup.otpauth_uri}</code>
             <p className="text-sm">2. Or enter manually — secret: <code className="font-mono">{setup.secret}</code></p>
             <p className="text-sm">3. Enter the 6-digit code from your app:</p>
-            <div className="flex gap-2"><Input value={code} onChange={e => setCode(e.target.value)} maxLength={6} className="w-32 font-mono text-center text-lg" data-testid="totp-input" /><Button onClick={verify} data-testid="verify-2fa">Verify</Button></div>
+            <div className="flex flex-wrap gap-2"><Input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="w-36 font-mono text-center text-lg tracking-[0.25em]" data-testid="totp-input" /><Button onClick={verify} disabled={code.length !== 6} data-testid="verify-2fa">Verify & enable</Button><Button variant="ghost" onClick={() => setSetup(null)}>Cancel</Button></div>
           </>
         )}
-        {verified && <><p className="text-sm text-emerald-400 flex items-center gap-2"><CheckCircle className="w-4 h-4" />2FA is enabled on your account.</p><Button variant="outline" onClick={disable}>Disable 2FA</Button></>}
+        {!loading && verified && <div className="space-y-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-4"><p className="text-sm text-emerald-400 flex items-center gap-2"><CheckCircle className="w-4 h-4" />Authenticator protection is active. A code is required at your next password sign-in.</p>{!disableMode ? <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDisableMode(true)}>Disable 2FA</Button> : <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-3"><div className="space-y-1"><Label className="text-xs">Confirm current password to disable</Label><Input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-64" /></div><Button variant="destructive" disabled={!password} onClick={disable}>Confirm disable</Button><Button variant="ghost" onClick={() => { setDisableMode(false); setPassword(""); }}>Cancel</Button></div>}</div>}
       </CardContent></Card>
     </div>
   );
@@ -459,7 +477,15 @@ export function CrmPipelinePage() {
   const [data, setData] = useState(null);
   const fetch = () => axios.get(`${API}/pro-pack/crm/pipeline`, { headers }).then(r => setData(r.data));
   useEffect(() => { fetch(); }, []); // eslint-disable-line
-  const move = async (id, stage) => { await axios.post(`${API}/pro-pack/crm/leads/${id}/move-stage`, { stage }, { headers }); fetch(); };
+  const move = async (id, stage) => {
+    try {
+      await axios.post(`${API}/pro-pack/crm/leads/${id}/move-stage`, { stage }, { headers });
+      toast.success(`Lead moved to ${stage}`);
+      fetch();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not move the lead");
+    }
+  };
   if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
   return (
     <div className="p-6 space-y-4" data-testid="crm-pipeline-page">
@@ -611,8 +637,6 @@ export function FinancialAnalyticsHubPage() {
     { path: "/contract-profit", label: "Contract Profit" },
     { path: "/profitability-heatmap", label: "Profitability Map" },
     { path: "/cost-per-ticket", label: "Cost / Ticket" },
-    { path: "/roi-reports", label: "ROI Reports" },
-    { path: "/revenue-tracker", label: "Revenue Tracker" },
     { path: "/saas-spend", label: "SaaS Spend" },
   ];
   return (
@@ -623,19 +647,6 @@ export function FinancialAnalyticsHubPage() {
           <CardContent className="pt-5 pb-4"><p className="font-semibold">{t.label}</p></CardContent>
         </Card>
       ))}</div>
-    </div>
-  );
-}
-
-/* ============== SLA HUB ============== */
-export function SlaHubPage() {
-  return (
-    <div className="p-6 space-y-4" data-testid="sla-hub-page">
-      <PageHeader title="SLA Hub" subtitle="Live timers + scheduled reports — one stop" icon={Activity} />
-      <Tabs defaultValue="timers"><TabsList><TabsTrigger value="timers">Live Timers</TabsTrigger><TabsTrigger value="reports">Reports</TabsTrigger></TabsList>
-        <TabsContent value="timers" className="mt-4"><Card><CardContent className="pt-6"><Button onClick={() => window.location.href = "/sla-timer"}>Open SLA Timer →</Button></CardContent></Card></TabsContent>
-        <TabsContent value="reports" className="mt-4"><Card><CardContent className="pt-6"><Button onClick={() => window.location.href = "/sla-report-gen"}>Open SLA Reports →</Button></CardContent></Card></TabsContent>
-      </Tabs>
     </div>
   );
 }

@@ -75,6 +75,9 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         "expected_delivery": data.get("expected_delivery", ""),
         "client_id": data.get("client_id", ""),
         "client_name": data.get("client_name", ""),
+        "ticket_id": data.get("ticket_id", ""),
+        "ticket_number": data.get("ticket_number", ""),
+        "ticket_title": data.get("ticket_title", ""),
         "assigned_to": data.get("assigned_to", ""),
         "assigned_to_name": data.get("assigned_to_name", ""),
         "created_by": current_user["id"],
@@ -90,6 +93,12 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
     await _log_po_audit(po["id"], "created", f"Purchase order {po['po_number']} created", current_user)
     return po
 
+@router.get("/purchase-orders/by-ticket/{ticket_id}")
+async def get_purchase_orders_for_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    return await db.purchase_orders.find(
+        {"ticket_id": ticket_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+
 @router.get("/purchase-orders/{po_id}")
 async def get_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
@@ -101,7 +110,7 @@ async def get_purchase_order(po_id: str, current_user: dict = Depends(get_curren
 async def update_purchase_order(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"vendor", "vendor_id", "vendor_contact", "vendor_email", "status", "line_items",
                "subtotal", "tax", "shipping", "total", "notes", "ship_to", "expected_delivery",
-               "client_id", "client_name", "assigned_to", "assigned_to_name"}
+               "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name"}
     update = {k: v for k, v in data.items() if k in allowed}
     for f in ("subtotal", "tax", "shipping", "total"):
         if f in update:
@@ -114,6 +123,90 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
     else:
         await _log_po_audit(po_id, "updated", "Purchase order updated", current_user)
     return {"message": "Purchase order updated"}
+
+@router.post("/purchase-orders/{po_id}/vendor-invoice-match")
+async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Record a supplier invoice against a PO without changing the PO or billing totals."""
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+
+    invoice_number = str(data.get("invoice_number", "")).strip()
+    if not invoice_number:
+        raise HTTPException(status_code=422, detail="Supplier invoice number is required")
+    try:
+        supplier_total = round(float(data.get("supplier_total")), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Supplier invoice total must be a valid amount")
+    if supplier_total < 0:
+        raise HTTPException(status_code=422, detail="Supplier invoice total cannot be negative")
+
+    expected_total = round(float(po.get("total", 0) or 0), 2)
+    variance = round(supplier_total - expected_total, 2)
+    match = {
+        "invoice_number": invoice_number,
+        "invoice_date": str(data.get("invoice_date", "")).strip(),
+        "supplier_total": supplier_total,
+        "expected_total": expected_total,
+        "variance": variance,
+        "status": "matched" if abs(variance) < 0.01 else "variance",
+        "notes": str(data.get("notes", "")).strip(),
+        "matched_by": current_user.get("id", "system"),
+        "matched_by_name": current_user.get("name", "System"),
+        "matched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": {
+        "vendor_invoice_match": match,
+        "updated_at": match["matched_at"],
+    }})
+    outcome = "matched" if match["status"] == "matched" else f"has a ${abs(variance):.2f} {'over' if variance > 0 else 'under'} variance"
+    await _log_po_audit(po_id, "vendor_invoice_matched", f"Supplier invoice {invoice_number} recorded and {outcome} against PO total ${expected_total:.2f}", current_user)
+    return {"message": "Supplier invoice match recorded", "vendor_invoice_match": match}
+
+@router.post("/purchase-orders/{po_id}/vendor-invoice-match/review")
+async def review_vendor_invoice_match(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    match = po.get("vendor_invoice_match")
+    if not match:
+        raise HTTPException(status_code=400, detail="Record a supplier invoice before reviewing it")
+    if match.get("status") != "variance":
+        raise HTTPException(status_code=400, detail="Only supplier invoice variances need review")
+
+    decision = str(data.get("decision", "")).strip().lower()
+    if decision not in {"accepted", "follow_up"}:
+        raise HTTPException(status_code=422, detail="Choose whether the variance is accepted or needs follow-up")
+    notes = str(data.get("notes", "")).strip()
+    review = {
+        "status": decision,
+        "notes": notes,
+        "reviewed_by": current_user.get("id", "system"),
+        "reviewed_by_name": current_user.get("name", "System"),
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    match["review"] = review
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": {
+        "vendor_invoice_match": match,
+        "updated_at": review["reviewed_at"],
+    }})
+    action = "accepted" if decision == "accepted" else "marked for supplier follow-up"
+    await _log_po_audit(po_id, "vendor_invoice_variance_reviewed", f"Supplier invoice {match.get('invoice_number', '')} variance {action}", current_user)
+    assignee_id = po.get("assigned_to")
+    if decision == "follow_up" and assignee_id and assignee_id != current_user.get("id"):
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": assignee_id,
+            "title": f"Supplier follow-up: {po.get('po_number', 'Purchase order')}",
+            "message": f"Supplier invoice {match.get('invoice_number', '')} has a ${abs(float(match.get('variance', 0) or 0)):.2f} variance and needs follow-up.",
+            "severity": "warning",
+            "type": "supplier_invoice_follow_up",
+            "ref_type": "purchase_order",
+            "ref_id": po_id,
+            "read": False,
+            "created_at": review["reviewed_at"],
+        })
+    return {"message": "Supplier invoice variance review saved", "vendor_invoice_match": match}
 
 @router.delete("/purchase-orders/{po_id}")
 async def delete_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
@@ -142,20 +235,32 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
     total_all_received = True
     for ri in received_items:
         pid = ri.get("product_id")
-        recv_qty = int(ri.get("quantity", 0))
-        if recv_qty <= 0:
-            continue
-        if pid in li_map:
-            li = li_map[pid]
-            prev_received = li.get("received_qty", 0)
-            new_received = prev_received + recv_qty
-            ordered_qty = li.get("quantity", 0)
-            li["received_qty"] = min(new_received, ordered_qty)
-            li["status"] = "received" if li["received_qty"] >= ordered_qty else "partial"
-            if li["received_qty"] < ordered_qty:
-                total_all_received = False
-            product = await db.products.find_one({"id": pid}, {"_id": 0})
-            if product:
+        try:
+            recv_qty = int(ri.get("quantity", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Received quantity must be a whole number")
+        if recv_qty < 1:
+            raise HTTPException(status_code=422, detail="Received quantity must be at least 1")
+        if pid not in li_map:
+            raise HTTPException(status_code=422, detail="Received item is not on this purchase order")
+
+        li = li_map[pid]
+        prev_received = int(li.get("received_qty", 0))
+        ordered_qty = int(li.get("quantity", 0))
+        remaining_qty = max(0, ordered_qty - prev_received)
+        if recv_qty > remaining_qty:
+            raise HTTPException(status_code=422, detail=f"Cannot receive {recv_qty}: only {remaining_qty} remaining for this line")
+        li["received_qty"] = prev_received + recv_qty
+        li["status"] = "received" if li["received_qty"] >= ordered_qty else "partial"
+        if li["received_qty"] < ordered_qty:
+            total_all_received = False
+        product = await db.products.find_one({"id": pid}, {"_id": 0})
+        if product:
+            stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
+            tracks_stock = product.get("track_inventory")
+            if tracks_stock is None:
+                tracks_stock = str(product.get("category", "")).lower() in stock_controlled_categories
+            if tracks_stock:
                 old_stock = product.get("quantity_in_stock", 0)
                 new_stock = old_stock + recv_qty
                 await db.products.update_one({"id": pid}, {"$set": {
@@ -173,8 +278,6 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
                 await db.stock_movements.insert_one(movement)
-        else:
-            total_all_received = False
     for li in line_items:
         if li.get("received_qty", 0) < li.get("quantity", 0):
             total_all_received = False

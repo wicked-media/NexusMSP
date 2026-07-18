@@ -634,7 +634,7 @@ function CippHygienePanel() {
     try {
       const res = await axios.post(`${API}/cipp/hygiene-digest/send`, {}, { headers });
       if (res.data?.sent) toast.success(`Digest sent via ${res.data.sent_via}`);
-      else toast.warning(res.data?.reason || res.data?.error || "Digest saved but not emailed (Resend not configured)");
+      else toast.warning(res.data?.reason || res.data?.error || "Digest saved but not emailed (Microsoft 365 is not connected)");
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setSending(false); }

@@ -242,7 +242,7 @@ Every write audited to `db.cipp_actions`.
 | Guest posture | 10 |
 | Modern auth CA | 5 |
 
-- "Send digest" emails an HTML hygiene digest via Resend.
+- "Send digest" emails an HTML hygiene digest through the selected Microsoft 365 mailbox.
 - Upsell candidates surfaces clients with risks → Security Posture bundle prospects.
 
 ## Client Health integration
@@ -481,7 +481,7 @@ Dashboard hero → ☕ button. Presets: coffee 15m / lunch 45m / meeting 30m / f
         "category": "Reports & Comms",
         "icon": "✉️",
         "order": 90,
-        "summary": "Two-way SMS, Resend email, MobileMessage gateway.",
+        "summary": "Two-way SMS, Microsoft 365 email, MobileMessage gateway.",
         "body_md": """## Email
 Send from the ticket Conversation tab → Public Email. RichTextEditor with full Outlook signature support (tables preserved on paste). HTML ⇄ Visual toggle for raw paste.
 
@@ -596,7 +596,7 @@ Suppressed alerts still write to the audit log for compliance.
         "order": 110,
         "summary": "Single screen showing every 3rd-party integration's status.",
         "body_md": """## What it is
-`/integrations` aggregates 12+ integrations: Huntress · Hudu · Acronis · Pax8 · Domotz · Stripe · Xero · Resend · MobileMessage · Splynx · Syncro · Suped · CIPP · UniFi.
+`/integrations` aggregates 12+ integrations: Huntress · Hudu · Acronis · Pax8 · Domotz · Stripe · Xero · Microsoft 365 Email · MobileMessage · Splynx · Syncro · Suped · CIPP · UniFi.
 
 ## Each tile shows
 - Connected / Unconfigured badge

@@ -16,7 +16,7 @@ export function WhisperRail({ email }) {
     if (!email) return;
     setLoading(true); setErr(null);
     axios.get(`${API}/whisper/contact?email=${encodeURIComponent(email)}`, { headers })
-      .then((r) => setData(r.data))
+      .then((r) => setData(r.data?.contact && r.data?.client ? r.data : null))
       .catch((e) => setErr(e.response?.status === 404 ? "not-found" : "error"))
       .finally(() => setLoading(false));
   }, [email, headers]);
@@ -25,7 +25,7 @@ export function WhisperRail({ email }) {
   if (loading) return <div className="rounded-xl border border-zinc-800 p-3 text-xs text-muted-foreground" data-testid="whisper-rail-loading"><Loader2 className="w-3 h-3 inline animate-spin mr-1" />Reading relationship…</div>;
   if (err === "not-found" || !data) return null;
 
-  const { contact, client, recent_tickets, finance, churn, escalations_ever, preferred_tech } = data;
+  const { contact, client, recent_tickets = [], finance = {}, churn, escalations_ever = 0, preferred_tech } = data;
   const isVip = contact.is_vip;
 
   return (

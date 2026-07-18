@@ -22,7 +22,7 @@ const ICON_BY_KEY = {
   domotz: Activity,
   stripe: DollarSign,
   xero: DollarSign,
-  resend: Mail,
+  microsoft365: Mail,
   sms: MessageSquare,
   splynx: Cloud,
   syncro: Cloud,
@@ -78,6 +78,7 @@ export default function IntegrationsOverviewPage() {
 
   const stale = (t) => t.last_synced_at && (Date.now() - new Date(t.last_synced_at).getTime() > 24 * 3600 * 1000);
   const staleCount = (data?.tiles || []).filter((t) => t.configured && stale(t)).length;
+  const filterCounts = { all: total, configured, unconfigured };
 
   return (
     <PageShell data-testid="integrations-overview-page">
@@ -96,7 +97,7 @@ export default function IntegrationsOverviewPage() {
               <Plug className="w-6 h-6 text-indigo-400" />Integrations
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Command deck for every 3rd-party service · {staleCount > 0 ? <span className="text-amber-400">{staleCount} integration{staleCount === 1 ? "" : "s"} last synced &gt; 24h ago</span> : "all fresh"}
+              Command deck for every connected service <span className="mx-1.5 text-border">•</span> {staleCount > 0 ? <span className="text-amber-400">{staleCount} integration{staleCount === 1 ? "" : "s"} needs attention</span> : <span className="text-emerald-400">all connected services are fresh</span>}
             </p>
           </div>
           <div className="flex gap-2">
@@ -106,17 +107,27 @@ export default function IntegrationsOverviewPage() {
           </div>
         </div>
 
+        {staleCount > 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <p className="text-xs text-amber-100/90"><span className="font-semibold">Connection attention needed.</span> Review integrations that have not synced in the last 24 hours.</p>
+            </div>
+            <button type="button" onClick={() => setFilter("configured")} className="shrink-0 text-[11px] font-medium text-amber-300 hover:text-amber-200">Review connected</button>
+          </div>
+        )}
+
         {/* Filters */}
         <Card>
           <CardContent className="p-3 flex items-center gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[240px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input className="pl-8 h-9" placeholder="Search integrations…" value={search} onChange={(e) => setSearch(e.target.value)} data-testid="io-search" />
+              <Input className="pl-8 h-9" placeholder="Search integrations..." value={search} onChange={(e) => setSearch(e.target.value)} data-testid="io-search" />
             </div>
             {["all", "configured", "unconfigured"].map((f) => (
               <button key={f} onClick={() => setFilter(f)}
                 className={`text-[10px] uppercase tracking-wider px-3 py-1.5 rounded border font-mono ${filter === f ? "bg-indigo-500/20 border-indigo-500/40 text-indigo-300" : "border-border text-muted-foreground hover:bg-muted/50"}`}
-                data-testid={`io-filter-${f}`}>{f}</button>
+                data-testid={`io-filter-${f}`}>{f} <span className="ml-1 opacity-70">{filterCounts[f]}</span></button>
             ))}
           </CardContent>
         </Card>
@@ -124,7 +135,7 @@ export default function IntegrationsOverviewPage() {
         {/* Tile grid */}
         {loading ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading integrations…
+            <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading integrations...
           </div>
         ) : tiles.length === 0 ? (
           <Card><CardContent className="p-10 text-center text-xs text-muted-foreground">No integrations match your filter</CardContent></Card>
@@ -135,8 +146,8 @@ export default function IntegrationsOverviewPage() {
               const tone = CATEGORY_TONE[t.category] || "text-zinc-400 border-border";
               const isStale = stale(t);
               return (
-                <Card key={t.key} className={`${t.configured ? "border-emerald-500/30" : "border-dashed border-zinc-800"} transition-colors`} data-testid={`io-tile-${t.key}`}>
-                  <CardContent className="p-4 space-y-3">
+                <Card key={t.key} className={`${t.configured ? "border-emerald-500/30 hover:border-emerald-500/50" : "border-dashed border-zinc-800 hover:border-zinc-700"} min-h-[230px] transition-colors`} data-testid={`io-tile-${t.key}`}>
+                  <CardContent className="p-4 h-full flex flex-col gap-3">
                     <div className="flex items-start justify-between">
                       <div className={`w-10 h-10 rounded-lg border flex items-center justify-center ${tone}`}>
                         <Icon className="w-5 h-5" />
@@ -148,9 +159,9 @@ export default function IntegrationsOverviewPage() {
                       )}
                     </div>
 
-                    <div>
-                      <div className="text-sm font-semibold">{t.name}</div>
-                      <div className="text-[11px] text-muted-foreground">{t.description}</div>
+                    <div className="min-h-[42px]">
+                      <div className="text-sm font-semibold leading-5">{t.name}</div>
+                      <div className="text-[11px] leading-4 text-muted-foreground">{t.description}</div>
                     </div>
 
                     {t.configured && (
@@ -158,7 +169,7 @@ export default function IntegrationsOverviewPage() {
                         {t.last_synced_at ? (
                           <div className={isStale ? "text-amber-400" : ""}>
                             Synced {new Date(t.last_synced_at).toLocaleString()}
-                            {isStale && <span className="ml-1">· stale</span>}
+                            {isStale && <span className="ml-1">• stale</span>}
                           </div>
                         ) : null}
                         {t.last_test_status && (
@@ -169,7 +180,7 @@ export default function IntegrationsOverviewPage() {
                       </div>
                     )}
 
-                    <div className="flex gap-2 pt-1 border-t border-border">
+                    <div className="flex gap-2 pt-3 mt-auto border-t border-border">
                       {t.command_center && t.configured && (
                         <Button size="sm" variant="outline" className="flex-1 text-xs" asChild data-testid={`io-open-${t.key}`}>
                           <Link to={t.command_center}><ExternalLink className="w-3 h-3 mr-1" />Open</Link>
@@ -177,7 +188,7 @@ export default function IntegrationsOverviewPage() {
                       )}
                       <Button size="sm" variant={t.configured ? "ghost" : "default"} className={`${t.command_center && t.configured ? "" : "flex-1"} text-xs`} asChild data-testid={`io-settings-${t.key}`}>
                         <Link to={`/settings?tab=integrations&anchor=${t.settings_anchor || ""}`}>
-                          <SettingsIcon className="w-3 h-3 mr-1" />{t.configured ? "" : "Configure"}
+                          <SettingsIcon className="w-3 h-3 mr-1" />{t.configured ? "Manage" : "Configure"}
                         </Link>
                       </Button>
                     </div>

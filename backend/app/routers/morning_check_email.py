@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
-from app.routers.email_utils import send_email, is_resend_configured
+from app.routers.email_utils import send_email, is_microsoft365_configured
 
 router = APIRouter()
 
@@ -178,7 +178,7 @@ async def send_morning_check_email(data: dict, current_user: dict = Depends(get_
     now = datetime.now(timezone.utc)
     subject = f"NOC Morning Check Report - {now.strftime('%B %d, %Y')}"
 
-    result = await send_email(to_email, subject, html)
+    result = await send_email(to_email, subject, html, category="notifications")
 
     # Log the send
     await db.email_logs.insert_one({
@@ -195,5 +195,5 @@ async def send_morning_check_email(data: dict, current_user: dict = Depends(get_
         "status": result["status"],
         "message": result["message"],
         "email_id": result.get("email_id"),
-        "resend_configured": is_resend_configured(),
+        "email_configured": await is_microsoft365_configured(),
     }

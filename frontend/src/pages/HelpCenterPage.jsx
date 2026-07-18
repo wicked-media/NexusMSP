@@ -95,7 +95,7 @@ export default function HelpCenterPage() {
   };
 
   const onReseed = async () => {
-    if (!window.confirm("Re-seed default articles? This will overwrite the 6 default articles.")) return;
+    if (!window.confirm("Refresh the NexusMSP product guides? Current platform articles will be updated and obsolete shipped guides removed; your custom articles are preserved.")) return;
     try {
       await api.post("/help/seed");
       toast.success("Seeded");
@@ -137,7 +137,7 @@ export default function HelpCenterPage() {
                   onClick={onReseed}
                   data-testid="help-reseed-btn"
                 >
-                  <RefreshCw className="w-3.5 h-3.5 mr-1" />Re-seed defaults
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh product guides
                 </Button>
               </>
             )}

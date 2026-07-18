@@ -15,11 +15,9 @@ export default function ThreatTimelinePage() {
   const { token } = useAuth();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchData = useCallback(async () => {
     setLoading(true);
-    try { const res = await axios.get(`${API}/soc/alerts`, { headers }); setAlerts(res.data.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))); }
+    try { const res = await axios.get(`${API}/soc/alerts`, { headers: { Authorization: `Bearer ${token}` } }); setAlerts(res.data.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))); }
     catch { toast.error("Failed"); }
     finally { setLoading(false); }
   }, [token]);

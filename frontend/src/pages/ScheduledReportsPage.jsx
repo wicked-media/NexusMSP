@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +34,7 @@ const FREQUENCIES = [
 
 export default function ScheduledReportsPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [reports, setReports] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +55,7 @@ export default function ScheduledReportsPage() {
       setStats(sRes.data);
     } catch { toast.error("Failed to load scheduled reports"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

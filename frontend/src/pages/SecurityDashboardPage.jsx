@@ -46,6 +46,8 @@ export default function SecurityDashboardPage() {
 
   const [hunt, setHunt] = useState(null);
   const [soc, setSoc] = useState(null);
+  const [endpointSecurity, setEndpointSecurity] = useState(null);
+  const [vulnerabilityData, setVulnerabilityData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Incident response state
@@ -77,12 +79,16 @@ export default function SecurityDashboardPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [huntRes, socRes] = await Promise.all([
+      const [huntRes, socRes, endpointRes, vulnerabilityRes] = await Promise.all([
         axios.get(`${API}/huntress/summary`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/soc/dashboard`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/endpoint-security/scores`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/vulnerability-scanner/overview`, { headers }).catch(() => ({ data: null })),
       ]);
       setHunt(huntRes.data);
       setSoc(socRes.data);
+      setEndpointSecurity(endpointRes.data);
+      setVulnerabilityData(vulnerabilityRes.data);
     } catch {
       toast.error("Failed to load security data");
     } finally { setLoading(false); }
@@ -103,7 +109,11 @@ export default function SecurityDashboardPage() {
   const configured = !!hunt?.configured;
   const s = hunt?.stats || {};
   const socH = soc?.huntress || {};
-  const vulns = soc?.vulnerability_summary || {};
+  const vulns = vulnerabilityData?.summary || {};
+  const endpointScores = endpointSecurity?.scores || [];
+  const endpointSummary = endpointSecurity?.summary || {};
+  const liveOnline = endpointScores.filter((endpoint) => endpoint.status === "online").length;
+  const liveOffline = endpointScores.filter((endpoint) => endpoint.status === "offline").length;
   const darkWeb = (soc?.dark_web_alerts || []).length;
   const identity = soc?.identity_threats || 0;
 
@@ -118,20 +128,20 @@ export default function SecurityDashboardPage() {
     LOW: { text: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30", pulse: "" },
   }[threatLevel];
 
-  const agentHealthPct = (s.agents_total || 0) > 0
+  const agentHealthPct = configured && (s.agents_total || 0) > 0
     ? Math.round(((s.agents_online || 0) / s.agents_total) * 100)
-    : (socH.health_pct || 0);
+    : endpointScores.length > 0 ? Math.round((liveOnline / endpointScores.length) * 100) : 0;
 
   return (
     <PageShell data-testid="security-dashboard">
       {/* Top metric strip — all Huntress-driven when configured */}
       <MetricStrip columns={6}>
-        <MetricTile label="Agents" value={configured ? `${s.agents_online || 0}/${s.agents_total || 0}` : (socH.total_agents || 0)} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="sec-metric-agents" />
-        <MetricTile label="Offline" value={configured ? (s.agents_offline || 0) : (socH.offline || 0)} accent="rose" icon={<WifiOff className="w-2.5 h-2.5 text-rose-400" />} testid="sec-metric-offline" />
+        <MetricTile label="Endpoints" value={configured ? `${s.agents_online || 0}/${s.agents_total || 0}` : `${liveOnline}/${endpointScores.length}`} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="sec-metric-agents" />
+        <MetricTile label="Offline" value={configured ? (s.agents_offline || 0) : liveOffline} accent="rose" icon={<WifiOff className="w-2.5 h-2.5 text-rose-400" />} testid="sec-metric-offline" />
         <MetricTile label="Critical" value={critIncidents} accent="rose" icon={<ShieldAlert className="w-2.5 h-2.5 text-rose-400" />} testid="sec-metric-critical" />
         <MetricTile label="Open" value={openIncidents} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="sec-metric-open" />
-        <MetricTile label="Signals" value={configured ? (s.signals_count || 0) : "—"} accent="violet" icon={<Zap className="w-2.5 h-2.5 text-violet-400" />} testid="sec-metric-signals" />
-        <MetricTile label="Orgs" value={configured ? (s.organizations_count || 0) : "—"} accent="indigo" icon={<Shield className="w-2.5 h-2.5 text-indigo-400" />} testid="sec-metric-orgs" />
+        <MetricTile label="Patch exposure" value={vulns.total || 0} accent="violet" icon={<Zap className="w-2.5 h-2.5 text-violet-400" />} testid="sec-metric-signals" />
+        <MetricTile label="Assessed" value={configured ? (s.organizations_count || 0) : `${endpointSummary.assessed || 0}/${endpointScores.length}`} accent="indigo" icon={<Shield className="w-2.5 h-2.5 text-indigo-400" />} testid="sec-metric-orgs" />
       </MetricStrip>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -139,14 +149,14 @@ export default function SecurityDashboardPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Shield className="w-6 h-6 text-orange-400" />SOC — Huntress Command Center
+              <Shield className="w-6 h-6 text-orange-400" />Security Operations Center
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
               Unified threat monitoring & response ·
               {configured ? (
                 <span className="text-emerald-400"> Huntress live {hunt?.last_synced_at ? `(synced ${new Date(hunt.last_synced_at).toLocaleTimeString()})` : ""}</span>
               ) : (
-                <span className="text-orange-400"> Huntress not configured — showing demo data</span>
+                <span className="text-emerald-400"> Nexus Agent posture and persisted security alerts</span>
               )}
             </p>
           </div>
@@ -189,7 +199,7 @@ export default function SecurityDashboardPage() {
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Endpoint Health</span>
               <span className="text-xs font-mono">{agentHealthPct}% ·
-                {configured ? <span className="text-muted-foreground ml-1">{s.agents_online || 0} online / {s.agents_offline || 0} offline</span> : null}
+                <span className="text-muted-foreground ml-1">{configured ? `${s.agents_online || 0} online / ${s.agents_offline || 0} offline` : `${liveOnline} online / ${liveOffline} offline`}</span>
               </span>
             </div>
             <Progress value={agentHealthPct} className="h-2" />
@@ -203,7 +213,7 @@ export default function SecurityDashboardPage() {
               <div className="flex items-center justify-between px-5 py-3 border-b border-border">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <Activity className="w-4 h-4 text-rose-400" />
-                  {configured ? "Huntress Incident Reports" : "Active Incidents (demo)"}
+                  {configured ? "Huntress Incident Reports" : "Persisted Security Alerts"}
                 </div>
                 {configured && (
                   <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate("/soc-feed")} data-testid="sec-view-feed">
@@ -408,7 +418,7 @@ export default function SecurityDashboardPage() {
                       <p className="text-[10px] text-muted-foreground capitalize">{sev}</p>
                     </div>
                   ))}
-                  {Object.keys(vulns).length === 0 && <div className="text-xs text-muted-foreground">No scan data</div>}
+                  {Object.keys(vulns).length === 0 && <div className="text-xs text-muted-foreground">No agent evidence yet</div>}
                 </div>
               </CardContent>
             </Card>

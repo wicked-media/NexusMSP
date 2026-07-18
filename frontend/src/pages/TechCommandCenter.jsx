@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import HeroTile from "@/components/HeroTile";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -81,7 +81,7 @@ function DirectoryTab({ headers, capacity, presets, onChanged, onAddClick, onInv
   const [filterTitle, setFilterTitle] = useState("all");
   const [filterStatus, setFilterStatus] = useState("active");
   const [editing, setEditing] = useState(null);
-  const techs = capacity?.techs || [];
+  const techs = useMemo(() => capacity?.techs || [], [capacity?.techs]);
 
   const titles = useMemo(() => Array.from(new Set(techs.map(t => t.job_title).filter(Boolean))), [techs]);
 
@@ -967,14 +967,14 @@ export default function TechCommandCenter() {
       </div>
 
       {/* HeroTile metric strip — same shape as Devices */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroTile label="Total Techs" value={summary.total} icon={Users} glow="violet" testId="tcc-tile-total" />
-        <HeroTile label="Idle" value={summary.idle || 0} icon={Activity} glow="emerald" testId="tcc-tile-idle" />
-        <HeroTile label="Active" value={summary.active || 0} icon={Activity} glow="cyan" testId="tcc-tile-active" />
-        <HeroTile label="Busy" value={summary.busy || 0} icon={Flame} glow="amber" testId="tcc-tile-busy" />
-        <HeroTile label="Overloaded" value={summary.overloaded || 0} icon={AlertTriangle} glow={summary.overloaded ? "rose" : "zinc"} testId="tcc-tile-overloaded" />
-        <HeroTile label="Avg Utilisation" value={`${summary.avg_util}%`} icon={TrendingUp} glow="violet" animated={false} testId="tcc-tile-util" />
-      </div>
+      <MetricStrip columns={6}>
+        <MetricTile label="Total techs" value={summary.total} accent="violet" icon={<Users className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-total" />
+        <MetricTile label="Idle" value={summary.idle || 0} accent="emerald" icon={<Activity className="w-2.5 h-2.5 text-emerald-400" />} testid="tcc-tile-idle" />
+        <MetricTile label="Active" value={summary.active || 0} accent="cyan" icon={<Activity className="w-2.5 h-2.5 text-cyan-400" />} testid="tcc-tile-active" />
+        <MetricTile label="Busy" value={summary.busy || 0} accent="amber" icon={<Flame className="w-2.5 h-2.5 text-amber-400" />} testid="tcc-tile-busy" />
+        <MetricTile label="Overloaded" value={summary.overloaded || 0} accent={summary.overloaded ? "rose" : "zinc"} icon={<AlertTriangle className={`w-2.5 h-2.5 ${summary.overloaded ? "text-rose-400" : "text-zinc-400"}`} />} testid="tcc-tile-overloaded" />
+        <MetricTile label="Avg utilisation" value={`${summary.avg_util}%`} accent="violet" icon={<TrendingUp className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-util" />
+      </MetricStrip>
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>

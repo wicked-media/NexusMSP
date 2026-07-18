@@ -67,12 +67,33 @@ async def create_device(device_data: DeviceCreate, current_user: dict = Depends(
 @router.put("/devices/{device_id}")
 async def update_device(device_id: str, device_data: dict, current_user: dict = Depends(get_current_user)):
     old_device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    result = await db.devices.update_one({"id": device_id}, {"$set": device_data})
-    if result.matched_count == 0:
+    if not old_device:
         raise HTTPException(status_code=404, detail="Device not found")
+    updates = dict(device_data or {})
+    if "client_id" in updates:
+        new_client_id = updates.get("client_id") or None
+        if new_client_id:
+            new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0, "id": 1, "name": 1})
+            if not new_client:
+                raise HTTPException(status_code=404, detail="Client not found")
+            updates["client_id"] = new_client_id
+            updates["client_name"] = new_client.get("name")
+        else:
+            updates["client_id"] = None
+            updates["client_name"] = None
+        old_client_id = old_device.get("client_id")
+        if old_client_id != new_client_id:
+            if old_client_id:
+                await db.clients.update_one({"id": old_client_id}, {"$inc": {"device_count": -1}})
+            if new_client_id:
+                await db.clients.update_one({"id": new_client_id}, {"$inc": {"device_count": 1}})
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.devices.update_one({"id": device_id}, {"$set": updates})
     if old_device:
         change_dict = {}
-        for k, v in device_data.items():
+        for k, v in updates.items():
+            if k == "updated_at":
+                continue
             if old_device.get(k) != v:
                 change_dict[k] = {"old": str(old_device.get(k)), "new": str(v)}
         if change_dict:
@@ -100,7 +121,9 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
     events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(100)
     performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
     alerts = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
-    tickets = await db.tickets.find({"device_id": device_id}, {"_id": 0}).to_list(50)
+    tickets = await db.tickets.find(
+        {"$or": [{"device_id": device_id}, {"device_ids": device_id}]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
     network_adapters = await db.device_network.find({"device_id": device_id}, {"_id": 0}).to_list(20)
     remote_sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(50)
     activity_logs = await db.activity_logs.find({"entity_type": "device", "entity_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(100)

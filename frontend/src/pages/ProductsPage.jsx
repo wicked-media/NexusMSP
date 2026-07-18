@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,11 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import Barcode from "react-barcode";
 import {
@@ -24,10 +26,13 @@ import {
 } from "lucide-react";
 
 const CATEGORIES = ["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"];
+const STOCK_CONTROLLED_CATEGORIES = ["Hardware", "Accessories", "Networking", "Security"];
+const tracksInventory = (product) => product.track_inventory ?? STOCK_CONTROLLED_CATEGORIES.includes(product.category);
 
 export default function ProductsPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -50,6 +55,7 @@ export default function ProductsPage() {
   const [instanceDialog, setInstanceDialog] = useState(false);
   const [labelDialog, setLabelDialog] = useState(false);
   const [selectedLabel, setSelectedLabel] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [stockForm, setStockForm] = useState({ type: "in", quantity: "1", reason: "" });
   const [instanceForm, setInstanceForm] = useState({ count: "1", serial_number: "", location: "Warehouse" });
   const labelRef = useRef();
@@ -57,12 +63,12 @@ export default function ProductsPage() {
     name: "", sku: "", description: "", category: "Hardware", vendor: "",
     cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
     reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
-    is_recurring: false, billing_cycle: "monthly"
+    is_recurring: false, billing_cycle: "monthly", track_inventory: true
   });
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
       const [prodRes, orderRes] = await Promise.all([
@@ -73,9 +79,9 @@ export default function ProductsPage() {
       setOnOrderSummary(orderRes.data || []);
     } catch { toast.error("Failed to load products"); }
     finally { setLoading(false); }
-  };
+  }, [headers]);
 
-  const fetchProductDetails = async (productId) => {
+  const fetchProductDetails = useCallback(async (productId) => {
     try {
       const [movRes, instRes, bundRes, orderRes] = await Promise.all([
         axios.get(`${API}/products/${productId}/stock-movements`, { headers }),
@@ -88,19 +94,36 @@ export default function ProductsPage() {
       setBundleItems(bundRes.data?.bundle_items || []);
       setOnOrderInfo(orderRes.data);
     } catch { /* silent */ }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchProducts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (token) fetchProducts(); }, [fetchProducts, token]);
+
+  // The sidebar's Add Product action opens the same canonical catalogue page
+  // and immediately presents the product form.
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    setEditing(null);
+    setForm({
+      name: "", sku: "", description: "", category: "Hardware", vendor: "",
+      cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
+      reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
+      is_recurring: false, billing_cycle: "monthly", track_inventory: true
+    });
+    setIsFormOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (viewProduct) fetchProductDetails(viewProduct.id);
-  }, [viewProduct]);
+  }, [fetchProductDetails, viewProduct]);
 
   const resetForm = () => setForm({
     name: "", sku: "", description: "", category: "Hardware", vendor: "",
     cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
     reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
-    is_recurring: false, billing_cycle: "monthly"
+    is_recurring: false, billing_cycle: "monthly", track_inventory: true
   });
 
   const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
@@ -113,6 +136,7 @@ export default function ProductsPage() {
       reorder_level: String(p.reorder_level || 5), unit: p.unit || "each",
       is_active: p.is_active !== false, is_taxable: p.is_taxable !== false,
       is_recurring: p.is_recurring || false, billing_cycle: p.billing_cycle || "monthly",
+      track_inventory: p.track_inventory ?? ["Hardware", "Accessories", "Networking", "Security"].includes(p.category),
       pricing_tiers: p.pricing_tiers || []
     });
     setIsFormOpen(true);
@@ -124,22 +148,31 @@ export default function ProductsPage() {
     if (!editing && payload.sku) payload.barcode = payload.sku;
     try {
       let savedId = editing?.id;
+      const successMessage = editing ? "Product updated" : "Product created";
       if (editing) {
         await axios.put(`${API}/products/${editing.id}`, payload, { headers });
-        toast.success("Product updated");
       } else {
         const r = await axios.post(`${API}/products`, payload, { headers });
         savedId = r.data?.id;
-        toast.success("Product created");
       }
       // Save tier pricing separately to dedicated endpoint
+      let tierPricingFailed = false;
       if (savedId && Array.isArray(form.pricing_tiers)) {
-        await axios.put(`${API}/billing-pro/products/${savedId}/pricing-tiers`,
-          { tiers: form.pricing_tiers.filter(t => t.min_qty && t.unit_price >= 0) },
-          { headers }
-        ).catch(() => null);
+        try {
+          await axios.put(`${API}/billing-pro/products/${savedId}/pricing-tiers`,
+            { tiers: form.pricing_tiers.filter(t => t.min_qty && t.unit_price >= 0) },
+            { headers }
+          );
+        } catch { tierPricingFailed = true; }
+      }
+      if (editing && viewProduct?.id === editing.id) {
+        const updatedProduct = await axios.get(`${API}/products/${editing.id}`, { headers });
+        setViewProduct(updatedProduct.data);
+        fetchProductDetails(editing.id);
       }
       setIsFormOpen(false); fetchProducts();
+      if (tierPricingFailed) toast.error(`${successMessage}, but quantity-break pricing could not be saved. Please reopen the product and try again.`);
+      else toast.success(successMessage);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
   };
 
@@ -148,6 +181,7 @@ export default function ProductsPage() {
       await axios.delete(`${API}/products/${id}`, { headers });
       toast.success("Product deleted"); fetchProducts();
       if (viewProduct?.id === id) setViewProduct(null);
+      setDeleteTarget(null);
     } catch { toast.error("Failed to delete"); }
   };
 
@@ -183,6 +217,8 @@ export default function ProductsPage() {
       await axios.put(`${API}/products/${viewProduct.id}/bundle`, { bundle_items: items }, { headers });
       toast.success("Bundle updated");
       fetchProductDetails(viewProduct.id);
+      const updatedProduct = await axios.get(`${API}/products/${viewProduct.id}`, { headers });
+      setViewProduct(updatedProduct.data);
       fetchProducts();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save bundle"); }
   };
@@ -260,8 +296,8 @@ export default function ProductsPage() {
     });
 
   const categories = [...new Set(products.map(p => p.category))].sort();
-  const totalValue = products.reduce((s, p) => s + (p.retail_price * p.quantity_in_stock), 0);
-  const lowStock = products.filter(p => p.quantity_in_stock <= (p.reorder_level || 5) && p.is_active);
+  const totalValue = products.filter(tracksInventory).reduce((s, p) => s + (p.retail_price * p.quantity_in_stock), 0);
+  const lowStock = products.filter(p => tracksInventory(p) && p.quantity_in_stock <= (p.reorder_level || 5) && p.is_active);
   const recurring = products.filter(p => p.is_recurring);
 
   const toggleSort = (field) => {
@@ -283,7 +319,7 @@ export default function ProductsPage() {
           <div><Label>Description</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Product description..." rows={2} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Category</Label>
-              <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
+              <Select value={form.category} onValueChange={v => setForm({ ...form, category: v, track_inventory: STOCK_CONTROLLED_CATEGORIES.includes(v) })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
@@ -354,8 +390,10 @@ export default function ProductsPage() {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2"><Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} /><Label>Active</Label></div>
             <div className="flex items-center gap-2"><Switch checked={form.is_taxable} onCheckedChange={v => setForm({ ...form, is_taxable: v })} /><Label>Taxable</Label></div>
+            <div className="flex items-center gap-2"><Switch checked={form.track_inventory} onCheckedChange={v => setForm({ ...form, track_inventory: v })} /><Label>Track Stock</Label></div>
             <div className="flex items-center gap-2"><Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} /><Label>Recurring</Label></div>
           </div>
+          <p className="text-[11px] text-muted-foreground">Track Stock defaults on for physical categories. You can override it here for exceptional products.</p>
           {form.is_recurring && (
             <div className="max-w-xs"><Label>Billing Cycle</Label>
               <Select value={form.billing_cycle} onValueChange={v => setForm({ ...form, billing_cycle: v })}>
@@ -401,6 +439,7 @@ export default function ProductsPage() {
   // ========== DETAIL VIEW ==========
   if (viewProduct) {
     const p = viewProduct;
+    const isStockTracked = tracksInventory(p);
     const margin = p.retail_price - p.cost_price;
     const marginPct = p.cost_price > 0 ? ((margin / p.cost_price) * 100).toFixed(1) : "N/A";
     return (
@@ -448,21 +487,36 @@ export default function ProductsPage() {
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Margin</p><p className="text-lg font-bold text-cyan-500">${margin.toFixed(2)} ({marginPct}%)</p></div>
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Tax Rate</p><p className="text-lg font-bold">{p.tax_rate}%</p></div>
                     </div>
+                    {p.pricing_tiers?.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-violet-500/20 bg-violet-500/[0.04] p-3" data-testid="product-tier-pricing-summary">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-violet-300">
+                          <Layers className="h-3.5 w-3.5" /> Quantity-break pricing
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {[...p.pricing_tiers].sort((a, b) => a.min_qty - b.min_qty).map(tier => (
+                            <div key={`${tier.min_qty}-${tier.unit_price}`} className="rounded-md border border-violet-500/15 bg-background/30 px-3 py-2">
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{tier.min_qty}+ units</p>
+                              <p className="font-mono text-sm font-semibold">${Number(tier.unit_price).toFixed(2)} <span className="text-xs font-normal text-muted-foreground">each</span></p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Inventory</CardTitle></CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-3 gap-4">
+                    {isStockTracked ? <div className="grid grid-cols-3 gap-4">
                       <div className="p-3 rounded-lg bg-muted/30 border">
                         <p className="text-xs text-muted-foreground mb-1">In Stock</p>
                         <p className={`text-2xl font-bold ${p.quantity_in_stock <= p.reorder_level ? 'text-red-500' : 'text-green-500'}`}>{p.quantity_in_stock}</p>
                       </div>
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Reorder Level</p><p className="text-2xl font-bold text-yellow-500">{p.reorder_level}</p></div>
                       <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs text-muted-foreground mb-1">Stock Value</p><p className="text-2xl font-bold">${(p.retail_price * p.quantity_in_stock).toFixed(2)}</p></div>
-                    </div>
+                    </div> : <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-5 text-sm text-muted-foreground"><span className="font-medium text-foreground">Stock not tracked.</span> This product remains billable but is not included in on-hand quantity, stock value or reorder alerts.</div>}
                     {/* On Order Indicator */}
-                    {onOrderInfo && onOrderInfo.on_order_qty > 0 && (
+                    {isStockTracked && onOrderInfo && onOrderInfo.on_order_qty > 0 && (
                       <div className="mt-3 p-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5">
                         <div className="flex items-center gap-2 mb-2">
                           <Truck className="w-4 h-4 text-cyan-400 animate-pulse" />
@@ -491,6 +545,8 @@ export default function ProductsPage() {
                     <Separator />
                     <div className="flex justify-between"><span className="text-muted-foreground">Unit</span><span className="font-medium capitalize">{p.unit}</span></div>
                     <Separator />
+                    <div className="flex justify-between"><span className="text-muted-foreground">Stock Control</span><span className="font-medium">{isStockTracked ? "Tracked" : "Not tracked"}</span></div>
+                    <Separator />
                     <div className="flex justify-between"><span className="text-muted-foreground">Taxable</span><span className="font-medium">{p.is_taxable ? "Yes" : "No"}</span></div>
                     {p.is_recurring && <>
                       <Separator />
@@ -515,9 +571,9 @@ export default function ProductsPage() {
                 )}
                 <div className="flex flex-col gap-2">
                   <Button onClick={() => openEdit(p)} className="w-full" data-testid="edit-product-btn"><Edit className="w-4 h-4 mr-1" />Edit Product</Button>
-                  <Button variant="outline" onClick={() => { setStockDialog(true); setStockForm({ type: "in", quantity: "1", reason: "" }); }} className="w-full" data-testid="stock-movement-btn"><ArrowUpDown className="w-4 h-4 mr-1" />Stock Movement</Button>
+                  {isStockTracked && <Button variant="outline" onClick={() => { setStockDialog(true); setStockForm({ type: "in", quantity: "1", reason: "" }); }} className="w-full" data-testid="stock-movement-btn"><ArrowUpDown className="w-4 h-4 mr-1" />Stock Movement</Button>}
                   {!p.barcode && <Button variant="outline" onClick={handleGenerateBarcode} className="w-full" data-testid="generate-barcode-btn"><QrCode className="w-4 h-4 mr-1" />Generate Barcode</Button>}
-                  <Button variant="destructive" onClick={() => handleDelete(p.id)} className="w-full" data-testid="delete-product-btn"><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+                  <Button variant="destructive" onClick={() => setDeleteTarget(p)} className="w-full" data-testid="delete-product-btn"><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
                 </div>
               </div>
             </div>
@@ -525,7 +581,7 @@ export default function ProductsPage() {
 
           {/* INVENTORY TAB */}
           <TabsContent value="inventory">
-            <div className="mt-4 space-y-4">
+            {isStockTracked ? <div className="mt-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold">Product Instances ({instances.length})</h3>
                 <Button size="sm" onClick={() => { setInstanceDialog(true); setInstanceForm({ count: "1", serial_number: "", location: "Warehouse" }); }} data-testid="add-instance-btn"><Plus className="w-4 h-4 mr-1" />Add Instances</Button>
@@ -571,7 +627,7 @@ export default function ProductsPage() {
                   </Table>
                 </CardContent>
               </Card>
-            </div>
+            </div> : <div className="mt-4 rounded-lg border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground"><Package className="mx-auto mb-3 h-8 w-8 opacity-35" /><p className="font-medium text-foreground">Instance tracking is off</p><p className="mt-1">Enable <strong>Track Stock</strong> in Edit Product before recording serialised instances.</p></div>}
           </TabsContent>
 
           {/* BUNDLES TAB */}
@@ -779,13 +835,13 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Package className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total Products</p><p className="text-xl font-bold">{products.length}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-500" /></div><div><p className="text-xs text-muted-foreground">Inventory Value</p><p className="text-xl font-bold">${totalValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-purple-500" /></div><div><p className="text-xs text-muted-foreground">Recurring</p><p className="text-xl font-bold">{recurring.length}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-yellow-500" /></div><div><p className="text-xs text-muted-foreground">Low Stock</p><p className="text-xl font-bold text-yellow-500">{lowStock.length}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Layers className="w-5 h-5 text-cyan-500" /></div><div><p className="text-xs text-muted-foreground">Categories</p><p className="text-xl font-bold">{categories.length}</p></div></div></CardContent></Card>
-      </div>
+      <MetricStrip columns={5}>
+        <MetricTile label="Total Products" value={products.length} accent="cyan" icon={<Package className="h-3.5 w-3.5" />} testid="products-metric-total" />
+        <MetricTile label="Inventory Value" value={`$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="emerald" icon={<DollarSign className="h-3.5 w-3.5" />} testid="products-metric-value" />
+        <MetricTile label="Recurring" value={recurring.length} accent="violet" icon={<RefreshCw className="h-3.5 w-3.5" />} testid="products-metric-recurring" />
+        <MetricTile label="Low Stock" value={lowStock.length} accent="amber" icon={<AlertTriangle className="h-3.5 w-3.5" />} testid="products-metric-low-stock" />
+        <MetricTile label="Categories" value={categories.length} accent="sky" icon={<Layers className="h-3.5 w-3.5" />} testid="products-metric-categories" />
+      </MetricStrip>
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -843,6 +899,7 @@ export default function ProductsPage() {
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm font-medium">${p.retail_price.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
+                    {tracksInventory(p) ? <>
                     <span className={`font-mono text-sm font-medium ${p.quantity_in_stock <= (p.reorder_level || 5) ? 'text-red-500' : ''}`}>
                       {p.quantity_in_stock}
                     </span>
@@ -853,6 +910,7 @@ export default function ProductsPage() {
                         <span className="text-[10px] font-mono text-cyan-400">{oo.on_order_qty} ordered</span>
                       </div>
                     ) : null; })()}
+                    </> : <span className="text-xs text-muted-foreground">Not tracked</span>}
                   </TableCell>
                   <TableCell>
                     <Badge variant={p.is_active ? "default" : "secondary"} className="text-[10px]">{p.is_active ? "Active" : "Inactive"}</Badge>
@@ -861,7 +919,7 @@ export default function ProductsPage() {
                     <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(p)}><Edit className="w-3 h-3" /></Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => printLabel(p)}><Printer className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(p.id)}><Trash2 className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteTarget(p)}><Trash2 className="w-3 h-3" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -887,6 +945,22 @@ export default function ProductsPage() {
         </Card>
       )}
 
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.name || "product"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the product, its tracked instances, stock movements, and bundle links. Ticket and invoice history is retained.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Product</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-product">
+              Delete Product
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {formDialog}
       {labelPrintDialog}
     </div>

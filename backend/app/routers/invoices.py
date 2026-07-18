@@ -72,7 +72,23 @@ async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends
 
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depends(get_current_user)):
+    if not invoice_data.client_id:
+        raise HTTPException(status_code=422, detail="Client is required")
     client = await db.clients.find_one({"id": invoice_data.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if not invoice_data.due_date:
+        raise HTTPException(status_code=422, detail="Due date is required")
+    try:
+        datetime.strptime(invoice_data.due_date[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Due date must be YYYY-MM-DD")
+    if not invoice_data.line_items:
+        raise HTTPException(status_code=422, detail="At least one invoice line is required")
+    if not 0 <= float(invoice_data.tax_rate or 0) <= 100:
+        raise HTTPException(status_code=422, detail="Tax rate must be between 0 and 100")
+    if not 0 <= float(invoice_data.discount_pct or 0) <= 100:
+        raise HTTPException(status_code=422, detail="Discount percentage must be between 0 and 100")
     client_name = client['name'] if client else None
 
     # ---- Calculate totals supporting per-line tax + per-line discount + invoice-level discount ----
@@ -85,14 +101,21 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
     subtotal = 0.0
     line_tax_total = 0.0
     enriched_lines = []
-    for li in line_items:
-        qty = float(li.get("quantity", 1) or 1)
-        unit = float(li.get("unit_price", li.get("rate", 0)) or 0)
-        line_disc_pct = float(li.get("discount_pct", 0) or 0)
+    for index, li in enumerate(line_items, start=1):
+        try:
+            qty = float(li.get("quantity", 1) or 1)
+            unit = float(li.get("unit_price", li.get("rate", 0)) or 0)
+            line_disc_pct = float(li.get("discount_pct", 0) or 0)
+            line_tax_pct = float(li.get("tax_rate", invoice_tax_rate) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Line {index} has an invalid quantity, price, discount, or tax rate")
+        if not str(li.get("name") or "").strip():
+            raise HTTPException(status_code=422, detail=f"Line {index} needs a description")
+        if qty <= 0 or unit < 0 or not 0 <= line_disc_pct <= 100 or not 0 <= line_tax_pct <= 100:
+            raise HTTPException(status_code=422, detail=f"Line {index} has invalid billing values")
         line_total_pre = qty * unit
         line_disc_amt = round(line_total_pre * line_disc_pct / 100, 2)
         line_total = round(line_total_pre - line_disc_amt, 2)
-        line_tax_pct = float(li.get("tax_rate", invoice_tax_rate) or 0)
         line_tax = round(line_total * line_tax_pct / 100, 2)
         subtotal += line_total
         line_tax_total += line_tax
@@ -101,8 +124,12 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
                                "tax_amount": line_tax, "total": line_total})
 
     # Apply invoice-level discount
+    if inv_discount_amt < 0:
+        raise HTTPException(status_code=422, detail="Discount amount cannot be negative")
     if inv_discount_pct:
         inv_discount_amt = round(subtotal * inv_discount_pct / 100, 2)
+    if inv_discount_amt > subtotal:
+        raise HTTPException(status_code=422, detail="Discount cannot exceed the invoice subtotal")
     discounted_subtotal = max(0, round(subtotal - inv_discount_amt, 2))
 
     # If line items had per-line tax, use that. Otherwise apply flat tax rate to discounted subtotal.
@@ -185,12 +212,77 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
 @router.put("/invoices/{invoice_id}")
 async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict = Depends(get_current_user)):
     old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    result = await db.invoices.update_one({"id": invoice_id}, {"$set": invoice_data})
-    if result.matched_count == 0:
+    if not old_inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    allowed = {"client_id", "client_name", "contract_id", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date"}
+    update = {key: value for key, value in invoice_data.items() if key in allowed}
+    financial_fields = {"line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total"}
+    if old_inv.get("payment_status") == "paid" and financial_fields.intersection(update):
+        raise HTTPException(status_code=409, detail="Paid invoices cannot be financially edited; issue a credit note instead")
+    if old_inv.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Voided invoices cannot be edited")
+    for value in (update.get("subtotal"), update.get("tax"), update.get("total"), update.get("discount_amount")):
+        if value is not None and float(value) < 0:
+            raise HTTPException(status_code=422, detail="Invoice totals cannot be negative")
+    if update.get("discount_pct") is not None and not 0 <= float(update["discount_pct"]) <= 100:
+        raise HTTPException(status_code=422, detail="Discount percentage must be between 0 and 100")
+    if update.get("tax_rate") is not None and not 0 <= float(update["tax_rate"]) <= 100:
+        raise HTTPException(status_code=422, detail="Tax rate must be between 0 and 100")
+
+    # Financial totals are always derived server-side.  The UI may display a
+    # preview, but it must never be able to set a subtotal, tax or total itself.
+    if financial_fields.intersection(update):
+        source_lines = update.get("line_items", old_inv.get("line_items", [])) or []
+        if not source_lines:
+            raise HTTPException(status_code=422, detail="At least one invoice line is required")
+        invoice_tax_rate = float(update.get("tax_rate", old_inv.get("tax_rate", 0)) or 0)
+        discount_pct = float(update.get("discount_pct", old_inv.get("discount_pct", 0)) or 0)
+        discount_amount = float(update.get("discount_amount", old_inv.get("discount_amount", 0)) or 0)
+        if not 0 <= discount_pct <= 100 or discount_amount < 0:
+            raise HTTPException(status_code=422, detail="Invoice discount is invalid")
+
+        subtotal = 0.0
+        line_tax_total = 0.0
+        enriched_lines = []
+        for index, line in enumerate(source_lines, start=1):
+            try:
+                quantity = float(line.get("quantity", 1) or 1)
+                unit_price = float(line.get("unit_price", line.get("rate", 0)) or 0)
+                line_discount_pct = float(line.get("discount_pct", 0) or 0)
+                line_tax_rate = float(line.get("tax_rate", invoice_tax_rate) or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail=f"Line {index} has invalid billing values")
+            if not str(line.get("name") or line.get("description") or "").strip() or quantity <= 0 or unit_price < 0 or not 0 <= line_discount_pct <= 100 or not 0 <= line_tax_rate <= 100:
+                raise HTTPException(status_code=422, detail=f"Line {index} has invalid billing values")
+            line_pre_discount = quantity * unit_price
+            line_discount_amount = round(line_pre_discount * line_discount_pct / 100, 2)
+            line_total = round(line_pre_discount - line_discount_amount, 2)
+            line_tax = round(line_total * line_tax_rate / 100, 2)
+            subtotal += line_total
+            line_tax_total += line_tax
+            enriched_lines.append({**line, "quantity": quantity, "unit_price": unit_price, "discount_pct": line_discount_pct,
+                                   "discount_amount": line_discount_amount, "tax_rate": line_tax_rate,
+                                   "tax_amount": line_tax, "total": line_total})
+
+        if discount_pct:
+            discount_amount = round(subtotal * discount_pct / 100, 2)
+        if discount_amount > subtotal:
+            raise HTTPException(status_code=422, detail="Discount cannot exceed the invoice subtotal")
+        discounted_subtotal = round(subtotal - discount_amount, 2)
+        tax = round(line_tax_total * (discounted_subtotal / subtotal), 2) if line_tax_total and subtotal else round(discounted_subtotal * invoice_tax_rate / 100, 2)
+        update.update({
+            "line_items": enriched_lines,
+            "tax_rate": invoice_tax_rate,
+            "discount_pct": discount_pct,
+            "discount_amount": discount_amount,
+            "subtotal": round(subtotal, 2),
+            "tax": tax,
+            "total": round(discounted_subtotal + tax, 2),
+        })
+    result = await db.invoices.update_one({"id": invoice_id}, {"$set": update})
     if old_inv:
         change_dict = {}
-        for k, v in invoice_data.items():
+        for k, v in update.items():
             if old_inv.get(k) != v:
                 change_dict[k] = {"old": str(old_inv.get(k)), "new": str(v)}
         if change_dict:
@@ -200,6 +292,8 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
 @router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
     old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if old_inv and (old_inv.get("payment_status") in {"paid", "partial"} or old_inv.get("status") not in {"draft", "pending_approval"}):
+        raise HTTPException(status_code=409, detail="Only unpaid draft invoices can be deleted; use a credit note or void workflow instead")
     result = await db.invoices.delete_one({"id": invoice_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -345,22 +439,42 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    amount = float(data.get("amount", 0))
+    if invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Cannot record a payment against a voided invoice")
+    try:
+        amount = float(data.get("amount", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Payment amount must be a number")
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="Payment amount must be greater than zero")
+    outstanding = max(0, float(invoice.get("total", 0) or 0) - float(invoice.get("amount_paid", 0) or 0))
+    if amount > outstanding + 0.005:
+        raise HTTPException(status_code=422, detail=f"Payment exceeds the outstanding balance of ${outstanding:.2f}")
     method = data.get("method", "manual")
-    new_paid = float(invoice.get("amount_paid", 0)) + amount
+    payment_date = str(data.get("date") or "").strip()
+    if payment_date:
+        try:
+            datetime.strptime(payment_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Payment date must be YYYY-MM-DD")
+    else:
+        payment_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    new_paid = float(invoice.get("amount_paid", 0) or 0) + amount
     new_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
     payment_record = {
-        "amount": amount, "method": method, "date": datetime.now(timezone.utc).isoformat(),
-        "reference": data.get("reference", ""), "recorded_by": current_user.get("name", ""),
+        "amount": amount, "method": method, "date": payment_date,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "reference": data.get("reference", ""), "notes": data.get("notes", ""),
+        "recorded_by": current_user.get("name", ""),
     }
     await db.invoices.update_one({"id": invoice_id}, {
         "$set": {"payment_status": new_status, "amount_paid": new_paid,
                  "status": "paid" if new_status == "paid" else invoice.get("status"),
-                 "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if new_status == "paid" else invoice.get("paid_date")},
+                 "paid_date": payment_date if new_status == "paid" else invoice.get("paid_date")},
         "$push": {"payments": payment_record}
     })
-    await log_activity(current_user, "payment_recorded", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded {method} payment of ${amount:.2f}", metadata={"amount": amount, "method": method})
-    return {"message": "Payment recorded", "new_balance": float(invoice.get("total", 0)) - new_paid}
+    await log_activity(current_user, "payment_recorded", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded {method} payment of ${amount:.2f}", metadata={"amount": amount, "method": method, "payment_date": payment_date, "reference": data.get("reference", "")})
+    return {"message": "Payment recorded", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
 
 # Move invoice to different client
 @router.post("/invoices/{invoice_id}/move-client")
@@ -390,6 +504,10 @@ async def void_invoice(invoice_id: str, data: dict = {}, current_user: dict = De
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("payment_status") in {"paid", "partial"}:
+        raise HTTPException(status_code=409, detail="Paid or partially paid invoices cannot be voided; issue a credit note instead")
+    if invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Invoice is already voided")
     reason = data.get("reason", "")
     await db.invoices.update_one({"id": invoice_id}, {"$set": {
         "status": "cancelled", "void_reason": reason,
@@ -430,11 +548,18 @@ async def sync_invoice_to_xero(invoice_id: str, current_user: dict = Depends(get
     xero_settings = await db.settings.find_one({"type": "xero"}, {"_id": 0})
     if not xero_settings or not xero_settings.get("connected"):
         raise HTTPException(status_code=400, detail="Xero not connected. Configure in Settings.")
-    xero_id = f"XERO-{str(uuid.uuid4())[:8].upper()}"
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {
-        "xero_invoice_id": xero_id, "xero_synced_at": datetime.now(timezone.utc).isoformat()
-    }})
-    return {"message": "Invoice synced to Xero", "xero_invoice_id": xero_id}
+    if not (xero_settings.get("access_token") or xero_settings.get("refresh_token")) or not xero_settings.get("tenant_id"):
+        raise HTTPException(
+            status_code=409,
+            detail="Xero is not OAuth-authorized. Complete the Xero connection before syncing invoices.",
+        )
+    # A real Xero API client is intentionally required here. Never manufacture
+    # an external invoice ID: that would make the finance record look synced
+    # when Xero has never accepted it.
+    raise HTTPException(
+        status_code=501,
+        detail="Xero invoice push is awaiting the OAuth API connector. This invoice has not been marked as synced.",
+    )
 
 @router.post("/xero/webhook")
 async def xero_webhook(data: dict):

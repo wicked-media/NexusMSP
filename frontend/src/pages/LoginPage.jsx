@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 
@@ -148,6 +148,8 @@ export default function LoginPage() {
   const [ssoEnabled, setSsoEnabled] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: "", password: "" });
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
   const [registerData, setRegisterData] = useState({ name: "", email: "", password: "" });
   const [wallpaper, setWallpaper] = useState(null);
   const [brand, setBrand] = useState({ company_name: "NexusOps", login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"], powered_by_visible: true });
@@ -186,9 +188,13 @@ export default function LoginPage() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    const success = await login(loginData.email, loginData.password);
+    const result = await login(loginData.email, loginData.password, twoFactorCode);
     setIsLoading(false);
-    if (success) navigate("/");
+    if (result.requires2FA) {
+      setTwoFactorRequired(true);
+      toast.message("Enter the code from your authenticator app to continue.");
+    }
+    if (result.success) navigate("/");
   };
 
   const handleRegister = async (e) => {
@@ -367,8 +373,19 @@ export default function LoginPage() {
                       </Button>
                     </div>
                   </div>
+                  {twoFactorRequired && (
+                    <div className="space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+                      <Label className="flex items-center gap-2 text-xs font-medium text-emerald-300 uppercase tracking-wider"><ShieldCheck className="h-3.5 w-3.5" />Authenticator code</Label>
+                      <Input
+                        inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code"
+                        value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        required maxLength={6} data-testid="login-2fa-input"
+                        className="h-11 bg-zinc-800/50 border-zinc-700/50 font-mono tracking-[0.35em] text-center text-white placeholder:tracking-normal placeholder:text-zinc-600"
+                      />
+                    </div>
+                  )}
                   <Button type="submit" className="w-full h-11 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium shadow-lg shadow-emerald-500/10 transition-all" disabled={isLoading} data-testid="login-submit-button">
-                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Sign In <ArrowRight className="w-4 h-4 ml-1" /></>}
+                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign In"} <ArrowRight className="w-4 h-4 ml-1" /></>}
                   </Button>
 
                   {ssoEnabled && (

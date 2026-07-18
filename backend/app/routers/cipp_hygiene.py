@@ -368,7 +368,7 @@ async def hygiene_digest(current_user: dict = Depends(get_current_user)):
 
 @router.post("/cipp/hygiene-digest/send")
 async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(get_current_user)):
-    """Generate digest + email it via Resend (if configured). body: { to?: ['a@b.com'] }"""
+    """Generate digest + email it through the configured Microsoft 365 mailbox."""
     data = data or {}
     digest = await hygiene_digest(current_user)
     if not digest.get("configured"):
@@ -443,12 +443,19 @@ async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(ge
 
     sent_via = None
     error = None
+    deliveries = []
     try:
-        from app.routers.email_utils import send_email, is_resend_configured
-        if await is_resend_configured():
+        from app.routers.email_utils import send_email, is_microsoft365_configured
+        if await is_microsoft365_configured():
             for addr in to_list:
-                await send_email(to=addr, subject=f"NexusOps · M365 Hygiene Digest · avg {digest['avg_score']}", html=html)
-            sent_via = "resend"
+                delivery = await send_email(addr, f"NexusOps · M365 Hygiene Digest · avg {digest['avg_score']}", html, category="notifications")
+                deliveries.append({"email": addr, "status": delivery.get("status"), "message": delivery.get("message")})
+            if deliveries and all(item["status"] == "sent" for item in deliveries):
+                sent_via = "microsoft_365"
+            elif deliveries:
+                error = "; ".join(item["message"] or f"{item['email']}: delivery failed" for item in deliveries if item["status"] != "sent")
+        else:
+            error = "Microsoft 365 mailbox is not connected"
     except Exception as e:
         error = str(e)[:120]
 
@@ -460,10 +467,11 @@ async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(ge
         "to": to_list,
         "sent_via": sent_via,
         "error": error,
+        "deliveries": deliveries,
         "by": current_user.get("name"),
     })
 
-    return {"sent": bool(sent_via), "sent_via": sent_via, "to": to_list, "error": error, "avg_score": digest["avg_score"], "preview_html": html if not sent_via else None}
+    return {"sent": bool(sent_via), "sent_via": sent_via, "to": to_list, "deliveries": deliveries, "error": error, "avg_score": digest["avg_score"], "preview_html": html if not sent_via else None}
 
 
 @router.get("/cipp/digests")

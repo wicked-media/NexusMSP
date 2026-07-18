@@ -59,6 +59,7 @@ async def create_product(data: dict, current_user: dict = Depends(get_current_us
         "is_taxable": data.get("is_taxable", True),
         "is_recurring": data.get("is_recurring", False),
         "billing_cycle": data.get("billing_cycle", "monthly"),
+        "track_inventory": data.get("track_inventory", str(data.get("category", "")).lower() in {"hardware", "accessories", "networking", "security"}),
         "barcode": barcode_value,
         "barcode_type": barcode_type,
         "barcode_image": barcode_image,
@@ -83,7 +84,7 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
 async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"name", "sku", "description", "category", "vendor", "cost_price", "retail_price",
                "tax_rate", "quantity_in_stock", "reorder_level", "unit", "is_active", "is_taxable",
-               "is_recurring", "billing_cycle", "barcode", "barcode_type", "bundle_items", "is_bundle"}
+               "is_recurring", "billing_cycle", "track_inventory", "barcode", "barcode_type", "bundle_items", "is_bundle"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "cost_price" in update:
         update["cost_price"] = float(update["cost_price"])
@@ -95,6 +96,8 @@ async def update_product(product_id: str, data: dict, current_user: dict = Depen
         update["quantity_in_stock"] = int(update["quantity_in_stock"])
     if "reorder_level" in update:
         update["reorder_level"] = int(update["reorder_level"])
+    if "track_inventory" in update:
+        update["track_inventory"] = bool(update["track_inventory"])
     if "barcode" in update and update["barcode"]:
         update["barcode_image"] = generate_barcode_svg_data(update["barcode"], update.get("barcode_type", "code128"))
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -103,8 +106,24 @@ async def update_product(product_id: str, data: dict, current_user: dict = Depen
 
 @router.delete("/products/{product_id}")
 async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1, "name": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Product instances and stock movements have no meaning without their parent.
+    # Historical ticket/invoice line items are deliberately retained as financial records.
+    instances_result = await db.product_instances.delete_many({"product_id": product_id})
+    movements_result = await db.stock_movements.delete_many({"product_id": product_id})
+    await db.products.update_many(
+        {"bundle_items.product_id": product_id},
+        {"$pull": {"bundle_items": {"product_id": product_id}}},
+    )
     await db.products.delete_one({"id": product_id})
-    return {"message": "Product deleted"}
+    return {
+        "message": "Product deleted",
+        "deleted_instances": instances_result.deleted_count,
+        "deleted_stock_movements": movements_result.deleted_count,
+    }
 
 # ============== PRODUCT BARCODE & STOCK ENDPOINTS ==============
 
@@ -160,10 +179,20 @@ async def create_product_instance(product_id: str, data: dict = {}, current_user
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    count = data.get("count", 1)
+    stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
+    tracks_stock = product.get("track_inventory")
+    if tracks_stock is None:
+        tracks_stock = str(product.get("category", "")).lower() in stock_controlled_categories
+    if not tracks_stock:
+        raise HTTPException(status_code=409, detail="Enable Track Stock before creating tracked product instances")
+    count = max(1, min(int(data.get("count", 1) or 1), 100))
+    requested_serial = str(data.get("serial_number") or "").strip()
     instances = []
-    for _ in range(min(count, 100)):
-        serial = data.get("serial_number", str(uuid.uuid4())[:8].upper())
+    for index in range(count):
+        # The client submits an empty serial field for auto-generated instances.
+        # Treat that as absent, and suffix a supplied base serial when making a batch.
+        generated_serial = str(uuid.uuid4())[:8].upper()
+        serial = f"{requested_serial}-{index + 1:02d}" if requested_serial and count > 1 else (requested_serial or generated_serial)
         barcode_value = f"{product.get('sku', 'PRD')}-{serial}"
         barcode_image = generate_barcode_svg_data(barcode_value, "code128")
         instance = {
@@ -176,9 +205,18 @@ async def create_product_instance(product_id: str, data: dict = {}, current_user
         await db.product_instances.insert_one(instance)
         instance.pop("_id", None)
         instances.append(instance)
-    # Update stock count
     current_stock = product.get("quantity_in_stock", 0)
-    await db.products.update_one({"id": product_id}, {"$set": {"quantity_in_stock": current_stock + count, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    new_stock = current_stock + count
+    now = datetime.now(timezone.utc).isoformat()
+    await db.products.update_one({"id": product_id}, {"$set": {"quantity_in_stock": new_stock, "updated_at": now}})
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()), "product_id": product_id, "product_name": product["name"],
+        "type": "in", "quantity": count, "previous_stock": current_stock, "new_stock": new_stock,
+        "reason": f"Created {count} tracked instance{'s' if count != 1 else ''}", "reference": "product_instances",
+        "ticket_id": None, "invoice_id": None,
+        "created_by": current_user["id"], "created_by_name": current_user.get("name", ""),
+        "created_at": now,
+    })
     return instances
 
 # Stock Movements
@@ -192,8 +230,23 @@ async def create_stock_movement(product_id: str, data: dict, current_user: dict 
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
+    tracks_stock = product.get("track_inventory")
+    if tracks_stock is None:
+        tracks_stock = str(product.get("category", "")).lower() in stock_controlled_categories
+    if not tracks_stock:
+        raise HTTPException(status_code=409, detail="Enable Track Stock before recording stock movements")
     movement_type = data.get("type", "in")  # in, out, adjustment
-    quantity = int(data.get("quantity", 0))
+    if movement_type not in {"in", "out", "adjustment"}:
+        raise HTTPException(status_code=422, detail="Movement type must be in, out, or adjustment")
+    try:
+        quantity = int(data.get("quantity", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Quantity must be a whole number")
+    if movement_type in {"in", "out"} and quantity < 1:
+        raise HTTPException(status_code=422, detail="Stock in and stock out quantities must be at least 1")
+    if movement_type == "adjustment" and quantity < 0:
+        raise HTTPException(status_code=422, detail="Adjusted stock cannot be negative")
     current_stock = product.get("quantity_in_stock", 0)
     if movement_type == "in":
         new_stock = current_stock + quantity
@@ -243,25 +296,56 @@ async def add_product_to_ticket(ticket_id: str, data: dict, current_user: dict =
     product = await db.products.find_one({"id": data.get("product_id")}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    quantity = int(data.get("quantity", 1))
+    try:
+        quantity = int(data.get("quantity", 1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Quantity must be a whole number")
+    if quantity < 1:
+        raise HTTPException(status_code=422, detail="Quantity must be at least 1")
+
+    # Capture the correct price at the time of sale so later product changes
+    # cannot alter the ticket or invoice history.
+    unit_price = float(product.get("retail_price", 0))
+    applied_tier = None
+    for tier in sorted(product.get("pricing_tiers") or [], key=lambda item: int(item.get("min_qty", 1))):
+        try:
+            min_qty = int(tier.get("min_qty", 1))
+            tier_price = float(tier.get("unit_price", unit_price))
+        except (TypeError, ValueError):
+            continue
+        if min_qty >= 1 and tier_price >= 0 and quantity >= min_qty:
+            unit_price = tier_price
+            applied_tier = min_qty
     line_item = {
         "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
         "sku": product.get("sku", ""), "quantity": quantity,
-        "unit_price": product.get("retail_price", 0),
-        "total": quantity * product.get("retail_price", 0),
+        "unit_price": unit_price, "total": round(quantity * unit_price, 2),
+        "pricing_source": "quantity_tier" if applied_tier else "retail_price",
+        "tier_min_qty": applied_tier,
     }
-    await db.tickets.update_one({"id": ticket_id}, {"$push": {"products": line_item}})
-    # Stock movement out
+    # Stock is controlled for physical inventory by default; service, software,
+    # licence and cloud products remain billable without an on-hand restriction.
+    stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
+    tracks_stock = product.get("track_inventory")
+    if tracks_stock is None:
+        tracks_stock = str(product.get("category", "")).lower() in stock_controlled_categories
+
+    # Stock movement out for physical items.
     current_stock = product.get("quantity_in_stock", 0)
-    await db.products.update_one({"id": product["id"]}, {"$set": {"quantity_in_stock": max(0, current_stock - quantity)}})
-    await db.stock_movements.insert_one({
-        "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
-        "type": "out", "quantity": quantity, "previous_stock": current_stock,
-        "new_stock": max(0, current_stock - quantity), "reason": f"Added to ticket {ticket_id}",
-        "reference": ticket_id, "ticket_id": ticket_id,
-        "created_by": current_user["id"], "created_by_name": current_user.get("name", ""),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    if tracks_stock:
+        if quantity > current_stock:
+            raise HTTPException(status_code=409, detail=f"Insufficient stock: {current_stock} available, {quantity} requested")
+        new_stock = current_stock - quantity
+        now = datetime.now(timezone.utc).isoformat()
+        await db.products.update_one({"id": product["id"]}, {"$set": {"quantity_in_stock": new_stock, "updated_at": now}})
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
+            "type": "out", "quantity": quantity, "previous_stock": current_stock,
+            "new_stock": new_stock, "reason": f"Added to ticket {ticket_id}",
+            "reference": ticket_id, "ticket_id": ticket_id,
+            "created_by": current_user["id"], "created_by_name": current_user.get("name", ""), "created_at": now,
+        })
+    await db.tickets.update_one({"id": ticket_id}, {"$push": {"products": line_item}})
     return line_item
 
 # Get products on a ticket
@@ -354,21 +438,28 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
     products_on_ticket = ticket.get("products", [])
     if not products_on_ticket:
         raise HTTPException(status_code=400, detail="No products on this ticket")
+    unbilled_items = [item for item in products_on_ticket if not item.get("invoice_id")]
+    if not unbilled_items:
+        raise HTTPException(status_code=400, detail="All product items on this ticket have already been invoiced")
+
+    def invoice_line(item: dict) -> dict:
+        return {
+            "description": item.get("product_name", "Product"),
+            "quantity": item.get("quantity", 1),
+            "unit_price": item.get("unit_price", 0),
+            "amount": item.get("total", 0),
+            "product_id": item.get("product_id", ""),
+            "ticket_item_id": item.get("id"),
+            "from_ticket": ticket_id,
+        }
+
     invoice_id = data.get("invoice_id")
     if invoice_id:
         invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
         existing_items = invoice.get("line_items", [])
-        for p in products_on_ticket:
-            existing_items.append({
-                "description": p.get("product_name", "Product"),
-                "quantity": p.get("quantity", 1),
-                "unit_price": p.get("unit_price", 0),
-                "amount": p.get("total", 0),
-                "product_id": p.get("product_id", ""),
-                "from_ticket": ticket_id,
-            })
+        existing_items.extend(invoice_line(item) for item in unbilled_items)
         new_subtotal = sum(li.get("amount", 0) for li in existing_items)
         tax_rate = float(invoice.get("tax_rate", 0))
         new_tax = new_subtotal * tax_rate / 100
@@ -378,19 +469,10 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
             "tax_amount": round(new_tax, 2), "total": round(new_total, 2),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }})
-        return {"message": f"Added {len(products_on_ticket)} items to invoice", "invoice_id": invoice_id}
+        invoice_number = invoice.get("invoice_number", "")
     else:
         inv_count = await db.invoices.count_documents({})
-        new_line_items = []
-        for p in products_on_ticket:
-            new_line_items.append({
-                "description": p.get("product_name", "Product"),
-                "quantity": p.get("quantity", 1),
-                "unit_price": p.get("unit_price", 0),
-                "amount": p.get("total", 0),
-                "product_id": p.get("product_id", ""),
-                "from_ticket": ticket_id,
-            })
+        new_line_items = [invoice_line(item) for item in unbilled_items]
         subtotal = sum(li["amount"] for li in new_line_items)
         invoice = {
             "id": str(uuid.uuid4()),
@@ -408,7 +490,26 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
         }
         await db.invoices.insert_one(invoice)
         invoice.pop("_id", None)
-        return {"message": "New invoice created from ticket items", "invoice_id": invoice["id"], "invoice_number": invoice["invoice_number"]}
+        invoice_id = invoice["id"]
+        invoice_number = invoice["invoice_number"]
+
+    invoiced_item_ids = {item.get("id") for item in unbilled_items}
+    invoiced_at = datetime.now(timezone.utc).isoformat()
+    updated_ticket_items = [
+        {
+            **item,
+            **({"invoice_id": invoice_id, "invoice_number": invoice_number, "invoiced_at": invoiced_at}
+               if item.get("id") in invoiced_item_ids else {}),
+        }
+        for item in products_on_ticket
+    ]
+    await db.tickets.update_one({"id": ticket_id}, {"$set": {"products": updated_ticket_items, "updated_at": invoiced_at}})
+    return {
+        "message": f"Added {len(unbilled_items)} item(s) to invoice",
+        "invoice_id": invoice_id,
+        "invoice_number": invoice_number,
+        "invoiced_item_count": len(unbilled_items),
+    }
 
 @router.delete("/tickets/{ticket_id}/products/{item_id}")
 async def remove_product_from_ticket(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
@@ -417,9 +518,27 @@ async def remove_product_from_ticket(ticket_id: str, item_id: str, current_user:
         raise HTTPException(status_code=404, detail="Ticket not found")
     products = ticket.get("products", [])
     item = next((p for p in products if p.get("id") == item_id), None)
-    if item:
-        product = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0})
-        if product:
-            await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity_in_stock": item.get("quantity", 1)}})
+    if not item:
+        raise HTTPException(status_code=404, detail="Ticket product item not found")
+    if item.get("invoice_id"):
+        raise HTTPException(status_code=409, detail="This item has already been invoiced and cannot be removed from the ticket")
+    product = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0})
+    if product:
+        stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
+        tracks_stock = product.get("track_inventory")
+        if tracks_stock is None:
+            tracks_stock = str(product.get("category", "")).lower() in stock_controlled_categories
+        if tracks_stock:
+            quantity = int(item.get("quantity", 1))
+            previous_stock = int(product.get("quantity_in_stock", 0))
+            new_stock = previous_stock + quantity
+            now = datetime.now(timezone.utc).isoformat()
+            await db.products.update_one({"id": item["product_id"]}, {"$set": {"quantity_in_stock": new_stock, "updated_at": now}})
+            await db.stock_movements.insert_one({
+                "id": str(uuid.uuid4()), "product_id": product["id"], "product_name": product["name"],
+                "type": "in", "quantity": quantity, "previous_stock": previous_stock, "new_stock": new_stock,
+                "reason": f"Removed from ticket {ticket_id}", "reference": ticket_id, "ticket_id": ticket_id,
+                "created_by": current_user["id"], "created_by_name": current_user.get("name", ""), "created_at": now,
+            })
     await db.tickets.update_one({"id": ticket_id}, {"$pull": {"products": {"id": item_id}}})
     return {"message": "Product removed from ticket"}

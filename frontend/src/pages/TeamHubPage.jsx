@@ -31,12 +31,12 @@ export default function TeamHubPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="border-b border-border bg-card/50">
+      <div className="border-b border-border bg-gradient-to-br from-card via-card to-violet-500/[0.04]">
         <div className="px-6 pt-5">
           <h1 className="text-2xl font-semibold tracking-tight">Team Hub</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Command center, roster, utilization, skills and leaderboard — all the team views.</p>
         </div>
-        <div className="px-4 mt-4 flex items-center gap-1 overflow-x-auto">
+        <div className="px-6 mt-5 flex items-center gap-1.5 overflow-x-auto">
           {TABS.map(t => {
             const Icon = t.icon;
             const active = activeTab === t.id;
@@ -46,7 +46,7 @@ export default function TeamHubPage() {
                 onClick={() => setActiveTab(t.id)}
                 data-testid={`team-hub-tab-${t.id}`}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${
-                  active ? "bg-muted text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  active ? "bg-violet-500/12 text-violet-200 border border-violet-500/25 shadow-sm" : "text-muted-foreground border border-transparent hover:text-foreground hover:bg-muted/50 hover:border-border"
                 }`}
               >
                 <Icon className="w-4 h-4" />{t.label}

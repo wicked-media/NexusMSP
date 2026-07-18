@@ -1134,12 +1134,20 @@ async def morning_brief(current_user: dict = Depends(get_current_user)):
 
 @router.post("/runbooks/from-ticket/{ticket_id}")
 async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    """Convert a resolved ticket into a published, reusable runbook."""
+    """Convert a resolved ticket into an editable, reusable runbook."""
     t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not t:
         raise HTTPException(404, "Ticket not found")
     if t.get("status") not in ("resolved", "closed"):
         raise HTTPException(400, "Only resolved/closed tickets can become runbooks")
+
+    existing = await db.runbooks.find_one({"source_ticket_id": ticket_id}, {"_id": 0})
+    if existing:
+        if payload.get("publish", True) and not existing.get("published"):
+            await db.runbooks.update_one({"id": existing["id"]}, {"$set": {"published": True}})
+            existing["published"] = True
+        existing["already_exists"] = True
+        return existing
 
     notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0, "body": 1, "created_at": 1, "author": 1}).sort("created_at", 1).to_list(100)
     convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:300]}" for n in notes[:30]])
@@ -1155,9 +1163,27 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
         f"Resolution: {t.get('resolution_notes','')[:600]}\n\n"
         f"Conversation history:\n{convo or '(no notes)'}\n"
     )
-    parsed = _safe_json(await _llm(system, user_msg, "runbook"))
+    try:
+        parsed = _safe_json(await _llm(system, user_msg, "runbook"))
+    except Exception:
+        parsed = {}
     if not parsed.get("steps"):
-        raise HTTPException(502, "AI failed to extract runbook steps")
+        # A runbook must remain available when the optional AI provider is not
+        # configured.  Preserve the ticket's verified resolution as an
+        # editable draft rather than failing the technician's workflow.
+        resolution = (t.get("resolution_notes") or "").strip()
+        description = (t.get("description") or "").strip()
+        parsed = {
+            "title": t.get("title") or "Resolved ticket runbook",
+            "summary": f"Draft procedure created from resolved ticket #{t.get('ticket_number') or ''}. Review and complete it before publishing.",
+            "steps": [
+                {"step": "Review the reported issue", "detail": description or "Confirm the affected service, device, and user impact."},
+                {"step": "Apply the recorded resolution", "detail": resolution or "Add the remediation that resolved this ticket before publishing."},
+                {"step": "Validate the outcome", "detail": "Confirm the service is restored and record the validation result."},
+            ],
+            "tags": [t.get("category") or "service-desk"],
+            "category": t.get("category") or "general",
+        }
 
     rb = {
         "id": uuid.uuid4().hex,
@@ -1175,6 +1201,77 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
     await db.runbooks.insert_one(dict(rb))
     rb.pop("_id", None)
     return rb
+
+
+@router.get("/ticket-runbooks/{ticket_id}")
+async def get_ticket_runbook(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Return the reusable runbook promoted from a ticket, if one exists."""
+    return await db.runbooks.find_one({"source_ticket_id": ticket_id}, {"_id": 0})
+
+
+@router.get("/tickets/{ticket_id}/runbook-suggestions")
+async def ticket_runbook_suggestions(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Find published, proven fixes that match the ticket's category or tags."""
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "category": 1, "tags": 1})
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+
+    category = (ticket.get("category") or "").strip()
+    tags = [str(tag).strip() for tag in (ticket.get("tags") or []) if str(tag).strip()]
+    matches = []
+    if category or tags:
+        clauses = []
+        if category:
+            clauses.append({"category": category})
+        if tags:
+            clauses.append({"tags": {"$in": tags}})
+        matches = await db.runbooks.find(
+            {"published": True, "source_ticket_id": {"$ne": ticket_id}, "$or": clauses},
+            {"_id": 0, "id": 1, "title": 1, "summary": 1, "steps": 1, "category": 1, "tags": 1, "source_ticket_number": 1},
+        ).sort("created_at", -1).to_list(4)
+    return matches
+
+
+@router.post("/knowledge-runbooks/{runbook_id}/used")
+async def record_knowledge_runbook_use(runbook_id: str, current_user: dict = Depends(get_current_user)):
+    """Record that a technician applied a knowledge runbook to ticket work."""
+    result = await db.runbooks.update_one(
+        {"id": runbook_id, "published": True},
+        {"$inc": {"use_count": 1}, "$set": {"last_used_at": _now().isoformat()}},
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Knowledge runbook not found")
+    return await db.runbooks.find_one({"id": runbook_id}, {"_id": 0, "id": 1, "use_count": 1, "last_used_at": 1})
+
+
+@router.post("/knowledge-runbooks/{runbook_id}/helpful")
+async def mark_knowledge_runbook_helpful(runbook_id: str, current_user: dict = Depends(get_current_user)):
+    """Allow each technician to mark a knowledge procedure helpful once."""
+    runbook = await db.runbooks.find_one({"id": runbook_id, "published": True}, {"_id": 0, "id": 1})
+    if not runbook:
+        raise HTTPException(404, "Knowledge runbook not found")
+    user_id = str(current_user.get("id") or current_user.get("email") or current_user.get("name") or "unknown")
+    existing = await db.runbook_feedback.find_one({"runbook_id": runbook_id, "user_id": user_id}, {"_id": 0})
+    if existing:
+        return {"already_marked": True, "helpful_votes": (await db.runbooks.find_one({"id": runbook_id}, {"_id": 0, "helpful_votes": 1}) or {}).get("helpful_votes", 0)}
+    await db.runbook_feedback.insert_one({"id": uuid.uuid4().hex, "runbook_id": runbook_id, "user_id": user_id, "created_at": _now().isoformat()})
+    await db.runbooks.update_one({"id": runbook_id}, {"$inc": {"helpful_votes": 1}})
+    updated = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0, "helpful_votes": 1})
+    return {"already_marked": False, "helpful_votes": (updated or {}).get("helpful_votes", 0)}
+
+
+@router.put("/knowledge-runbooks/{runbook_id}")
+async def update_knowledge_runbook(runbook_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
+    """Refine the reusable procedure without exposing automation runbook fields."""
+    allowed = {key: payload[key] for key in ("title", "summary", "steps", "category", "tags") if key in payload}
+    if not allowed:
+        raise HTTPException(400, "No knowledge runbook changes supplied")
+    allowed["updated_at"] = _now().isoformat()
+    allowed["updated_by"] = current_user.get("name") or current_user.get("email")
+    result = await db.runbooks.update_one({"id": runbook_id, "source_ticket_id": {"$exists": True}}, {"$set": allowed})
+    if not result.matched_count:
+        raise HTTPException(404, "Knowledge runbook not found")
+    return await db.runbooks.find_one({"id": runbook_id}, {"_id": 0})
 
 
 @router.get("/runbooks")

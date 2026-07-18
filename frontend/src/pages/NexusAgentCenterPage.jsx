@@ -11,7 +11,7 @@
  *
  * Per-device telemetry/management lives on the Devices page (single source of truth).
  */
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
@@ -24,11 +24,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
+import { batchIsComplete, canExecuteAgentCommands, updateFilteredSelection } from "@/lib/nexusAgentHelpers";
 import {
-  Server, Activity, Download, Plus, RefreshCw, Terminal, Zap, FileDown,
+  Server, Activity, Download, Plus, Terminal, Zap, FileDown,
   Settings as SettingsIcon, ShieldCheck, Loader2, Sparkles, Copy,
-  CheckCircle2, ChevronRight, WifiOff, Users, History, TrendingUp,
-  AlertCircle, XCircle, Clock, ExternalLink,
+  CheckCircle2, WifiOff, Users, TrendingUp, AlertCircle, XCircle, ExternalLink, RefreshCw,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 
@@ -45,6 +45,22 @@ const TONE_CLASSES = {
 };
 
 const VERSION_DONUT_COLORS = ["#22d3ee", "#a78bfa", "#34d399", "#fbbf24", "#fb7185", "#818cf8", "#f97316"];
+
+const STATUS_DOT_CLASSES = {
+  emerald: "bg-emerald-400",
+  cyan: "bg-cyan-400",
+  amber: "bg-amber-400",
+  rose: "bg-rose-400",
+  zinc: "bg-zinc-400",
+};
+
+function InlineError({ children }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 text-xs text-rose-300 bg-rose-500/5 border-t border-rose-500/20">
+      <AlertCircle className="w-3.5 h-3.5 shrink-0" />{children}
+    </div>
+  );
+}
 
 function CopyChip({ value, label = "copy", testId }) {
   const [done, setDone] = useState(false);
@@ -69,11 +85,12 @@ function VersionDonut() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [data, setData] = useState({ rows: [], total_agents: 0, latest_version: "" });
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () => axios.get(`${API}/nexus-agent/fleet/version-distribution`, { headers })
-      .then(r => setData(r.data))
-      .catch(() => {});
+      .then(r => { setData(r.data); setError(""); })
+      .catch(() => setError("Version data is unavailable."));
     load();
     const i = setInterval(load, 10000);
     return () => clearInterval(i);
@@ -137,6 +154,7 @@ function VersionDonut() {
           </div>
         )}
       </CardContent>
+      {error && <InlineError>{error}</InlineError>}
     </Card>
   );
 }
@@ -147,11 +165,12 @@ function ActivityTicker() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [events, setEvents] = useState([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () => axios.get(`${API}/nexus-agent/fleet/activity?limit=60`, { headers })
-      .then(r => setEvents(r.data?.events || []))
-      .catch(() => {});
+      .then(r => { setEvents(r.data?.events || []); setError(""); })
+      .catch(() => setError("Fleet activity is unavailable."));
     load();
     const i = setInterval(load, 5000);
     return () => clearInterval(i);
@@ -181,6 +200,7 @@ function ActivityTicker() {
           ))}
         </div>
       </CardContent>
+      {error && <InlineError>{error}</InlineError>}
     </Card>
   );
 }
@@ -191,11 +211,12 @@ function RecentEnrollments() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/fleet/recent-enrollments?limit=8`, { headers })
-      .then(r => setRows(r.data || []))
-      .catch(() => {});
+      .then(r => { setRows(r.data || []); setError(""); })
+      .catch(() => setError("Recent enrollments are unavailable."));
   }, [headers]);
 
   return (
@@ -211,7 +232,7 @@ function RecentEnrollments() {
         ) : (
           <div className="divide-y divide-zinc-900/60">
             {rows.map(r => (
-              <Link key={r.id} to={`/devices/${r.id}`} className="block px-3 py-2 text-xs hover:bg-zinc-900/40">
+              <Link key={r.id} to={r.device_record_id ? `/devices/${r.device_record_id}` : "/devices?source=nexus-agent"} className="block px-3 py-2 text-xs hover:bg-zinc-900/40">
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${r.online ? "bg-emerald-400" : "bg-zinc-600"}`} />
                   <span className="font-medium text-zinc-200 truncate flex-1">{r.hostname || "(unnamed)"}</span>
@@ -227,6 +248,7 @@ function RecentEnrollments() {
           </div>
         )}
       </CardContent>
+      {error && <InlineError>{error}</InlineError>}
     </Card>
   );
 }
@@ -244,19 +266,24 @@ function FleetScriptRunner() {
   const [batchId, setBatchId] = useState(null);
   const [batch, setBatch] = useState({ commands: [], counts: {} });
   const [filter, setFilter] = useState("");
-  const pollRef = useRef(null);
+  const [loadError, setLoadError] = useState("");
+  const [batchError, setBatchError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/agents`, { headers })
-      .then(r => setAgents(r.data || []))
-      .catch(() => {});
+      .then(r => { setAgents(r.data || []); setLoadError(""); })
+      .catch(() => setLoadError("Unable to load agents."));
   }, [headers]);
 
+  const onlineAgents = useMemo(() => agents.filter(a => a.online), [agents]);
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
-    if (!q) return agents;
-    return agents.filter(a => (a.hostname || "").toLowerCase().includes(q));
-  }, [agents, filter]);
+    if (!q) return onlineAgents;
+    return onlineAgents.filter(a => (a.hostname || "").toLowerCase().includes(q));
+  }, [onlineAgents, filter]);
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(agent => selected.has(agent.id));
 
   const toggle = (id) => {
     setSelected(prev => {
@@ -266,8 +293,7 @@ function FleetScriptRunner() {
     });
   };
   const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(a => a.id)));
+    setSelected(prev => updateFilteredSelection(prev, filtered.map(agent => agent.id)));
   };
 
   const launch = async () => {
@@ -282,7 +308,9 @@ function FleetScriptRunner() {
       }, { headers });
       setBatchId(r.data.batch_id);
       setBatch({ commands: [], counts: {} });
-      toast.success(`Launched on ${r.data.targets.length} devices`);
+      setBatchError("");
+      const skipped = r.data.skipped_device_ids?.length || 0;
+      toast.success(`Launched on ${r.data.targets.length} devices${skipped ? `; ${skipped} unavailable device${skipped === 1 ? "" : "s"} skipped` : ""}`);
     } catch (e) { toast.error(e?.response?.data?.detail || "Launch failed"); }
     finally { setBusy(false); }
   };
@@ -290,14 +318,43 @@ function FleetScriptRunner() {
   // Poll batch results
   useEffect(() => {
     if (!batchId) return;
-    const tick = () => axios.get(`${API}/nexus-agent/fleet/batch/${batchId}`, { headers })
-      .then(r => setBatch(r.data))
-      .catch(() => {});
+    let stopped = false;
+    let timer;
+    const tick = async () => {
+      try {
+        const response = await axios.get(`${API}/nexus-agent/fleet/batch/${batchId}`, { headers });
+        if (stopped) return;
+        const nextBatch = response.data;
+        setBatch(nextBatch);
+        setBatchError("");
+        const commands = nextBatch.commands || [];
+        const complete = batchIsComplete(commands);
+        if (!complete) timer = setTimeout(tick, 2500);
+      } catch (error) {
+        if (stopped) return;
+        setBatchError(error?.response?.data?.detail || "Unable to refresh batch results.");
+        if (error?.response?.status !== 403 && error?.response?.status !== 404) timer = setTimeout(tick, 5000);
+      }
+    };
     tick();
-    pollRef.current = setInterval(tick, 2500);
-    return () => clearInterval(pollRef.current);
-    // eslint-disable-next-line
-  }, [batchId]);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [batchId, headers]);
+
+  const cancelBatch = async () => {
+    if (!batchId) return;
+    setCancelling(true);
+    try {
+      const response = await axios.post(`${API}/nexus-agent/fleet/batch/${batchId}/cancel`, {}, { headers });
+      toast.success(`Cancelled ${response.data.cancelled} pending command${response.data.cancelled === 1 ? "" : "s"}`);
+      const refreshed = await axios.get(`${API}/nexus-agent/fleet/batch/${batchId}`, { headers });
+      setBatch(refreshed.data);
+      setBatchError("");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Unable to cancel pending commands");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   return (
     <Card className="bg-zinc-950 border-zinc-800" data-testid="fleet-script-runner-card">
@@ -311,8 +368,9 @@ function FleetScriptRunner() {
         {/* Device picker */}
         <div className="border border-zinc-800 rounded">
           <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800">
-            <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleAll} className="accent-cyan-500" data-testid="select-all-agents" />
-            <span className="text-[10px] uppercase text-zinc-500 tracking-wider">All</span>
+            <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} className="accent-cyan-500" data-testid="select-all-agents" />
+            <span className="text-[10px] uppercase text-zinc-500 tracking-wider">All online</span>
+            {agents.length > onlineAgents.length && <span className="text-[10px] text-zinc-600">{agents.length - onlineAgents.length} offline excluded</span>}
             <Input value={filter} onChange={e => setFilter(e.target.value)} placeholder="filter…" className="h-6 text-xs max-w-[200px] ml-auto" />
           </div>
           <div className="max-h-32 overflow-y-auto divide-y divide-zinc-900/60">
@@ -360,6 +418,12 @@ function FleetScriptRunner() {
               <Badge className="bg-zinc-700 text-zinc-300">{batch.counts?.pending || 0} PENDING</Badge>
               <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30">{batch.counts?.timeout || 0} TIMEOUT</Badge>
               <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30">{batch.counts?.error || 0} ERROR</Badge>
+              <Badge className="bg-zinc-700 text-zinc-300">{batch.counts?.cancelled || 0} CANCELLED</Badge>
+              {(batch.counts?.pending || 0) > 0 && (
+                <Button variant="outline" size="sm" className="h-6 text-[10px] text-rose-300 border-rose-500/30" onClick={cancelBatch} disabled={cancelling} data-testid="fleet-script-cancel">
+                  {cancelling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <XCircle className="w-3 h-3 mr-1" />}Cancel pending
+                </Button>
+              )}
               <span className="ml-auto text-zinc-500">batch {batchId.slice(0, 8)}…</span>
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto">
@@ -368,7 +432,7 @@ function FleetScriptRunner() {
                 return (
                   <div key={c.id} className="border border-zinc-800 rounded text-xs" data-testid={`batch-cmd-${c.id}`}>
                     <div className="px-2 py-1 flex items-center gap-2 border-b border-zinc-900">
-                      <span className={`w-1.5 h-1.5 rounded-full bg-${tone}-400`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT_CLASSES[tone] || STATUS_DOT_CLASSES.zinc}`} />
                       <span className="text-zinc-200 truncate flex-1">{c.hostname || c.device_id.slice(0, 8)}</span>
                       <span className={`text-[9px] uppercase tracking-wider ${TONE_CLASSES[tone]} border-0 bg-transparent px-1`}>{c.status}</span>
                       {c.duration_ms != null && c.status !== "pending" && c.status !== "dispatched" && (
@@ -386,6 +450,8 @@ function FleetScriptRunner() {
             </div>
           </div>
         )}
+        {loadError && <InlineError>{loadError}</InlineError>}
+        {batchError && <InlineError>{batchError}</InlineError>}
       </CardContent>
     </Card>
   );
@@ -401,10 +467,14 @@ function InstallerBuilder({ open, onClose }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const isLocalInstaller = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(result?.server_url || result?.download_url || "");
 
   useEffect(() => {
     if (!open) return;
-    axios.get(`${API}/clients-enriched`, { headers }).then(r => setClients(r.data?.clients || [])).catch(() => setClients([]));
+    axios.get(`${API}/clients-enriched`, { headers })
+      .then(r => { setClients(r.data?.clients || []); setLoadError(""); })
+      .catch(() => { setClients([]); setLoadError("Unable to load clients."); });
   }, [open, headers]);
 
   const submit = async () => {
@@ -423,12 +493,12 @@ function InstallerBuilder({ open, onClose }) {
       <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
-          <DialogDescription>Builds a Windows ZIP containing nexus-agent.exe + a per-client enrollment token.</DialogDescription>
+          <DialogDescription>Build a client-bound Windows ZIP with the NexusMSP Agent and its unique enrollment token.</DialogDescription>
         </DialogHeader>
         {!result ? (
           <div className="space-y-3">
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Client</label>
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Client / organisation</label>
               <Select value={clientId} onValueChange={setClientId}>
                 <SelectTrigger data-testid="installer-client-select"><SelectValue placeholder="Pick a client…" /></SelectTrigger>
                 <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
@@ -444,6 +514,11 @@ function InstallerBuilder({ open, onClose }) {
                 <FileDown className="w-3 h-3" />{result.filename}
               </a>
             </div>
+            {isLocalInstaller && (
+              <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+                This package is linked to your local NexusMSP server and will work only on this computer for now. Set a public HTTPS server URL before deploying it to a client machine.
+              </div>
+            )}
             <div className="text-[10px] text-zinc-500 space-y-1">
               <div>One-line PowerShell deploy:</div>
               <pre className="bg-zinc-950 border border-zinc-800 rounded p-2 font-mono text-[10px] text-zinc-300 whitespace-pre-wrap break-all">{`Invoke-WebRequest "${result.download_url}" -OutFile $env:TEMP\\NexusOpsAgent.zip; Expand-Archive $env:TEMP\\NexusOpsAgent.zip -DestinationPath $env:TEMP\\NexusOpsAgent -Force; & "$env:TEMP\\NexusOpsAgent\\install.bat"`}</pre>
@@ -451,6 +526,7 @@ function InstallerBuilder({ open, onClose }) {
             </div>
           </div>
         )}
+        {loadError && <InlineError>{loadError}</InlineError>}
         <DialogFooter>
           {!result ? (
             <>
@@ -471,21 +547,22 @@ function InstallerBuilder({ open, onClose }) {
 
 // ───────── Settings (kept) ─────────
 
-function SettingsCard() {
+function SettingsCard({ canEdit }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true });
+  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, winget_enabled: false, winget_allowed_ids: [] });
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0 });
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/settings`, { headers })
-      .then(r => { setS(prev => ({ ...prev, ...r.data })); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); })
-      .catch(() => {});
-    // eslint-disable-next-line
-  }, []);
+      .then(r => { setS(prev => ({ ...prev, ...r.data })); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); setLoadError(""); })
+      .catch(() => setLoadError("Agent settings are unavailable."));
+  }, [headers]);
 
   const save = async () => {
+    if (!canEdit) return;
     setBusy(true);
     try {
       await axios.put(`${API}/nexus-agent/settings`, s, { headers });
@@ -511,21 +588,33 @@ function SettingsCard() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">Heartbeat (sec)</label>
-            <Input type="number" value={s.heartbeat_secs} onChange={e => setS({ ...s, heartbeat_secs: Number(e.target.value) || 60 })} data-testid="agent-setting-heartbeat" />
+            <Input type="number" value={s.heartbeat_secs} onChange={e => setS({ ...s, heartbeat_secs: Number(e.target.value) || 60 })} disabled={!canEdit} data-testid="agent-setting-heartbeat" />
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">Poll (sec)</label>
-            <Input type="number" value={s.poll_secs} onChange={e => setS({ ...s, poll_secs: Number(e.target.value) || 10 })} data-testid="agent-setting-poll" />
+            <Input type="number" value={s.poll_secs} onChange={e => setS({ ...s, poll_secs: Number(e.target.value) || 10 })} disabled={!canEdit} data-testid="agent-setting-poll" />
           </div>
         </div>
         <div>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500">Server URL</label>
-          <Input value={s.server_url} onChange={e => setS({ ...s, server_url: e.target.value })} placeholder="https://your-domain.com" data-testid="agent-setting-server-url" />
+          <Input value={s.server_url} onChange={e => setS({ ...s, server_url: e.target.value })} placeholder="https://your-domain.com" disabled={!canEdit} data-testid="agent-setting-server-url" />
+        </div>
+        <div className="border-t border-zinc-800 pt-3">
+          <div className="flex items-start gap-3 mb-2">
+            <button type="button" role="switch" aria-checked={s.winget_enabled}
+              onClick={() => setS({ ...s, winget_enabled: !s.winget_enabled })} disabled={!canEdit}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.winget_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}>
+              <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${s.winget_enabled ? "translate-x-4" : "translate-x-0.5"} mt-0.5`} />
+            </button>
+            <div><div className="text-sm font-medium">Winget approved-app updates</div><p className="text-[11px] text-zinc-500">Only packages in this allow-list can run in a maintenance window.</p></div>
+          </div>
+          <Textarea value={(s.winget_allowed_ids || []).join("\n")} onChange={e => setS({ ...s, winget_allowed_ids: e.target.value.split(/[\n,]/).map(x => x.trim()).filter(Boolean) })} placeholder={"Microsoft.Edge\nGoogle.Chrome\n7zip.7zip"} rows={3} disabled={!canEdit} />
         </div>
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-start gap-3">
             <button type="button" role="switch" aria-checked={s.auto_update_enabled}
               onClick={() => setS({ ...s, auto_update_enabled: !s.auto_update_enabled })}
+              disabled={!canEdit}
               data-testid="agent-setting-auto-update"
               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.auto_update_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}>
               <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${s.auto_update_enabled ? "translate-x-4" : "translate-x-0.5"} mt-0.5`} />
@@ -547,12 +636,17 @@ function SettingsCard() {
             <span className="text-sm font-medium">Splashtop</span>
             <Badge variant="outline" className="text-[10px] text-zinc-500">Phase 4</Badge>
           </div>
-          <Input value={s.splashtop_deploy_code_default} onChange={e => setS({ ...s, splashtop_deploy_code_default: e.target.value })} placeholder="Default deployment code" />
+          <Input value={s.splashtop_deploy_code_default} onChange={e => setS({ ...s, splashtop_deploy_code_default: e.target.value })} placeholder="Default deployment code" disabled={!canEdit} />
         </div>
         <div className="pt-1">
-          <Button onClick={save} disabled={busy} data-testid="agent-settings-save">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}Save</Button>
+          {canEdit ? (
+            <Button onClick={save} disabled={busy} data-testid="agent-settings-save">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}Save</Button>
+          ) : (
+            <p className="text-[11px] text-zinc-500">Read-only. Agent command permission is required to change settings.</p>
+          )}
         </div>
       </CardContent>
+      {loadError && <InlineError>{loadError}</InlineError>}
     </Card>
   );
 }
@@ -560,14 +654,18 @@ function SettingsCard() {
 // ───────── Page ─────────
 
 export default function NexusAgentCenterPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [stats, setStats] = useState({});
   const [installerOpen, setInstallerOpen] = useState(false);
+  const [statsError, setStatsError] = useState("");
   const navigate = useNavigate();
+  const canOperate = canExecuteAgentCommands(user);
 
   useEffect(() => {
-    const load = () => axios.get(`${API}/nexus-agent/stats`, { headers }).then(r => setStats(r.data || {})).catch(() => {});
+    const load = () => axios.get(`${API}/nexus-agent/stats`, { headers })
+      .then(r => { setStats(r.data || {}); setStatsError(""); })
+      .catch(() => setStatsError("Fleet summary is unavailable."));
     load();
     const i = setInterval(load, 5000);
     return () => clearInterval(i);
@@ -589,32 +687,49 @@ export default function NexusAgentCenterPage() {
           <Button variant="outline" size="sm" onClick={() => navigate("/devices?source=nexus-agent")} data-testid="goto-devices-btn">
             <Server className="w-3 h-3 mr-1" />Open in Devices
           </Button>
-          <Button size="sm" onClick={() => setInstallerOpen(true)} className="bg-cyan-500 text-zinc-950 hover:bg-cyan-400" data-testid="open-installer-builder">
-            <Plus className="w-3 h-3 mr-1" />Generate Installer
-          </Button>
+          {canOperate && (
+            <Button size="sm" onClick={() => setInstallerOpen(true)} className="bg-cyan-500 text-zinc-950 hover:bg-cyan-400" data-testid="open-installer-builder">
+              <Plus className="w-3 h-3 mr-1" />Generate Installer
+            </Button>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="agent-hero-tiles">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="agent-hero-tiles">
         <HeroTile label="Agents Online" value={stats.online_agents || 0} icon={Activity} glow="emerald" testId="hero-agents-online" />
         <HeroTile label="Agents Offline" value={stats.offline_agents || 0} icon={WifiOff} glow={stats.offline_agents ? "rose" : "zinc"} testId="hero-agents-offline" />
-        <HeroTile label="Total Agents" value={stats.total_agents || 0} icon={Server} glow="cyan" testId="hero-agents-total" />
+        <HeroTile label="Enrolled Agents" value={stats.total_agents || 0} icon={Server} glow="cyan" testId="hero-agents-total" />
+        <HeroTile label="Assessed Endpoints" value={stats.assessed_devices || 0} subtitle={`of ${stats.managed_devices || 0} managed`} icon={ShieldCheck} glow="violet" testId="hero-endpoints-assessed" />
+        <HeroTile label="Pending Updates" value={stats.pending_updates || 0} icon={RefreshCw} glow={stats.pending_updates ? "amber" : "zinc"} testId="hero-updates-pending" />
         <HeroTile label="Commands Queued" value={stats.pending_commands || 0} icon={Terminal} glow={stats.pending_commands ? "amber" : "violet"} testId="hero-agents-pending" />
       </div>
+      {statsError && <InlineError>{statsError}</InlineError>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <VersionDonut />
         <ActivityTicker />
       </div>
 
-      <FleetScriptRunner />
+      {canOperate ? (
+        <FleetScriptRunner />
+      ) : (
+        <Card className="bg-zinc-950 border-zinc-800" data-testid="fleet-script-restricted">
+          <CardContent className="py-6 flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Remote commands are restricted</p>
+              <p className="text-xs text-zinc-500 mt-1">An administrator must grant the Execute Agent Commands permission before you can run fleet scripts, generate installers, or change agent settings.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <RecentEnrollments />
-        <SettingsCard />
+        {canOperate && <SettingsCard canEdit />}
       </div>
 
-      <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} />
+      {canOperate && <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} />}
     </div>
   );
 }

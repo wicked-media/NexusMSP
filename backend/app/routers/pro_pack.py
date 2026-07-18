@@ -358,7 +358,9 @@ async def phone_inbound_webhook(data: dict):
 
 @router.get("/pro-pack/api-tokens")
 async def list_tokens(current_user: dict = Depends(get_current_user)):
-    items = await db.api_tokens.find({}, {"_id": 0, "secret": 0}).sort("created_at", -1).to_list(100)
+    items = await db.api_tokens.find(
+        {"owner_user_id": current_user["id"]}, {"_id": 0, "secret": 0, "secret_hash": 0}
+    ).sort("created_at", -1).to_list(100)
     return items
 
 @router.post("/pro-pack/api-tokens")
@@ -371,6 +373,7 @@ async def create_token(data: dict, current_user: dict = Depends(get_current_user
         "client_id": data.get("client_id"),
         "secret_hash": hashlib.sha256(raw.encode()).hexdigest(),
         "secret_preview": raw[:6] + "…" + raw[-4:],
+        "owner_user_id": current_user["id"],
         "created_by": current_user.get("name", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": data.get("expires_at"),
@@ -381,7 +384,12 @@ async def create_token(data: dict, current_user: dict = Depends(get_current_user
 
 @router.delete("/pro-pack/api-tokens/{tid}")
 async def revoke_token(tid: str, current_user: dict = Depends(get_current_user)):
-    await db.api_tokens.update_one({"id": tid}, {"$set": {"is_active": False, "revoked_at": datetime.now(timezone.utc).isoformat()}})
+    result = await db.api_tokens.update_one(
+        {"id": tid, "owner_user_id": current_user["id"]},
+        {"$set": {"is_active": False, "revoked_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="API token not found")
     return {"message": "revoked"}
 
 
@@ -563,6 +571,20 @@ async def setup_2fa(current_user: dict = Depends(get_current_user)):
     )
     return {"secret": secret, "otpauth_uri": uri, "qr_code_text": uri}
 
+
+@router.get("/pro-pack/2fa")
+async def get_2fa_status(current_user: dict = Depends(get_current_user)):
+    """Return enrollment state without exposing the authenticator secret."""
+    rec = await db.user_2fa.find_one(
+        {"user_id": current_user.get("id")},
+        {"_id": 0, "verified": 1, "verified_at": 1, "created_at": 1},
+    )
+    return {
+        "enabled": bool(rec and rec.get("verified")),
+        "verified_at": rec.get("verified_at") if rec else None,
+        "setup_in_progress": bool(rec and not rec.get("verified")),
+    }
+
 @router.post("/pro-pack/2fa/verify")
 async def verify_2fa(data: dict, current_user: dict = Depends(get_current_user)):
     code = (data.get("code") or "").strip()
@@ -576,7 +598,12 @@ async def verify_2fa(data: dict, current_user: dict = Depends(get_current_user))
     return {"verified": True}
 
 @router.delete("/pro-pack/2fa")
-async def disable_2fa(current_user: dict = Depends(get_current_user)):
+async def disable_2fa(data: dict, current_user: dict = Depends(get_current_user)):
+    """Disable MFA only after the signed-in technician re-confirms their password."""
+    password = data.get("password", "")
+    user = await db.users.find_one({"id": current_user.get("id")})
+    if not user or not verify_password(password, user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
     await db.user_2fa.delete_one({"user_id": current_user.get("id")})
     return {"message": "disabled"}
 

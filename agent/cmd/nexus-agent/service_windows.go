@@ -3,21 +3,56 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 
 	"nexusagent/internal/config"
+	"golang.org/x/sys/windows/svc"
 )
 
 const svcName = "NexusOpsAgent"
 
+type agentService struct{ cfg *config.Config }
+
+func (s *agentService) Execute(_ []string, requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
+	changes <- svc.Status{State: svc.StartPending}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runAgentContext(ctx, s.cfg)
+	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	for request := range requests {
+		switch request.Cmd {
+		case svc.Interrogate:
+			changes <- request.CurrentStatus
+		case svc.Stop, svc.Shutdown:
+			changes <- svc.Status{State: svc.StopPending}
+			cancel()
+			return false, 0
+		}
+	}
+	return false, 0
+}
+
+// svcRunIfNeeded lets the same executable run interactively from a terminal
+// and correctly participate in the Windows Service Control Manager when it is
+// launched as the NexusOpsAgent service.
+func svcRunIfNeeded(cfg *config.Config) (bool, error) {
+	isService, err := svc.IsWindowsService()
+	if err != nil || !isService {
+		return false, err
+	}
+	return true, svc.Run(svcName, &agentService{cfg: cfg})
+}
+
 func svcInstall(cfg *config.Config) error {
 	exe, err := os.Executable()
 	if err != nil { return err }
-	// sc create NexusOpsAgent binPath= "<exe> -run foreground" start= auto DisplayName= "NexusOps Agent"
+	// No explicit run flag: main detects Service Control Manager execution and
+	// starts the Windows service handler; interactive launches remain console-mode.
 	cmd := exec.Command("sc", "create", svcName,
-		"binPath=", fmt.Sprintf("\"%s\" -run foreground", exe),
+		"binPath=", fmt.Sprintf("\"%s\"", exe),
 		"start=", "auto",
 		"DisplayName=", "NexusOps Agent",
 	)

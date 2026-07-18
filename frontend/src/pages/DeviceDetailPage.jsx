@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer } from "lucide-react";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer, Pencil, Building2, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -13,11 +13,15 @@ import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
+import { Input } from "../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import WatchDeviceButton from "../components/devices/WatchDeviceButton";
 import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
 import DeviceDossier from "../components/devices/DeviceDossier";
+import MaintenanceWindowDialog from "../components/devices/MaintenanceWindowDialog";
+import HeroTile from "../components/HeroTile";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
@@ -27,20 +31,7 @@ const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emera
 const SEVERITY_COLORS = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", important: "bg-amber-500/10 text-amber-500", warning: "bg-amber-500/10 text-amber-500", info: "bg-blue-500/10 text-blue-500", error: "bg-red-500/10 text-red-500" };
 const PATCH_STATUS = { installed: "bg-emerald-500/10 text-emerald-500", pending: "bg-amber-500/10 text-amber-500", failed: "bg-red-500/10 text-red-500" };
 const EVENT_ICONS = { agent_check_in: Activity, login: User, logout: User, software_installed: Package, patch_applied: Download, alert_triggered: AlertTriangle, reboot: RefreshCw, service_restart: Wrench, backup_completed: HardDrive, script_executed: Terminal };
-
-function UsageGauge({ label, value, icon: Icon, thresholds = [70, 90] }) {
-  const color = value >= thresholds[1] ? "text-red-500" : value >= thresholds[0] ? "text-amber-500" : "text-emerald-500";
-  const bgColor = value >= thresholds[1] ? "bg-red-500" : value >= thresholds[0] ? "bg-amber-500" : "bg-emerald-500";
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground"><Icon className="w-3.5 h-3.5" />{label}</div>
-        <span className={`text-sm font-mono font-bold ${color}`}>{value}%</span>
-      </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all ${bgColor}`} style={{ width: `${value}%` }} /></div>
-    </div>
-  );
-}
+const displayLinkSpeed = (speed) => !speed ? "—" : speed >= 1000 ? `${speed / 1000} Gbps` : `${speed} Mbps`;
 
 export default function DeviceDetailPage() {
   const { deviceId } = useParams();
@@ -60,6 +51,12 @@ export default function DeviceDetailPage() {
   const [trmmLinkOpen, setTrmmLinkOpen] = useState(false);
   const [trmmAgentSelect, setTrmmAgentSelect] = useState("");
   const [trmmRemoteBusy, setTrmmRemoteBusy] = useState(false);
+  const [patchWindowOpen, setPatchWindowOpen] = useState(false);
+  const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
+  const [deviceEditorBusy, setDeviceEditorBusy] = useState(false);
+  const [clientOptions, setClientOptions] = useState([]);
+  const [deviceEditor, setDeviceEditor] = useState({ name: "", client_id: "", assigned_user: "", location: "" });
+  const [softwareSearch, setSoftwareSearch] = useState("");
 
   // Fetch TRMM status + agents (best effort)
   useEffect(() => {
@@ -204,6 +201,38 @@ export default function DeviceDetailPage() {
     }
   };
 
+  const openDeviceEditor = async () => {
+    if (!data?.device) return;
+    setDeviceEditor({
+      name: data.device.name || "",
+      client_id: data.device.client_id || "",
+      assigned_user: data.device.assigned_user || "",
+      location: data.device.location || "",
+    });
+    setDeviceEditorOpen(true);
+    try {
+      const res = await axios.get(`${API}/clients`, { headers: { Authorization: `Bearer ${token}` } });
+      setClientOptions(Array.isArray(res.data) ? res.data : []);
+    } catch { setClientOptions([]); }
+  };
+
+  const saveDeviceIdentity = async () => {
+    if (!deviceEditor.name.trim()) { toast.error("Device name is required"); return; }
+    setDeviceEditorBusy(true);
+    try {
+      await axios.put(`${API}/devices/${deviceId}`, {
+        name: deviceEditor.name.trim(),
+        client_id: deviceEditor.client_id || null,
+        assigned_user: deviceEditor.assigned_user.trim() || null,
+        location: deviceEditor.location.trim() || null,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Device identity updated");
+      setDeviceEditorOpen(false);
+      fetchDetail();
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not update device"); }
+    finally { setDeviceEditorBusy(false); }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin" /></div>;
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
 
@@ -214,40 +243,61 @@ export default function DeviceDetailPage() {
     cpu: p.cpu, memory: p.memory, disk: p.disk,
     net_in: p.network_in, net_out: p.network_out
   }));
+  const performanceSamples = data.performance || [];
+  const performanceValues = (...keys) => performanceSamples.map(sample => keys.map(key => sample[key]).find(value => typeof value === "number")).filter(value => typeof value === "number");
+  const peakValue = (...keys) => Math.round(Math.max(0, ...performanceValues(...keys)));
+  const latestValue = (...keys) => {
+    const latest = performanceSamples[0] || {};
+    return Math.round(keys.map(key => latest[key]).find(value => typeof value === "number") || 0);
+  };
 
-  const complianceColor = (dev.compliance_score || 0) >= 90 ? "text-emerald-500" : (dev.compliance_score || 0) >= 70 ? "text-amber-500" : "text-red-500";
+  const complianceAssessed = Boolean(dev.security_assessed_at);
+  const complianceColor = !complianceAssessed ? "text-muted-foreground" : (dev.compliance_score || 0) >= 90 ? "text-emerald-500" : (dev.compliance_score || 0) >= 70 ? "text-amber-500" : "text-red-500";
   const SecurityIcon = (dev.compliance_score || 0) >= 90 ? ShieldCheck : (dev.compliance_score || 0) >= 70 ? Shield : ShieldAlert;
+  const cpuUsage = Math.round(dev.cpu_usage || 0);
+  const memoryUsage = Math.round(dev.memory_usage || 0);
+  const diskUsage = Math.round(dev.disk_usage || 0);
+  const usageGlow = (value) => value >= 90 ? "rose" : value >= 70 ? "amber" : "emerald";
+  const adapters = data.network_adapters || [];
+  const activeAdapter = adapters.find(adapter => adapter.status === "up") || adapters.find(adapter => adapter.ip_address) || null;
+  const software = data.software || [];
+  const softwareQuery = softwareSearch.trim().toLowerCase();
+  const filteredSoftware = software.filter(item => !softwareQuery || [item.name, item.publisher, item.version, item.category].some(value => String(value || "").toLowerCase().includes(softwareQuery)));
+  const softwareInventoryAt = software.reduce((latest, item) => item.last_inventory_at && (!latest || item.last_inventory_at > latest) ? item.last_inventory_at : latest, null);
 
   return (
     <div className="space-y-6" data-testid="device-detail-page">
-      {/* Header */}<div className="flex items-start justify-between">
-        <div className="flex items-start gap-4">
+      {/* Device identity */}<div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/devices")} data-testid="back-to-devices"><ArrowLeft className="w-5 h-5" /></Button>
-          <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
+          <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
             <DevIcon className="w-7 h-7" />
+            {((rdLiveStatus || dev.status) === "online") && <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-3 w-3 rounded-full border-2 border-background bg-emerald-400" /></span>}
           </div>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight" data-testid="device-name">{dev.name}</h1>
-              <Badge className={STATUS_COLORS[rdLiveStatus || dev.status] + " border capitalize"} data-testid="device-status">{rdLiveStatus || dev.status}</Badge>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-2xl font-bold tracking-tight" data-testid="device-name">{dev.name}</h1>
+              <span className={`inline-flex items-center gap-1.5 text-xs font-medium capitalize ${(rdLiveStatus || dev.status) === "online" ? "text-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "text-red-400" : "text-amber-400"}`} data-testid="device-status"><span className={`h-2 w-2 rounded-full ${(rdLiveStatus || dev.status) === "online" ? "bg-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "bg-red-400" : "bg-amber-400"}`} />{rdLiveStatus || dev.status}</span>
               {rdLiveStatus && rdLiveStatus !== dev.status && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">LIVE</span>
               )}
-              {dev.compliance_score != null && (
+              {complianceAssessed && (
                 <Badge variant="outline" className={complianceColor + " border-current/20"}>
                   <SecurityIcon className="w-3 h-3 mr-1" />{dev.compliance_score}% Compliant
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{dev.ip_address || "N/A"}</span>
-              <span>{dev.os} {dev.os_version || ""}</span>
-              <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{dev.location || "Unknown"}</span>
-              <span>{dev.client_name}</span>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{dev.ip_address || "No IP reported"}</span>
+              <span className="flex items-center gap-1"><Monitor className="h-3.5 w-3.5" />{dev.os} {dev.os_version || ""}</span>
+              <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{dev.location || "No location"}</span>
+              <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{dev.client_name || "Unassigned client"}</span>
+              <span className="flex items-center gap-1"><User className="h-3.5 w-3.5" />{dev.assigned_user || "Unassigned user"}</span>
             </div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 xl:justify-end">
+          <Button variant="outline" size="sm" onClick={openDeviceEditor} data-testid="edit-device-identity"><Pencil className="mr-1 h-4 w-4" />Edit</Button>
           <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
           <RemoteAccessButton
             device={dev}
@@ -275,41 +325,20 @@ export default function DeviceDetailPage() {
       </div>
 
       {/* Quick Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card><CardContent className="pt-4 pb-3">
-          <UsageGauge label="CPU" value={Math.round(dev.cpu_usage || 0)} icon={Cpu} />
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <UsageGauge label="Memory" value={Math.round(dev.memory_usage || 0)} icon={MemoryStick} />
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <UsageGauge label="Disk" value={Math.round(dev.disk_usage || 0)} icon={HardDrive} />
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Clock className="w-3.5 h-3.5" />Uptime</div>
-            <p className="text-lg font-bold font-mono">{dev.uptime_hours != null ? `${Math.round(dev.uptime_hours / 24)}d ${dev.uptime_hours % 24}h` : "N/A"}</p>
-          </div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground"><AlertTriangle className="w-3.5 h-3.5" />Alerts</div>
-            <p className={`text-lg font-bold ${dev.alerts_count > 0 ? "text-red-500" : "text-emerald-500"}`}>{dev.alerts_count}</p>
-          </div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Download className="w-3.5 h-3.5" />Patches</div>
-            <p className={`text-lg font-bold ${(dev.pending_patches || 0) > 0 ? "text-amber-500" : "text-emerald-500"}`}>{dev.pending_patches || 0} pending</p>
-          </div>
-        </CardContent></Card>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-testid="device-hero-tiles">
+        <HeroTile label="CPU" value={cpuUsage} suffix="%" icon={Cpu} glow={usageGlow(cpuUsage)} subtitle={cpuUsage >= 90 ? "Critical load" : cpuUsage >= 70 ? "Elevated load" : "Normal load"} testId="device-stat-cpu" />
+        <HeroTile label="Memory" value={memoryUsage} suffix="%" icon={MemoryStick} glow={usageGlow(memoryUsage)} subtitle={memoryUsage >= 90 ? "Critical pressure" : memoryUsage >= 70 ? "Elevated pressure" : "Normal pressure"} testId="device-stat-memory" />
+        <HeroTile label="Disk" value={diskUsage} suffix="%" icon={HardDrive} glow={usageGlow(diskUsage)} subtitle={diskUsage >= 90 ? "Capacity critical" : diskUsage >= 70 ? "Capacity watch" : "Capacity healthy"} testId="device-stat-disk" />
+        <HeroTile label="Uptime" value={dev.uptime_hours != null ? `${Math.floor(dev.uptime_hours / 24)}d ${Math.round(dev.uptime_hours % 24)}h` : "—"} icon={Clock} glow="cyan" subtitle={dev.last_reboot ? `Rebooted ${formatDistanceToNow(new Date(dev.last_reboot), { addSuffix: true })}` : "Reboot time unavailable"} animated={false} testId="device-stat-uptime" />
+        <HeroTile label="Alerts" value={dev.alerts_count || 0} icon={AlertTriangle} glow={(dev.alerts_count || 0) > 0 ? "rose" : "emerald"} subtitle={(dev.alerts_count || 0) > 0 ? "Needs attention" : "No active alerts"} testId="device-stat-alerts" />
+        <HeroTile label="Patches" value={dev.pending_patches || 0} icon={Download} glow={(dev.pending_patches || 0) > 0 ? "amber" : "emerald"} subtitle={(dev.pending_patches || 0) > 0 ? "Pending approval" : "No updates pending"} testId="device-stat-patches" />
       </div>
 
       {/* Tabs */}
       <DeviceDossier deviceId={dev.id} headers={{ Authorization: `Bearer ${token}` }} API={API} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-10 w-full" data-testid="device-tabs">
+        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-11" data-testid="device-tabs">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="tickets">Tickets ({data.tickets?.length || 0})</TabsTrigger>
@@ -553,7 +582,7 @@ export default function DeviceDetailPage() {
                     const priorityColor = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
                     const statusColor = { open: "border-blue-500/30 text-blue-500", in_progress: "border-amber-500/30 text-amber-500", resolved: "border-emerald-500/30 text-emerald-500", closed: "border-gray-500/30 text-gray-400", on_hold: "border-orange-500/30 text-orange-500" };
                     return (
-                      <TableRow key={`k-${i}`} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/tickets`)} data-testid={`device-ticket-${t.id || i}`}>
+                      <TableRow key={`k-${i}`} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(t.ticket_number || t.id)}`)} data-testid={`device-ticket-${t.id || i}`}>
                         <TableCell className="font-mono text-xs font-medium">{t.ticket_number || `TKT-${String(i+1).padStart(3,"0")}`}</TableCell>
                         <TableCell className="max-w-xs truncate font-medium">{t.title}</TableCell>
                         <TableCell><Badge className={`${priorityColor[t.priority] || ""} text-[10px] capitalize`}>{t.priority}</Badge></TableCell>
@@ -592,7 +621,13 @@ export default function DeviceDetailPage() {
 
         {/* PERFORMANCE TAB */}
         <TabsContent value="performance" className="space-y-4 mt-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <HeroTile label="CPU now" value={latestValue("cpu_usage", "cpu")} suffix="%" icon={Cpu} glow={usageGlow(latestValue("cpu_usage", "cpu"))} subtitle={`Peak ${peakValue("cpu_usage", "cpu")}% in this view`} testId="device-perf-cpu" />
+            <HeroTile label="Memory now" value={latestValue("memory_usage", "memory")} suffix="%" icon={MemoryStick} glow={usageGlow(latestValue("memory_usage", "memory"))} subtitle={`Peak ${peakValue("memory_usage", "memory")}% in this view`} testId="device-perf-memory" />
+            <HeroTile label="Disk now" value={latestValue("disk_usage", "disk")} suffix="%" icon={HardDrive} glow={usageGlow(latestValue("disk_usage", "disk"))} subtitle={`Peak ${peakValue("disk_usage", "disk")}% in this view`} testId="device-perf-disk" />
+            <HeroTile label="Samples" value={performanceSamples.length} icon={Activity} glow="violet" subtitle={performanceSamples[0]?.timestamp ? `Last sample ${formatDistanceToNow(new Date(performanceSamples[0].timestamp), { addSuffix: true })}` : "Awaiting agent telemetry"} testId="device-perf-samples" />
+          </div>
+          {perfData.length === 0 ? <Card><CardContent className="flex flex-col items-center justify-center py-14 text-center"><Activity className="mb-3 h-8 w-8 text-muted-foreground" /><p className="text-sm font-medium">No performance history yet</p><p className="mt-1 text-xs text-muted-foreground">NexusOps Agent samples will appear here after the next telemetry collection.</p></CardContent></Card> : <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm">CPU Usage (24h)</CardTitle></CardHeader>
               <CardContent>
@@ -650,12 +685,22 @@ export default function DeviceDetailPage() {
                 </ResponsiveContainer>
               </CardContent>
             </Card>
-          </div>
+          </div>}
         </TabsContent>
 
         {/* SOFTWARE TAB */}
-        <TabsContent value="software" className="mt-4">
+        <TabsContent value="software" className="mt-4 space-y-4">
+          <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+            <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10"><Package className="h-4 w-4 text-violet-400" /></div>
+                <div><p className="text-sm font-medium">{software.length} discovered applications</p><p className="text-xs text-muted-foreground">{softwareInventoryAt ? `Inventory collected ${formatDistanceToNow(new Date(softwareInventoryAt), { addSuffix: true })}` : "Awaiting the first software inventory"}</p></div>
+              </div>
+              <div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={softwareSearch} onChange={e => setSoftwareSearch(e.target.value)} placeholder="Search name, publisher, version…" className="h-9 pl-8 text-xs" data-testid="device-software-search" /></div>
+            </CardContent>
+          </Card>
           <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Installed software</CardTitle><span className="text-xs text-muted-foreground">Showing {filteredSoftware.length} of {software.length}</span></CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
@@ -665,9 +710,11 @@ export default function DeviceDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(data.software || []).length === 0 ? (
+                  {software.length === 0 ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No software inventory data</TableCell></TableRow>
-                  ) : (data.software || []).map((sw, i) => (
+                  ) : filteredSoftware.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No applications match “{softwareSearch}”</TableCell></TableRow>
+                  ) : filteredSoftware.map((sw, i) => (
                     <TableRow key={`k-${i}`}>
                       <TableCell className="font-medium">{sw.name}</TableCell>
                       <TableCell className="font-mono text-xs">{sw.version}</TableCell>
@@ -684,7 +731,13 @@ export default function DeviceDetailPage() {
         </TabsContent>
 
         {/* PATCHES TAB */}
-        <TabsContent value="patches" className="mt-4">
+        <TabsContent value="patches" className="mt-4 space-y-4">
+          <Card className="border-cyan-500/20 bg-cyan-500/[0.03]">
+            <CardContent className="py-3 flex items-center justify-between gap-4">
+              <div><p className="font-medium text-sm">Patch deployment is maintenance-window controlled</p><p className="text-xs text-muted-foreground">{dev.pending_patches || 0} Windows updates currently pending. Review the list, then schedule an approved window.</p></div>
+              <Button size="sm" onClick={() => setPatchWindowOpen(true)} data-testid="device-schedule-patches"><Calendar className="w-4 h-4 mr-1" />Schedule patches</Button>
+            </CardContent>
+          </Card>
           <Card>
             <CardContent className="p-0">
               <Table>
@@ -699,10 +752,10 @@ export default function DeviceDetailPage() {
                     <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No patch data</TableCell></TableRow>
                   ) : (data.patches || []).map((p, i) => (
                     <TableRow key={`k-${i}`}>
-                      <TableCell className="font-mono text-xs font-medium">{p.kb_id}</TableCell>
+                      <TableCell className="font-mono text-xs font-medium">{p.kb_id || p.kb_article || "-"}</TableCell>
                       <TableCell className="max-w-xs truncate">{p.title}</TableCell>
-                      <TableCell><Badge className={SEVERITY_COLORS[p.severity] + " text-[10px] capitalize"}>{p.severity}</Badge></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{p.category}</TableCell>
+                      <TableCell><Badge className={SEVERITY_COLORS[p.severity || "important"] + " text-[10px] capitalize"}>{p.severity || "important"}</Badge></TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{p.category || "Windows Update"}</TableCell>
                       <TableCell><Badge className={PATCH_STATUS[p.status] + " text-[10px] capitalize"}>{p.status}</Badge></TableCell>
                       <TableCell className="text-sm">{p.installed_date || "-"}</TableCell>
                     </TableRow>
@@ -715,31 +768,36 @@ export default function DeviceDetailPage() {
 
         {/* SECURITY TAB */}
         <TabsContent value="security" className="space-y-4 mt-4">
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <div className="xl:col-span-4">
               <Card className="h-full">
                 <CardHeader className="pb-3"><CardTitle className="text-sm">Compliance Score</CardTitle></CardHeader>
                 <CardContent className="flex flex-col items-center justify-center">
-                  <div className={`text-6xl font-bold font-mono ${complianceColor}`}>{dev.compliance_score || 0}</div>
-                  <p className="text-sm text-muted-foreground mt-2">out of 100</p>
-                  <Progress value={dev.compliance_score || 0} className="mt-4 h-3" />
+                  {complianceAssessed ? <>
+                    <div className={`text-6xl font-bold font-mono ${complianceColor}`}>{dev.compliance_score}</div>
+                    <p className="text-sm text-muted-foreground mt-2">out of 100 · assessed live</p>
+                    <Progress value={dev.compliance_score} className="mt-4 h-3" />
+                  </> : <>
+                    <div className="text-xl font-semibold text-muted-foreground">Not assessed</div>
+                    <p className="text-sm text-muted-foreground mt-2 text-center">Waiting for the next agent security inventory.</p>
+                  </>}
                 </CardContent>
               </Card>
             </div>
-            <div className="col-span-8 space-y-4">
+            <div className="space-y-4 xl:col-span-8">
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Endpoint Protection</CardTitle></CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
                     {[
-                      { label: "Antivirus", value: dev.antivirus || "None", status: dev.antivirus_status, icon: Shield },
-                      { label: "EDR / XDR", value: dev.edr_status === "active" ? "Active" : "Not Deployed", status: dev.edr_status, icon: ShieldCheck },
-                      { label: "Firewall", value: dev.firewall_enabled ? "Enabled" : "Disabled", status: dev.firewall_enabled ? "active" : "inactive", icon: Lock },
-                      { label: "Disk Encryption", value: dev.encryption_status || "Unknown", status: (dev.encryption_status || "").includes("Encrypted") ? "active" : "inactive", icon: Lock },
+                      { label: "Antivirus", value: dev.antivirus || "Not assessed", status: complianceAssessed ? dev.antivirus_status : "unknown", icon: Shield },
+                      { label: "Real-time protection", value: dev.defender_real_time_enabled ? "Enabled" : complianceAssessed ? "Disabled" : "Not assessed", status: complianceAssessed ? (dev.defender_real_time_enabled ? "active" : "inactive") : "unknown", icon: ShieldCheck },
+                      { label: "Firewall", value: dev.firewall_enabled ? "Enabled" : complianceAssessed ? "Disabled" : "Not assessed", status: complianceAssessed ? (dev.firewall_enabled ? "active" : "inactive") : "unknown", icon: Lock },
+                      { label: "Disk Encryption", value: dev.encryption_status || "Not assessed", status: complianceAssessed ? (/encrypted|bitlocker on|protection on/i.test(dev.encryption_status || "") ? "active" : "inactive") : "unknown", icon: Lock },
                     ].map((item, i) => (
                       <div key={`k-${i}`} className="flex items-center gap-3 p-3 rounded-lg border">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.status === "active" ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
-                          <item.icon className={`w-5 h-5 ${item.status === "active" ? "text-emerald-500" : "text-red-500"}`} />
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.status === "active" ? "bg-emerald-500/10" : item.status === "inactive" ? "bg-red-500/10" : "bg-muted"}`}>
+                          <item.icon className={`w-5 h-5 ${item.status === "active" ? "text-emerald-500" : item.status === "inactive" ? "text-red-500" : "text-muted-foreground"}`} />
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">{item.label}</p>
@@ -769,28 +827,40 @@ export default function DeviceDetailPage() {
                   </div>
                 </CardContent>
               </Card>
+              <div className="grid grid-cols-2 gap-4">
+                <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Defender signature age</p><p className="font-mono font-semibold mt-1">{complianceAssessed ? `${dev.defender_signature_age_days ?? "?"} days` : "Not assessed"}</p></CardContent></Card>
+                <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Pending Windows updates</p><p className={`font-mono font-semibold mt-1 ${(dev.pending_patches || 0) > 0 ? "text-amber-500" : "text-emerald-500"}`}>{complianceAssessed ? (dev.pending_patches || 0) : "Not assessed"}</p></CardContent></Card>
+              </div>
             </div>
           </div>
         </TabsContent>
 
         {/* NETWORK TAB */}
         <TabsContent value="network" className="space-y-4 mt-4">
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <Card><CardContent className="pt-4">
-              <div className="text-xs text-muted-foreground">Internal IP</div>
-              <p className="font-mono font-medium mt-1">{dev.ip_address || "N/A"}</p>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Card className="border-emerald-500/20 bg-emerald-500/[0.03]"><CardContent className="pt-4 pb-3">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full bg-emerald-400" />Active connection</div>
+              <p className="mt-1 truncate font-medium">{activeAdapter?.adapter_name || "No active adapter"}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{activeAdapter?.ip_address || dev.ip_address || "No address reported"}</p>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
-              <div className="text-xs text-muted-foreground">Public IP</div>
-              <p className="font-mono font-medium mt-1">{dev.public_ip || "N/A"}</p>
+              <div className="text-xs text-muted-foreground">Gateway</div>
+              <p className="mt-1 font-mono font-medium">{activeAdapter?.gateway || "Not reported"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Default route</p>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
-              <div className="text-xs text-muted-foreground">MAC Address</div>
-              <p className="font-mono font-medium mt-1">{dev.mac_address || "N/A"}</p>
+              <div className="text-xs text-muted-foreground">DNS servers</div>
+              <p className="mt-1 truncate font-mono font-medium text-xs">{(activeAdapter?.dns || []).join(", ") || "Not reported"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Resolver path</p>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4">
+              <div className="text-xs text-muted-foreground">Link speed</div>
+              <p className="mt-1 font-mono font-medium">{displayLinkSpeed(activeAdapter?.speed_mbps)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{adapters.filter(adapter => adapter.status === "up").length} active of {adapters.length} adapters</p>
             </CardContent></Card>
           </div>
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Network className="w-4 h-4" />Network Adapters</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm flex items-center gap-2"><Network className="w-4 h-4" />Network adapters</CardTitle><span className="text-xs text-muted-foreground">Last collected: {activeAdapter?.last_updated ? formatDistanceToNow(new Date(activeAdapter.last_updated), { addSuffix: true }) : "—"}</span></CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
@@ -804,14 +874,14 @@ export default function DeviceDetailPage() {
                     <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No network adapter data</TableCell></TableRow>
                   ) : (data.network_adapters || []).map((n, i) => (
                     <TableRow key={`k-${i}`}>
-                      <TableCell className="font-medium">{n.adapter_name}{n.ssid ? <span className="text-xs text-muted-foreground ml-1">({n.ssid})</span> : ""}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-[10px] capitalize">{n.type}</Badge></TableCell>
-                      <TableCell className="font-mono text-xs">{n.ip_address}</TableCell>
-                      <TableCell className="font-mono text-xs">{n.subnet || "-"}</TableCell>
+                      <TableCell className="font-medium">{n.adapter_name}{n.ssid ? <span className="text-xs text-muted-foreground ml-1">({n.ssid})</span> : ""}{n.status === "up" && <span className="ml-2 text-[10px] text-emerald-400">PRIMARY</span>}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-[10px] capitalize">{n.type || "network"}</Badge></TableCell>
+                      <TableCell className="font-mono text-xs">{n.ip_address || n.ip_addresses?.find(ip => ip.includes(".")) || "—"}</TableCell>
+                      <TableCell className="font-mono text-xs">{n.subnet ? `/${n.subnet}` : "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{n.gateway || "-"}</TableCell>
                       <TableCell className="font-mono text-xs">{(n.dns || []).join(", ") || "-"}</TableCell>
-                      <TableCell className="text-sm">{n.speed_mbps ? `${n.speed_mbps >= 1000 ? `${n.speed_mbps/1000} Gbps` : `${n.speed_mbps} Mbps`}` : "-"}</TableCell>
-                      <TableCell><Badge className={n.status === "up" ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}>{n.status}</Badge></TableCell>
+                      <TableCell className="text-sm">{displayLinkSpeed(n.speed_mbps)}</TableCell>
+                      <TableCell><Badge className={n.status === "up" ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground"}>{n.status || "unknown"}</Badge></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -907,45 +977,59 @@ export default function DeviceDetailPage() {
 
         {/* BACKUPS TAB */}
         <TabsContent value="backups" className="mt-4">
-          <DeviceBackupPlansPanel deviceId={data.id} token={token} />
+          <DeviceBackupPlansPanel deviceId={dev.id} token={token} />
         </TabsContent>
 
         {/* AUDIT LOG TAB */}
         <TabsContent value="audit-log" className="mt-4">
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4" />Device Activity Log (Admin)</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b pb-3">
+              <div>
+                <CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-violet-400" />Device audit log</CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">Administrative changes, agent activity, and remote-access events for this endpoint.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px]">{(data.activity_logs || []).length} entries</Badge>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchDetail} aria-label="Refresh device audit log" data-testid="refresh-device-audit"><RefreshCw className="w-3.5 h-3.5" /></Button>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {(data.activity_logs || []).length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">No activity logs recorded for this device</div>
+                <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted"><Shield className="h-5 w-5 text-muted-foreground" /></div>
+                  <p className="text-sm font-medium">No audit activity recorded</p>
+                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">New agent check-ins, remote sessions, commands, and device changes will appear here.</p>
+                </div>
               ) : (
-                <div className="space-y-2">
+                <div className="divide-y">
                   {(data.activity_logs || []).map((log, i) => (
-                    <div key={log.id || i} className="flex items-start gap-3 p-3 rounded-lg border bg-card" data-testid={`device-audit-${i}`}>
-                      <div className="mt-0.5">
+                    <div key={log.id || i} className="grid grid-cols-[auto_1fr] gap-x-3 px-4 py-3 transition-colors hover:bg-muted/30 sm:grid-cols-[auto_minmax(0,1fr)_auto]" data-testid={`device-audit-${i}`}>
+                      <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
                         {log.action === "created" && <Plus className="w-4 h-4 text-green-500" />}
-                        {log.action === "updated" && <Wrench className="w-4 h-4 text-blue-500" />}
+                        {log.action === "updated" && <Wrench className="w-4 h-4 text-sky-500" />}
                         {log.action === "deleted" && <XCircle className="w-4 h-4 text-red-500" />}
                         {log.action === "remote_connect" && <ExternalLink className="w-4 h-4 text-emerald-500" />}
-                        {log.action === "remote_disconnect" && <Lock className="w-4 h-4 text-zinc-400" />}
-                        {!["created","updated","deleted","remote_connect","remote_disconnect"].includes(log.action) && <Info className="w-4 h-4 text-zinc-500" />}
+                        {log.action === "remote_disconnect" && <Lock className="w-4 h-4 text-muted-foreground" />}
+                        {!["created","updated","deleted","remote_connect","remote_disconnect"].includes(log.action) && <Info className="w-4 h-4 text-violet-400" />}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{log.user_name}</span>
-                          <Badge variant="outline" className="text-[10px] capitalize">{(log.action || "").replace("_", " ")}</Badge>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{log.user_name || "NexusMSP"}</span>
+                          <Badge variant="outline" className="h-5 text-[10px] capitalize">{(log.action || "activity").replace(/_/g, " ")}</Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{log.details}</p>
+                        <p className="mt-1 break-words text-xs text-muted-foreground">{log.details || "No additional details recorded."}</p>
                         {log.changes && Object.keys(log.changes).length > 0 && (
-                          <div className="mt-1 text-[11px] text-muted-foreground">
+                          <div className="mt-2 rounded-md bg-muted/50 px-2.5 py-2 text-[11px] text-muted-foreground">
                             {Object.entries(log.changes).slice(0, 5).map(([k, v]) => (
-                              <div key={k}><span className="text-zinc-500">{k}:</span> <span className="text-red-400 line-through">{v.old}</span> <span className="text-green-400">{v.new}</span></div>
+                              <div key={k} className="flex flex-wrap gap-x-1.5"><span className="font-medium text-foreground/70">{k}</span><span className="text-red-400 line-through">{v.old ?? "—"}</span><span className="text-muted-foreground">→</span><span className="text-emerald-400">{v.new ?? "—"}</span></div>
                             ))}
                           </div>
                         )}
                       </div>
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">{log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true }) : "-"}</span>
+                      <div className="col-start-2 mt-1 text-[10px] text-muted-foreground sm:col-start-auto sm:mt-0 sm:text-right">
+                        <div>{log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true }) : "Unknown time"}</div>
+                        {log.created_at && <div className="mt-0.5 hidden sm:block">{format(new Date(log.created_at), "d MMM yyyy, HH:mm")}</div>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -954,6 +1038,43 @@ export default function DeviceDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={deviceEditorOpen} onOpenChange={setDeviceEditorOpen}>
+        <DialogContent className="max-w-md" aria-describedby="device-identity-description">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4 text-violet-400" />Edit device identity</DialogTitle>
+            <DialogDescription id="device-identity-description">Update the device name, owning client, assigned user, and physical location.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Device name</Label>
+              <Input value={deviceEditor.name} onChange={e => setDeviceEditor(prev => ({ ...prev, name: e.target.value }))} className="mt-1" data-testid="edit-device-name" />
+            </div>
+            <div>
+              <Label className="text-xs">Owning client</Label>
+              <Select value={deviceEditor.client_id || "__none__"} onValueChange={value => setDeviceEditor(prev => ({ ...prev, client_id: value === "__none__" ? "" : value }))}>
+                <SelectTrigger className="mt-1" data-testid="edit-device-client"><SelectValue placeholder="Select a client" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No client assigned</SelectItem>
+                  {clientOptions.map(client => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Assigned user</Label>
+              <Input value={deviceEditor.assigned_user} onChange={e => setDeviceEditor(prev => ({ ...prev, assigned_user: e.target.value }))} placeholder="e.g. Aaron Steele" className="mt-1" data-testid="edit-device-assigned-user" />
+            </div>
+            <div>
+              <Label className="text-xs">Location</Label>
+              <Input value={deviceEditor.location} onChange={e => setDeviceEditor(prev => ({ ...prev, location: e.target.value }))} placeholder="e.g. Home office" className="mt-1" data-testid="edit-device-location" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeviceEditorOpen(false)} disabled={deviceEditorBusy}>Cancel</Button>
+            <Button onClick={saveDeviceIdentity} disabled={deviceEditorBusy} data-testid="save-device-identity">{deviceEditorBusy ? <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Remote Access Dialog - No RustDesk ID configured */}
       <Dialog open={remoteDialogOpen} onOpenChange={setRemoteDialogOpen}>
@@ -1104,6 +1225,13 @@ export default function DeviceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <MaintenanceWindowDialog
+        open={patchWindowOpen}
+        onClose={() => setPatchWindowOpen(false)}
+        selectedIds={[dev.id]}
+        deviceNames={{ [dev.id]: dev.name }}
+        onScheduled={() => { setPatchWindowOpen(false); fetchDetail(); }}
+      />
     </div>
   );
 }

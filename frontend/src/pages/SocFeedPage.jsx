@@ -102,16 +102,15 @@ export default function SocFeedPage() {
   };
 
   const handleIsolate = async (alert) => {
+    if (alert.source !== "huntress") {
+      toast.info("Endpoint isolation requires a configured EDR integration. No isolation command was sent.");
+      return;
+    }
     setActionLoading(alert.id);
     try {
-      if (alert.source === "huntress") {
-        const res = await axios.post(`${API}/huntress/agents/${alert._raw_id || alert.hostname}/isolate`, {}, { headers });
-        if (res.data?.success) toast.success(`${alert.hostname} isolated via Huntress`);
-        else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
-      } else {
-        await axios.post(`${API}/soc/alerts/${alert.id}/isolate`, { hostname: alert.hostname }, { headers });
-        toast.success(`${alert.hostname} isolated`);
-      }
+      const res = await axios.post(`${API}/huntress/agents/${alert._raw_id || alert.hostname}/isolate`, {}, { headers });
+      if (res.data?.success) toast.success(`${alert.hostname} isolated via Huntress`);
+      else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
       fetchAlerts();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setActionLoading(null); }
@@ -153,7 +152,7 @@ export default function SocFeedPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">SOC Alert Feed</h1>
-          <p className="text-muted-foreground">{alerts.length} alerts from all sources</p>
+          <p className="text-muted-foreground">{alerts.length} persisted alerts{alerts.some(alert => alert.source === "huntress") ? " and connected Huntress incidents" : ""}</p>
         </div>
         <Button variant="outline" onClick={fetchAlerts}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
       </div>
@@ -188,6 +187,7 @@ export default function SocFeedPage() {
                       <span className="font-medium text-sm">{alert.title}</span>
                       <Badge className={SEV[alert.severity]?.class + " text-[10px]"}>{alert.severity}</Badge>
                       <Badge className={STATUS_CONFIG[alert.status]?.class + " text-[10px]"}><StatusIcon className="w-3 h-3 mr-1" />{STATUS_CONFIG[alert.status]?.label}</Badge>
+                      {alert.source && <Badge variant="outline" className="text-[10px] text-muted-foreground">{alert.source === "huntress" ? "Huntress" : "NexusMSP"}</Badge>}
                       {alert.mitre_attack && <Badge variant="outline" className="text-[10px] font-mono">{alert.mitre_attack}</Badge>}
                       {alert.ticket_number && <Badge variant="outline" className="text-[10px] text-green-400 border-green-500/30"><Ticket className="w-3 h-3 mr-1" />{alert.ticket_number}</Badge>}
                     </div>
@@ -213,7 +213,7 @@ export default function SocFeedPage() {
                         <Ticket className="w-3 h-3 mr-1" />Ticket
                       </Button>
                     )}
-                    {["new", "investigating"].includes(alert.status) && (
+                    {alert.source === "huntress" && ["new", "investigating"].includes(alert.status) && (
                       <Button size="sm" variant="outline" className="h-7 text-xs text-purple-400 border-purple-500/30" onClick={() => handleIsolate(alert)} disabled={actionLoading === alert.id} data-testid={`isolate-${alert.id}`}>
                         <Lock className="w-3 h-3 mr-1" />Isolate
                       </Button>

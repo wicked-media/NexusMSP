@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { AlertTriangle, Bell, Clock, Settings, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,11 +52,11 @@ export default function EscalationMatrixPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Card><CardContent className="pt-4 pb-3 text-center"><Settings className="w-4 h-4 mx-auto mb-1 text-primary" /><p className="text-xl font-bold">{rules.length}</p><p className="text-xs text-muted-foreground">Rules</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold text-green-500">{rules.filter(r => r.enabled).length}</p><p className="text-xs text-muted-foreground">Active</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3 text-center"><Bell className="w-4 h-4 mx-auto mb-1 text-amber-500" /><p className="text-xl font-bold">{logs.length}</p><p className="text-xs text-muted-foreground">Escalations</p></CardContent></Card>
-      </div>
+      <MetricStrip columns={3}>
+        <MetricTile label="Escalation rules" value={rules.length} accent="violet" icon={<Settings className="w-2.5 h-2.5 text-violet-400" />} testid="escalation-metric-rules" />
+        <MetricTile label="Active rules" value={rules.filter(r => r.enabled).length} accent="emerald" icon={<Zap className="w-2.5 h-2.5 text-emerald-400" />} testid="escalation-metric-active" />
+        <MetricTile label="Escalations" value={logs.length} accent="amber" icon={<Bell className="w-2.5 h-2.5 text-amber-400" />} testid="escalation-metric-log" />
+      </MetricStrip>
 
       <Card>
         <CardContent className="pt-4">

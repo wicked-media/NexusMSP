@@ -275,29 +275,22 @@ async def send_pre_bill_preview(ri_id: str, data: dict | None = None, current_us
 <p style='text-align:right;font-size:18px;'><b>Total: ${amt:,.2f}</b></p>
 <p>If anything looks off, just reply — we'll fix it before invoicing.</p>
 <p>— {company}</p></div>"""
-    sent = False
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    if resend_key and not resend_key.startswith("re_test_placeholder"):
-        try:
-            import resend
-            import asyncio as _asyncio
-            resend.api_key = resend_key
-            await _asyncio.to_thread(resend.Emails.send, {
-                "from": f"{company} Billing <{os.environ.get('SENDER_EMAIL', 'billing@nexusops.io')}>",
-                "to": [email],
-                "subject": f"Upcoming invoice preview — ${amt:,.2f} due {next_due}",
-                "html": html,
-            })
-            sent = True
-        except Exception as e:
-            logger.warning(f"pre-bill email failed: {e}")
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        email,
+        f"Upcoming invoice preview — ${amt:,.2f} due {next_due}",
+        html,
+        category="billing",
+    )
+    sent = delivery.get("status") == "sent"
     await db.recurring_prebill_log.insert_one({
         "id": str(uuid.uuid4()), "ri_id": ri_id, "client_id": client.get("id"),
         "email": email, "amount": amt, "next_due": next_due,
-        "sent": sent, "sent_at": _now_iso(), "sent_by": current_user.get("name"),
+        "sent": sent, "delivery_status": delivery.get("status"), "delivery_message": delivery.get("message"),
+        "sender_mailbox": delivery.get("sender"), "sent_at": _now_iso(), "sent_by": current_user.get("name"),
     })
     await log_activity(current_user, "pre_bill_preview", "recurring_invoice", ri_id, ri.get("description", ""), f"Preview → {email}")
-    return {"sent": sent, "email": email, "preview_html": html}
+    return {"sent": sent, "email": email, "preview_html": html, "delivery_status": delivery.get("status"), "delivery_message": delivery.get("message")}
 
 
 # ╔══════════════════════════════════════════════════════════════════╗

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-VALID_ACTIONS = {"run-checks", "install-patches", "reboot", "run-script"}
+VALID_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 
 def _now_iso():
@@ -96,7 +96,10 @@ async def create_window(data: dict, current_user: dict = Depends(get_current_use
     if not scheduled:
         raise HTTPException(400, "scheduled_at required (ISO or 'YYYY-MM-DD HH:MM:SS')")
     devices = await db.devices.find({"id": {"$in": device_ids}}, {"_id": 0}).to_list(500)
-    devices_meta = [{"id": d["id"], "name": d.get("name"), "client_id": d.get("client_id"), "client_name": d.get("client_name"), "has_agent": d.get("has_agent", bool(d.get("trmm_agent_id")))} for d in devices]
+    devices_meta = [{
+        "id": d["id"], "name": d.get("name"), "client_id": d.get("client_id"), "client_name": d.get("client_name"),
+        "nexus_agent_id": d.get("nexus_agent_id"), "status": d.get("status"),
+    } for d in devices]
 
     window = {
         "id": str(uuid.uuid4()),
@@ -146,9 +149,11 @@ async def run_now(wid: str, current_user: dict = Depends(get_current_user)):
 # ───────────────────────────── Execution ─────────────────────────────
 
 async def _run_device_action(device: dict, action: str, window: dict) -> dict:
-    """Best-effort runner. Uses the same internal helpers the ticket page uses, falling back
-    to a simulated success result if there is no agent or runner available. Always returns
-    a record dict suitable for db insert."""
+    """Queue a real Nexus Agent command when the device is enrolled and online.
+
+    Windows Update deployment is only ever invoked from an approved maintenance
+    window. Winget deployments additionally require an explicit allow-list.
+    """
     rec = {
         "id": str(uuid.uuid4()),
         "window_id": window["id"],
@@ -159,24 +164,53 @@ async def _run_device_action(device: dict, action: str, window: dict) -> dict:
         "status": "running",
         "message": "",
     }
-    has_agent = device.get("has_agent") or bool(device.get("trmm_agent_id"))
-    if not has_agent:
-        rec.update({"status": "skipped", "message": "device has no agent", "finished_at": _now_iso()})
+    if not device.get("nexus_agent_id"):
+        rec.update({"status": "skipped", "message": "device has no enrolled Nexus Agent", "finished_at": _now_iso()})
         return rec
-    online = device.get("status") == "online"
-    if action == "reboot" and not online:
-        rec.update({"status": "skipped", "message": "device offline (reboot needs online)", "finished_at": _now_iso()})
-        return rec
-    # Best-effort TRMM dispatch via existing endpoint pattern; mocked-safe.
     try:
-        # The window runner intentionally does NOT call live TRMM here to avoid blocking the loop;
-        # instead it records the intent + a deterministic mock outcome. The actual TRMM fan-out
-        # is already provided by the TicketDevice fan-out endpoint when a tech triggers it
-        # manually. Production deployment can swap this for a direct call.
-        await asyncio.sleep(0.05)
-        rec.update({"status": "ok", "message": f"{action} dispatched", "finished_at": _now_iso()})
+        from app.routers.nexus_agent import queue_command_for_device
+        if action == "reboot":
+            command_id = await queue_command_for_device(device, "reboot", {}, queued_by="maintenance-window")
+        elif action == "run-checks":
+            command_id = await queue_command_for_device(
+                device, "run_powershell",
+                {"script": "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,LastBootUpTime; Get-PSDrive -PSProvider FileSystem | Select-Object Name,Used,Free", "timeout_sec": 90},
+                queued_by="maintenance-window",
+            )
+        elif action == "install-patches":
+            # Native Windows Update Agent API. This excludes drivers and runs
+            # only within the window selected by a technician.
+            script = """$ErrorActionPreference='Stop'
+$session=New-Object -ComObject Microsoft.Update.Session
+$updates=$session.CreateUpdateSearcher().Search(\"IsInstalled=0 and Type='Software' and IsHidden=0\").Updates
+$toInstall=New-Object -ComObject Microsoft.Update.UpdateColl
+foreach($u in $updates){ if(-not $u.EulaAccepted){$u.AcceptEula()}; [void]$toInstall.Add($u) }
+if($toInstall.Count -eq 0){'No applicable Windows updates'; exit 0}
+$result=$session.CreateUpdateInstaller(); $result.Updates=$toInstall; $out=$result.Install()
+[pscustomobject]@{installed=$toInstall.Count;result_code=$out.ResultCode;reboot_required=$out.RebootRequired}|ConvertTo-Json -Compress"""
+            command_id = await queue_command_for_device(device, "run_powershell", {"script": script, "timeout_sec": 7200}, queued_by="maintenance-window")
+        elif action == "install-winget":
+            policy = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
+            allowed = [str(item).strip() for item in (policy.get("winget_allowed_ids") or []) if str(item).strip()]
+            if not policy.get("winget_enabled") or not allowed:
+                rec.update({"status": "skipped", "message": "Winget requires patch policy enablement and an approved package allow-list", "finished_at": _now_iso()})
+                return rec
+            commands = "; ".join([f"winget upgrade --id '{package}' --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity" for package in allowed])
+            command_id = await queue_command_for_device(device, "run_powershell", {"script": "$ErrorActionPreference='Continue'; " + commands, "timeout_sec": 7200}, queued_by="maintenance-window")
+        elif action == "run-script":
+            script_id = window.get("script_id")
+            script = await db.scripts.find_one({"id": script_id}, {"_id": 0}) if script_id else None
+            if not script or not (script.get("content") or "").strip():
+                rec.update({"status": "skipped", "message": "select a valid script for this maintenance window", "finished_at": _now_iso()})
+                return rec
+            shell = "powershell" if str(script.get("os_target", "")).lower() != "linux" else "bash"
+            command_id = await queue_command_for_device(device, "run_script", {"script": script["content"], "shell": shell, "timeout_sec": 900}, queued_by="maintenance-window")
+        else:
+            rec.update({"status": "skipped", "message": f"unsupported maintenance action: {action}", "finished_at": _now_iso()})
+            return rec
+        rec.update({"status": "queued", "command_id": command_id, "message": f"{action} queued for Nexus Agent", "finished_at": _now_iso()})
     except Exception as e:
-        rec.update({"status": "failed", "message": str(e)[:200], "finished_at": _now_iso()})
+        rec.update({"status": "skipped", "message": str(e)[:200], "finished_at": _now_iso()})
     return rec
 
 
@@ -202,7 +236,7 @@ async def execute_window(wid: str):
     tasks = [run_one(d, a) for d in devices for a in actions]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     results = [r for r in results if isinstance(r, dict)]
-    summary_counts = {"ok": 0, "failed": 0, "skipped": 0}
+    summary_counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for r in results:
         summary_counts[r.get("status", "skipped")] = summary_counts.get(r.get("status", "skipped"), 0) + 1
 

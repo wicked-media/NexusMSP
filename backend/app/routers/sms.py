@@ -628,6 +628,8 @@ async def send_invoice_sms(invoice_id: str, data: dict = None, current_user: dic
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("payment_status") == "paid" or invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Payment reminders cannot be sent for paid or voided invoices")
 
     client = await db.clients.find_one({"id": invoice.get("client_id")}, {"_id": 0}) or {}
     phone = data.get("to") or client.get("mobile") or client.get("phone")
@@ -661,7 +663,8 @@ async def send_invoice_sms(invoice_id: str, data: dict = None, current_user: dic
         "amount": f"{float(invoice.get('total') or 0):.2f}",
         "company_name": "NexusOps",
     }
-    message = _substitute(tmpl["body"] if tmpl else "", ctx) if tmpl else (data.get("message") or "")
+    custom_message = (data.get("message") or "").strip()
+    message = custom_message if custom_message else _substitute(tmpl["body"] if tmpl else "", ctx)
     if not message:
         raise HTTPException(status_code=400, detail="Unable to build SMS body")
 

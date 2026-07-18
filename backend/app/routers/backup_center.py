@@ -158,6 +158,8 @@ async def get_backup_compliance(user=Depends(get_current_user)):
     compliant = 0
     non_compliant = 0
     no_backup = 0
+    not_assessed = 0
+    evidence_available = bool(backup_records)
 
     for d in devices:
         if not d.get("name"):
@@ -179,10 +181,14 @@ async def get_backup_compliance(user=Depends(get_current_user)):
             rpo_hours = 0
             rto_hours = 0
             last_backup = None
-            status = "no_backup"
+            status = "no_backup" if evidence_available else "not_assessed"
             size_gb = 0
-            no_backup += 1
-            compliance = "no_backup"
+            if evidence_available:
+                no_backup += 1
+                compliance = "no_backup"
+            else:
+                not_assessed += 1
+                compliance = "not_assessed"
 
         results.append({
             "device_id": d["id"], "device_name": d["name"],
@@ -193,27 +199,16 @@ async def get_backup_compliance(user=Depends(get_current_user)):
             "size_gb": size_gb, "compliance": compliance,
         })
 
-    if not backup_records:
-        servers = [d for d in devices if d.get("device_type") in ["server"]]
-        for s in servers:
-            entry = next((r for r in results if r["device_id"] == s["id"]), None)
-            if entry:
-                entry["backup_status"] = "success"
-                entry["compliance"] = "compliant"
-                entry["last_backup"] = datetime.now(timezone.utc).isoformat()
-                entry["rpo_hours"] = 24
-                entry["rto_hours"] = 4
-                entry["size_gb"] = 45.2
-                compliant += 1
-                no_backup -= 1
-
     return {
         "stats": {
             "total_devices": len(results),
             "compliant": compliant,
             "non_compliant": non_compliant,
-            "no_backup": max(no_backup, 0),
-            "compliance_pct": round((compliant / max(len(results), 1)) * 100, 1),
+            "no_backup": no_backup,
+            "not_assessed": not_assessed,
+            "evaluated": compliant + non_compliant + no_backup,
+            "compliance_pct": round((compliant / max(compliant + non_compliant + no_backup, 1)) * 100, 1) if evidence_available else 0,
+            "evidence_available": evidence_available,
         },
         "devices": results,
     }

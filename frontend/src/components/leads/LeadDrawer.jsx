@@ -29,6 +29,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
   const [nba, setNba] = useState(null);
   const [draftEmail, setDraftEmail] = useState(null);
   const [draftingIntent, setDraftingIntent] = useState(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
@@ -77,6 +78,32 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
       setTab("emails");
     } catch { toast.error("Failed to draft"); }
     finally { setDraftingIntent(null); }
+  };
+
+  const sendDraft = async () => {
+    if (!lead?.email || !draftEmail) return;
+    setSendingEmail(true);
+    try {
+      const response = await axios.post(`${API}/leads/${leadId}/send-email`, {
+        to: lead.email,
+        subject: draftEmail.subject,
+        body: draftEmail.body,
+        body_type: "plain",
+      }, { headers });
+      const delivery = response.data?.delivery || {};
+      if (delivery.status === "sent") {
+        toast.success(`Sent to ${lead.email}`);
+        setDraftEmail(null);
+        await loadAll();
+        onUpdated?.();
+      } else {
+        toast.warning(delivery.message || "Email was recorded but was not delivered");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to send email");
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   const addTask = async (title) => {
@@ -178,6 +205,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                   <Info icon={Phone} label="Phone" value={lead.phone} />
                   <Info icon={Globe} label="Website" value={lead.website} link />
                   <Info icon={Building2} label="Source" value={lead.source || "—"} />
+                  {lead.source_mailbox && <Info icon={Mail} label="Received by" value={lead.source_mailbox} />}
                   {lead.notes && (
                     <Card className="p-2.5 bg-zinc-900/40 border-zinc-800/60">
                       <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Notes</p>
@@ -223,6 +251,10 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                       <p className="text-xs font-semibold text-zinc-100 mb-2">Subject: {draftEmail.subject}</p>
                       <pre className="text-xs whitespace-pre-wrap font-sans text-zinc-200 leading-relaxed">{draftEmail.body}</pre>
                       <div className="flex items-center gap-2 mt-3">
+                        <Button size="sm" className="h-7 text-[11px] bg-violet-600 hover:bg-violet-500" onClick={sendDraft} disabled={sendingEmail || !lead.email} data-testid="drawer-send-email">
+                          {sendingEmail ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Mail className="w-3 h-3 mr-1" />}
+                          {lead.email ? `Send to ${lead.email}` : "No email address"}
+                        </Button>
                         <Button size="sm" className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-500" onClick={() => { navigator.clipboard.writeText(`Subject: ${draftEmail.subject}\n\n${draftEmail.body}`); toast.success("Copied to clipboard"); }} data-testid="drawer-copy-email">
                           Copy to clipboard
                         </Button>

@@ -1,30 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import DOMPurify from "dompurify";
-import CoPilotPanel from "@/components/CoPilotPanel";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
-import { WhyOnFireButton } from "@/components/ai/WhyOnFireButton";
 import { SentimentBadge } from "@/components/ai/SentimentBadge";
-import { TicketAIBundle } from "@/components/ai/TicketAIBundle";
 import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
-import TicketProgressTracker from "@/components/tickets/TicketProgressTracker";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
-import { TicketDetailHeader } from "@/components/tickets/TicketDetailHeader";
 import TicketEnrichmentRail from "@/components/tickets/TicketEnrichmentRail";
 import TicketConversationTab from "@/components/tickets/TicketConversationTab";
 import {
   TicketWorksheetTab, TicketAttachmentsTab, TicketItemsTab,
   TicketChildrenTab, TicketTimeTab, TicketAuditTab,
 } from "@/components/tickets/TicketSecondaryTabs";
-import TicketDeviceCockpit from "@/components/tickets/TicketDeviceCockpit";
-import TicketDeviceList from "@/components/tickets/TicketDeviceList";
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
-import TicketServiceTierWidget, { ServiceTierChip } from "@/components/tickets/TicketServiceTierWidget";
+import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidget";
 import TicketCategorisationWidget from "@/components/tickets/TicketCategorisationWidget";
+import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
   GroupBySelector, useGroupedTickets,
@@ -32,7 +26,6 @@ import {
 import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -65,76 +58,27 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
-import { TicketCopilotButton, ExplainErrorButton } from "@/components/ai/CopilotWidgets";
-import { VoiceJournalButton } from "@/components/ai/VoiceJournalButton";
-import { HuduSuggestionsPanel } from "@/components/ai/HuduSuggestionsPanel";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
-  Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag, Link2,
-  Timer, GitBranch, Merge, FileText, Eye, History, X, Play, Square,
-  Lightbulb, BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi, WifiOff,
-  Terminal, Zap, SpellCheck, Brain, ExternalLink, Shield, Cpu, Users,
-  Download, BellRing, ChevronDown, Paperclip, Trash2, ShoppingCart, Receipt,
-  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar, Mic,
+  Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag,
+  Timer, GitBranch, Merge, Eye, History, X, Play,
+  BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi,
+  Terminal, Zap, Brain, ExternalLink, Shield, Cpu, Users,
+  Download, BellRing, Trash2, ShoppingCart, Receipt,
+  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar,
   Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
-  MessageCircle, UserPlus, Settings2, AlertTriangle, Lock, Unlock, RotateCcw, GripVertical
+  Settings2, AlertTriangle
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
-import { Responsive, WidthProvider } from "react-grid-layout";
 import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
-import "@/styles/dashboard-grid.css";
-import { useWidgetGrid } from "@/hooks/useWidgetGrid";
-
-const TicketsResponsiveGridLayout = WidthProvider(Responsive);
-
-// ─── Tickets LIST view widget metadata ────────────────────────────────────
-const TICKETS_LIST_WIDGET_META = {
-  "hero-tiles":  { label: "Hero Metric Strip", icon: Sparkles },
-  "smart-inbox": { label: "Smart Inbox (Needs Attention)", icon: AlertTriangle },
-  "type-tabs":   { label: "Type Filter Tabs", icon: Ticket },
-  "filters":     { label: "Search & Filter Bar", icon: Search },
-  "toolbar":     { label: "Saved Views · Density · Group By", icon: Settings2 },
-};
-const TICKETS_LIST_DEFAULT_LAYOUT = [
-  { i: "hero-tiles",  x: 0, y: 0, w: 12, h: 2, minH: 2, minW: 6 },
-  { i: "smart-inbox", x: 0, y: 2, w: 12, h: 4, minH: 2, minW: 4 },
-  { i: "type-tabs",   x: 0, y: 6, w: 12, h: 1, minH: 1, minW: 4 },
-  { i: "filters",     x: 0, y: 7, w: 12, h: 1, minH: 1, minW: 4 },
-  { i: "toolbar",     x: 0, y: 8, w: 12, h: 2, minH: 1, minW: 4 },
-];
-
-// ─── Tickets DETAIL sidebar: draggable widget grid ────────────────────────
-const SIDEBAR_DEFAULT_LAYOUT = [
-  { i: "serviceTier",    x: 0, y: 0,  w: 12, h: 6,  minH: 3, minW: 6 },
-  { i: "categorisation", x: 0, y: 6,  w: 12, h: 8,  minH: 5, minW: 6 },
-  { i: "statusCard",     x: 0, y: 14, w: 12, h: 14, minH: 8, minW: 6 },
-  { i: "runScripts",     x: 0, y: 28, w: 12, h: 5,  minH: 3, minW: 6 },
-  { i: "burndown",       x: 0, y: 33, w: 12, h: 4,  minH: 3, minW: 6 },
-  { i: "workflow",       x: 0, y: 37, w: 12, h: 6,  minH: 4, minW: 6 },
-  { i: "cockpit",        x: 0, y: 43, w: 12, h: 8,  minH: 5, minW: 6 },
-  { i: "enrichment",     x: 0, y: 51, w: 12, h: 6,  minH: 4, minW: 6 },
-];
-const SIDEBAR_LAYOUT_KEY = "nx-ticket-detail-sidebar-layout-v1";
-// ─── Tickets DETAIL view: panel visibility keys ───────────────────────────
-const TICKETS_DETAIL_PANELS = [
-  { k: "legacyHeader",  label: "Legacy big header",     icon: Settings2 },
-  { k: "serviceTier",   label: "Service Tier",          icon: Shield },
-  { k: "categorisation", label: "Categorisation (ITIL)", icon: Settings2 },
-  { k: "aiAnalysis",    label: "AI Diagnosis",          icon: Brain },
-  { k: "related",       label: "Related Tickets",       icon: Link2 },
-  { k: "copilot",       label: "AI Co-Pilot Strip",     icon: Sparkles },
-  { k: "burndown",      label: "SLA Burn-down",         icon: Clock },
-  { k: "workflow",      label: "Workflow Controls",     icon: Settings2 },
-  { k: "cockpit",       label: "Live Device Cockpit",   icon: MonitorCheck },
-  { k: "runScripts",    label: "Run Scripts on Device", icon: Terminal },
-  { k: "quickActions",  label: "Quick Actions",         icon: Zap },
-  { k: "devicePanel",   label: "Device Info Panel",     icon: Cpu },
-  { k: "enrichment",    label: "AI Enrichment Rail",    icon: Sparkles },
-];
-
+import { collectionFromResponse, matchTicketByReference, ticketToolAvailability } from "@/lib/ticketWorkspaceHelpers";
+import {
+  LOCAL_PREVIEW_CLIENTS, LOCAL_PREVIEW_DEVICES, LOCAL_PREVIEW_NOTE_COUNTS,
+  LOCAL_PREVIEW_PRODUCTS, LOCAL_PREVIEW_SCRIPTS, LOCAL_PREVIEW_SERVICES,
+  LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, localPreviewCollection,
+  localPreviewRecord, localPreviewTicketDetail,
+} from "@/lib/ticketPreviewData";
 
 export default function TicketsPage() {
   const { token, user } = useAuth();
@@ -147,6 +91,7 @@ export default function TicketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [attentionFilter, setAttentionFilter] = useState("all");
   const [density, setDensity] = useDensityMode();
   const [groupBy, setGroupBy] = useState(() => {
     try { return localStorage.getItem("nexus.tickets.groupBy") || "age"; } catch { return "age"; }
@@ -154,27 +99,19 @@ export default function TicketsPage() {
   useEffect(() => { try { localStorage.setItem("nexus.tickets.groupBy", groupBy); } catch {} }, [groupBy]);
   const [activeViewId, setActiveViewId] = useState(null);
 
-  // ─── List-view widget grid (drag/drop, hide, add) ──────────────────────
-  const listGrid = useWidgetGrid({
-    storageKey: "nx-tickets-list-layout-v1",
-    hiddenKey:  "nx-tickets-list-hidden-v1",
-    defaultLayout: TICKETS_LIST_DEFAULT_LAYOUT,
-    widgetMeta: TICKETS_LIST_WIDGET_META,
-    label: "Tickets",
-  });
-
   const applyView = (v) => {
-    if (!v) { setActiveViewId(null); return; }
+    if (!v) { setActiveViewId(null); setAttentionFilter("all"); return; }
     setActiveViewId(v.id);
     const f = v.filters || {};
     if (f.status != null) setStatusFilter(f.status);
     if (f.priority != null) setPriorityFilter(f.priority);
+    if (f.attention != null) setAttentionFilter(f.attention);
     if (f.search != null) setSearchQuery(f.search);
     if (v.group_by) setGroupBy(v.group_by);
     if (v.density) setDensity(v.density);
   };
   const currentSnapshot = {
-    filters: { status: statusFilter, priority: priorityFilter, search: searchQuery },
+    filters: { status: statusFilter, priority: priorityFilter, search: searchQuery, attention: attentionFilter },
     group_by: groupBy, density, sort: "created_desc",
   };
 
@@ -191,51 +128,21 @@ export default function TicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Right-rail panel visibility (persisted per-user) ──
-  const [panelVisible, setPanelVisible] = useState(() => {
-    try {
-      const raw = localStorage.getItem("nexus.tickets.panels");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, legacyHeader: false, ...parsed };
-      }
-    } catch {}
-    return { serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true, legacyHeader: false };
-  });
-
-  // ─── Detail-view sidebar drag/drop layout (separate from panelVisible) ──
-  const [sidebarEditMode, setSidebarEditMode] = useState(false);
-  const [sidebarLayouts, setSidebarLayouts] = useState(() => {
-    try {
-      const saved = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch { /* */ }
-    return { lg: SIDEBAR_DEFAULT_LAYOUT };
-  });
-  const onSidebarLayoutChange = (_cur, all) => {
-    setSidebarLayouts(all);
-    try { localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(all)); } catch { /* */ }
+  // Ticket details use a stable layout. Core information and tools cannot be hidden by a saved preference.
+  const panelVisible = {
+    serviceTier: true, categorisation: true, aiAnalysis: true, related: true,
+    enrichment: true, copilot: true, burndown: true, workflow: true,
+    cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
-  const resetSidebarLayout = () => {
-    setSidebarLayouts({ lg: SIDEBAR_DEFAULT_LAYOUT });
-    try { localStorage.removeItem(SIDEBAR_LAYOUT_KEY); } catch { /* */ }
-    toast.success("Sidebar layout reset");
-  };
-  // Filter sidebar layout to only show widgets visible per panelVisible
-  const sidebarVisibleLayouts = (() => {
-    const out = {};
-    Object.keys(sidebarLayouts).forEach(bp => {
-      out[bp] = (sidebarLayouts[bp] || []).filter(l => panelVisible[l.i] !== false);
-    });
-    return out;
-  })();
-  useEffect(() => {
-    try { localStorage.setItem("nexus.tickets.panels", JSON.stringify(panelVisible)); } catch {}
-  }, [panelVisible]);
-  const togglePanel = (k) => setPanelVisible(p => ({ ...p, [k]: !p[k] }));
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
+  const [runbookCreating, setRunbookCreating] = useState(false);
+  const [ticketRunbook, setTicketRunbook] = useState(null);
+  const [runbookSuggestions, setRunbookSuggestions] = useState([]);
+  const [selectedRunbookSuggestion, setSelectedRunbookSuggestion] = useState(null);
+  const [detailTab, setDetailTab] = useState("conversation");
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [ticketNotes, setTicketNotes] = useState([]);
   const [ticketEmails, setTicketEmails] = useState([]);
   const [childTickets, setChildTickets] = useState([]);
@@ -262,6 +169,7 @@ export default function TicketsPage() {
   const [ticketAttachments, setTicketAttachments] = useState([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [ticketProducts, setTicketProducts] = useState([]);
+  const [ticketPurchaseOrders, setTicketPurchaseOrders] = useState([]);
   // SMS thread state
   const [ticketSms, setTicketSms] = useState([]);
   const [smsForm, setSmsForm] = useState({ to: "", message: "", template_key: "" });
@@ -367,16 +275,74 @@ export default function TicketsPage() {
   const [fjInvoiceList, setFjInvoiceList] = useState([]);
   const [fjTemplateDialog, setFjTemplateDialog] = useState(false);
   const [fjTemplates, setFjTemplates] = useState({});
-  const [isRecording, setIsRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState(null);
   const [triageResult, setTriageResult] = useState(null);
   const [triaging, setTriaging] = useState(false);
   const [enrichment, setEnrichment] = useState(null);
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
   const [clientContacts, setClientContacts] = useState([]);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+
+  const createRunbookFromTicket = async () => {
+    if (!viewingTicket) return;
+    setRunbookCreating(true);
+    try {
+      const response = await axios.post(
+        `${API}/runbooks/from-ticket/${viewingTicket.id}`,
+        { publish: true },
+        { headers },
+      );
+      setTicketRunbook(response.data);
+      toast.success(response.data?.already_exists ? "This ticket already has a reusable runbook" : `Reusable runbook published: ${response.data?.title || "Untitled runbook"}`);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not create a runbook. Add resolution notes and try again.");
+    } finally {
+      setRunbookCreating(false);
+    }
+  };
+
+  const addRunbookToInternalNote = () => {
+    if (!selectedRunbookSuggestion) return;
+    const steps = (selectedRunbookSuggestion.steps || []).map((step, index) => (
+      `${index + 1}. ${step.step || "Step"}${step.detail ? ` — ${step.detail}` : ""}`
+    ));
+    const runbookNote = [
+      `Runbook used: ${selectedRunbookSuggestion.title}`,
+      selectedRunbookSuggestion.summary || "",
+      "",
+      ...steps,
+    ].filter(Boolean).join("\n");
+    setConversationType("note");
+    setIsInternalNote(true);
+    setNewNote((current) => current ? `${current}\n\n${runbookNote}` : runbookNote);
+    setDetailTab("conversation");
+    axios.post(`${API}/knowledge-runbooks/${selectedRunbookSuggestion.id}/used`, {}, { headers }).catch(() => {});
+    setSelectedRunbookSuggestion(null);
+    toast.success("Runbook steps added to the internal note");
+  };
+
+  useEffect(() => {
+    if (!viewingTicket?.id) {
+      setTicketRunbook(null);
+      setRunbookSuggestions([]);
+      return undefined;
+    }
+    let active = true;
+    Promise.all([
+      axios.get(`${API}/ticket-runbooks/${viewingTicket.id}`, { headers }),
+      axios.get(`${API}/tickets/${viewingTicket.id}/runbook-suggestions`, { headers }),
+    ])
+      .then(([runbookResponse, suggestionsResponse]) => {
+        if (!active) return;
+        setTicketRunbook(runbookResponse.data || null);
+        setRunbookSuggestions(Array.isArray(suggestionsResponse.data) ? suggestionsResponse.data : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTicketRunbook(null);
+        setRunbookSuggestions([]);
+      });
+    return () => { active = false; };
+  }, [viewingTicket?.id, headers]);
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -395,18 +361,18 @@ export default function TicketsPage() {
         axios.get(`${API}/field-jobs/stats/summary`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/pro-pack/service-catalog`, { headers }).catch(() => ({ data: [] })),
       ]);
-      setTickets(tRes.data);
-      setClients(cRes.data);
-      setUsers(uRes.data);
-      setCannedResponses(crRes.data);
-      setNoteCounts(ncRes.data);
-      setDevices(dRes.data);
-      setAllProducts(pRes.data);
-      setWorkshopJobs(wsRes.data || []);
+      setTickets(localPreviewCollection(collectionFromResponse(tRes.data, ["tickets"]), LOCAL_PREVIEW_TICKETS));
+      setClients(localPreviewCollection(collectionFromResponse(cRes.data, ["clients"]), LOCAL_PREVIEW_CLIENTS));
+      setUsers(localPreviewCollection(collectionFromResponse(uRes.data, ["users"]), LOCAL_PREVIEW_USERS));
+      setCannedResponses(collectionFromResponse(crRes.data, ["responses", "canned_responses"]));
+      setNoteCounts(localPreviewRecord(ncRes.data, LOCAL_PREVIEW_NOTE_COUNTS));
+      setDevices(localPreviewCollection(collectionFromResponse(dRes.data, ["devices"]), LOCAL_PREVIEW_DEVICES));
+      setAllProducts(localPreviewCollection(collectionFromResponse(pRes.data, ["products"]), LOCAL_PREVIEW_PRODUCTS));
+      setWorkshopJobs(collectionFromResponse(wsRes.data, ["jobs"]));
       setWorkshopStats(wsSRes.data || {});
-      setFieldJobs(fjRes.data || []);
+      setFieldJobs(collectionFromResponse(fjRes.data, ["jobs", "field_jobs"]));
       setFieldStats(fjSRes.data || {});
-      setServices(svcRes.data || []);
+      setServices(localPreviewCollection(collectionFromResponse(svcRes.data, ["services"]), LOCAL_PREVIEW_SERVICES));
       // Fetch active viewers for tickets
       try {
         const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
@@ -414,7 +380,7 @@ export default function TicketsPage() {
       } catch { setTicketViewers({}); }
     } catch { toast.error("Failed to fetch tickets"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
@@ -424,7 +390,7 @@ export default function TicketsPage() {
     const ref = searchParams.get("ticket");
     if (!ref || tickets.length === 0 || viewingTicket) return;
     const wanted = decodeURIComponent(ref).replace(/^#/, "").toUpperCase();
-    const match = tickets.find(t => (t.ticket_number || "").toUpperCase() === wanted);
+    const match = matchTicketByReference(tickets, wanted);
     if (match) {
       fetchTicketDetail(match);
       // Clear the param so back-navigation doesn't trap us
@@ -432,13 +398,46 @@ export default function TicketsPage() {
       np.delete("ticket");
       setSearchParams(np, { replace: true });
     } else {
-      toast.error(`Ticket #${wanted} not found`);
+      toast.error(`Ticket ${wanted} not found`);
       const np = new URLSearchParams(searchParams);
       np.delete("ticket");
       setSearchParams(np, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickets, searchParams]);
+
+  // Queue deep-links from Morning Checks, Notifications and dashboard command tiles.
+  useEffect(() => {
+    const status = searchParams.get("status");
+    const priority = searchParams.get("priority");
+    const attention = searchParams.get("attention");
+    if (status && ["open", "pending", "in_progress", "on_hold", "resolved", "closed"].includes(status)) setStatusFilter(status);
+    if (priority && ["critical", "high", "medium", "low"].includes(priority)) setPriorityFilter(priority);
+    if (["no_response", "sla_breach", "unassigned", "critical_high"].includes(attention)) setAttentionFilter(attention);
+  }, [searchParams]);
+
+  // Device detail deep-link: prefill a new ticket with the selected endpoint and
+  // its client, then open the normal ticket creation workflow.
+  useEffect(() => {
+    const linkedDeviceId = searchParams.get("device_id");
+    if (!linkedDeviceId || devices.length === 0) return;
+    const linkedDevice = devices.find(device => device.id === linkedDeviceId);
+    if (!linkedDevice) {
+      toast.error("Linked device not found");
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        device_id: linkedDevice.id,
+        client_id: linkedDevice.client_id || prev.client_id,
+        title: prev.title || `Support request - ${linkedDevice.name || linkedDevice.hostname || "device"}`,
+      }));
+      setIsCreateOpen(true);
+    }
+    const np = new URLSearchParams(searchParams);
+    np.delete("device_id");
+    setSearchParams(np, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices, searchParams]);
 
   // Timer effect
   useEffect(() => {
@@ -451,16 +450,17 @@ export default function TicketsPage() {
 
   const fetchTicketDetail = async (ticket) => {
     setViewingTicket(ticket);
+    setDetailTab("conversation");
+    setToolsOpen(false);
     setSuggestions(null);
     setAiAnalysis(null);
     setDeviceStatus(null);
     setEnrichment(null);
-    setEditingTitle(false);
     setClientContacts([]);
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
+      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, poRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
@@ -469,34 +469,37 @@ export default function TicketsPage() {
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/attachments`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/tickets/${ticket.id}/products`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/purchase-orders/by-ticket/${ticket.id}`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/ticket-enrichment/${ticket.id}`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/tickets/${ticket.id}/sms`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
       ]);
-      setTicketNotes(nRes.data);
-      setTicketEmails(eRes.data);
-      setChildTickets(cRes.data);
-      setTimeEntries(tRes.data);
-      setAuditLog(aRes.data);
-      setScripts(sRes.data);
-      setTicketAttachments(attRes.data || []);
-      setTicketProducts(prodRes.data || []);
-      setEnrichment(enrichRes.data);
-      setTicketSms(smsRes.data || []);
-      setSmsTemplates(smsTmplRes.data || []);
+      const previewDetail = localPreviewTicketDetail(ticket.id);
+      setTicketNotes(localPreviewCollection(collectionFromResponse(nRes.data, ["comments", "notes"]), previewDetail.comments));
+      setTicketEmails(localPreviewCollection(collectionFromResponse(eRes.data, ["emails"]), previewDetail.emails));
+      setChildTickets(localPreviewCollection(collectionFromResponse(cRes.data, ["tickets", "children"]), previewDetail.children));
+      setTimeEntries(localPreviewCollection(collectionFromResponse(tRes.data, ["time_entries"]), previewDetail.time_entries));
+      setAuditLog(localPreviewCollection(collectionFromResponse(aRes.data, ["audit_log", "events"]), previewDetail.audit_log));
+      setScripts(localPreviewCollection(collectionFromResponse(sRes.data, ["scripts"]), LOCAL_PREVIEW_SCRIPTS));
+      setTicketAttachments(localPreviewCollection(collectionFromResponse(attRes.data, ["attachments"]), previewDetail.attachments));
+      setTicketProducts(localPreviewCollection(collectionFromResponse(prodRes.data, ["products", "items"]), previewDetail.products));
+      setTicketPurchaseOrders(collectionFromResponse(poRes.data, ["purchase_orders", "items"]));
+      setEnrichment(Array.isArray(enrichRes.data) ? null : enrichRes.data);
+      setTicketSms(localPreviewCollection(collectionFromResponse(smsRes.data, ["messages", "sms"]), previewDetail.sms));
+      setSmsTemplates(collectionFromResponse(smsTmplRes.data, ["templates"]));
       if (smsCfgRes.data) setSmsConfig({
         signature: smsCfgRes.data.signature || "",
         append_signature: smsCfgRes.data.append_signature !== false,
       });
       // Fetch client contacts for email auto-populate
       if (ticket.client_id) {
-        axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(r.data || [])).catch(() => {});
+        axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(collectionFromResponse(r.data, ["contacts"]))).catch(() => {});
       }
       // Fetch worksheets
       try {
         const wsRes2 = await axios.get(`${API}/tickets/${ticket.id}/worksheet`, { headers });
-        setWorksheetItems(wsRes2.data || []);
+        setWorksheetItems(localPreviewCollection(collectionFromResponse(wsRes2.data, ["worksheet", "items"]), previewDetail.worksheet));
       } catch { setWorksheetItems([]); }
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
@@ -509,7 +512,8 @@ export default function TicketsPage() {
       if (ticket.device_id) {
         try {
           const dRes = await axios.get(`${API}/devices/${ticket.device_id}`, { headers });
-          setDeviceStatus(dRes.data);
+          const device = dRes.data;
+          setDeviceStatus(device && !Array.isArray(device) && device.id && device.status ? device : null);
         } catch { setDeviceStatus(null); }
       }
       // Fetch AI suggestions
@@ -547,38 +551,6 @@ export default function TicketsPage() {
       });
       fetchTickets();
     } catch { toast.error("Failed to create ticket"); }
-  };
-
-  const startVoiceRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      const chunks = [];
-      recorder.ondataavailable = e => chunks.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const fd = new FormData();
-        fd.append("file", blob, "voice_ticket.webm");
-        try {
-          toast.info("Transcribing audio...");
-          const res = await axios.post(`${API}/voice-ticket/transcribe`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
-          const s = res.data.structured || {};
-          setFormData(prev => ({ ...prev, title: s.title || prev.title, description: s.description || prev.description, priority: s.priority || prev.priority, category: s.category || prev.category, source: "voice" }));
-          toast.success("Voice transcribed! Review and submit.");
-          setIsCreateOpen(true);
-        } catch { toast.error("Transcription failed"); }
-      };
-      recorder.start();
-      setMediaRecorder(recorder);
-      setIsRecording(true);
-      toast.info("Recording... Click stop when done.");
-    } catch { toast.error("Microphone access denied"); }
-  };
-
-  const stopVoiceRecording = () => {
-    if (mediaRecorder) { mediaRecorder.stop(); setMediaRecorder(null); }
-    setIsRecording(false);
   };
 
   const handleAiTriage = async () => {
@@ -622,7 +594,7 @@ export default function TicketsPage() {
       await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, { content: newNote, is_internal: conversationType === "note" }, { headers });
       setNewNote("");
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers });
-      setTicketNotes(res.data);
+      setTicketNotes(collectionFromResponse(res.data, ["comments", "notes"]));
       toast.success("Note added");
     } catch { toast.error("Failed to add note"); }
   };
@@ -630,6 +602,10 @@ export default function TicketsPage() {
   const handleSendEmail = async () => {
     // Server-side auto-injects rich signature from /email-signatures default,
     // so we don't append client-side. Send body as-is.
+    if (!emailForm.to?.split(",").some((address) => address.trim())) {
+      toast.error("Add at least one recipient before sending");
+      return;
+    }
     try {
       await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
         ticket_id: viewingTicket.id,
@@ -646,8 +622,8 @@ export default function TicketsPage() {
         axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${viewingTicket.id}/emails`, { headers }),
       ]);
-      setTicketNotes(nRes.data);
-      setTicketEmails(eRes.data);
+      setTicketNotes(collectionFromResponse(nRes.data, ["comments", "notes"]));
+      setTicketEmails(collectionFromResponse(eRes.data, ["emails"]));
       toast.success("Email sent");
     } catch { toast.error("Failed to send email"); }
   };
@@ -670,8 +646,8 @@ export default function TicketsPage() {
         axios.get(`${API}/tickets/${viewingTicket.id}/sms`, { headers }),
         axios.get(`${API}/tickets/${viewingTicket.id}/audit-log`, { headers }).catch(() => ({ data: auditLog })),
       ]);
-      setTicketSms(smsRes.data || []);
-      setAuditLog(aRes.data);
+      setTicketSms(collectionFromResponse(smsRes.data, ["messages", "sms"]));
+      setAuditLog(collectionFromResponse(aRes.data, ["audit_log", "events"]));
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to send SMS");
     } finally {
@@ -735,6 +711,12 @@ export default function TicketsPage() {
         invoice_id: invoiceId || null
       }, { headers });
       toast.success(res.data.message);
+      setTicketProducts(prev => prev.map(item => item.invoice_id ? item : ({
+        ...item,
+        invoice_id: res.data.invoice_id,
+        invoice_number: res.data.invoice_number,
+        invoiced_at: new Date().toISOString(),
+      })));
       setIsPushInvoiceOpen(false);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to push to invoice"); }
   };
@@ -764,7 +746,7 @@ export default function TicketsPage() {
       await axios.post(`${API}/tickets/${viewingTicket.id}/attachments`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
       toast.success("Attachment uploaded");
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/attachments`, { headers });
-      setTicketAttachments(res.data || []);
+      setTicketAttachments(collectionFromResponse(res.data, ["attachments"]));
     } catch { toast.error("Upload failed"); }
     finally { setAttachmentUploading(false); e.target.value = ""; }
   };
@@ -783,7 +765,7 @@ export default function TicketsPage() {
       setIsChildOpen(false);
       setChildForm({ title: "", description: "", priority: "medium" });
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/children`, { headers });
-      setChildTickets(res.data);
+      setChildTickets(collectionFromResponse(res.data, ["tickets", "children"]));
       fetchTickets();
       toast.success("Child ticket created");
     } catch { toast.error("Failed to create child ticket"); }
@@ -806,7 +788,7 @@ export default function TicketsPage() {
       setIsTimeOpen(false);
       setTimeForm({ minutes: 15, description: "", billable: true });
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/time-entries`, { headers });
-      setTimeEntries(res.data);
+      setTimeEntries(collectionFromResponse(res.data, ["time_entries"]));
       toast.success("Time logged");
     } catch { toast.error("Failed to log time"); }
   };
@@ -844,7 +826,7 @@ export default function TicketsPage() {
       await axios.post(`${API}/canned-responses`, cannedForm, { headers });
       setCannedForm({ title: "", content: "", category: "general" });
       const res = await axios.get(`${API}/canned-responses`, { headers });
-      setCannedResponses(res.data);
+      setCannedResponses(collectionFromResponse(res.data, ["responses", "canned_responses"]));
       toast.success("Canned response saved");
     } catch { toast.error("Failed to save"); }
   };
@@ -1351,6 +1333,13 @@ export default function TicketsPage() {
   const filteredTickets = tickets.filter(t => {
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+    if (attentionFilter === "no_response" && (noteCounts[t.id] > 0 || ["closed", "resolved"].includes(t.status))) return false;
+    if (attentionFilter === "sla_breach") {
+      const dueAt = t.sla_due || t.sla_due_at;
+      if (!dueAt || new Date(dueAt) >= new Date() || ["closed", "resolved"].includes(t.status)) return false;
+    }
+    if (attentionFilter === "unassigned" && t.assigned_to) return false;
+    if (attentionFilter === "critical_high" && !["critical", "high"].includes(t.priority)) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (t.title?.toLowerCase().includes(q) || t.ticket_number?.toLowerCase().includes(q) || t.client_name?.toLowerCase().includes(q));
@@ -1359,6 +1348,25 @@ export default function TicketsPage() {
   });
 
   const groupedTickets = useGroupedTickets(filteredTickets, groupBy, statusConfig, priorityConfig);
+
+  const attentionLabel = {
+    no_response: "No response",
+    sla_breach: "SLA breached",
+    unassigned: "Unassigned",
+    critical_high: "Critical & high",
+  }[attentionFilter];
+
+  const applyQueueFilter = ({ status = "all", priority = "all", attention = "all" }) => {
+    setStatusFilter(status);
+    setPriorityFilter(priority);
+    setAttentionFilter(attention);
+    setActiveViewId(null);
+    const next = new URLSearchParams(searchParams);
+    if (status === "all") next.delete("status"); else next.set("status", status);
+    if (priority === "all") next.delete("priority"); else next.set("priority", priority);
+    if (attention === "all") next.delete("attention"); else next.set("attention", attention);
+    setSearchParams(next, { replace: true });
+  };
 
   // AI Analysis
   const handleAiAnalysis = async () => {
@@ -1388,9 +1396,10 @@ export default function TicketsPage() {
 
   // Run script on device
   const handleRunScript = async (scriptId) => {
-    if (!viewingTicket?.device_id) { toast.error("No device linked to this ticket"); return; }
+    const linkedDeviceId = viewingTicket?.device_id || viewingTicket?.device_ids?.[0];
+    if (!linkedDeviceId) { toast.error("No device linked to this ticket"); return; }
     try {
-      await axios.post(`${API}/scripts/${scriptId}/execute`, [viewingTicket.device_id], { headers });
+      await axios.post(`${API}/scripts/${scriptId}/execute`, [linkedDeviceId], { headers });
       toast.success("Script queued for execution");
     } catch { toast.error("Failed to run script"); }
   };
@@ -1399,8 +1408,9 @@ export default function TicketsPage() {
 
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
-    const parent = viewingTicket.parent_id ? tickets.find(t => t.id === viewingTicket.parent_id) : null;
     const slaHours = viewingTicket.sla_due ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
+    const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
+    const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
     return (
       <PageShell>
         <div className="p-6 space-y-4 ticket-glass" data-testid="ticket-detail-view">
@@ -1413,11 +1423,13 @@ export default function TicketsPage() {
             setViewingTicket(null);
           }}
           onReply={() => {
-            try { document.querySelector('[data-testid="ticket-reply-tab"]')?.click(); } catch {}
+            setDetailTab("conversation");
+            setConversationType("email");
             window.scrollTo({ top: 800, behavior: "smooth" });
           }}
           onResolve={() => handleUpdateTicket("status", "resolved")}
           onStatusChange={(s) => handleUpdateTicket("status", s)}
+          onOpenTools={() => setToolsOpen(true)}
           onChangeCustomer={(updated) => updated && setViewingTicket(updated)}
           onTitleSave={(t) => { if (t && t !== viewingTicket.title) handleUpdateTicket("title", t); }}
           onMutate={async () => {
@@ -1432,109 +1444,147 @@ export default function TicketsPage() {
               try { document.querySelector('[data-testid="ticket-assignee-select"]')?.click(); } catch {}
               window.scrollTo({ top: 600, behavior: "smooth" });
             }
-            else if (k === "voice") document.querySelector('[data-testid="voice-journal-btn"]')?.click();
-            else if (k === "email") setIsEmailOpen?.(true);
-            else if (k === "pdf") handleDownloadPdf?.();
-            else if (k === "billing") setIsPushInvoiceOpen?.(true);
-            else if (k === "craig" || k === "copilot" || k === "explain" || k === "why_fire") handleAiAnalysis?.();
           }}
         />
 
-        {/* Header with grouped menus (legacy — hidden by default, toggle from Layout menu) */}
-        {panelVisible.legacyHeader && (
-        <TicketDetailHeader
-          viewingTicket={viewingTicket}
-          parent={parent}
-          deviceStatus={deviceStatus}
-          token={token}
-          handleAiAnalysis={handleAiAnalysis}
-          aiAnalyzing={aiAnalyzing}
-          isTimerRunning={isTimerRunning}
-          timerElapsed={timerElapsed}
-          toggleTimer={toggleTimer}
-          fmtTime={fmtTime}
-          setIsTimeOpen={setIsTimeOpen}
-          setIsEmailOpen={setIsEmailOpen}
-          setIsAddItemOpen={setIsAddItemOpen}
-          setIsKitPickerOpen={setIsKitPickerOpen}
-          setIsPushInvoiceOpen={setIsPushInvoiceOpen}
-          setIsChildOpen={setIsChildOpen}
-          setIsMergeOpen={setIsMergeOpen}
-          setInvoicesList={setInvoicesList}
-          ticketProducts={ticketProducts}
-          handleDownloadPdf={handleDownloadPdf}
-          onBack={() => {
-            if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {});
-            setViewingTicket(null);
-          }}
-        />
+        {runbookSuggestions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5" data-testid="ticket-runbook-suggestions">
+            <div className="flex items-center gap-2 mr-1 text-xs text-sky-100">
+              <BookOpen className="h-3.5 w-3.5 text-sky-400" />
+              <span className="font-medium">Proven fixes available</span>
+            </div>
+            {runbookSuggestions.map((runbook) => (
+              <Button
+                key={runbook.id}
+                variant="ghost"
+                size="sm"
+                className="h-7 max-w-[260px] justify-start px-2 text-xs text-sky-200 hover:bg-sky-500/10 hover:text-sky-100"
+                title={runbook.summary || runbook.title}
+                onClick={() => setSelectedRunbookSuggestion(runbook)}
+              >
+                <BookOpen className="mr-1.5 h-3 w-3 flex-none" />
+                <span className="truncate">{runbook.title}</span>
+              </Button>
+            ))}
+          </div>
         )}
 
-        {/* Layout customisation toolbar */}
-        <div className="flex items-center justify-between gap-1.5 flex-wrap">
-          {panelVisible.legacyHeader && <ServiceTierChip ticketId={viewingTicket.id} token={token} />}
-          <div className="flex items-center gap-1.5 ml-auto">
-          {sidebarEditMode && (
-            <Button
-              variant="ghost" size="sm"
-              className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5"
-              onClick={resetSidebarLayout}
-              data-testid="sidebar-reset-btn"
-            >
-              <RotateCcw className="w-3 h-3 mr-1" />Reset sidebar
-            </Button>
-          )}
-          <Button
-            variant={sidebarEditMode ? "outline" : "ghost"}
-            size="sm"
-            className={`h-7 px-2 text-[10px] font-mono uppercase tracking-wider ${
-              sidebarEditMode
-                ? "text-violet-300 border-violet-500/40 bg-violet-500/10"
-                : "text-zinc-400 hover:text-zinc-100 hover:bg-white/5"
-            }`}
-            onClick={() => setSidebarEditMode(e => !e)}
-            data-testid="sidebar-customise-btn"
-            title="Toggle drag/drop & resize on sidebar widgets"
-          >
-            {sidebarEditMode ? <Lock className="w-3 h-3 mr-1" /> : <Unlock className="w-3 h-3 mr-1" />}
-            {sidebarEditMode ? "Lock sidebar" : "Customise sidebar"}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5" data-testid="layout-toggle">
-                <Settings2 className="w-3 h-3 mr-1" />Layout
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-60" data-testid="layout-menu">
-              <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest font-mono text-muted-foreground flex items-center justify-between">
-                <span>Show panels</span>
-                <button
-                  type="button"
-                  onClick={() => setPanelVisible({ serviceTier: true, categorisation: true, aiAnalysis: true, related: true, enrichment: true, copilot: true, burndown: true, workflow: true, cockpit: true, runScripts: true, quickActions: true, devicePanel: true, links: true })}
-                  className="text-[9px] text-emerald-400 hover:text-emerald-300 normal-case tracking-normal"
-                  data-testid="layout-show-all"
-                >
-                  Show all
-                </button>
+        <Dialog open={!!selectedRunbookSuggestion} onOpenChange={(open) => !open && setSelectedRunbookSuggestion(null)}>
+          <DialogContent className="max-w-xl" data-testid="ticket-runbook-preview">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-sky-400" />
+                {selectedRunbookSuggestion?.title || "Runbook"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {selectedRunbookSuggestion?.summary && <p className="text-sm text-muted-foreground">{selectedRunbookSuggestion.summary}</p>}
+              <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+                {(selectedRunbookSuggestion?.steps || []).length > 0 ? selectedRunbookSuggestion.steps.map((step, index) => (
+                  <div key={`${selectedRunbookSuggestion.id}-${index}`} className="flex gap-3 text-sm">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-[10px] font-semibold text-sky-300">{index + 1}</span>
+                    <div><p className="font-medium">{step.step || "Step"}</p>{step.detail && <p className="mt-0.5 text-xs text-muted-foreground">{step.detail}</p>}</div>
+                  </div>
+                )) : <p className="text-sm text-muted-foreground">This runbook does not yet contain detailed steps.</p>}
               </div>
-              {TICKETS_DETAIL_PANELS.map(p => {
-                const Icon = p.icon;
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={p.k}
-                    checked={!!panelVisible[p.k]}
-                    onCheckedChange={() => togglePanel(p.k)}
-                    data-testid={`layout-${p.k}`}
-                    className="text-xs"
-                  >
-                    <Icon className="w-3 h-3 mr-1.5 text-violet-400" />{p.label}
-                  </DropdownMenuCheckboxItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelectedRunbookSuggestion(null)}>Close</Button>
+              <Button onClick={addRunbookToInternalNote} disabled={(selectedRunbookSuggestion?.steps || []).length === 0}>
+                <ClipboardList className="mr-2 h-4 w-4" />Add steps to internal note
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase()) && (
+          <div className="flex justify-end -mt-1">
+            {ticketRunbook ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-emerald-500/30 bg-emerald-500/5 text-emerald-200 hover:bg-emerald-500/15 hover:text-emerald-100"
+                onClick={() => { window.location.assign("/runbooks?tab=knowledge"); }}
+                data-testid="view-ticket-runbook"
+              >
+                <BookOpen className="mr-2 h-3.5 w-3.5" />
+                View reusable runbook
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-violet-500/30 bg-violet-500/5 text-violet-200 hover:bg-violet-500/15 hover:text-violet-100"
+                onClick={createRunbookFromTicket}
+                disabled={runbookCreating}
+                data-testid="create-runbook-from-ticket"
+              >
+                {runbookCreating ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <BookOpen className="mr-2 h-3.5 w-3.5" />}
+                Create reusable runbook
+              </Button>
+            )}
           </div>
-        </div>
+        )}
+
+        <TicketToolsCenter
+          open={toolsOpen}
+          onOpenChange={setToolsOpen}
+          ticket={viewingTicket}
+          sections={[
+            {
+              id: "ai",
+              title: "AI assistance",
+              description: "One focused diagnostic action. Ticket summaries remain in the main ticket header.",
+              icon: Sparkles,
+              content: <>
+                <TicketToolAction icon={Brain} title="AI diagnosis" description="Analyse likely cause, severity, and recommended next steps." busy={aiAnalyzing} onClick={handleAiAnalysis} testId="tools-ai-diagnose" />
+              </>,
+            },
+            {
+              id: "work",
+              title: "Ticket actions",
+              description: "Communicate, record effort, or restructure the request.",
+              icon: MessageSquare,
+              content: <>
+                <TicketToolAction icon={Mail} title="Email client" description="Compose a tracked reply using the ticket context." state="connected" onClick={() => setIsEmailOpen(true)} />
+                <TicketToolAction icon={Timer} title="Log time" description="Capture billable or non-billable technician effort." onClick={() => setIsTimeOpen(true)} />
+                <TicketToolAction icon={Bell} title="Notify contacts" description="Send a service update to the ticket contacts." state="connected" onClick={() => setIsClientNotifyOpen(true)} />
+                <TicketToolAction icon={GitBranch} title="Create child ticket" description="Split an independent workstream while preserving context." onClick={() => setIsChildOpen(true)} />
+                <TicketToolAction icon={Merge} title="Merge tickets" description="Consolidate duplicate requests and their history." state="attention" onClick={() => setIsMergeOpen(true)} />
+              </>,
+            },
+            {
+              id: "device",
+              title: "Device & automation",
+              description: viewingTicket.device_id ? "Remote support, health checks, and approved scripts for the linked device." : "Link a device in ticket properties to enable remote and automation tools.",
+              icon: MonitorCheck,
+              content: <>
+                <TicketToolAction icon={ExternalLink} title="Remote access" description={toolAvailability.remote ? `Open a support session to ${linkedDeviceId}.` : "Link a device to enable remote support."} state="connected" stateLabel="Linked" disabled={!toolAvailability.remote} onClick={() => window.open(`/remote-access?device=${linkedDeviceId}`, "_blank")} />
+                <TicketToolAction icon={MonitorCheck} title="Run health checks" description={toolAvailability.remote ? "Collect current endpoint health and service status." : "Link a device to run endpoint checks."} disabled={!toolAvailability.remote} onClick={() => axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"))} />
+                {scripts.slice(0, 6).map(script => <TicketToolAction key={script.id} icon={Terminal} title={script.name} description={script.description || "Run this approved automation against the linked device."} state="connected" stateLabel="Script" disabled={!toolAvailability.scripts} onClick={() => handleRunScript(script.id)} />)}
+              </>,
+            },
+            {
+              id: "workflow",
+              title: "Workflow & lifecycle",
+              description: "Manage dependencies, planned work, change control, and closure follow-up.",
+              icon: GitBranch,
+              content: <TicketWorkflowPanel embedded ticket={viewingTicket} allTickets={tickets} headers={headers} refresh={() => fetchTicketDetail(viewingTicket)} />,
+            },
+            {
+              id: "billing",
+              title: "Billing & output",
+              description: "Add products, apply kits, invoice completed work, or export the ticket.",
+              icon: Receipt,
+              content: <>
+                <TicketToolAction icon={ShoppingCart} title="Add product" description="Record hardware, licences, or labour used on this ticket." onClick={() => setIsAddItemOpen(true)} />
+                <TicketToolAction icon={Package} title="Apply service kit" description="Add a reusable bundle of products and tasks." onClick={() => setIsKitPickerOpen(true)} />
+                <TicketToolAction icon={Receipt} title="Push to invoice" description="Create or update an invoice from completed work." state="attention" onClick={() => setIsPushInvoiceOpen(true)} />
+                <TicketToolAction icon={Download} title="Download PDF" description="Export the ticket conversation and work summary." onClick={handleDownloadPdf} />
+              </>,
+            },
+          ]}
+        />
 
         {/* AI Co-Pilot Strip — heuristic next-best-action + optional AI summary */}
         {panelVisible.copilot && (
@@ -1556,55 +1606,14 @@ export default function TicketsPage() {
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
 
         {/* Title + Compact Progress side-by-side (saves vertical space) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* LEFT — Title card */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-2">
-                {editingTitle ? (
-                  <Input
-                    value={titleDraft}
-                    onChange={e => setTitleDraft(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter") { handleUpdateTicket("title", titleDraft); setEditingTitle(false); }
-                      if (e.key === "Escape") setEditingTitle(false);
-                    }}
-                    onBlur={() => { if (titleDraft !== viewingTicket.title) handleUpdateTicket("title", titleDraft); setEditingTitle(false); }}
-                    className="text-xl font-bold"
-                    autoFocus
-                    data-testid="edit-title-input"
-                  />
-                ) : (
-                  <CardTitle
-                    className="text-xl cursor-pointer hover:text-primary transition-colors"
-                    onClick={() => { setTitleDraft(viewingTicket.title); setEditingTitle(true); }}
-                    data-testid="ticket-title-editable"
-                    title="Click to edit"
-                  >
-                    {viewingTicket.title}
-                  </CardTitle>
-                )}
-              </div>
-              <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-                {viewingTicket.client_name && (
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">{viewingTicket.client_name.charAt(0)}</span>
-                    {viewingTicket.client_name}
-                  </span>
-                )}
-                {viewingTicket.contact_name && (
-                  <>
-                    <span className="text-border">|</span>
-                    <span className="flex items-center gap-1"><User className="w-3 h-3" />{viewingTicket.contact_name}</span>
-                  </>
-                )}
-                {viewingTicket.contact_email && (
-                  <span className="text-xs text-muted-foreground/60">{viewingTicket.contact_email}</span>
-                )}
-              </div>
+        <div className="grid grid-cols-1 gap-4">
+          {/* LEFT — request summary (title and customer live in the console header) */}
+          <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(120deg,rgba(59,130,246,0.07),rgba(17,19,24,0.35)_44%,transparent)] shadow-[0_12px_36px_rgba(0,0,0,0.14)]">
+            <CardHeader className="border-b border-white/[0.06] pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><span className="h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]" />Case brief</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingTicket.description}</p>
+              <p className="max-w-5xl text-sm leading-6 text-zinc-300 whitespace-pre-wrap">{viewingTicket.description || "No request details have been recorded yet."}</p>
               {/* Tags */}
               <div className="flex items-center gap-2 mt-4 flex-wrap">
                 <Tag className="w-4 h-4 text-muted-foreground" />
@@ -1618,10 +1627,10 @@ export default function TicketsPage() {
               </div>
               {/* SLA indicator */}
               {slaHours !== null && (
-                <div className={`mt-3 flex items-center gap-2 text-sm ${slaHours < 2 ? 'text-red-500' : slaHours < 8 ? 'text-yellow-500' : 'text-green-500'}`}>
+                <div className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${slaHours < 2 ? 'border-red-500/25 bg-red-500/[0.08] text-red-300' : slaHours < 8 ? 'border-yellow-500/25 bg-yellow-500/[0.08] text-yellow-300' : 'border-emerald-500/25 bg-emerald-500/[0.08] text-emerald-300'}`}>
                   <Clock className="w-4 h-4" />
                   <span>SLA: {slaHours > 0 ? `${slaHours}h remaining` : `Overdue by ${Math.abs(slaHours)}h`}</span>
-                  <div className={`h-2 rounded-full flex-1 max-w-[200px] ${slaHours < 2 ? 'bg-red-500/20' : slaHours < 8 ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>
+                  <div className={`h-2 rounded-full flex-1 max-w-[240px] ${slaHours < 2 ? 'bg-red-500/20' : slaHours < 8 ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>
                     <div className={`h-2 rounded-full transition-all ${slaHours < 2 ? 'bg-red-500' : slaHours < 8 ? 'bg-yellow-500' : 'bg-green-500'}`}
                       style={{ width: `${Math.max(5, Math.min(100, (1 - slaHours / 24) * 100))}%` }} />
                   </div>
@@ -1631,26 +1640,6 @@ export default function TicketsPage() {
           </Card>
 
           {/* RIGHT — Compact progress + related-tickets quick chips */}
-          <div className="flex flex-col gap-3">
-            <TicketProgressTracker
-              status={viewingTicket.status}
-              onChange={(s) => handleUpdateTicket("status", s)}
-              compact
-            />
-            {/* Hudu KB Suggestions — moved here to fill space, collapsible */}
-            <details className="group">
-              <summary className="cursor-pointer list-none">
-                <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors text-xs">
-                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="font-semibold text-emerald-400">Hudu KB Suggestions</span>
-                  <ChevronDown className="w-3 h-3 ml-auto text-muted-foreground group-open:rotate-180 transition-transform" />
-                </div>
-              </summary>
-              <div className="mt-2">
-                <HuduSuggestionsPanel ticket={viewingTicket} />
-              </div>
-            </details>
-          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1754,20 +1743,20 @@ export default function TicketsPage() {
               </Card>
             )}
 
-            {/* Tabs: Conversation first, then Suggestions, etc */}
-            <Tabs defaultValue="conversation">
-              <TabsList className="w-full grid grid-cols-10 bg-transparent border-b border-white/[0.06] rounded-none p-0 h-auto">
-                <TabsTrigger value="conversation" data-testid="conversation-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><MessageSquare className="w-3 h-3 mr-1" />Convo · {ticketNotes.length + ticketEmails.length + ticketSms.length}</TabsTrigger>
-                <TabsTrigger value="blueprint" data-testid="blueprint-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Lightbulb className="w-3 h-3 mr-1" />{viewingTicket.blueprint_id ? "Sheet" : "Blueprint"}</TabsTrigger>
-                <TabsTrigger value="suggestions" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Lightbulb className="w-3 h-3 mr-1" />AI</TabsTrigger>
-                <TabsTrigger value="worksheets" data-testid="worksheets-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><CheckCircle className="w-3 h-3 mr-1" />Tasks · {worksheetItems.length}</TabsTrigger>
-                <TabsTrigger value="attachments" data-testid="attachments-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Paperclip className="w-3 h-3 mr-1" />Files · {ticketAttachments.length}</TabsTrigger>
-                <TabsTrigger value="items" data-testid="items-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><ShoppingCart className="w-3 h-3 mr-1" />Items · {ticketProducts.length}</TabsTrigger>
-                <TabsTrigger value="children" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><GitBranch className="w-3 h-3 mr-1" />Sub · {childTickets.length}</TabsTrigger>
-                <TabsTrigger value="time" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><Timer className="w-3 h-3 mr-1" />Time · {timeEntries.length}</TabsTrigger>
-                <TabsTrigger value="audit" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><History className="w-3 h-3 mr-1" />Audit</TabsTrigger>
-                <TabsTrigger value="timeline" data-testid="timeline-tab" className="text-[10px] font-mono uppercase tracking-wider rounded-none border-b-2 border-transparent data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-violet-300 data-[state=active]:shadow-none py-2"><History className="w-3 h-3 mr-1" />TimeM</TabsTrigger>
-              </TabsList>
+            <Tabs value={detailTab} onValueChange={setDetailTab}>
+              <TicketWorkspaceTabs
+                activeTab={detailTab}
+                onTabChange={setDetailTab}
+                counts={{
+                  conversation: ticketNotes.length + ticketEmails.length + ticketSms.length,
+                  tasks: worksheetItems.length,
+                  files: ticketAttachments.length,
+                  time: timeEntries.length,
+                  items: ticketProducts.length,
+                  procurement: ticketPurchaseOrders.length,
+                  children: childTickets.length,
+                }}
+              />
 
               {/* BLUEPRINT / WORKSHEET TAB */}
               <TabsContent value="blueprint" className="space-y-4">
@@ -1940,6 +1929,21 @@ export default function TicketsPage() {
                 />
               </TabsContent>
 
+              <TabsContent value="procurement" className="space-y-3">
+                {(() => {
+                  const committed = ticketPurchaseOrders.filter(po => ["submitted", "partial", "received"].includes(po.status));
+                  const supplierCost = committed.reduce((sum, po) => sum + Number(po.vendor_invoice_match?.supplier_total ?? po.total ?? 0), 0);
+                  const openVariances = ticketPurchaseOrders.filter(po => po.vendor_invoice_match?.status === "variance" && po.vendor_invoice_match?.review?.status !== "accepted");
+                  return <Card className="border-amber-500/20">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-amber-400" />Procurement linked to this ticket</CardTitle></CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-3 gap-3 text-sm"><div className="rounded-lg bg-muted/30 p-3"><p className="text-xs text-muted-foreground">Purchase orders</p><p className="mt-1 font-mono text-lg font-semibold">{ticketPurchaseOrders.length}</p></div><div className="rounded-lg bg-muted/30 p-3"><p className="text-xs text-muted-foreground">Committed supplier cost</p><p className="mt-1 font-mono text-lg font-semibold text-amber-400">${supplierCost.toFixed(2)}</p></div><div className="rounded-lg bg-muted/30 p-3"><p className="text-xs text-muted-foreground">Active variances</p><p className={`mt-1 font-mono text-lg font-semibold ${openVariances.length ? "text-amber-400" : "text-emerald-400"}`}>{openVariances.length}</p></div></div>
+                      {ticketPurchaseOrders.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No purchase orders are linked to this ticket yet.</p> : <Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Vendor</TableHead><TableHead>Status</TableHead><TableHead>Invoice</TableHead><TableHead className="text-right">Supplier cost</TableHead></TableRow></TableHeader><TableBody>{ticketPurchaseOrders.map(po => { const match = po.vendor_invoice_match; const cost = Number(match?.supplier_total ?? po.total ?? 0); return <TableRow key={po.id}><TableCell><a className="font-mono text-primary hover:underline" href={`/purchase-orders?po=${encodeURIComponent(po.id)}`}>{po.po_number}</a></TableCell><TableCell>{po.vendor || "—"}</TableCell><TableCell><Badge variant="outline" className="capitalize text-xs">{String(po.status || "draft").replace(/_/g, " ")}</Badge></TableCell><TableCell>{match ? <Badge className={match.status === "matched" || match.review?.status === "accepted" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs" : "bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs"}>{match.status === "matched" ? "Matched" : match.review?.status === "accepted" ? "Accepted" : "Variance"}</Badge> : <span className="text-xs text-muted-foreground">Pending</span>}</TableCell><TableCell className="text-right font-mono">${cost.toFixed(2)}</TableCell></TableRow>; })}</TableBody></Table>}
+                    </CardContent>
+                  </Card>;
+                })()}
+              </TabsContent>
+
               {/* CHILDREN TAB */}
               <TabsContent value="children">
                 <TicketChildrenTab
@@ -1966,58 +1970,25 @@ export default function TicketsPage() {
             </Tabs>
           </div>
 
-          {/* Right sidebar — draggable widget grid */}
-          {(() => {
-            // Compute eligibility: panel must be visible AND its conditional render must pass
-            const hasDevice = !!(viewingTicket.device_id || (viewingTicket.device_ids || []).length > 0);
-            const eligible = {
-              serviceTier: panelVisible.serviceTier !== false,
-              categorisation: panelVisible.categorisation !== false,
-              statusCard: true,
-              runScripts: panelVisible.runScripts !== false && !!viewingTicket.device_id && scripts.length > 0,
-              burndown: panelVisible.burndown !== false,
-              workflow: panelVisible.workflow !== false,
-              cockpit: panelVisible.cockpit !== false && hasDevice,
-              enrichment: panelVisible.enrichment !== false,
-            };
-            const liveLayouts = {};
-            Object.keys(sidebarLayouts).forEach(bp => {
-              liveLayouts[bp] = (sidebarLayouts[bp] || []).filter(l => eligible[l.i]);
-            });
-            return (
-          <TicketsResponsiveGridLayout
-            className={`layout ${sidebarEditMode ? "nx-edit-mode" : ""}`}
-            layouts={liveLayouts}
-            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-            cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
-            rowHeight={40}
-            margin={[0, 12]}
-            containerPadding={[0, 0]}
-            isDraggable={sidebarEditMode}
-            isResizable={sidebarEditMode}
-            onLayoutChange={onSidebarLayoutChange}
-            draggableCancel=".nx-widget-hide,button,a,input,kbd,select,[role='combobox']"
-            useCSSTransforms
-            compactType="vertical"
-          >
+          {/* Right sidebar — stable ticket properties, never hidden by saved layout state */}
+          <aside className="space-y-3 self-start lg:sticky lg:top-5" data-testid="ticket-properties-rail">
+            {(viewingTicket.requester_email || viewingTicket.contact_email) && (
+              <div key="requester-context" className="min-w-0">
+                <WhisperRail email={viewingTicket.requester_email || viewingTicket.contact_email} />
+              </div>
+            )}
             {panelVisible.serviceTier && (
-              <div key="serviceTier" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("serviceTier"); }} className="nx-widget-hide" data-testid="sidebar-hide-serviceTier" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
+              <div key="serviceTier" className="min-w-0">
                 <TicketServiceTierWidget
                   ticketId={viewingTicket.id}
                   clientId={viewingTicket.client_id}
                   token={token}
-                  isAdmin={user?.role === "admin" || user?.is_admin}
+                  isAdmin={false}
                 />
               </div>
             )}
             {panelVisible.categorisation && (
-              <div key="categorisation" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("categorisation"); }} className="nx-widget-hide" data-testid="sidebar-hide-categorisation" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
+              <div key="categorisation" className="min-w-0">
                 <TicketCategorisationWidget
                   ticket={viewingTicket}
                   token={token}
@@ -2025,28 +1996,27 @@ export default function TicketsPage() {
                 />
               </div>
             )}
-            <div key="statusCard" className="nx-widget-card">
-              <Card>
-              <CardContent className="pt-4 space-y-4">
-                <div><Label className="text-xs text-muted-foreground">Status</Label>
-                  <Select value={viewingTicket.status} onValueChange={v => handleUpdateTicket("status", v)}>
-                    <SelectTrigger data-testid="status-select"><SelectValue /></SelectTrigger>
-                    <SelectContent>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                  </Select>
+            <div key="statusCard" className="min-w-0">
+              <Card className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.13),transparent_40%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
+              <CardContent className="space-y-4 p-4">
+                <div className="flex items-start justify-between gap-3 border-b border-white/[0.07] pb-3">
+                  <div><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-violet-300">Ticket controls</p><p className="mt-1 text-xs text-zinc-500">Ownership, urgency and classification</p></div>
+                  <div className={`mt-0.5 h-2 w-2 rounded-full ${viewingTicket.priority === "critical" ? "bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.9)]" : viewingTicket.priority === "high" ? "bg-amber-400" : "bg-violet-400"}`} />
                 </div>
-                <div><Label className="text-xs text-muted-foreground">Priority</Label>
+                <div className="grid grid-cols-1 gap-3">
+                <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Priority</Label>
                   <Select value={viewingTicket.priority} onValueChange={v => handleUpdateTicket("priority", v)}>
                     <SelectTrigger data-testid="priority-select"><SelectValue /></SelectTrigger>
                     <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div><Label className="text-xs text-muted-foreground">Assigned To</Label>
+                <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Assigned to</Label>
                   <Select value={viewingTicket.assigned_to || ""} onValueChange={v => handleUpdateTicket("assigned_to", v)}>
-                    <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                    <SelectTrigger data-testid="ticket-assignee-select"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                     <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div><Label className="text-xs text-muted-foreground">Category</Label>
+                <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Category</Label>
                   <Select value={viewingTicket.category || "support"} onValueChange={v => handleUpdateTicket("category", v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -2056,13 +2026,14 @@ export default function TicketsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                </div>
                 <Separator />
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Client</span><span>{viewingTicket.client_name}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Created</span><span>{viewingTicket.created_at && format(new Date(viewingTicket.created_at), "MMM d, HH:mm")}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Time</span><span className="font-mono">{viewingTicket.total_time_minutes || 0}m</span></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Client</p><p className="mt-1 truncate text-xs font-medium text-zinc-200">{viewingTicket.client_name || "Unassigned"}</p></div>
+                  <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Created</p><p className="mt-1 text-xs font-medium text-zinc-200">{viewingTicket.created_at && format(new Date(viewingTicket.created_at), "MMM d, HH:mm")}</p></div>
+                  <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Tracked time</p><p className="mt-1 font-mono text-xs font-medium text-zinc-200">{viewingTicket.total_time_minutes || 0}m</p></div>
                   {viewingTicket.watchers?.length > 0 && (
-                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Watchers</span><span>{viewingTicket.watchers.length}</span></div>
+                    <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Watchers</p><p className="mt-1 text-xs font-medium text-zinc-200">{viewingTicket.watchers.length}</p></div>
                   )}
                 </div>
                 <Separator />
@@ -2085,10 +2056,10 @@ export default function TicketsPage() {
                 </div>
                 {/* Device info panel (primary device) */}
                 {panelVisible.devicePanel && deviceStatus && (
-                  <div className="mt-2 p-2 rounded-lg bg-muted/30 border border-border/50 space-y-1" data-testid="device-info-panel">
+                  <div className="mt-2 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.05] p-3 space-y-2" data-testid="device-info-panel">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <MonitorCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                        <MonitorCheck className="w-3.5 h-3.5 text-cyan-300" />
                         <span className="text-xs font-medium">{deviceStatus.name}</span>
                       </div>
                       <div className={`flex items-center gap-1 text-[10px] ${deviceStatus.status === "online" ? "text-emerald-400" : "text-red-400"}`}>
@@ -2104,115 +2075,33 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 )}
-                {/* Quick Actions */}
-                {panelVisible.quickActions && (
-                <>
-                <Separator />
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Quick Actions</Label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={handleAiAnalysis} disabled={aiAnalyzing} data-testid="quick-ai-btn">
-                      <Brain className="w-3 h-3 mr-1 text-purple-400" />{aiAnalyzing ? "Analyzing..." : "AI Diagnose"}
-                    </Button>
-                    {viewingTicket.device_id && (
-                      <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start"
-                        onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}`, '_blank')} data-testid="quick-remote-btn">
-                        <ExternalLink className="w-3 h-3 mr-1 text-blue-400" />Remote
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                </>
-                )}
               </CardContent>
             </Card>
             </div>
 
-            {/* Run Scripts */}
-            {panelVisible.runScripts && viewingTicket.device_id && scripts.length > 0 && (
-              <div key="runScripts" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("runScripts"); }} className="nx-widget-hide" data-testid="sidebar-hide-runScripts" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
-              <Card data-testid="run-scripts-card">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-1.5"><Terminal className="w-4 h-4 text-green-400" />Run Script on Device</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-[120px]">
-                    {scripts.slice(0, 10).map(script => (
-                      <div key={script.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50 transition-colors" data-testid={`script-${script.id}`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Zap className="w-3 h-3 text-yellow-400 flex-shrink-0" />
-                          <span className="text-xs truncate">{script.name}</span>
-                        </div>
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-green-400 flex-shrink-0"
-                          onClick={() => handleRunScript(script.id)}>Run</Button>
-                      </div>
-                    ))}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-              </div>
-            )}
-
             {/* SLA Burn-down */}
             {panelVisible.burndown && (
-              <div key="burndown" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("burndown"); }} className="nx-widget-hide" data-testid="sidebar-hide-burndown" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
+              <div key="burndown" className="min-w-0">
                 <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
               </div>
             )}
 
-            {/* Workflow polish (Group D — block-on, change, maintenance, CSAT) */}
-            {panelVisible.workflow && (
-              <div key="workflow" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("workflow"); }} className="nx-widget-hide" data-testid="sidebar-hide-workflow" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
-                <TicketWorkflowPanel
-                  ticket={viewingTicket}
-                  allTickets={tickets}
-                  headers={headers}
-                  refresh={() => fetchTicketDetail(viewingTicket)}
-                />
-              </div>
-            )}
-
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
-            {(viewingTicket.device_id || (viewingTicket.device_ids || []).length > 0) && panelVisible.cockpit && (
-              <div key="cockpit" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("cockpit"); }} className="nx-widget-hide" data-testid="sidebar-hide-cockpit" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
-                <TicketDeviceList
-                  ticketId={viewingTicket.id}
-                  headers={headers}
-                  refreshTicketDetails={() => fetchTicketDetail(viewingTicket)}
-                />
-              </div>
-            )}
 
             {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
             {panelVisible.enrichment && (
-              <div key="enrichment" className="nx-widget-card">
-                {sidebarEditMode && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); togglePanel("enrichment"); }} className="nx-widget-hide" data-testid="sidebar-hide-enrichment" title="Hide panel"><X className="w-3 h-3" /></button>
-                )}
+              <div key="enrichment" className="min-w-0">
                 <TicketEnrichmentRail enrichment={enrichment} />
               </div>
             )}
-          </TicketsResponsiveGridLayout>
-            );
-          })()}
+          </aside>
         </div>
 
         <EmailDialog
           open={isEmailOpen} onOpenChange={setIsEmailOpen}
           emailForm={emailForm} setEmailForm={setEmailForm}
           emailSignature={emailSignature} handleSendEmail={handleSendEmail}
+          clientContacts={clientContacts}
           handleProofread={handleProofread} proofreadResult={proofreadResult}
           setProofreadResult={setProofreadResult} proofreadLoading={proofreadLoading}
         />
@@ -2257,7 +2146,7 @@ export default function TicketsPage() {
           onApplied={(res, kit) => {
             toast.success(`Applied kit "${kit.name}" — ${res.attached_count} items added`);
             // Reload ticket products
-            axios.get(`${API}/tickets/${viewingTicket.id}/products`, { headers }).then(r => setTicketProducts(r.data)).catch(() => {});
+            axios.get(`${API}/tickets/${viewingTicket.id}/products`, { headers }).then(r => setTicketProducts(collectionFromResponse(r.data, ["products", "items"]))).catch(() => {});
           }}
         />
 
@@ -2269,12 +2158,6 @@ export default function TicketsPage() {
         />
 
         {/* VIP Whisper Rail — shows rich context on the requester */}
-        {(viewingTicket.requester_email || viewingTicket.contact_email) && (
-          <WhisperRail email={viewingTicket.requester_email || viewingTicket.contact_email} />
-        )}
-
-        {/* Technician Co-Pilot */}
-        <CoPilotPanel ticket={viewingTicket} device={deviceStatus} />
         </div>
       </PageShell>
     );
@@ -2297,21 +2180,34 @@ export default function TicketsPage() {
 
     return (
       <div className="space-y-4" data-testid="ws-job-detail">
-        {/* Header */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={() => setViewWsJob(null)} data-testid="ws-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center"><Wrench className="w-4 h-4 text-purple-400" /></div>
-          <span className="font-mono font-semibold">{viewWsJob.job_number}</span>
-          <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
-          <Badge variant="outline" className="text-xs capitalize">{viewWsJob.priority}</Badge>
-          {viewWsJob.warranty_status === "in_warranty" && <Badge className="bg-green-500/20 text-green-400 border-green-500/30"><Shield className="w-3 h-3 mr-1" />Under Warranty</Badge>}
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
+        {/* Workshop job header */}
+        <div className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/[0.13] via-background to-background overflow-hidden" data-testid="ws-job-header">
+          <div className="flex items-start gap-4 p-5 flex-wrap">
+            <Button variant="ghost" size="sm" className="mt-0.5 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setViewWsJob(null)} data-testid="ws-back"><ArrowLeft className="w-4 h-4 mr-1" />Jobs</Button>
+            <div className="w-11 h-11 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center shadow-sm"><Wrench className="w-5 h-5 text-purple-300" /></div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                <span className="font-mono text-xs font-semibold tracking-wider text-purple-300">{viewWsJob.job_number}</span>
+                <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
+                <Badge variant="outline" className="text-[10px] capitalize">{viewWsJob.priority} priority</Badge>
+                {viewWsJob.warranty_status === "in_warranty" && <Badge className="bg-green-500/20 text-green-400 border-green-500/30"><Shield className="w-3 h-3 mr-1" />Under Warranty</Badge>}
+              </div>
+              <h1 className="text-xl font-semibold tracking-tight truncate">{viewWsJob.fault_description || "Workshop repair"}</h1>
+              <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground/75">{viewWsJob.customer_name || "Customer pending"}</span>
+                <span className="text-muted-foreground/30">•</span>
+                <span>{[viewWsJob.device_brand, viewWsJob.device_model].filter(Boolean).join(" ") || viewWsJob.device_type || "Device details pending"}</span>
+                {viewWsJob.serial_number && <><span className="text-muted-foreground/30">•</span><span className="font-mono">S/N {viewWsJob.serial_number}</span></>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
             <Button variant="outline" size="sm" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
             <Button variant="outline" size="sm" onClick={() => setWsIntakeDialog(true)} data-testid="ws-intake-btn"><ClipboardList className="w-3 h-3 mr-1" />Intake</Button>
             <Button variant="outline" size="sm" onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }} data-testid="ws-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
             <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }} data-testid="ws-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
             <Button variant="outline" size="sm" onClick={handleDownloadWsPdf} data-testid="ws-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={handleDownloadWsQr} data-testid="ws-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+            </div>
           </div>
         </div>
 
@@ -2379,16 +2275,19 @@ export default function TicketsPage() {
             </Card>
 
             {/* Tabs */}
-            <Tabs defaultValue="notes">
-              <TabsList className="w-full grid grid-cols-7">
-                <TabsTrigger value="notes" data-testid="ws-notes-tab"><MessageSquare className="w-3 h-3 mr-1" />Notes ({wsNotes.length})</TabsTrigger>
-                <TabsTrigger value="checklist" data-testid="ws-checklist-tab"><ListChecks className="w-3 h-3 mr-1" />Checklist ({wsCheckDone}/{wsChecklist.length})</TabsTrigger>
-                <TabsTrigger value="photos" data-testid="ws-photos-tab"><Camera className="w-3 h-3 mr-1" />Photos ({wsPhotos.length})</TabsTrigger>
-                <TabsTrigger value="parts" data-testid="ws-parts-tab"><Package className="w-3 h-3 mr-1" />Parts ({viewWsJob.parts_used?.length || 0})</TabsTrigger>
-                <TabsTrigger value="quote" data-testid="ws-quote-tab"><DollarSign className="w-3 h-3 mr-1" />Quote</TabsTrigger>
-                <TabsTrigger value="history" data-testid="ws-history-tab"><History className="w-3 h-3 mr-1" />History ({wsRepairHistory.length})</TabsTrigger>
-                <TabsTrigger value="audit" data-testid="ws-audit-tab"><Eye className="w-3 h-3 mr-1" />Audit</TabsTrigger>
-              </TabsList>
+            <Tabs defaultValue="notes" className="rounded-xl border bg-card overflow-hidden">
+              <div className="px-4 pt-3 border-b bg-muted/[0.1]">
+                <div className="flex items-center justify-between gap-3 mb-2"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Repair workspace</span><span className="text-[11px] text-muted-foreground">Evidence, work and commercial record</span></div>
+                <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
+                  <TabsTrigger value="notes" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-notes-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Notes <span className="ml-1 text-[10px] opacity-70">{wsNotes.length}</span></TabsTrigger>
+                  <TabsTrigger value="checklist" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-checklist-tab"><ListChecks className="w-3 h-3 mr-1.5" />Checklist <span className="ml-1 text-[10px] opacity-70">{wsCheckDone}/{wsChecklist.length}</span></TabsTrigger>
+                  <TabsTrigger value="photos" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-photos-tab"><Camera className="w-3 h-3 mr-1.5" />Photos <span className="ml-1 text-[10px] opacity-70">{wsPhotos.length}</span></TabsTrigger>
+                  <TabsTrigger value="parts" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-parts-tab"><Package className="w-3 h-3 mr-1.5" />Parts <span className="ml-1 text-[10px] opacity-70">{viewWsJob.parts_used?.length || 0}</span></TabsTrigger>
+                  <TabsTrigger value="quote" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-quote-tab"><DollarSign className="w-3 h-3 mr-1.5" />Quote</TabsTrigger>
+                  <TabsTrigger value="history" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-history-tab"><History className="w-3 h-3 mr-1.5" />History <span className="ml-1 text-[10px] opacity-70">{wsRepairHistory.length}</span></TabsTrigger>
+                  <TabsTrigger value="audit" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-audit-tab"><Eye className="w-3 h-3 mr-1.5" />Audit</TabsTrigger>
+                </TabsList>
+              </div>
 
               {/* NOTES TAB */}
               <TabsContent value="notes" className="space-y-3">
@@ -2592,27 +2491,25 @@ export default function TicketsPage() {
           {/* Sidebar — right 1/3 */}
           <div className="space-y-4">
             {/* Billing Card */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Billing Summary</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Labour ({viewWsJob.labour_minutes || 0}m @ ${viewWsJob.labour_rate}/hr)</span><span className="font-mono">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
+            <Card className="overflow-hidden border-emerald-500/20">
+              <CardHeader className="pb-3 bg-emerald-500/[0.045] border-b border-emerald-500/15"><CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-400" />Commercial summary</CardTitle></CardHeader>
+              <CardContent className="pt-4 space-y-2.5 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Parts</span><span className="font-mono font-medium">${(viewWsJob.total_parts_cost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">Labour <span className="text-[10px]">({viewWsJob.labour_minutes || 0}m @ ${viewWsJob.labour_rate}/hr)</span></span><span className="font-mono font-medium">${(viewWsJob.total_labour_cost || 0).toFixed(2)}</span></div>
                 <Separator />
-                <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between items-end text-base font-bold"><span>Total value</span><span className="text-emerald-400 font-mono text-lg">${(viewWsJob.total_cost || 0).toFixed(2)}</span></div>
                 {viewWsJob.estimated_cost > 0 && <div className="flex justify-between text-xs text-muted-foreground"><span>Estimated</span><span className="font-mono">${viewWsJob.estimated_cost.toFixed(2)}</span></div>}
               </CardContent>
             </Card>
 
             {/* Labour Timer */}
-            <Card className="border-amber-500/20">
-              <CardContent className="py-3">
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Labour Timer</p>
+            <Card className={viewWsJob.timer_running ? "border-amber-500/35 bg-amber-500/[0.045]" : "border-border/70"}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between mb-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Labour timer</p><p className="font-mono text-2xl font-semibold mt-1">{viewWsJob.labour_minutes || 0}<span className="text-sm text-muted-foreground ml-1">min</span></p></div>{viewWsJob.timer_running && <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/25 animate-pulse">Live</Badge>}</div>
                 <div className="flex items-center gap-2">
-                  <Button className={viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
-                    {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop</> : <><Play className="w-4 h-4 mr-1" />Start</>}
+                  <Button className={`flex-1 ${viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"}`} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
+                    {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop timer</> : <><Play className="w-4 h-4 mr-1" />Start timer</>}
                   </Button>
-                  <span className="font-mono text-lg">{viewWsJob.labour_minutes || 0} min</span>
-                  {viewWsJob.timer_running && <Badge className="bg-green-500/20 text-green-400 animate-pulse">Running</Badge>}
                 </div>
               </CardContent>
             </Card>
@@ -2629,11 +2526,10 @@ export default function TicketsPage() {
 
             {/* Assigned Tech */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div><span className="text-muted-foreground block text-xs">Technician</span><span className="font-medium">{viewWsJob.assigned_to_name || "Unassigned"}</span></div>
-                <div><span className="text-muted-foreground block text-xs">Created by</span><span>{viewWsJob.created_by_name}</span></div>
-                <div><span className="text-muted-foreground block text-xs">Created</span><span>{viewWsJob.created_at?.slice(0, 10)}</span></div>
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4 text-purple-300" />Ownership</CardTitle></CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center gap-2.5 rounded-lg bg-muted/[0.35] p-2.5"><span className="w-7 h-7 rounded-full bg-purple-500/15 text-purple-300 flex items-center justify-center text-xs font-semibold">{(viewWsJob.assigned_to_name || "?").slice(0, 1)}</span><div className="min-w-0"><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Bench technician</span><span className="font-medium text-xs">{viewWsJob.assigned_to_name || "Unassigned — workshop queue"}</span></div></div>
+                <div className="grid grid-cols-2 gap-3 text-xs"><div><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Created by</span><span className="font-medium">{viewWsJob.created_by_name || "System"}</span></div><div><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Checked in</span><span>{viewWsJob.created_at?.slice(0, 10) || "—"}</span></div></div>
               </CardContent>
             </Card>
           </div>
@@ -2723,11 +2619,25 @@ export default function TicketsPage() {
 
         {/* Device Intake Dialog */}
         <Dialog open={wsIntakeDialog} onOpenChange={setWsIntakeDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Device Intake Details</DialogTitle></DialogHeader>
-            <div className="space-y-4">
-              <div><Label>Customer Email</Label><Input value={wsIntakeForm.customer_email} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_email: e.target.value })} placeholder="customer@example.com" data-testid="ws-intake-email" /></div>
-              <div><Label>Condition on Arrival</Label>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden p-0 gap-0">
+            <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-purple-500/[0.1] to-transparent">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-purple-300" /></div>
+                <div><DialogTitle>Complete device intake</DialogTitle><p className="text-sm text-muted-foreground mt-1">Record exactly what arrived before the repair work begins.</p></div>
+              </div>
+            </DialogHeader>
+            <div className="space-y-4 px-6 py-5 overflow-y-auto max-h-[63vh]">
+              <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
+                <div className="flex items-center gap-2"><User className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">Customer & access</h3></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><Label>Customer email</Label><Input value={wsIntakeForm.customer_email} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_email: e.target.value })} placeholder="customer@example.com" data-testid="ws-intake-email" /></div>
+                  <div><Label>Login password or PIN <span className="text-muted-foreground font-normal">(optional)</span></Label><Input value={wsIntakeForm.customer_password} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_password: e.target.value })} placeholder="Only if required to test" type="password" data-testid="ws-intake-password" /></div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Only record access details required for diagnosis. Never add recovery codes or MFA secrets.</p>
+              </section>
+              <section className="rounded-xl border border-amber-500/20 bg-amber-500/[0.035] p-4 space-y-3">
+                <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-400" /><h3 className="text-sm font-semibold">Arrival condition & contents</h3></div>
+                <div><Label>Physical condition on arrival</Label>
                 <Select value={wsIntakeForm.condition_on_arrival || "not_assessed"} onValueChange={v => setWsIntakeForm({ ...wsIntakeForm, condition_on_arrival: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -2739,20 +2649,22 @@ export default function TicketsPage() {
                     <SelectItem value="broken">Broken - Major physical damage</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div><Label>Accessories Received</Label>
-                <div className="flex flex-wrap gap-2 mt-1">
+                </div>
+                <div><Label>Accessories received</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
                   {["Charger", "Power Cable", "Bag/Case", "Mouse", "Keyboard", "USB Drive", "Manual", "Box"].map(acc => (
-                    <label key={acc} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <label key={acc} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs cursor-pointer transition-colors ${wsIntakeForm.accessories_received.includes(acc) ? "border-purple-500/35 bg-purple-500/10 text-purple-100" : "border-border/60 hover:bg-muted/30"}`}>
                       <Checkbox checked={wsIntakeForm.accessories_received.includes(acc)} onCheckedChange={c => {
                         setWsIntakeForm(prev => ({ ...prev, accessories_received: c ? [...prev.accessories_received, acc] : prev.accessories_received.filter(a => a !== acc) }));
                       }} />{acc}
                     </label>
                   ))}
+                  </div>
                 </div>
-              </div>
-              <div><Label>Customer Password/PIN (for login)</Label><Input value={wsIntakeForm.customer_password} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_password: e.target.value })} placeholder="Optional - stored securely" type="password" data-testid="ws-intake-password" /></div>
-              <div className="grid grid-cols-2 gap-3">
+              </section>
+              <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
+                <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-300" /><h3 className="text-sm font-semibold">Warranty</h3></div>
+                <div className="grid grid-cols-2 gap-3">
                 <div><Label>Warranty Status</Label>
                   <Select value={wsIntakeForm.warranty_status} onValueChange={v => setWsIntakeForm({ ...wsIntakeForm, warranty_status: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -2765,9 +2677,13 @@ export default function TicketsPage() {
                   </Select>
                 </div>
                 <div><Label>Warranty Expiry</Label><Input type="date" value={wsIntakeForm.warranty_expiry} onChange={e => setWsIntakeForm({ ...wsIntakeForm, warranty_expiry: e.target.value })} /></div>
-              </div>
+                </div>
+              </section>
+              <p className="text-xs text-muted-foreground px-1">Tip: take a before photo from the Photos tab for any existing damage, then save this intake record.</p>
             </div>
-            <DialogFooter><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save Intake</Button></DialogFooter>
+            <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12]">
+              <Button variant="outline" onClick={() => setWsIntakeDialog(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save intake record</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
@@ -2807,21 +2723,24 @@ export default function TicketsPage() {
 
     return (
       <div className="space-y-4" data-testid="fj-detail">
-        {/* Header */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={() => setViewFjJob(null)} data-testid="fj-back"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <div className="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Wifi className="w-4 h-4 text-cyan-400" /></div>
-          <span className="font-mono font-semibold">{viewFjJob.job_number}</span>
-          <Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge>
-          <Badge variant="outline" className="text-xs capitalize">{viewFjJob.job_category}</Badge>
-          <Badge variant="outline" className="text-xs capitalize">{viewFjJob.priority}</Badge>
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
+        {/* Field job header */}
+        <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.13] via-background to-background overflow-hidden" data-testid="fj-job-header">
+          <div className="flex items-start gap-4 p-5 flex-wrap">
+            <Button variant="ghost" size="sm" className="mt-0.5 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setViewFjJob(null)} data-testid="fj-back"><ArrowLeft className="w-4 h-4 mr-1" />Jobs</Button>
+            <div className="w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shadow-sm"><Radio className="w-5 h-5 text-cyan-300" /></div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1.5"><span className="font-mono text-xs font-semibold tracking-wider text-cyan-300">{viewFjJob.job_number}</span><Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge><Badge variant="outline" className="text-[10px] capitalize">{viewFjJob.job_category}</Badge><Badge variant="outline" className="text-[10px] capitalize">{viewFjJob.priority} priority</Badge></div>
+              <h1 className="text-xl font-semibold tracking-tight truncate">{viewFjJob.description || "Field service job"}</h1>
+              <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs text-muted-foreground"><span className="font-medium text-foreground/75">{viewFjJob.customer_name || "Customer pending"}</span><span className="text-muted-foreground/30">•</span><span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3 text-cyan-300" />{viewFjJob.service_address || "Site address pending"}</span>{viewFjJob.scheduled_date && <><span className="text-muted-foreground/30">•</span><span>{viewFjJob.scheduled_date} {viewFjJob.scheduled_time || ""}</span></>}</div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
             <Button variant="outline" size="sm" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
             <Button variant="outline" size="sm" onClick={() => setFjSiteDialog(true)} data-testid="fj-site-btn"><MapPin className="w-3 h-3 mr-1" />Site Info</Button>
             <Button variant="outline" size="sm" onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }} data-testid="fj-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
             <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }} data-testid="fj-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
             <Button variant="outline" size="sm" onClick={handleDownloadFjPdf} data-testid="fj-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
             <Button variant="outline" size="sm" onClick={handleDownloadFjQr} data-testid="fj-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+            </div>
           </div>
         </div>
 
@@ -2879,17 +2798,20 @@ export default function TicketsPage() {
             </Card>
 
             {/* Tabs */}
-            <Tabs defaultValue="notes">
-              <TabsList className="w-full grid grid-cols-8">
-                <TabsTrigger value="notes" data-testid="fj-notes-tab"><MessageSquare className="w-3 h-3 mr-1" />Notes ({fjNotes.length})</TabsTrigger>
-                <TabsTrigger value="checklist" data-testid="fj-checklist-tab"><ListChecks className="w-3 h-3 mr-1" />Checklist ({fjCheckDone}/{fjChecklist.length})</TabsTrigger>
-                <TabsTrigger value="photos" data-testid="fj-photos-tab"><Camera className="w-3 h-3 mr-1" />Photos ({fjPhotos.length})</TabsTrigger>
-                <TabsTrigger value="equipment" data-testid="fj-equip-tab"><Cpu className="w-3 h-3 mr-1" />Equipment ({fjEquipment.length})</TabsTrigger>
-                <TabsTrigger value="materials" data-testid="fj-mat-tab"><Package className="w-3 h-3 mr-1" />Materials ({fjMaterials.length})</TabsTrigger>
-                <TabsTrigger value="quote" data-testid="fj-quote-tab"><DollarSign className="w-3 h-3 mr-1" />Quote</TabsTrigger>
-                <TabsTrigger value="history" data-testid="fj-history-tab"><History className="w-3 h-3 mr-1" />History ({fjJobHistory.length})</TabsTrigger>
-                <TabsTrigger value="audit" data-testid="fj-audit-tab"><Eye className="w-3 h-3 mr-1" />Audit</TabsTrigger>
-              </TabsList>
+            <Tabs defaultValue="notes" className="rounded-xl border bg-card overflow-hidden">
+              <div className="px-4 pt-3 border-b bg-muted/[0.1]">
+                <div className="flex items-center justify-between gap-3 mb-2"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Field workspace</span><span className="text-[11px] text-muted-foreground">Site evidence, equipment and completion record</span></div>
+                <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
+                  <TabsTrigger value="notes" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-notes-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Notes <span className="ml-1 text-[10px] opacity-70">{fjNotes.length}</span></TabsTrigger>
+                  <TabsTrigger value="checklist" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-checklist-tab"><ListChecks className="w-3 h-3 mr-1.5" />Checklist <span className="ml-1 text-[10px] opacity-70">{fjCheckDone}/{fjChecklist.length}</span></TabsTrigger>
+                  <TabsTrigger value="photos" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-photos-tab"><Camera className="w-3 h-3 mr-1.5" />Photos <span className="ml-1 text-[10px] opacity-70">{fjPhotos.length}</span></TabsTrigger>
+                  <TabsTrigger value="equipment" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-equip-tab"><Cpu className="w-3 h-3 mr-1.5" />Equipment <span className="ml-1 text-[10px] opacity-70">{fjEquipment.length}</span></TabsTrigger>
+                  <TabsTrigger value="materials" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-mat-tab"><Package className="w-3 h-3 mr-1.5" />Materials <span className="ml-1 text-[10px] opacity-70">{fjMaterials.length}</span></TabsTrigger>
+                  <TabsTrigger value="quote" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-quote-tab"><DollarSign className="w-3 h-3 mr-1.5" />Quote</TabsTrigger>
+                  <TabsTrigger value="history" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-history-tab"><History className="w-3 h-3 mr-1.5" />History <span className="ml-1 text-[10px] opacity-70">{fjJobHistory.length}</span></TabsTrigger>
+                  <TabsTrigger value="audit" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-audit-tab"><Eye className="w-3 h-3 mr-1.5" />Audit</TabsTrigger>
+                </TabsList>
+              </div>
 
               {/* NOTES */}
               <TabsContent value="notes" className="space-y-3">
@@ -3114,10 +3036,11 @@ export default function TicketsPage() {
           {/* Sidebar */}
           <div className="space-y-4">
             {/* Signal & Speed Test */}
-            <Card className="border-cyan-500/20">
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-400" />Signal & Speed</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <div><Label className="text-xs">Signal (dBm)</Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
+            <Card className="overflow-hidden border-cyan-500/20">
+              <CardHeader className="pb-3 bg-cyan-500/[0.045] border-b border-cyan-500/15"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-300" />Site verification</CardTitle></CardHeader>
+              <CardContent className="space-y-3 pt-4">
+                <p className="text-[11px] text-muted-foreground">Record live readings at site. They save automatically as you enter them.</p>
+                <div><Label className="text-xs">Signal <span className="text-muted-foreground">(dBm)</span></Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
                 <div className="grid grid-cols-2 gap-2">
                   <div><Label className="text-xs">Down (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
                   <div><Label className="text-xs">Up (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
@@ -3126,13 +3049,13 @@ export default function TicketsPage() {
             </Card>
 
             {/* Cost Summary */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Cost Summary</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Materials</span><span className="font-mono">${fjMatTotal.toFixed(2)}</span></div>
+            <Card className="overflow-hidden border-emerald-500/20">
+              <CardHeader className="pb-3 bg-emerald-500/[0.045] border-b border-emerald-500/15"><CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-400" />Materials & equipment</CardTitle></CardHeader>
+              <CardContent className="pt-4 space-y-2.5 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Materials</span><span className="font-mono font-medium">${fjMatTotal.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Equipment</span><span className="font-mono">{fjEquipment.length} items</span></div>
                 <Separator />
-                <div className="flex justify-between font-bold"><span>Materials Total</span><span className="text-green-400">${fjMatTotal.toFixed(2)}</span></div>
+                <div className="flex justify-between items-end font-bold"><span>Materials total</span><span className="text-emerald-400 font-mono text-lg">${fjMatTotal.toFixed(2)}</span></div>
               </CardContent>
             </Card>
 
@@ -3148,11 +3071,10 @@ export default function TicketsPage() {
 
             {/* Assignment */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div><span className="text-muted-foreground block text-xs">Technician</span><span className="font-medium">{viewFjJob.assigned_to_name || "Unassigned"}</span></div>
-                <div><span className="text-muted-foreground block text-xs">Created by</span><span>{viewFjJob.created_by_name}</span></div>
-                <div><span className="text-muted-foreground block text-xs">Created</span><span>{viewFjJob.created_at?.slice(0, 10)}</span></div>
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4 text-cyan-300" />Dispatch ownership</CardTitle></CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center gap-2.5 rounded-lg bg-muted/[0.35] p-2.5"><span className="w-7 h-7 rounded-full bg-cyan-500/15 text-cyan-300 flex items-center justify-center text-xs font-semibold">{(viewFjJob.assigned_to_name || "?").slice(0, 1)}</span><div className="min-w-0"><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Field technician</span><span className="font-medium text-xs">{viewFjJob.assigned_to_name || "Unassigned — dispatch queue"}</span></div></div>
+                <div className="grid grid-cols-2 gap-3 text-xs"><div><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Created by</span><span className="font-medium">{viewFjJob.created_by_name || "System"}</span></div><div><span className="text-muted-foreground block text-[10px] uppercase tracking-wide">Created</span><span>{viewFjJob.created_at?.slice(0, 10) || "—"}</span></div></div>
               </CardContent>
             </Card>
           </div>
@@ -3386,22 +3308,12 @@ export default function TicketsPage() {
     <PageShell data-testid="tickets-page">
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-      {/* Header — matches Devices Command Center / Team Command Center */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Tickets Command Center
-          </h1>
-          <p className="text-sm text-zinc-500">{tickets.length} SLA · {workshopJobs.length} workshop · {fieldJobs.length} cabling/WISP · live ticker · saved views</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
+      <TicketModuleHeader
+        title="Ticket queue"
+        subtitle={`${tickets.length} support · ${workshopJobs.length} workshop · ${fieldJobs.length} field jobs · saved views and live service signals`}
+        actions={<>
           <Button variant="outline" size="sm" className="h-8 text-xs text-blue-300 border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
-            <Plus className="w-3 h-3 mr-1" />New SLA
-          </Button>
-          <Button variant="outline" size="sm"
-            className={`h-8 text-xs ${isRecording ? "text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 animate-pulse" : "text-amber-300 border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"}`}
-            onClick={isRecording ? stopVoiceRecording : startVoiceRecording} data-testid="voice-ticket-btn">
-            <Mic className="w-3 h-3 mr-1" />{isRecording ? "Stop" : "Voice"}
+            <Plus className="w-3 h-3 mr-1" />New ticket
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs text-purple-300 border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
             <Wrench className="w-3 h-3 mr-1" />Workshop
@@ -3412,47 +3324,25 @@ export default function TicketsPage() {
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={fetchTickets} data-testid="refresh-tickets-btn">
             <RefreshCw className="w-3 h-3 mr-1" />Refresh
           </Button>
-        </div>
-      </div>
+        </>}
+      />
 
-      {/* Edit Bar — drag/drop & hide widgets above the ticket list */}
-      <listGrid.EditBar testIdPrefix="tickets-list-" />
-
-      <TicketsResponsiveGridLayout
-        className={`layout ${listGrid.editMode ? "nx-edit-mode" : ""}`}
-        layouts={listGrid.visibleLayouts}
-        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
-        rowHeight={48}
-        margin={[12, 12]}
-        containerPadding={[0, 0]}
-        isDraggable={listGrid.editMode}
-        isResizable={listGrid.editMode}
-        onLayoutChange={listGrid.onLayoutChange}
-        draggableCancel=".nx-widget-hide,button,a,input,kbd,select"
-        useCSSTransforms
-        compactType="vertical"
-      >
+      <div className="space-y-3" data-testid="ticket-queue-controls">
 
       {/* HeroTile metric strip */}
-      {!listGrid.hiddenWidgets.has("hero-tiles") && (
-      <div key="hero-tiles" className="nx-widget-card">
-        <listGrid.HideBtn id="hero-tiles" />
+      <div key="hero-tiles" className="min-w-0">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
-          <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" testId="stat-open" />
-          <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" testId="stat-progress" />
-          <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" testId="stat-resolved" />
-          <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} testId="stat-critical" />
-          <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} testId="stat-no-notes" />
-          <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} testId="stat-avg-time" />
+          <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
+          <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
+          <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "resolved" })} active={statusFilter === "resolved" && attentionFilter === "all"} testId="stat-resolved" />
+          <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
+          <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
+          <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({})} active={statusFilter === "all" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
         </div>
       </div>
-      )}
 
       {/* Smart Inbox — Needs Attention strip */}
-      {!listGrid.hiddenWidgets.has("smart-inbox") && (
-      <div key="smart-inbox" className="nx-widget-card">
-        <listGrid.HideBtn id="smart-inbox" />
+      <div key="smart-inbox" className="min-w-0">
         {(() => {
           const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
           const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
@@ -3470,11 +3360,11 @@ export default function TicketsPage() {
             </Card>
           );
           return (
-            <Card className="border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.02] h-full" data-testid="tickets-smart-inbox">
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <Card className="overflow-hidden border border-rose-500/20 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.10),transparent_32%),linear-gradient(135deg,rgba(17,19,24,0.96),rgba(10,12,17,0.98))] shadow-[0_14px_38px_rgba(0,0,0,0.18)] h-full" data-testid="tickets-smart-inbox">
+              <CardHeader className="border-b border-white/[0.06] pb-3 flex flex-row items-center justify-between">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-violet-400" />Needs Attention
-                  <Badge variant="outline" className="text-[9px] uppercase">{items.length}</Badge>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/[0.14] ring-1 ring-rose-500/25"><AlertTriangle className="w-3.5 h-3.5 text-rose-300" /></span>Needs Attention
+                  <Badge variant="outline" className="border-rose-500/25 bg-rose-500/[0.08] text-[9px] uppercase text-rose-200">{items.length}</Badge>
                 </CardTitle>
                 <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">{breached.length} breached · {critical.length} critical · {stale.length} stale</span>
               </CardHeader>
@@ -3484,7 +3374,7 @@ export default function TicketsPage() {
                     <button
                       key={`${t.id}-${i}-${t._kind}`}
                       onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
-                      className={`text-left flex items-start gap-2 px-2.5 py-2 rounded border ${t._tone} hover:brightness-125 transition`}
+                      className={`text-left flex items-start gap-2 rounded-lg border px-2.5 py-2.5 ${t._tone} hover:brightness-125 hover:-translate-y-px transition`}
                       data-testid={`tickets-inbox-${t.id}-${t._kind}`}
                     >
                       <Badge variant="outline" className="text-[9px] uppercase shrink-0">{t._label}</Badge>
@@ -3500,13 +3390,10 @@ export default function TicketsPage() {
           );
         })()}
       </div>
-      )}
 
       {/* Type Filter Tabs */}
-      {!listGrid.hiddenWidgets.has("type-tabs") && (
-      <div key="type-tabs" className="nx-widget-card">
-        <listGrid.HideBtn id="type-tabs" />
-        <div className="flex items-center gap-2 flex-wrap h-full">
+      <div key="type-tabs" className="min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap rounded-xl border border-white/[0.08] bg-black/[0.14] p-1.5 h-full">
           {[
             { val: "all", label: "All", icon: Ticket, count: tickets.length + workshopJobs.length + fieldJobs.length },
             { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
@@ -3516,8 +3403,8 @@ export default function TicketsPage() {
             <Button key={t.val} variant="outline" size="sm"
               onClick={() => setTypeFilter(t.val)}
               className={`gap-1.5 ${typeFilter === t.val
-                ? "text-zinc-100 border-zinc-600 bg-zinc-800"
-                : "text-zinc-400 border-zinc-800 hover:bg-zinc-900 hover:text-zinc-300"}`}
+                ? "text-violet-100 border-violet-500/25 bg-violet-500/[0.15]"
+                : "text-zinc-500 border-transparent hover:bg-white/[0.05] hover:text-zinc-200"}`}
               data-testid={`type-filter-${t.val}`}>
               <t.icon className={`w-3.5 h-3.5 ${typeFilter === t.val ? t.color || "" : "opacity-60"}`} />
               {t.label} <span className="text-xs opacity-70">({t.count})</span>
@@ -3525,37 +3412,31 @@ export default function TicketsPage() {
           ))}
         </div>
       </div>
-      )}
 
       {/* Filters */}
-      {!listGrid.hiddenWidgets.has("filters") && (
-      <div key="filters" className="nx-widget-card">
-        <listGrid.HideBtn id="filters" />
-        <div className="flex items-center gap-3 flex-wrap h-full">
+      <div key="filters" className="min-w-0">
+        <div className="flex items-center gap-3 flex-wrap rounded-xl border border-white/[0.08] bg-black/[0.12] px-3 py-2.5 h-full">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
+            <Input className="h-9 border-white/[0.08] bg-white/[0.03] pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]" data-testid="status-filter"><SelectValue /></SelectTrigger>
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+            <SelectTrigger className="h-9 w-[140px] border-white/[0.08] bg-white/[0.03]" data-testid="status-filter"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
           </Select>
-          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-[140px]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
+          <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+            <SelectTrigger className="h-9 w-[140px] border-white/[0.08] bg-white/[0.03]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
           </Select>
-          {(statusFilter !== "all" || priorityFilter !== "all") && (
-            <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); }} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
+          {(statusFilter !== "all" || priorityFilter !== "all" || attentionFilter !== "all") && (
+            <Button variant="ghost" size="sm" onClick={() => applyQueueFilter({})} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
           )}
-          <p className="text-sm text-muted-foreground ml-auto">{filteredTickets.length} of {tickets.length} tickets</p>
+          <p className="ml-auto rounded-lg bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-500">{attentionLabel ? `${attentionLabel} queue: ` : ""}{filteredTickets.length} of {tickets.length} tickets</p>
         </div>
       </div>
-      )}
 
       {/* Saved Views · Density · Group By toolbar */}
-      {!listGrid.hiddenWidgets.has("toolbar") && (
-      <div key="toolbar" className="nx-widget-card">
-        <listGrid.HideBtn id="toolbar" />
+      <div key="toolbar" className="min-w-0">
         {(typeFilter === "all" || typeFilter === "sla") ? (
           <>
             <SavedViewsBar
@@ -3577,9 +3458,8 @@ export default function TicketsPage() {
           </div>
         )}
       </div>
-      )}
 
-      </TicketsResponsiveGridLayout>
+      </div>
 
       {/* Bulk Actions Bar */}
       {(typeFilter === "all" || typeFilter === "sla") && (
@@ -3700,7 +3580,7 @@ export default function TicketsPage() {
           <div className="py-16 text-center" data-testid="ticket-list-empty">
             <Ticket className="w-10 h-10 mx-auto text-zinc-700 mb-3" />
             <p className="text-sm text-zinc-500 mb-3">No tickets match your filters</p>
-            <Button variant="outline" size="sm" onClick={() => { setStatusFilter("all"); setPriorityFilter("all"); setSearchQuery(""); }}>Clear filters</Button>
+            <Button variant="outline" size="sm" onClick={() => { applyQueueFilter({}); setSearchQuery(""); }}>Clear filters</Button>
           </div>
         )}
       </div>
@@ -3711,32 +3591,36 @@ export default function TicketsPage() {
         {(typeFilter === "all" || typeFilter === "workshop") && workshopJobs.map(j => {
           const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
           return (
-            <Card key={`ws-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-purple-500"
+            <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-purple-500/15 bg-gradient-to-r from-purple-500/[0.055] via-background to-background hover:border-purple-500/35 hover:shadow-md hover:shadow-purple-950/15 transition-all"
               onClick={() => fetchWsJobDetail(j)} data-testid={`ws-job-${j.id}`}>
-              <CardContent className="py-3 px-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-purple-500/10">
-                    <Wrench className="w-4 h-4 text-purple-400" />
+              <CardContent className="py-0 px-0">
+                <div className="flex items-stretch">
+                  <div className="w-1 shrink-0 bg-gradient-to-b from-purple-400 via-purple-500 to-indigo-600" />
+                  <div className="flex flex-1 items-center gap-4 p-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-purple-500/12 border border-purple-500/25 shadow-sm">
+                    <Wrench className="w-4 h-4 text-purple-300" />
                   </div>
-                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0">
-                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-purple-500/10 border border-purple-500/30 text-purple-300">{j.job_number}</div>
+                  <div className="relative flex flex-col items-center gap-1 w-24 flex-shrink-0">
+                    <span className="text-[9px] uppercase tracking-[0.14em] font-semibold text-purple-300/70">Workshop</span>
+                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-purple-500/12 border border-purple-500/25 text-purple-200">{j.job_number}</div>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium text-sm truncate">{j.fault_description || "Workshop Job"}</p>
-                      <Badge className="bg-purple-500/10 text-purple-400 text-[9px] border-purple-500/30">WORKSHOP</Badge>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-semibold text-sm truncate group-hover:text-purple-200 transition-colors">{j.fault_description || "Workshop repair"}</p>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{j.customer_name}</span>
-                      {j.device_brand && <><span className="text-muted-foreground/30">|</span><span>{j.device_brand} {j.device_model}</span></>}
+                    <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground/75">{j.customer_name}</span>
+                      <span className="text-muted-foreground/30">•</span>
+                      <span>{[j.device_brand, j.device_model].filter(Boolean).join(" ") || j.device_type || "Device details pending"}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="flex items-center gap-4 flex-shrink-0 pl-3 border-l border-border/50">
                     <Badge className={wsStatus.class + " text-[10px]"}>{wsStatus.label}</Badge>
-                    <div className="text-right w-20">
-                      <p className="text-xs text-muted-foreground">{j.assigned_to_name || <span className="text-red-400">Unassigned</span>}</p>
-                      <p className="font-mono text-xs text-green-400">${(j.total_cost || 0).toFixed(2)}</p>
+                    <div className="text-right w-24">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Bench tech</p>
+                      <p className="text-xs font-medium truncate">{j.assigned_to_name || <span className="text-amber-400">Unassigned</span>}</p>
                     </div>
+                  </div>
                   </div>
                 </div>
               </CardContent>

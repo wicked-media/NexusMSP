@@ -1,71 +1,126 @@
-"""Shared email sending utility using Resend.
-Reads config from DB first (settings.resend), falls back to env vars.
-"""
-import os
-import asyncio
+"""Shared outbound email delivery through the primary Microsoft 365 mailbox."""
 import logging
-import resend
+import base64
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from dotenv import load_dotenv
+import httpx
 from app.database import db
 from app.auth import get_current_user
 
-load_dotenv()
 logger = logging.getLogger(__name__)
-
-_ENV_API_KEY = os.environ.get("RESEND_API_KEY", "")
-_ENV_SENDER = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
-
-router = APIRouter(prefix="/settings/resend", tags=["Resend Settings"])
+router = APIRouter(prefix="/settings/email-delivery", tags=["Microsoft 365 Email Delivery"])
 
 
-async def _load_resend_config():
-    """Returns (api_key, sender_email, source). source is 'db' or 'env'."""
-    doc = await db.settings.find_one({"key": "resend"}, {"_id": 0})
-    if doc and doc.get("value"):
-        v = doc["value"]
-        api_key = (v.get("api_key") or "").strip()
-        if api_key:
-            return api_key, (v.get("sender_email") or _ENV_SENDER or "onboarding@resend.dev"), "db"
-    return _ENV_API_KEY, _ENV_SENDER, "env"
+async def _load_microsoft365_config():
+    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    if not settings.get("enabled") or not settings.get("connected"):
+        return None
+    required = ("tenant_id", "client_id", "client_secret")
+    if not all(str(settings.get(field) or "").strip() for field in required):
+        return None
+    settings["sender_email"] = settings.get("outbound_mailbox_email") or settings.get("mailbox_email")
+    if not str(settings.get("sender_email") or "").strip():
+        return None
+    return settings
 
 
-def _is_real_key(k: str) -> bool:
-    return bool(k) and not k.startswith("re_test_placeholder")
+async def is_microsoft365_configured() -> bool:
+    return bool(await _load_microsoft365_config())
 
 
-async def is_resend_configured_async() -> bool:
-    key, _, _ = await _load_resend_config()
-    return _is_real_key(key)
+async def _require_admin(current_user: dict):
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "role": 1, "is_admin": 1})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
-# Legacy sync helper (used at module import by some callers)
-def is_resend_configured():
-    return _is_real_key(_ENV_API_KEY)
-
-
-async def send_email(to_email: str, subject: str, html_content: str):
-    """Send an email via Resend. Returns dict with status and email_id."""
-    api_key, sender, source = await _load_resend_config()
-    if not _is_real_key(api_key):
-        logger.info(f"[EMAIL MOCK] To: {to_email} | Subject: {subject}")
-        return {"status": "mocked", "message": "Email logged (Resend not configured)", "email_id": None}
-
-    resend.api_key = api_key
-    params = {
-        "from": sender,
-        "to": [to_email],
-        "subject": subject,
-        "html": html_content,
-    }
+async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict):
+    """Maintain a provider-independent outbound email audit without storing message bodies."""
     try:
-        result = await asyncio.to_thread(resend.Emails.send, params)
-        logger.info(f"[EMAIL SENT via {source}] To: {to_email} | ID: {result.get('id')}")
-        return {"status": "sent", "message": f"Email sent to {to_email}", "email_id": result.get("id")}
-    except Exception as e:
-        logger.error(f"[EMAIL FAILED] To: {to_email} | Error: {str(e)}")
-        return {"status": "failed", "message": str(e), "email_id": None}
+        await db.email_delivery_log.insert_one({
+            "recipients": recipients,
+            "cc_recipients": cc_recipients,
+            "subject": subject,
+            "category": category,
+            "sender_mailbox": sender,
+            "attachment_count": len(attachments or []),
+            "status": result.get("status"),
+            "message": result.get("message"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.warning("Unable to save email delivery audit record: %s", exc)
+
+
+async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, attachments: list[dict] | None = None):
+    """Send through the selected Microsoft 365 mailbox for an outbound category."""
+    recipients = [to_email] if isinstance(to_email, str) else [address for address in to_email if address]
+    cc_recipients = [address for address in (cc_addresses or []) if address]
+    config = await _load_microsoft365_config()
+    if not config:
+        logger.info("[EMAIL MOCK] To: %s | Subject: %s", to_email, subject)
+        result = {"status": "mocked", "message": "Email logged (Microsoft 365 mailbox not connected)", "email_id": None}
+        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=None, attachments=attachments, result=result)
+        return result
+
+    sender = (config.get("outbound_routing") or {}).get(category) or config["sender_email"]
+    if not recipients:
+        result = {"status": "failed", "message": "No email recipient provided", "email_id": None}
+        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
+        return result
+    graph_attachments = []
+    for attachment in attachments or []:
+        content = attachment.get("content", b"")
+        content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        graph_attachments.append({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": attachment.get("filename") or "attachment",
+            "contentType": attachment.get("content_type") or "application/octet-stream",
+            "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
+        })
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            token_response = await client.post(
+                f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token",
+                data={
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials",
+                },
+            )
+            if token_response.status_code != 200:
+                result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
+                await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
+                return result
+            access_token = token_response.json().get("access_token")
+            send_response = await client.post(
+                f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                json={
+                    "message": {
+                        "subject": subject,
+                        "body": {"contentType": "HTML", "content": html_content},
+                        "toRecipients": [{"emailAddress": {"address": address}} for address in recipients],
+                        "ccRecipients": [{"emailAddress": {"address": address}} for address in cc_recipients],
+                        "attachments": graph_attachments,
+                    },
+                    "saveToSentItems": True,
+                },
+            )
+            if send_response.status_code not in (200, 202):
+                result = {"status": "failed", "message": "Microsoft 365 rejected the email", "email_id": None}
+                await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
+                return result
+        logger.info("[EMAIL SENT via Microsoft 365] From: %s To: %s", sender, ", ".join(recipients))
+        result = {"status": "sent", "message": f"Email sent to {', '.join(recipients)} via Microsoft 365", "email_id": None, "sender": sender}
+        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
+        return result
+    except Exception as exc:
+        logger.error("[EMAIL FAILED via Microsoft 365] To: %s | Error: %s", to_email, exc)
+        result = {"status": "failed", "message": "Microsoft 365 delivery failed", "email_id": None}
+        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
+        return result
 
 
 
@@ -78,88 +133,53 @@ def _mask(k: str) -> str:
 
 
 @router.get("")
-async def get_resend_settings(current_user: dict = Depends(get_current_user)):
-    """Return current Resend configuration (API key masked)."""
-    doc = await db.settings.find_one({"key": "resend"}, {"_id": 0}) or {}
-    v = doc.get("value", {}) or {}
-    db_key = v.get("api_key") or ""
-    configured_from = "db" if _is_real_key(db_key) else ("env" if _is_real_key(_ENV_API_KEY) else "none")
-    effective_key = db_key if _is_real_key(db_key) else _ENV_API_KEY
+async def get_email_delivery_settings(current_user: dict = Depends(get_current_user)):
+    """Return safe status of the shared Microsoft 365 delivery mailbox."""
+    await _require_admin(current_user)
+    config = await _load_microsoft365_config()
     return {
-        "api_key": _mask(effective_key),
-        "api_key_set": _is_real_key(effective_key),
-        "sender_email": v.get("sender_email") or _ENV_SENDER,
-        "reply_to": v.get("reply_to", ""),
-        "configured_from": configured_from,
-        "updated_at": doc.get("updated_at"),
-        "updated_by": doc.get("updated_by"),
-        "last_test_result": v.get("last_test_result"),
-        "last_test_at": v.get("last_test_at"),
+        "provider": "microsoft_365",
+        "configured": bool(config),
+        "sender_email": config.get("sender_email") if config else "",
+        "updated_at": config.get("updated_at") if config else None,
+        "updated_by": config.get("connected_by") if config else None,
     }
 
 
-@router.put("")
-async def update_resend_settings(data: dict, current_user: dict = Depends(get_current_user)):
-    """Update Resend settings. api_key='clear' removes it; masked keys ignored."""
-    api_key = (data.get("api_key") or "").strip()
-    sender_email = (data.get("sender_email") or "").strip() or _ENV_SENDER
-    reply_to = (data.get("reply_to") or "").strip()
-
-    existing = await db.settings.find_one({"key": "resend"}, {"_id": 0}) or {}
-    current_value = existing.get("value", {}) or {}
-    new_value = {**current_value, "sender_email": sender_email, "reply_to": reply_to}
-
-    if api_key == "clear":
-        new_value.pop("api_key", None)
-    elif api_key and not api_key.startswith("***") and "..." not in api_key[:10]:
-        new_value["api_key"] = api_key
-
-    await db.settings.update_one(
-        {"key": "resend"},
-        {"$set": {
-            "key": "resend",
-            "value": new_value,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "updated_by": current_user.get("name", ""),
-        }},
-        upsert=True
-    )
-    return {"message": "Resend settings saved"}
+@router.get("/audit")
+async def list_email_delivery_audit(limit: int = 25, current_user: dict = Depends(get_current_user)):
+    """Recent provider-independent outbound delivery outcomes for the mail console."""
+    await _require_admin(current_user)
+    safe_limit = max(1, min(limit, 100))
+    deliveries = await db.email_delivery_log.find({}, {"_id": 0}).sort("created_at", -1).to_list(safe_limit)
+    return {"deliveries": deliveries}
 
 
 @router.post("/test")
-async def test_resend(data: dict = None, current_user: dict = Depends(get_current_user)):
-    """Send a test email to verify Resend config."""
+async def test_microsoft365_delivery(data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Send a controlled test email through the shared Microsoft 365 mailbox."""
+    await _require_admin(current_user)
     data = data or {}
     to_email = (data.get("to_email") or current_user.get("email") or "").strip()
     if not to_email:
         raise HTTPException(status_code=400, detail="to_email required")
-
-    api_key, sender, source = await _load_resend_config()
-    if not _is_real_key(api_key):
-        raise HTTPException(status_code=400, detail="Resend API key not configured")
+    if not await is_microsoft365_configured():
+        raise HTTPException(status_code=400, detail="Microsoft 365 mailbox is not connected")
 
     html = f"""<div style="font-family: system-ui, sans-serif; padding: 24px; max-width: 560px; margin: auto;">
-      <h2 style="color: #10b981;">NexusOps - Resend Test Email</h2>
+      <h2 style="color: #10b981;">NexusMSP - Microsoft 365 Test Email</h2>
       <p>Hi {current_user.get('name', 'there')},</p>
-      <p>This is a test email from your NexusOps installation to verify your Resend integration is working correctly.</p>
-      <div style="background:#f1f5f9;padding:12px;border-radius:6px;font-size:12px;margin-top:16px;">
-        <strong>Source:</strong> {source}<br/>
-        <strong>Sender:</strong> {sender}<br/>
-        <strong>Sent at:</strong> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-      </div>
-      <p style="color:#64748b;font-size:12px;margin-top:24px;">If you received this, your Resend setup is operational.</p>
+      <p>This is a test email from your NexusMSP installation to verify Microsoft 365 mail delivery.</p>
+      <p style="color:#64748b;font-size:12px;margin-top:24px;">If you received this, the shared mailbox is ready for leads, tickets, invoices, and reminders.</p>
     </div>"""
-    result = await send_email(to_email, "NexusOps - Resend Test Email", html)
-
+    result = await send_email(to_email, "NexusMSP - Microsoft 365 Test Email", html)
     await db.settings.update_one(
-        {"key": "resend"},
+        {"type": "o365_mailbox"},
         {"$set": {
-            "value.last_test_result": result.get("status"),
-            "value.last_test_at": datetime.now(timezone.utc).isoformat(),
-            "value.last_test_to": to_email,
-            "value.last_test_message": result.get("message"),
+            "last_outbound_test_status": result.get("status"),
+            "last_outbound_test_at": datetime.now(timezone.utc).isoformat(),
+            "last_outbound_test_to": to_email,
+            "last_outbound_test_message": result.get("message", ""),
         }},
-        upsert=True
     )
     return result

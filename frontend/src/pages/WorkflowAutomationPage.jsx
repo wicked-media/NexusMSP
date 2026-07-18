@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +37,7 @@ const TRIGGER_ICONS = {
 
 export default function WorkflowAutomationPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [workflows, setWorkflows] = useState([]);
   const [triggers, setTriggers] = useState([]);
   const [actions, setActions] = useState([]);
@@ -65,7 +65,7 @@ export default function WorkflowAutomationPage() {
       setStats(statsRes.data);
     } catch { toast.error("Failed to load workflows"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

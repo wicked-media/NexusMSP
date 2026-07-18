@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { Mic, MicOff, Send, Loader2, AlertCircle, CheckCircle, Ticket, MessageSq
 
 export default function VoiceTicketPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [recording, setRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -28,7 +28,7 @@ export default function VoiceTicketPage() {
   useEffect(() => {
     axios.get(`${API}/clients`, { headers }).then(r => setClients(r.data)).catch(() => {});
     axios.get(`${API}/voice-ticket/history`, { headers }).then(r => setHistory(r.data)).catch(() => {});
-  }, []);
+  }, [headers]);
 
   const toggleRecording = () => {
     if (recording) {

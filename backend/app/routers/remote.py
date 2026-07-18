@@ -9,15 +9,184 @@ from app.models import *
 
 router = APIRouter()
 
+REMOTE_POLICY_DEFAULTS = {
+    "default_provider": "rustdesk",
+    "allow_fallback": True,
+    "require_consent": True,
+    "require_ticket_reference": False,
+}
+
+
+async def _remote_policy():
+    stored = await db.settings.find_one({"type": "remote_access_policy"}, {"_id": 0})
+    return {**REMOTE_POLICY_DEFAULTS, **(stored or {})}
+
+
+async def _provider_is_active(provider_id: str) -> bool:
+    if provider_id == "rustdesk":
+        legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
+        if legacy and legacy.get("value", {}).get("server_url") and legacy.get("value", {}).get("enabled", True):
+            return True
+        settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
+        return bool(settings and settings.get("server_url"))
+    config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
+    return bool(config and config.get("active"))
+
+
+async def _rustdesk_config() -> dict:
+    """Read both supported RustDesk setting shapes during the migration period."""
+    typed = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0}) or {}
+    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+    # Typed settings take precedence when an explicit value exists, while the
+    # established RustDesk integration remains a safe fallback.
+    return {
+        **legacy_value,
+        **{key: value for key, value in typed.items() if value not in (None, "")},
+    }
+
+
+def _device_provider_id(device: dict, provider_id: str) -> Optional[str]:
+    if provider_id == "rustdesk":
+        return device.get("rustdesk_id")
+    # Keep integration identifiers in one predictable map while accepting the
+    # straightforward legacy field used by early device imports.
+    ids = device.get("remote_provider_ids") or {}
+    return ids.get(provider_id) or device.get(f"{provider_id}_id") or device.get(f"{provider_id}_uuid")
+
+
+@router.get("/remote-access/policy")
+async def get_remote_access_policy(current_user: dict = Depends(get_current_user)):
+    return await _remote_policy()
+
+
+@router.put("/remote-access/policy")
+async def save_remote_access_policy(data: dict, current_user: dict = Depends(get_current_user)):
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not user or (user.get("role") != "admin" and not user.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    allowed = {"default_provider", "allow_fallback", "require_consent", "require_ticket_reference"}
+    updates = {key: value for key, value in data.items() if key in allowed}
+    if updates.get("default_provider") not in (None, "rustdesk", "splashtop"):
+        raise HTTPException(status_code=422, detail="Choose RustDesk or Splashtop as the default provider")
+    updates.update({"type": "remote_access_policy", "updated_at": datetime.now(timezone.utc).isoformat()})
+    await db.settings.update_one({"type": "remote_access_policy"}, {"$set": updates}, upsert=True)
+    return await _remote_policy()
+
+
+@router.get("/devices/{device_id}/remote-options")
+async def get_device_remote_options(device_id: str, current_user: dict = Depends(get_current_user)):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    policy = await _remote_policy()
+    assigned = device.get("remote_provider") or "inherit"
+    providers = []
+    for provider_id, name in (("rustdesk", "RustDesk"), ("splashtop", "Splashtop")):
+        provider_device_id = _device_provider_id(device, provider_id)
+        active = await _provider_is_active(provider_id)
+        selected = provider_id == (policy["default_provider"] if assigned == "inherit" else assigned)
+        providers.append({
+            "id": provider_id,
+            "name": name,
+            "active": active,
+            "assigned": assigned == provider_id,
+            "selected": selected,
+            "device_identifier": provider_device_id,
+            "ready": bool(active and provider_device_id),
+            "reason": None if active and provider_device_id else ("Provider is not enabled" if not active else "This device has not been enrolled"),
+        })
+    return {"device_id": device_id, "assigned_provider": assigned, "policy": policy, "providers": providers}
+
+
+@router.put("/devices/{device_id}/remote-access")
+async def save_device_remote_access(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    provider = data.get("remote_provider", "inherit")
+    if provider not in ("inherit", "rustdesk", "splashtop"):
+        raise HTTPException(status_code=422, detail="Unsupported remote provider")
+    ids = dict(device.get("remote_provider_ids") or {})
+    for provider_id in ("rustdesk", "splashtop"):
+        value = data.get(f"{provider_id}_id")
+        if value is not None:
+            if value:
+                ids[provider_id] = value.strip()
+            else:
+                ids.pop(provider_id, None)
+    await db.devices.update_one({"id": device_id}, {"$set": {
+        "remote_provider": provider,
+        "remote_provider_ids": ids,
+        "remote_access_updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    return await get_device_remote_options(device_id, current_user)
+
+
+@router.post("/devices/{device_id}/remote-sessions/start")
+async def start_provider_remote_session(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    policy = await _remote_policy()
+    provider = data.get("provider") or device.get("remote_provider") or policy["default_provider"]
+    if provider == "inherit":
+        provider = policy["default_provider"]
+    if provider not in ("rustdesk", "splashtop", "trmm"):
+        raise HTTPException(status_code=422, detail="Unsupported remote provider")
+    if policy["require_ticket_reference"] and not data.get("ticket_id"):
+        raise HTTPException(status_code=422, detail="A ticket reference is required before starting a remote session")
+    consent_confirmed = bool(data.get("consent_confirmed"))
+    if policy["require_consent"] and not consent_confirmed:
+        raise HTTPException(status_code=422, detail="End-user consent must be confirmed before starting a remote session")
+    if not await _provider_is_active(provider):
+        raise HTTPException(status_code=409, detail=f"{provider.title()} is not enabled in Remote Access settings")
+    provider_device_id = device.get("trmm_agent_id") if provider == "trmm" else _device_provider_id(device, provider)
+    if not provider_device_id:
+        raise HTTPException(status_code=409, detail=f"This device has not been enrolled in {provider.title()}")
+    client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    handoff_required = provider == "splashtop"
+    session = RemoteSession(
+        device_id=device_id, device_name=device.get("name"), client_id=device.get("client_id"),
+        client_name=client.get("name") if client else None, user_id=current_user["id"],
+        user_name=current_user.get("name"), session_type=data.get("session_type", "remote_desktop"),
+        rustdesk_id=device.get("rustdesk_id"), provider=provider, provider_device_id=provider_device_id,
+        ticket_id=data.get("ticket_id"), consent_required=policy["require_consent"],
+        consent_confirmed=consent_confirmed, consent_confirmed_at=now if consent_confirmed else None,
+        launch_status="handoff_required" if handoff_required else "launched", device_type=device.get("device_type", "workstation"),
+    )
+    doc = session.model_dump()
+    for key in ("started_at", "consent_confirmed_at"):
+        if doc.get(key): doc[key] = doc[key].isoformat()
+    await db.remote_sessions.insert_one(doc)
+    await log_activity(current_user, "remote_connect", "device", device_id, device.get("name", ""),
+        f"Started {provider.title()} {session.session_type} session on {device.get('name', '')}",
+        metadata={"session_id": session.id, "provider": provider, "ticket_id": data.get("ticket_id")})
+    return {
+        "session": doc,
+        "provider": provider,
+        "launch_mode": "provider_handoff" if handoff_required else "native_client",
+        "message": ("Open this device from the Splashtop technician console. NexusMSP has recorded the session; API launch handoff is the remaining Splashtop configuration step."
+                    if handoff_required else ("Tactical RMM session recorded. Continue with the MeshCentral connection." if provider == "trmm" else "RustDesk session recorded. Continue with the RustDesk connection dialog.")),
+    }
+
 # ============== RUSTDESK / REMOTE ACCESS ENDPOINTS ==============
 
 @router.get("/remote/status")
 async def get_remote_status(current_user: dict = Depends(get_current_user)):
-    settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
-    return {"configured": bool(settings and settings.get('server_url'))}
+    settings = await _rustdesk_config()
+    return {"configured": bool(settings.get("server_url"))}
 
 @router.post("/remote/settings")
 async def save_remote_settings(settings: RustDeskSettings, current_user: dict = Depends(get_current_user)):
+    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+    shared = {
+        "server_url": settings.server_url,
+        "api_key": settings.api_key,
+        "relay_server": settings.relay_server,
+    }
     await db.settings.update_one(
         {"type": "rustdesk"},
         {"$set": {
@@ -29,12 +198,22 @@ async def save_remote_settings(settings: RustDeskSettings, current_user: dict = 
         }},
         upsert=True
     )
+    await db.settings.update_one(
+        {"key": "rustdesk_config"},
+        {"$set": {
+            "key": "rustdesk_config",
+            "value": {**legacy_value, **shared, "enabled": True},
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_by": current_user["id"],
+        }},
+        upsert=True,
+    )
     return {"message": "RustDesk settings saved"}
 
 @router.get("/remote/settings")
 async def get_remote_settings(current_user: dict = Depends(get_current_user)):
-    settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
-    if not settings:
+    settings = await _rustdesk_config()
+    if not settings or not settings.get("server_url"):
         return {"configured": False}
     return {
         "configured": True,

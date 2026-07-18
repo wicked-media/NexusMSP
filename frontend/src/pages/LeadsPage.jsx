@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card } from "@/components/ui/card";
@@ -16,6 +17,7 @@ import {
   Funnel, KanbanSquare, BarChart3, Table as TableIcon, ChevronRight, Ticket, GitMerge, MoreVertical
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import HeroTile from "@/components/HeroTile";
 
 import InitialsAvatar from "../components/leads/InitialsAvatar";
 import LeadScoreBadge from "../components/leads/LeadScoreBadge";
@@ -39,6 +41,7 @@ const EMPTY_FORM = {
 
 export default function LeadsPage() {
   const { token, user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState("pipeline");
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
@@ -77,6 +80,13 @@ export default function LeadsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const leadId = searchParams.get("lead");
+    if (!leadId) return;
+    setDrawerLeadId(leadId);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter(l => {
@@ -99,7 +109,7 @@ export default function LeadsPage() {
         if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
       }
       if (q) {
-        const hay = `${l.company_name} ${l.contact_name} ${l.email} ${l.notes || ""}`.toLowerCase();
+        const hay = `${l.company_name} ${l.contact_name} ${l.email} ${l.source || ""} ${l.source_mailbox || ""} ${l.notes || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -159,6 +169,9 @@ export default function LeadsPage() {
           <p className="text-xs text-muted-foreground">Pipeline · scoring · forecasts · proposals · tickets.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { window.location.href = "/o365-setup"; }} data-testid="leads-email-intake">
+            <Funnel className="w-3.5 h-3.5 mr-1" />Email Intake
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setPasteOpen(true)} data-testid="leads-quick-add">
             <Sparkles className="w-3.5 h-3.5 mr-1" />Quick Add by Paste
           </Button>
@@ -173,10 +186,10 @@ export default function LeadsPage() {
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="Total Leads" value={leads.length} hue="violet" testid="stat-total" />
-        <Stat label="Open" value={summary.open} hue="sky" testid="stat-open" />
-        <Stat label="Pipeline $" value={money(summary.pipelineValue)} hue="emerald" testid="stat-pipeline-value" />
-        <Stat label="🔥 Hot" value={summary.hot} hue="orange" testid="stat-hot" />
+        <HeroTile label="All leads" value={leads.length} icon={Sparkles} glow="violet" testId="stat-total" />
+        <HeroTile label="Open pipeline" value={summary.open} icon={Funnel} glow="sky" testId="stat-open" />
+        <HeroTile label="Pipeline value" value={money(summary.pipelineValue)} icon={BarChart3} glow="emerald" animated={false} testId="stat-pipeline-value" />
+        <HeroTile label="Hot leads" value={summary.hot} icon={Flame} glow="amber" testId="stat-hot" />
       </div>
 
       <LeadActivityTicker />
@@ -263,6 +276,7 @@ export default function LeadsPage() {
                   <TableHead className="w-8"><input type="checkbox" checked={selected.length > 0 && selected.length === filteredLeads.length} onChange={e => setSelected(e.target.checked ? filteredLeads.map(l => l.id) : [])} /></TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Contact</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Stage</TableHead>
                   <TableHead className="text-right">Value</TableHead>
                   <TableHead className="text-center">Score</TableHead>
@@ -273,9 +287,9 @@ export default function LeadsPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={9} className="py-12 text-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading leads…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} className="py-12 text-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading leads…</TableCell></TableRow>
                 ) : filteredLeads.length === 0 ? (
-                  <TableRow><TableCell colSpan={9} className="py-12 text-center text-muted-foreground">No leads match. Click New Lead or Quick Add to start.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} className="py-12 text-center text-muted-foreground">No leads match. Click New Lead or Quick Add to start.</TableCell></TableRow>
                 ) : filteredLeads.map(l => {
                   const cfg = STATUS_CONFIG[l.status] || STATUS_CONFIG.new;
                   const sc = scores[l.id];
@@ -299,6 +313,7 @@ export default function LeadsPage() {
                         </div>
                       </TableCell>
                       <TableCell><span className="text-xs">{l.contact_name || "—"}</span></TableCell>
+                      <TableCell><div className="min-w-0"><span className="text-xs capitalize">{l.source || "—"}</span>{l.source_mailbox && <p className="max-w-[150px] truncate text-[10px] text-violet-300" title={l.source_mailbox}>{l.source_mailbox}</p>}</div></TableCell>
                       <TableCell><span className={`text-[10px] px-1.5 py-0.5 rounded border ${cfg.pill}`}>{cfg.label}</span></TableCell>
                       <TableCell className="text-right text-xs font-mono">{money(l.estimated_value)}</TableCell>
                       <TableCell className="text-center">{sc ? <LeadScoreBadge score={sc.overall} sub={sc} compact /> : <span className="text-[10px] text-zinc-600">—</span>}</TableCell>

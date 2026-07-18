@@ -64,6 +64,11 @@ func main() {
 		fmt.Println(s)
 		return
 	case "foreground", "":
+		if *runFlag == "" {
+			handled, err := svcRunIfNeeded(cfg)
+			if err != nil { log.Fatalf("service: %v", err) }
+			if handled { return }
+		}
 		runAgent(cfg)
 	default:
 		log.Fatalf("unknown -run mode: %s", *runFlag)
@@ -71,6 +76,20 @@ func main() {
 }
 
 func runAgent(cfg *config.Config) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		log.Println("shutting down...")
+		cancel()
+	}()
+	runAgentContext(ctx, cfg)
+}
+
+func runAgentContext(ctx context.Context, cfg *config.Config) {
 	log.Printf("NexusOps Agent %s starting...", Version)
 	log.Printf("Server: %s | Client: %s", cfg.ServerURL, cfg.ClientName)
 
@@ -94,20 +113,12 @@ func runAgent(cfg *config.Config) {
 	tr.SetToken(cfg.AgentToken)
 
 	// Background loops
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	hb := heartbeat.NewLoop(tr, cfg, Version, 60*time.Second)
 	cmd := commands.NewLoop(tr, cfg, 10*time.Second)
 
 	go hb.Run(ctx)
 	go cmd.Run(ctx)
 
-	// Wait for OS signal (or service stop on Windows)
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	<-sigCh
-	log.Println("shutting down...")
-	cancel()
+	<-ctx.Done()
 	time.Sleep(500 * time.Millisecond)
 }

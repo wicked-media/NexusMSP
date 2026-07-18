@@ -51,49 +51,63 @@ async def scan_compliance(client_id: str, framework: str = "cis", current_user: 
     if not fw:
         return {"error": "Unknown framework"}
 
-    # Gather environment data
-    device_count = await db.devices.count_documents({"client_id": client_id})
-    online = await db.devices.count_documents({"client_id": client_id, "status": "online"})
+    # Gather directly observable environment data. Controls without evidence stay
+    # explicitly unassessed; they are never silently marked as compliant.
+    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(5000)
+    device_count = len(devices)
+    online = sum(1 for device in devices if device.get("status") == "online")
+    assessed_devices = [device for device in devices if device.get("security_assessed_at")]
+    device_ids = [device.get("id") for device in devices if device.get("id")]
+    software_count = await db.device_software.count_documents({"device_id": {"$in": device_ids}}) if device_ids else 0
+    activity_count = await db.activity_logs.count_documents({"device_id": {"$in": device_ids}}) if device_ids else 0
     acronis_count = await db.acronis_devices.count_documents({"client_id": client_id})
-    vault_count = await db.vault.count_documents({"client_id": client_id})
-    contracts = await db.contracts.count_documents({"client_id": client_id, "status": "active"})
+    encrypted = lambda device: any(marker in str(device.get("encryption_status") or "").lower() for marker in ("encrypted", "bitlocker on", "protection on"))
+    all_assessed = bool(assessed_devices) and len(assessed_devices) == device_count
+    all_firewalls = all(device.get("firewall_enabled") for device in assessed_devices) if assessed_devices else False
+    all_defender = all(device.get("antivirus_status") == "active" and device.get("defender_real_time_enabled") for device in assessed_devices) if assessed_devices else False
+    all_encrypted = all(encrypted(device) for device in assessed_devices) if assessed_devices else False
 
     # Evaluate each control
     check_results = {
-        "devices_inventoried": device_count > 0,
-        "software_tracked": device_count > 0,
-        "backups_configured": acronis_count > 0 or device_count == 0,
-        "configs_secure": True,
-        "creds_managed": vault_count > 0 or device_count == 0,
-        "access_controlled": True,
-        "vulns_managed": device_count > 0,
-        "audit_logs": True,
-        "email_protected": True,
-        "antimalware": device_count > 0,
-        "recovery_tested": acronis_count > 0 or device_count == 0,
-        "network_managed": online > 0 or device_count == 0,
-        "data_integrity": True,
-        "encryption": True,
-        "risk_assessed": contracts > 0,
-        "training_done": False,
+        "devices_inventoried": ("pass" if device_count > 0 else "not_assessed", f"{device_count} device(s) recorded"),
+        "software_tracked": ("pass" if software_count > 0 else "not_assessed", f"{software_count} software inventory item(s) collected"),
+        "backups_configured": ("pass" if acronis_count > 0 else "not_assessed", f"{acronis_count} backup-enabled device(s) linked"),
+        "configs_secure": (("pass" if all_firewalls else "fail") if assessed_devices else "not_assessed", f"Firewall evidence from {len(assessed_devices)}/{device_count} device(s)"),
+        "creds_managed": ("not_assessed", "No credential-management evidence source connected"),
+        "access_controlled": ("not_assessed", "No identity-provider evidence source connected"),
+        "vulns_managed": (("pass" if all_assessed else "not_assessed"), f"Security posture assessed on {len(assessed_devices)}/{device_count} device(s)"),
+        "audit_logs": ("pass" if activity_count > 0 else "not_assessed", f"{activity_count} endpoint activity log entry/entries"),
+        "email_protected": ("not_assessed", "No email-security evidence source connected"),
+        "antimalware": (("pass" if all_defender else "fail") if assessed_devices else "not_assessed", f"Defender evidence from {len(assessed_devices)}/{device_count} device(s)"),
+        "recovery_tested": ("not_assessed", "Backup recovery-test evidence not available"),
+        "network_managed": ("pass" if online > 0 else "not_assessed", f"{online}/{device_count} device(s) currently online"),
+        "data_integrity": ("not_assessed", "No data-integrity evidence source connected"),
+        "encryption": (("pass" if all_encrypted else "fail") if assessed_devices else "not_assessed", f"Encryption evidence from {len(assessed_devices)}/{device_count} device(s)"),
+        "risk_assessed": ("not_assessed", "No documented risk-assessment evidence connected"),
+        "training_done": ("not_assessed", "No training-platform evidence source connected"),
     }
 
     results = []
     passed = 0
+    evaluated = 0
     for ctrl in fw["controls"]:
-        status = "pass" if check_results.get(ctrl["check"], False) else "fail"
+        status, evidence = check_results.get(ctrl["check"], ("not_assessed", "No evidence mapping configured"))
+        if status != "not_assessed":
+            evaluated += 1
         if status == "pass":
             passed += 1
-        results.append({**ctrl, "status": status})
+        results.append({**ctrl, "status": status, "evidence": evidence})
 
-    score = round((passed / max(len(fw["controls"]), 1)) * 100)
+    score = round((passed / evaluated) * 100) if evaluated else 0
 
     # Save report
     report_id = str(uuid.uuid4())[:8]
     report = {
         "id": report_id, "client_id": client_id, "client_name": client.get("name", ""),
         "framework": framework, "framework_name": fw["name"],
-        "score": score, "passed": passed, "total": len(fw["controls"]),
+        "score": score, "evidence_score": score,
+        "coverage_pct": round((evaluated / max(len(fw["controls"]), 1)) * 100),
+        "passed": passed, "evaluated": evaluated, "total": len(fw["controls"]),
         "controls": results,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "scanned_by": current_user.get("name", ""),

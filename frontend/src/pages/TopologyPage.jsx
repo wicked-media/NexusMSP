@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,7 +95,7 @@ function TopologyCanvas({ topology }) {
 
 export default function TopologyPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState("");
   const [topology, setTopology] = useState(null);
@@ -114,7 +114,7 @@ export default function TopologyPage() {
       finally { setLoading(false); }
     };
     fetch();
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => {
     if (!selectedClient) return;
@@ -127,7 +127,7 @@ export default function TopologyPage() {
       finally { setTopoLoading(false); }
     };
     fetchTopo();
-  }, [selectedClient, token]);
+  }, [selectedClient, headers]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 

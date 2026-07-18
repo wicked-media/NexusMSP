@@ -77,10 +77,23 @@ async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_us
 async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(get_current_user)):
     client = await db.clients.find_one({"id": ticket_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
+    if ticket_data.client_id and not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # The client account owns the service tier. Capture its policy on the
+    # ticket when it is created so SLA handling and reporting stay consistent.
+    inherited_tier = None
+    if client and client.get("service_tier_id"):
+        inherited_tier = await db.service_tiers.find_one(
+            {"id": client["service_tier_id"], "is_active": True},
+            {"_id": 0},
+        )
     
     assigned_name = None
     if ticket_data.assigned_to:
         user = await db.users.find_one({"id": ticket_data.assigned_to}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=404, detail="Assigned technician not found")
         assigned_name = user['name'] if user else None
     
     sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}
@@ -99,12 +112,17 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
             sla_resolve = float(service_doc.get("sla_resolve_hours") or 0)
             sla_hours[ticket_data.priority] = sla_resolve or sla_hours.get(ticket_data.priority, 8)
 
-    sla_due = datetime.now(timezone.utc) + timedelta(hours=sla_hours.get(ticket_data.priority, 8))
+    tier_resolution_minutes = int((inherited_tier or {}).get("resolution_sla_minutes") or 0)
+    sla_due = datetime.now(timezone.utc) + timedelta(
+        minutes=tier_resolution_minutes or (sla_hours.get(ticket_data.priority, 8) * 60)
+    )
     
     # Resolve device name(s)
     device_name = None
     if ticket_data.device_id:
         device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1})
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
         device_name = device['name'] if device else None
 
     # Multi-device: ensure device_id is included in device_ids, and resolve device_names parallel array
@@ -136,8 +154,17 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     doc['created_at'] = doc['created_at'].isoformat()
     doc['updated_at'] = doc['updated_at'].isoformat()
     doc['sla_due'] = doc['sla_due'].isoformat() if doc['sla_due'] else None
+    if inherited_tier:
+        doc.update({
+            "service_tier_id": inherited_tier["id"],
+            "service_tier_name": inherited_tier.get("name"),
+            "service_tier_source": "client",
+            "tier_response_sla_minutes": inherited_tier.get("response_sla_minutes"),
+            "tier_resolution_sla_minutes": inherited_tier.get("resolution_sla_minutes"),
+        })
     await db.tickets.insert_one(doc)
     await db.clients.update_one({"id": ticket_data.client_id}, {"$inc": {"ticket_count": 1}})
+    await ticket_audit(ticket.id, current_user, "created", f"Created ticket {ticket_number}")
 
     # Auto-apply default blueprint if the client has one (Syncro-style worksheet auto-apply)
     try:
@@ -222,9 +249,20 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # Resolve device name if device_id changed
     if 'device_id' in ticket_data and ticket_data['device_id']:
         device = await db.devices.find_one({"id": ticket_data['device_id']}, {"_id": 0, "name": 1})
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
         ticket_data['device_name'] = device['name'] if device else None
     elif 'device_id' in ticket_data and not ticket_data['device_id']:
         ticket_data['device_name'] = None
+    if 'assigned_to' in ticket_data:
+        if ticket_data['assigned_to']:
+            assignee = await db.users.find_one({"id": ticket_data['assigned_to']}, {"_id": 0, "name": 1})
+            if not assignee:
+                raise HTTPException(status_code=404, detail="Assigned technician not found")
+            ticket_data['assigned_name'] = assignee.get('name')
+            ticket_data['assigned_at'] = datetime.now(timezone.utc).isoformat()
+        else:
+            ticket_data['assigned_name'] = None
     result = await db.tickets.update_one({"id": ticket_id}, {"$set": ticket_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -493,8 +531,15 @@ async def ticket_audit(ticket_id: str, user: dict, action: str, details: str):
 
 @router.get("/tickets/{ticket_id}/audit-log")
 async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    entries = await db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return entries
+    # ``ticket_audit`` was used by early workflow/device features.  Merge it
+    # once at read time so existing history remains visible while all new
+    # records are written to ``ticket_audit_log``.
+    current, legacy = await asyncio.gather(
+        db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
+        db.ticket_audit.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
+    )
+    entries_by_id = {entry.get("id"): entry for entry in [*current, *legacy] if entry.get("id")}
+    return sorted(entries_by_id.values(), key=lambda entry: entry.get("created_at") or "", reverse=True)
 
 
 # ============== CANNED RESPONSES ==============
@@ -547,32 +592,16 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
     
     subject = email_data.subject or f"Re: [{ticket.get('ticket_number', '')}] {ticket.get('title', '')}"
 
-    # ------- Auto-inject rich signature (Outlook-grade) ------------------
-    body = email_data.body or ""
-    body_type = email_data.body_type or "text"
-    sig_marker = "<!--nx-signature-->"
-    if sig_marker not in body and "[[NX_SIG]]" not in body:
-        try:
-            from app.routers.email_signatures import _build_context, _render  # type: ignore
-            sig_doc = await db.email_signatures.find_one(
-                {"user_id": current_user["id"], "is_default": True}, {"_id": 0},
-            )
-            sig_html = ""
-            if sig_doc:
-                ctx = await _build_context(current_user["id"], ticket_id)
-                sig_html = _render(sig_doc.get("html", ""), ctx)
-            else:
-                u = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0}) or {}
-                legacy = u.get("email_signature") or ""
-                if legacy:
-                    sig_html = f"<pre style='font-family:inherit;margin:0;'>{legacy}</pre>"
-            if sig_html:
-                if body_type != "html":
-                    body = f"<div>{body.replace(chr(10), '<br/>')}</div>"
-                    body_type = "html"
-                body = f"{body}<br/><br/>{sig_marker}{sig_html}"
-        except Exception as _sig_err:  # noqa: F841
-            logger.warning(f"signature injection failed: {_sig_err}")
+    # Apply the signed-in technician's default rich signature server-side.
+    # A marker makes this safe for drafts/retries and scope selects new/reply.
+    from app.routers.email_signatures import append_default_signature
+    body, body_type, _signature_id = await append_default_signature(
+        body=email_data.body,
+        body_type=email_data.body_type,
+        current_user=current_user,
+        subject=subject,
+        ticket_id=ticket_id,
+    )
 
     ticket_email = TicketEmail(
         ticket_id=ticket_id,
@@ -591,40 +620,26 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         status="pending"
     )
     
-    # Send via Resend if configured
-    import resend
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    sender_email = os.environ.get("SENDER_EMAIL", "tickets@nexusops.io")
-    
-    if resend_key and not resend_key.startswith("re_test_placeholder"):
-        resend.api_key = resend_key
-        try:
-            params = {
-                "from": f"NexusOps <{sender_email}>",
-                "to": ticket_email.to_addresses,
-                "subject": ticket_email.subject,
-                "html": ticket_email.body if ticket_email.body_type == "html" else f"<pre>{ticket_email.body}</pre>",
-            }
-            if ticket_email.cc_addresses:
-                params["cc"] = ticket_email.cc_addresses
-            result = await asyncio.to_thread(resend.Emails.send, params)
-            ticket_email.status = "sent"
-            ticket_email.message_id = result.get("id") if isinstance(result, dict) else None
-            ticket_email.sent_at = datetime.now(timezone.utc)
-            logger.info(f"Email sent via Resend to {ticket_email.to_addresses}, id={ticket_email.message_id}")
-        except Exception as e:
-            ticket_email.status = "failed"
-            logger.error(f"Resend email failed: {e}")
-    else:
-        # Demo mode - mark as sent without actually sending
-        ticket_email.status = "sent"
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        ticket_email.to_addresses,
+        ticket_email.subject,
+        ticket_email.body if ticket_email.body_type == "html" else f"<pre>{ticket_email.body}</pre>",
+        category="ticket_replies",
+        cc_addresses=ticket_email.cc_addresses,
+    )
+    ticket_email.status = delivery.get("status", "failed")
+    ticket_email.message_id = delivery.get("email_id")
+    if ticket_email.status == "sent":
         ticket_email.sent_at = datetime.now(timezone.utc)
-        logger.info(f"Email marked as sent (demo mode) to {ticket_email.to_addresses}")
     
     doc = ticket_email.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     if doc.get('sent_at'):
         doc['sent_at'] = doc['sent_at'].isoformat()
+    doc['delivery_status'] = delivery.get('status', 'failed')
+    doc['delivery_message'] = delivery.get('message', '')
+    doc['sender_mailbox'] = delivery.get('sender')
     await db.ticket_emails.insert_one(doc)
     
     return ticket_email

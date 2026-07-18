@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,33 +49,10 @@ const ORPHAN_DEFAULT_LAYOUT = [
 
 const STATUS_ICON = { success: CheckCircle, failed: XCircle, running: Clock, warning: AlertTriangle };
 const STATUS_COLOR = { success: "text-emerald-400 bg-emerald-500/10", failed: "text-red-400 bg-red-500/10", running: "text-blue-400 bg-blue-500/10", warning: "text-amber-400 bg-amber-500/10" };
-const complianceColors = { compliant: "default", non_compliant: "destructive", no_backup: "outline" };
+const complianceColors = { compliant: "default", non_compliant: "destructive", no_backup: "outline", not_assessed: "secondary" };
 
 // Re-export for legacy local references in this file
 const AnimatedCounter = _AC;
-
-/** ── Animated counter — ticks up to target value (legacy local; the canonical version lives in /components/HeroTile.jsx) ── */
-function _AnimatedCounterLocal({ value, suffix = "", duration = 800 }) {
-  const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
-  useEffect(() => {
-    startRef.current = null;
-    const start = display;
-    const target = Number(value) || 0;
-    const raf = (ts) => {
-      if (!startRef.current) startRef.current = ts;
-      const elapsed = ts - startRef.current;
-      const progress = Math.min(1, elapsed / duration);
-      // ease-out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(start + (target - start) * eased));
-      if (progress < 1) requestAnimationFrame(raf);
-    };
-    requestAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-  return <>{display}{suffix}</>;
-}
 
 /** ── Live running-backup card with animated progress ring + shimmer ── */
 function RunningBackupCard({ activity, onCancel }) {
@@ -1059,9 +1036,10 @@ export default function BackupCenterPage() {
               <Card><CardContent className="pt-4 pb-3 text-center"><HardDrive className="w-4 h-4 mx-auto mb-1" /><p className="text-xl font-bold">{cs.total_devices}</p><p className="text-xs text-muted-foreground">Total Devices</p></CardContent></Card>
               <Card><CardContent className="pt-4 pb-3 text-center"><CheckCircle className="w-4 h-4 mx-auto mb-1 text-green-500" /><p className="text-xl font-bold text-green-500">{cs.compliant}</p><p className="text-xs text-muted-foreground">Compliant</p></CardContent></Card>
               <Card><CardContent className="pt-4 pb-3 text-center"><XCircle className="w-4 h-4 mx-auto mb-1 text-red-500" /><p className="text-xl font-bold text-red-500">{cs.non_compliant}</p><p className="text-xs text-muted-foreground">Non-Compliant</p></CardContent></Card>
-              <Card><CardContent className="pt-4 pb-3 text-center"><AlertTriangle className="w-4 h-4 mx-auto mb-1 text-amber-500" /><p className="text-xl font-bold text-amber-500">{cs.no_backup}</p><p className="text-xs text-muted-foreground">No Backup</p></CardContent></Card>
-              <Card><CardContent className="pt-4 pb-3 text-center"><Shield className="w-4 h-4 mx-auto mb-1 text-primary" /><p className="text-xl font-bold">{cs.compliance_pct}%</p><p className="text-xs text-muted-foreground">Compliance Rate</p></CardContent></Card>
+              <Card><CardContent className="pt-4 pb-3 text-center"><AlertTriangle className="w-4 h-4 mx-auto mb-1 text-amber-500" /><p className="text-xl font-bold text-amber-500">{cs.evidence_available ? cs.no_backup : cs.not_assessed}</p><p className="text-xs text-muted-foreground">{cs.evidence_available ? "No Backup" : "Not Assessed"}</p></CardContent></Card>
+              <Card><CardContent className="pt-4 pb-3 text-center"><Shield className="w-4 h-4 mx-auto mb-1 text-primary" /><p className="text-xl font-bold">{cs.compliance_pct}%</p><p className="text-xs text-muted-foreground">Verified Compliance Rate</p></CardContent></Card>
             </div>
+            {!cs.evidence_available && <p className="text-xs text-muted-foreground">No backup source has reported to NexusMSP yet. Connect or sync Acronis before treating any device as protected or unprotected.</p>}
             <Card>
               <CardHeader><CardTitle className="text-base">Device Backup Status</CardTitle></CardHeader>
               <CardContent>

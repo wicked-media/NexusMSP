@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +12,11 @@ import {
   Loader2, RefreshCw, AlertTriangle, TrendingUp, Heart, DollarSign,
   Users, Shield, ChevronRight, Target, ArrowUpRight, ArrowDownRight
 } from "lucide-react";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 
-export default function HealthRadarPage() {
+export default function HealthRadarPage({ embedded = false }) {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
@@ -27,8 +30,15 @@ export default function HealthRadarPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!embedded) {
+      navigate("/client-insights?tab=portfolio-radar", { replace: true });
+      return;
+    }
+    fetchData();
+  }, [embedded, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (!embedded) return null;
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   const getScoreColor = (score) => {
@@ -38,35 +48,29 @@ export default function HealthRadarPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="health-radar-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 p-6" data-testid="health-radar-page">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Client Health & Opportunity Radar</h1>
-          <p className="text-muted-foreground">Identify at-risk clients and upsell opportunities</p>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg border border-rose-500/25 bg-rose-500/10 flex items-center justify-center"><Heart className="w-4 h-4 text-rose-400" /></div>
+            <h1 className="text-2xl font-bold tracking-tight">Client Health Radar</h1>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">Prioritise retention risks and revenue opportunities across your client base.</p>
         </div>
-        <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+        <Button size="sm" variant="outline" onClick={fetchData}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh radar</Button>
       </div>
 
       {data && (
         <>
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><Users className="w-5 h-5 text-primary" /></div><div><p className="text-2xl font-bold">{data.summary.total_clients}</p><p className="text-xs text-muted-foreground">Total Clients</p></div></div></CardContent>
-            </Card>
-            <Card className="border-red-500/30">
-              <CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-red-400" /></div><div><p className="text-2xl font-bold text-red-400">{data.summary.at_risk_count}</p><p className="text-xs text-muted-foreground">At Risk</p></div></div></CardContent>
-            </Card>
-            <Card className="border-emerald-500/30">
-              <CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><Heart className="w-5 h-5 text-emerald-400" /></div><div><p className="text-2xl font-bold text-emerald-400">{data.summary.healthy_count}</p><p className="text-xs text-muted-foreground">Healthy</p></div></div></CardContent>
-            </Card>
-            <Card className="border-cyan-500/30">
-              <CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-cyan-400" /></div><div><p className="text-2xl font-bold text-cyan-400">${data.summary.total_potential_mrr?.toLocaleString()}</p><p className="text-xs text-muted-foreground">Potential MRR</p></div></div></CardContent>
-            </Card>
-          </div>
+          <MetricStrip columns={4}>
+            <MetricTile label="Clients monitored" value={data.summary.total_clients} accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} />
+            <MetricTile label="Require attention" value={data.summary.at_risk_count} accent="rose" icon={<AlertTriangle className="w-2.5 h-2.5 text-rose-400" />} />
+            <MetricTile label="Healthy clients" value={data.summary.healthy_count} accent="emerald" icon={<Heart className="w-2.5 h-2.5 text-emerald-400" />} />
+            <MetricTile label="Growth potential" value={`$${data.summary.total_potential_mrr?.toLocaleString() || 0}`} accent="sky" icon={<TrendingUp className="w-2.5 h-2.5 text-sky-400" />} />
+          </MetricStrip>
 
-          <Tabs defaultValue="at-risk">
-            <TabsList className="w-full grid grid-cols-3">
+          <Tabs defaultValue="at-risk" className="space-y-4">
+            <TabsList className="w-full max-w-2xl grid grid-cols-3 h-11 rounded-lg border border-border bg-card p-1">
               <TabsTrigger value="at-risk"><AlertTriangle className="w-3 h-3 mr-1" />At Risk ({data.at_risk_clients.length})</TabsTrigger>
               <TabsTrigger value="opportunities"><TrendingUp className="w-3 h-3 mr-1" />Opportunities ({data.upsell_opportunities.length})</TabsTrigger>
               <TabsTrigger value="healthy"><Heart className="w-3 h-3 mr-1" />Healthy ({data.healthy_clients.length})</TabsTrigger>

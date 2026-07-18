@@ -3,6 +3,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
+import re
 from app.database import db, security, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 
 
@@ -12,6 +13,24 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def password_policy_error(password: str, email: str = "") -> str | None:
+    """Return a user-safe password policy error, or None when the password is acceptable."""
+    if len(password) < 12:
+        return "Use at least 12 characters"
+    categories = sum((
+        bool(re.search(r"[a-z]", password)),
+        bool(re.search(r"[A-Z]", password)),
+        bool(re.search(r"\d", password)),
+        bool(re.search(r"[^A-Za-z0-9]", password)),
+    ))
+    if categories < 3:
+        return "Use at least three of: lowercase, uppercase, number, and symbol"
+    local_part = email.split("@", 1)[0].strip().lower()
+    if local_part and len(local_part) >= 3 and local_part in password.lower():
+        return "Do not include your email name in the password"
+    return None
 
 
 def create_token(user_id: str, email: str, role: str) -> str:

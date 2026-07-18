@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,7 @@ export default function VendorScorecardPage() {
   const [sortBy, setSortBy] = useState("score");
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [tab, setTab] = useState("overview");
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -45,7 +45,7 @@ export default function VendorScorecardPage() {
       setData(res.data);
     } catch { toast.error("Failed to load vendor data"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

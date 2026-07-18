@@ -168,19 +168,19 @@ def _health_score(d: dict) -> tuple[int, str]:
     reasons = []
     if d.get("status") == "offline":
         score -= 40; reasons.append("offline")
-    cpu = d.get("cpu_load") or 0
+    cpu = d.get("cpu_usage") or d.get("cpu_load") or 0
     if cpu >= 90: score -= 15; reasons.append(f"CPU {int(cpu)}%")
     elif cpu >= 75: score -= 5
-    mem = d.get("memory_pct") or 0
+    mem = d.get("memory_usage") or d.get("memory_pct") or 0
     if mem >= 90: score -= 15; reasons.append(f"RAM {int(mem)}%")
     elif mem >= 75: score -= 5
-    disk = d.get("disk_pct") or 0
+    disk = d.get("disk_usage") or d.get("disk_pct") or 0
     if disk >= 95: score -= 25; reasons.append(f"disk {int(disk)}% — critical")
     elif disk >= 90: score -= 15; reasons.append(f"disk {int(disk)}%")
     elif disk >= 80: score -= 5
     cf = d.get("checks_failing") or 0
     if cf > 0: score -= min(20, cf * 5); reasons.append(f"{cf} failing checks")
-    pp = d.get("patches_pending") or 0
+    pp = d.get("pending_patches") or d.get("patches_pending") or 0
     if pp >= 30: score -= 10; reasons.append(f"{pp} patches behind")
     elif pp >= 10: score -= 5
     score = max(0, min(100, score))
@@ -227,7 +227,7 @@ def _failure_risk(d: dict) -> dict:
     smart = d.get("smart_status")
     if smart and str(smart).lower() not in ("ok", "passed", "healthy"):
         risk += 35; factors.append(f"SMART: {smart}")
-    if (d.get("disk_pct") or 0) >= 95:
+    if (d.get("disk_usage") or d.get("disk_pct") or 0) >= 95:
         risk += 20; factors.append("disk critical")
     if (d.get("memory_errors") or 0) > 0:
         risk += 15; factors.append("memory errors detected")
@@ -264,10 +264,11 @@ async def device_dossier(device_id: str, current_user: dict = Depends(get_curren
     # Build "What changed today" timeline (last 24h)
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     timeline = []
-    # Audit logs touching this device
+    # Device audit and agent activity. These are the operational source of truth
+    # for a device; ticket audit logs do not reliably reference an endpoint.
     try:
-        audit = await db.ticket_audit.find(
-            {"created_at": {"$gte": since}, "details": {"$regex": (d.get("name") or device_id), "$options": "i"}},
+        audit = await db.activity_logs.find(
+            {"entity_type": "device", "entity_id": device_id, "created_at": {"$gte": since}},
             {"_id": 0, "action": 1, "details": 1, "created_at": 1, "user_name": 1},
         ).sort("created_at", -1).to_list(40)
         for a in audit:
@@ -280,16 +281,60 @@ async def device_dossier(device_id: str, current_user: dict = Depends(get_curren
     except Exception:
         pass
 
-    # CPU/RAM history if collected
-    history = []
+    # Agent events provide check-ins, command results, patch installs, and alerts.
     try:
-        async for h in db.device_telemetry.find(
-            {"device_id": device_id, "ts": {"$gte": since}},
-            {"_id": 0, "ts": 1, "cpu": 1, "memory": 1, "disk": 1},
-        ).sort("ts", 1):
-            history.append(h)
+        events = await db.device_events.find(
+            {"device_id": device_id, "timestamp": {"$gte": since}},
+            {"_id": 0, "event_type": 1, "message": 1, "timestamp": 1, "source": 1},
+        ).sort("timestamp", -1).to_list(40)
+        for event in events:
+            timeline.append({
+                "ts": event.get("timestamp"),
+                "kind": event.get("event_type") or "agent_event",
+                "title": event.get("message") or (event.get("event_type") or "Device event").replace("_", " ").title(),
+                "by": event.get("source") or "NexusOps Agent",
+            })
     except Exception:
         pass
+
+    # Surface the latest inventory and update evidence even when there was no
+    # configuration change. This tells a technician exactly how fresh the data is.
+    try:
+        software = await db.device_software.find({"device_id": device_id}, {"_id": 0, "last_inventory_at": 1}).to_list(5000)
+        inventory_at = max((row.get("last_inventory_at") for row in software if row.get("last_inventory_at")), default=None)
+        if inventory_at and inventory_at >= since:
+            timeline.append({"ts": inventory_at, "kind": "inventory", "title": f"Software inventory refreshed - {len(software)} applications recorded", "by": "NexusOps Agent"})
+        patches = await db.device_patches.find(
+            {"device_id": device_id, "detected_at": {"$gte": since}}, {"_id": 0, "status": 1, "detected_at": 1}
+        ).to_list(500)
+        pending = sum(1 for patch in patches if patch.get("status") in {"pending", "approved"})
+        if pending:
+            patch_ts = max((patch.get("detected_at") for patch in patches if patch.get("detected_at")), default=None)
+            timeline.append({"ts": patch_ts, "kind": "patches", "title": f"{pending} Windows update{'s' if pending != 1 else ''} detected for review", "by": "Windows Update"})
+    except Exception:
+        pass
+
+    # Compare the newest and oldest collected readings in the period. CPU is
+    # intentionally omitted because it is transient; memory and disk changes are
+    # durable and useful to a technician.
+    history = []
+    try:
+        history = await db.device_performance.find(
+            {"device_id": device_id, "timestamp": {"$gte": since}},
+            {"_id": 0, "timestamp": 1, "cpu": 1, "memory": 1, "disk": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1},
+        ).sort("timestamp", 1).to_list(500)
+        if len(history) >= 2:
+            first, latest = history[0], history[-1]
+            for label, keys in (("Memory usage", ("memory_usage", "memory")), ("Disk usage", ("disk_usage", "disk"))):
+                before = next((first.get(key) for key in keys if first.get(key) is not None), None)
+                after = next((latest.get(key) for key in keys if latest.get(key) is not None), None)
+                if isinstance(before, (int, float)) and isinstance(after, (int, float)) and abs(after - before) >= 3:
+                    direction = "increased" if after > before else "decreased"
+                    timeline.append({"ts": latest.get("timestamp"), "kind": "telemetry", "title": f"{label} {direction} from {before:.0f}% to {after:.0f}%", "by": "NexusOps Agent"})
+    except Exception:
+        pass
+
+    timeline.sort(key=lambda item: item.get("ts") or "", reverse=True)
 
     return {
         "device": d,
@@ -348,6 +393,10 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
     allowed = {"run-checks", "install-patches", "reboot", "shutdown", "send-message", "tag"}
     if action not in allowed:
         raise HTTPException(400, f"action must be one of {sorted(allowed)}")
+    if action != "tag":
+        from app.routers.nexus_agent import _can_execute_agent_commands
+        if not _can_execute_agent_commands(current_user):
+            raise HTTPException(403, "Agent command permission required")
 
     cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
     targets = [d async for d in cursor]

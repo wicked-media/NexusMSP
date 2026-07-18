@@ -16,7 +16,12 @@ import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 import CommandPalette from "@/components/CommandPalette";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
+  LOCAL_HOSTS.has(window.location.hostname)
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : window.location.origin
+);
 export const API = `${BACKEND_URL}/api`;
 
 // Theme Context
@@ -137,18 +142,19 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, [token]);
 
-  const login = async (email, password) => {
+  const login = async (email, password, twoFactorCode = "") => {
     try {
-      const response = await axios.post(`${API}/auth/login`, { email, password });
+      const response = await axios.post(`${API}/auth/login`, { email, password, two_factor_code: twoFactorCode });
+      if (response.data.requires_2fa) return { requires2FA: true };
       const { token: newToken, user: userData } = response.data;
       secureStorage.setItem("nexusops_token", newToken);
       setToken(newToken);
       setUser(userData);
       toast.success("Welcome back!");
-      return true;
+      return { success: true };
     } catch (error) {
       toast.error(error.response?.data?.detail || "Login failed");
-      return false;
+      return { success: false };
     }
   };
 
@@ -247,7 +253,7 @@ const buildRouteElement = (route) => {
   const Component = route.component;
   let element = (
     <Suspense fallback={<PageLoader />}>
-      <Component />
+      <Component redirectTab={route.redirectTab} redirectTo={route.redirectTo} />
     </Suspense>
   );
 

@@ -5,7 +5,7 @@ Defines per-tier SLA targets, colours, and feature flags so techs instantly
 know the level of service a client is on. Tiers are CRUD-managed by admins.
 """
 from fastapi import APIRouter, HTTPException, Depends
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db
 from app.auth import get_current_user
@@ -97,6 +97,23 @@ async def _seed_if_empty():
 async def _is_admin(user_id: str) -> bool:
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "role": 1, "is_admin": 1})
     return bool(u and (u.get("role") == "admin" or u.get("is_admin")))
+
+
+def _tier_sla_due(ticket: dict, resolution_minutes: int) -> str:
+    """Calculate an active ticket's deadline from the client contract.
+
+    A tier change applies the current agreement to open work.  Using the
+    ticket's original creation time retains an honest, auditable elapsed SLA
+    rather than silently giving an old ticket a fresh full window.
+    """
+    raw_created_at = ticket.get("created_at")
+    try:
+        created_at = datetime.fromisoformat(str(raw_created_at).replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        created_at = datetime.now(timezone.utc)
+    return (created_at + timedelta(minutes=resolution_minutes)).isoformat()
 
 
 @router.get("/service-tiers")
@@ -194,6 +211,32 @@ async def assign_client_tier(client_id: str, data: dict, current_user: dict = De
     result = await db.clients.update_one({"id": client_id}, ops)
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
+    active_ticket_query = {"client_id": client_id, "status": {"$nin": ["resolved", "closed"]}}
+    if tier_id:
+        # Keep active work aligned with the contract currently assigned to the
+        # client. Closed tickets preserve the historical context they had at
+        # the time of resolution.
+        resolution_minutes = int(tier.get("resolution_sla_minutes") or 0)
+        active_tickets = await db.tickets.find(active_ticket_query, {"_id": 0, "id": 1, "created_at": 1}).to_list(1000)
+        for active_ticket in active_tickets:
+            fields = {
+                "service_tier_id": tier_id,
+                "service_tier_name": tier.get("name"),
+                "service_tier_source": "client",
+                "tier_response_sla_minutes": tier.get("response_sla_minutes"),
+                "tier_resolution_sla_minutes": tier.get("resolution_sla_minutes"),
+            }
+            if resolution_minutes:
+                fields["sla_due"] = _tier_sla_due(active_ticket, resolution_minutes)
+            await db.tickets.update_one({"id": active_ticket["id"]}, {"$set": fields})
+    else:
+        await db.tickets.update_many(active_ticket_query, {"$unset": {
+            "service_tier_id": "",
+            "service_tier_name": "",
+            "service_tier_source": "",
+            "tier_response_sla_minutes": "",
+            "tier_resolution_sla_minutes": "",
+        }})
     return {"message": "Tier assigned", "service_tier_id": tier_id}
 
 
@@ -214,7 +257,7 @@ async def get_client_service_tier(client_id: str, current_user: dict = Depends(g
 @router.get("/tickets/{ticket_id}/service-tier")
 async def get_ticket_service_tier(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _seed_if_empty()
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "client_id": 1})
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "client_id": 1, "service_tier_id": 1})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     client = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0, "service_tier_id": 1, "name": 1})
@@ -222,6 +265,14 @@ async def get_ticket_service_tier(ticket_id: str, current_user: dict = Depends(g
         return {"tier": None, "client_id": ticket.get("client_id")}
     tier_id = client.get("service_tier_id")
     if not tier_id:
-        return {"tier": None, "client_id": client.get("id"), "client_name": client.get("name")}
+        return {"tier": None, "client_id": client.get("id"), "client_name": client.get("name"), "source": "client"}
     tier = await db.service_tiers.find_one({"id": tier_id}, {"_id": 0})
-    return {"tier": tier, "client_id": ticket.get("client_id"), "client_name": client.get("name")}
+    if tier and ticket.get("service_tier_id") != tier_id:
+        await db.tickets.update_one({"id": ticket_id}, {"$set": {
+            "service_tier_id": tier_id,
+            "service_tier_name": tier.get("name"),
+            "service_tier_source": "client",
+            "tier_response_sla_minutes": tier.get("response_sla_minutes"),
+            "tier_resolution_sla_minutes": tier.get("resolution_sla_minutes"),
+        }})
+    return {"tier": tier, "client_id": ticket.get("client_id"), "client_name": client.get("name"), "source": "client"}

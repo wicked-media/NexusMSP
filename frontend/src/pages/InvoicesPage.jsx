@@ -13,9 +13,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
+import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
@@ -61,6 +63,7 @@ export default function InvoicesPage() {
   const [editing, setEditing] = useState(null);
   const [viewInvoice, setViewInvoice] = useState(null);
   const [invoiceActivity, setInvoiceActivity] = useState([]);
+  const [invoiceActivityError, setInvoiceActivityError] = useState("");
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "", notes: "", date: "" });
   const [payingInvoice, setPayingInvoice] = useState(null);
@@ -70,6 +73,7 @@ export default function InvoicesPage() {
   const [voidDialog, setVoidDialog] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [voidingInvoice, setVoidingInvoice] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [pdfPreviewInvoice, setPdfPreviewInvoice] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -78,6 +82,7 @@ export default function InvoicesPage() {
   const [emailHistory, setEmailHistory] = useState([]);
   const [emailDialog, setEmailDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
+  const [disputeScan, setDisputeScan] = useState(null);
   // SMS reminder state
   const [smsDialog, setSmsDialog] = useState(false);
   const [smsTemplates, setSmsTemplates] = useState([]);
@@ -119,6 +124,14 @@ export default function InvoicesPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Chat and other workspaces can deep-link directly to a specific invoice.
+  useEffect(() => {
+    const invoiceId = searchParams.get("invoice");
+    if (!invoiceId || viewInvoice?.id === invoiceId || invoices.length === 0) return;
+    const target = invoices.find(invoice => invoice.id === invoiceId || invoice.invoice_number === invoiceId);
+    if (target) viewInvoiceDetail(target);
+  }, [invoices, searchParams, viewInvoice?.id]); // intentionally opens only the requested invoice
+
   // Stripe payment callback
   useEffect(() => {
     const success = searchParams.get("payment_success");
@@ -148,14 +161,18 @@ export default function InvoicesPage() {
   const viewInvoiceDetail = async (inv) => {
     setViewInvoice(inv);
     setDetailTab("items");
+    setInvoiceActivityError("");
     try {
       const [actRes, emailRes] = await Promise.all([
-        axios.get(`${API}/invoices/${inv.id}/activity-log`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/invoices/${inv.id}/activity-log`, { headers }).catch(error => {
+          setInvoiceActivityError(error.response?.status === 403 ? "Invoice audit history is available to billing administrators." : "Invoice audit history could not be loaded.");
+          return { data: [] };
+        }),
         axios.get(`${API}/invoices/${inv.id}/email-history`, { headers }).catch(() => ({ data: [] })),
       ]);
       setInvoiceActivity(actRes.data);
       setEmailHistory(emailRes.data);
-    } catch { setInvoiceActivity([]); setEmailHistory([]); }
+    } catch { setInvoiceActivity([]); setEmailHistory([]); setInvoiceActivityError("Invoice history could not be loaded."); }
   };
 
   const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
@@ -178,7 +195,7 @@ export default function InvoicesPage() {
       items[idx] = { ...items[idx], [field]: value };
       if (field === "product_id" && value) {
         const prod = products.find(p => p.id === value);
-        if (prod) { items[idx].name = prod.name; items[idx].unit_price = prod.retail_price; items[idx].description = prod.sku || ""; }
+        if (prod) { items[idx].name = prod.name; items[idx].unit_price = prod.sell_price ?? prod.retail_price ?? 0; items[idx].description = prod.sku || ""; }
       }
       items[idx].total = (items[idx].quantity || 0) * (items[idx].unit_price || 0);
       return { ...f, line_items: items };
@@ -224,6 +241,10 @@ export default function InvoicesPage() {
   const handleSave = async () => {
     if (!form.client_id) { toast.error("Client is required"); return; }
     if (!form.due_date) { toast.error("Due date is required"); return; }
+    if (form.line_items.length === 0) { toast.error("Add at least one invoice line before saving"); return; }
+    if (form.line_items.some(line => !line.name?.trim() || Number(line.quantity) <= 0 || Number(line.unit_price) < 0)) {
+      toast.error("Each line needs a name, positive quantity, and valid unit price"); return;
+    }
     const payload = {
       ...form,
       tax_rate: parseFloat(form.tax_rate) || 0,
@@ -253,7 +274,7 @@ export default function InvoicesPage() {
   };
 
   const handleDelete = async (id) => {
-    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); fetchAll(); if (viewInvoice?.id === id) setViewInvoice(null); }
+    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetchAll(); if (viewInvoice?.id === id) setViewInvoice(null); }
     catch { toast.error("Failed"); }
   };
 
@@ -271,6 +292,8 @@ export default function InvoicesPage() {
 
   const handleManualPayment = async () => {
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) { toast.error("Enter valid amount"); return; }
+    const remaining = (payingInvoice?.total || 0) - (payingInvoice?.amount_paid || 0);
+    if (parseFloat(paymentForm.amount) > remaining + 0.001) { toast.error(`Payment cannot exceed the remaining balance of $${remaining.toFixed(2)}`); return; }
     try {
       await axios.post(`${API}/invoices/${payingInvoice.id}/record-payment`, paymentForm, { headers });
       toast.success("Payment recorded");
@@ -302,13 +325,20 @@ export default function InvoicesPage() {
 
   // --- Email Invoice ---
   const handleEmailInvoice = async () => {
+    if (!emailForm.email.trim()) { toast.error("Enter the recipient email address"); return; }
     if (!viewInvoice) return;
     try {
-      await axios.post(`${API}/invoices/${viewInvoice.id}/email`, emailForm, { headers });
-      toast.success("Invoice emailed");
+      const response = await axios.post(`${API}/invoices/${viewInvoice.id}/email`, emailForm, { headers });
+      if (response.data?.sent) toast.success("Invoice emailed");
+      else toast.warning(response.data?.message || "Email delivery is not configured");
       setEmailDialog(false);
-      const res = await axios.get(`${API}/invoices/${viewInvoice.id}/email-history`, { headers });
-      setEmailHistory(res.data);
+      const [invoiceRes, historyRes] = await Promise.all([
+        axios.get(`${API}/invoices/${viewInvoice.id}`, { headers }),
+        axios.get(`${API}/invoices/${viewInvoice.id}/email-history`, { headers }),
+      ]);
+      setViewInvoice(invoiceRes.data);
+      setInvoices(current => current.map(invoice => invoice.id === invoiceRes.data.id ? invoiceRes.data : invoice));
+      setEmailHistory(historyRes.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to email"); }
   };
 
@@ -566,6 +596,7 @@ export default function InvoicesPage() {
             </div>
             <div><Label>Reference</Label><Input value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder="Reference number" data-testid="payment-reference" /></div>
             <div><Label>Payment Date</Label><Input type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div>
+            <div><Label>Internal Notes</Label><Textarea value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional payment notes" rows={2} /></div>
           </div>
           <DialogFooter><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="w-4 h-4 mr-1" />Confirm Payment</Button></DialogFooter>
         </DialogContent>
@@ -640,7 +671,34 @@ export default function InvoicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* CREDIT NOTE */}
+      {/* DISPUTE-RISK REVIEW */}
+      <Dialog open={Boolean(disputeScan)} onOpenChange={open => !open && setDisputeScan(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Shield className="w-5 h-5 text-rose-400" />Dispute-risk review</DialogTitle>
+            <p className="text-sm text-muted-foreground">{disputeScan?.invoice_number} · Review these items before sending or chasing payment.</p>
+          </DialogHeader>
+          <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
+            {disputeScan?.summary && <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">{disputeScan.summary}</div>}
+            {(!disputeScan?.flags?.length && !disputeScan?.ai_risks?.length) && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">No risks were found in this invoice.</div>}
+            {disputeScan?.flags?.map((flag, index) => (
+              <div key={`flag-${index}`} className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                <div className="mb-1 flex items-center gap-2"><Badge variant="outline" className="border-amber-500/40 text-amber-300">{flag.severity || "Review"}</Badge><span className="font-medium text-sm">{flag.line || "Invoice check"}</span></div>
+                <p className="text-sm text-muted-foreground">{flag.risk}</p>
+              </div>
+            ))}
+            {disputeScan?.ai_risks?.map((risk, index) => (
+              <div key={`ai-${index}`} className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
+                <div className="mb-1 flex items-center gap-2"><Badge variant="outline" className="border-rose-500/40 text-rose-300">AI · {risk.severity || "Review"}</Badge><span className="font-medium text-sm">{risk.line || "Invoice check"}</span></div>
+                <p className="text-sm text-muted-foreground">{risk.reason}</p>
+                {risk.justification && <p className="mt-2 border-l-2 border-rose-500/40 pl-3 text-xs text-muted-foreground">Suggested response: {risk.justification}</p>}
+              </div>
+            ))}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setDisputeScan(null)}>Close review</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={creditNoteDialog} onOpenChange={setCreditNoteDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Receipt className="w-5 h-5 text-amber-400" />Issue Credit Note</DialogTitle></DialogHeader>
@@ -712,11 +770,29 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.invoice_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the unpaid draft invoice. Sent, paid, and voided invoices remain as financial history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Invoice</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-invoice">
+              Delete Draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
   if (viewInvoice) {
     const inv = viewInvoice;
     const pStatus = inv.payment_status || "unpaid";
+    const canDelete = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
+    const canVoid = pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
     const balance = (inv.total || 0) - (inv.amount_paid || 0);
     const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
@@ -810,13 +886,14 @@ export default function InvoicesPage() {
                       <div className="text-center py-8 text-muted-foreground text-sm">No payments recorded</div>
                     ) : (
                       <Table>
-                        <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Recorded By</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+                        <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Notes</TableHead><TableHead>Recorded By</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
                         <TableBody>
                           {(inv.payments || []).map((p, i) => (
                             <TableRow key={`k-${i}`}>
-                              <TableCell className="text-sm">{p.date ? format(new Date(p.date), "MMM d, yyyy h:mm a") : "-"}</TableCell>
+                              <TableCell className="text-sm">{p.date ? (String(p.date).length === 10 ? format(parseISO(p.date), "MMM d, yyyy") : format(new Date(p.date), "MMM d, yyyy h:mm a")) : "-"}</TableCell>
                               <TableCell><Badge variant="outline" className="capitalize text-xs">{(p.method || "").replace(/_/g, " ")}</Badge></TableCell>
                               <TableCell className="text-sm font-mono">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
+                              <TableCell className="max-w-48 truncate text-sm text-muted-foreground" title={p.notes || ""}>{p.notes || "-"}</TableCell>
                               <TableCell className="text-sm">{p.recorded_by || "-"}</TableCell>
                               <TableCell className="text-right font-mono font-medium text-green-500">${(p.amount || 0).toFixed(2)}</TableCell>
                             </TableRow>
@@ -832,7 +909,7 @@ export default function InvoicesPage() {
                 <Card className="mt-2">
                   <CardContent className="p-0">
                     {emailHistory.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground text-sm">No emails sent yet</div>
+                      <div className="text-center py-8 text-muted-foreground text-sm">No delivery attempts yet</div>
                     ) : (
                       <Table>
                         <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>To</TableHead><TableHead>Subject</TableHead><TableHead>Sent By</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
@@ -843,7 +920,12 @@ export default function InvoicesPage() {
                               <TableCell className="text-sm">{em.email}</TableCell>
                               <TableCell className="text-sm max-w-xs truncate">{em.subject}</TableCell>
                               <TableCell className="text-sm">{em.sent_by_name}</TableCell>
-                              <TableCell>{em.sent ? <Badge className="bg-green-500/20 text-green-400 text-xs">Sent</Badge> : <Badge className="bg-amber-500/20 text-amber-400 text-xs">Queued</Badge>}</TableCell>
+                              <TableCell>
+                                {em.delivery_status === "failed" ? <Badge className="bg-rose-500/20 text-rose-400 text-xs">Failed</Badge>
+                                  : em.delivery_status === "mocked" ? <Badge className="bg-amber-500/20 text-amber-400 text-xs">Simulated</Badge>
+                                  : em.sent ? <Badge className="bg-green-500/20 text-green-400 text-xs">Sent</Badge>
+                                  : <Badge className="bg-muted text-muted-foreground text-xs">Queued</Badge>}
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -857,7 +939,7 @@ export default function InvoicesPage() {
                 <Card className="mt-2">
                   <CardContent className="p-0">
                     {invoiceActivity.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground text-sm">No audit entries</div>
+                      <div className="text-center py-8 text-muted-foreground text-sm">{invoiceActivityError || "No audit entries"}</div>
                     ) : (
                       <div className="p-4 space-y-2">
                         {invoiceActivity.map((log, i) => (
@@ -899,7 +981,7 @@ export default function InvoicesPage() {
                 <Separator />
                 <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{inv.created_at ? format(new Date(inv.created_at), "MMM d, yyyy") : "N/A"}</span></div>
                 {inv.paid_date && <><Separator /><div><span className="text-muted-foreground block">Paid Date</span><span className="font-medium text-green-500">{format(parseISO(inv.paid_date), "MMM d, yyyy")}</span></div></>}
-                {inv.last_emailed_to && <><Separator /><div><span className="text-muted-foreground block">Last Emailed</span><span className="font-medium text-blue-400">{inv.last_emailed_to}</span><span className="block text-xs text-muted-foreground">{inv.last_emailed_at ? format(new Date(inv.last_emailed_at), "MMM d, HH:mm") : ""}</span></div></>}
+                {inv.last_emailed_to && <><Separator /><div><span className="text-muted-foreground block">Last email attempt</span><span className="font-medium text-blue-400">{inv.last_emailed_to}</span><span className="block text-xs text-muted-foreground">{inv.last_emailed_at ? format(new Date(inv.last_emailed_at), "MMM d, HH:mm") : ""}</span>{inv.last_email_delivery_status && <Badge variant="outline" className={`mt-1 text-[10px] ${inv.last_email_delivery_status === "sent" ? "border-emerald-500/40 text-emerald-400" : inv.last_email_delivery_status === "failed" ? "border-rose-500/40 text-rose-400" : "border-amber-500/40 text-amber-400"}`}>{inv.last_email_delivery_status}</Badge>}</div></>}
                 {inv.late_fee_applied && <><Separator /><div><span className="text-muted-foreground block">Late Fees</span><span className="font-medium text-amber-400">${(inv.total_late_fees || 0).toFixed(2)}</span></div></>}
                 {pStatus !== "paid" && (
                   <>
@@ -948,13 +1030,12 @@ export default function InvoicesPage() {
                       const r = await axios.post(`${API}/invoices/${inv.id}/dispute-scan`, {}, { headers: { Authorization: `Bearer ${token}` } });
                       const total = (r.data.flags || []).length + (r.data.ai_risks || []).length;
                       toast.success(`Scanned · ${total} risk(s) found`);
-                      console.log("Dispute scan:", r.data);
-                      window.alert(
-                        "DISPUTE SCAN\n\n" +
-                        "Heuristic flags: " + ((r.data.flags || []).map(f => `[${f.severity}] ${f.line}: ${f.risk}`).join("\n") || "none") +
-                        "\n\nAI risks: " + ((r.data.ai_risks || []).map(a => `[${a.severity}] ${a.line}: ${a.reason}\n   → ${a.justification}`).join("\n\n") || "none") +
-                        ((r.data.ai_summary) ? ("\n\nSummary: " + r.data.ai_summary) : "")
-                      );
+                      setDisputeScan({
+                        invoice_number: inv.invoice_number,
+                        flags: r.data.flags || [],
+                        ai_risks: r.data.ai_risks || [],
+                        summary: r.data.ai_summary || "",
+                      });
                     } catch (e) {
                       toast.error(e.response?.data?.detail || e.message);
                     }
@@ -990,13 +1071,13 @@ export default function InvoicesPage() {
                 <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
                   <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Client
                 </Button>
-                <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>
-                {inv.status !== "cancelled" && (
+                {pStatus !== "paid" && inv.status !== "cancelled" && <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>}
+                {canVoid && (
                   <Button variant="outline" className="w-full text-amber-500 hover:text-amber-400" onClick={() => { setVoidingInvoice(inv); setVoidReason(""); setVoidDialog(true); }} data-testid="void-invoice-btn">
                     <Ban className="w-4 h-4 mr-1" />Void Invoice
                   </Button>
                 )}
-                <Button variant="destructive" className="w-full" onClick={() => handleDelete(inv.id)}><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+                {canDelete && <Button variant="destructive" className="w-full" onClick={() => setDeleteTarget(inv)} data-testid="delete-invoice-btn"><Trash2 className="w-4 h-4 mr-1" />Delete</Button>}
               </CardContent>
             </Card>
           </div>
@@ -1152,19 +1233,13 @@ export default function InvoicesPage() {
   // ========== LIST VIEW ==========
   return (
     <PageShell data-testid="invoices-page">
-      <MetricStrip columns={5}>
-        <MetricTile label="Total" value={stats.total || 0} accent="indigo" icon={<FileText className="w-2.5 h-2.5 text-indigo-400" />} testid="stat-total" />
-        <MetricTile label="Paid" value={stats.paid || 0} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="stat-paid" />
-        <MetricTile label="Unpaid" value={stats.unpaid || 0} accent={stats.unpaid > 0 ? "rose" : "emerald"} icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="stat-unpaid" />
-        <MetricTile label="Collected" value={`$${(stats.total_collected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="emerald" icon={<TrendingUp className="w-2.5 h-2.5 text-emerald-400" />} testid="stat-collected" />
-        <MetricTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent={stats.total_outstanding > 0 ? "amber" : "emerald"} icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="stat-outstanding" />
-      </MetricStrip>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Invoices</h1>
-          <p className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">{invoices.length} invoices</p>
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center"><Receipt className="w-4 h-4 text-emerald-300" /></span>
+            <div><h1 className="text-2xl font-bold tracking-tight">Invoices</h1><p className="text-sm text-muted-foreground">Billing command centre · {invoices.length} invoices</p></div>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10" data-testid="goto-billing-pro"><Zap className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
@@ -1176,6 +1251,14 @@ export default function InvoicesPage() {
           </Button>
           <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <HeroTile label="All invoices" value={stats.total || 0} icon={FileText} glow="cyan" testId="stat-total" />
+        <HeroTile label="Paid" value={stats.paid || 0} icon={CheckCircle} glow="emerald" testId="stat-paid" />
+        <HeroTile label="Unpaid" value={stats.unpaid || 0} icon={XCircle} glow={stats.unpaid > 0 ? "rose" : "emerald"} testId="stat-unpaid" />
+        <HeroTile label="Collected" value={`$${(stats.total_collected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingUp} glow="emerald" animated={false} testId="stat-collected" />
+        <HeroTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={AlertTriangle} glow={stats.total_outstanding > 0 ? "amber" : "emerald"} animated={false} testId="stat-outstanding" />
       </div>
 
       {/* Filters */}
@@ -1210,7 +1293,6 @@ export default function InvoicesPage() {
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="h-7">Clear</Button>
           <div className="ml-auto flex items-center gap-1.5">
             <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("mark_sent")} data-testid="bulk-mark-sent" className="h-7"><Send className="w-3 h-3 mr-1" />Mark Sent</Button>
-            <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("mark_paid")} data-testid="bulk-mark-paid" className="h-7"><DollarSign className="w-3 h-3 mr-1" />Mark Paid</Button>
             <Button size="sm" variant="outline" disabled={bulkBusy} onClick={handleExportCsv} data-testid="bulk-export-csv" className="h-7"><FileSpreadsheet className="w-3 h-3 mr-1" />Export CSV</Button>
             <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("void")} className="h-7 border-amber-500/30 text-amber-300"><Ban className="w-3 h-3 mr-1" />Void</Button>
             <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkAction("delete")} className="h-7 border-rose-500/30 text-rose-300"><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
@@ -1285,7 +1367,7 @@ export default function InvoicesPage() {
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400" title="Preview PDF" onClick={() => handlePdfPreview(inv)} data-testid={`print-btn-${inv.id}`}><Printer className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-400" title="Download" onClick={() => handlePdfDownload(inv)} data-testid={`download-btn-${inv.id}`}><Download className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(inv.id)}><Trash2 className="w-3 h-3" /></Button>
+                        {pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => setDeleteTarget(inv)}><Trash2 className="w-3 h-3" /></Button>}
                       </div>
                     </TableCell>
                   </TableRow>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -137,7 +137,7 @@ export default function XeroDashboardPage() {
   const [invForm, setInvForm] = useState(emptyInvForm);
   const [estForm, setEstForm] = useState(emptyEstForm);
   const [recForm, setRecForm] = useState(emptyRecForm);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -159,7 +159,7 @@ export default function XeroDashboardPage() {
       axios.get(`${API}/payment-links`, { headers }).then(r => setPaymentLinks(r.data)).catch(() => {});
     } catch { toast.error("Failed to load financial data"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -1088,7 +1088,7 @@ export default function XeroDashboardPage() {
             <div><Label>Recipient Email *</Label><Input type="email" value={emailForm.to_email} onChange={e => setEmailForm(p => ({ ...p, to_email: e.target.value }))} placeholder="client@company.com" data-testid="email-to" /></div>
             <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm(p => ({ ...p, subject: e.target.value }))} /></div>
             <div><Label>Message</Label><Textarea rows={4} value={emailForm.message} onChange={e => setEmailForm(p => ({ ...p, message: e.target.value }))} /></div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Shield className="w-3 h-3" />Invoice PDF will be auto-attached (Resend integration)</div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Shield className="w-3 h-3" />Invoice PDF will be auto-attached and sent through Microsoft 365</div>
           </div>
           <DialogFooter><Button onClick={handleSendEmail} disabled={emailSending} data-testid="send-email-btn">{emailSending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mail className="w-4 h-4 mr-1" />}{emailSending ? "Sending..." : "Send Invoice Email"}</Button></DialogFooter>
         </DialogContent>

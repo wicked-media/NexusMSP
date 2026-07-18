@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Brain, Loader2, Wrench, Radio } from "lucide-react";
+import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock } from "lucide-react";
 import { priorityConfig } from "@/config/ticketConfig";
 
 export function CreateTicketDialog({
@@ -281,42 +281,67 @@ export function CreateTicketDialog({
 export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm, users, handleCreateWsJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-purple-400" />New Workshop Job</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Customer Name</Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} data-testid="ws-customer" /></div>
-            <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} /></div>
-          </div>
-          <div><Label>Customer Email</Label><Input value={wsForm.customer_email} onChange={e => setWsForm({ ...wsForm, customer_email: e.target.value })} placeholder="customer@example.com" type="email" /></div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>Device Type</Label>
-              <Select value={wsForm.device_type || "laptop"} onValueChange={v => setWsForm({ ...wsForm, device_type: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="laptop">Laptop</SelectItem><SelectItem value="desktop">Desktop</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="tablet">Tablet</SelectItem><SelectItem value="printer">Printer</SelectItem><SelectItem value="network">Network Device</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
-              </Select>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-purple-500/[0.12] via-purple-500/[0.04] to-transparent">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shadow-sm">
+              <Wrench className="w-5 h-5 text-purple-300" />
             </div>
-            <div><Label>Brand</Label><Input value={wsForm.device_brand} onChange={e => setWsForm({ ...wsForm, device_brand: e.target.value })} placeholder="Dell, HP..." /></div>
-            <div><Label>Model</Label><Input value={wsForm.device_model} onChange={e => setWsForm({ ...wsForm, device_model: e.target.value })} /></div>
-          </div>
-          <div><Label>Serial Number</Label><Input value={wsForm.serial_number} onChange={e => setWsForm({ ...wsForm, serial_number: e.target.value })} className="font-mono" /></div>
-          <div><Label>Fault Description</Label><Textarea value={wsForm.fault_description} onChange={e => setWsForm({ ...wsForm, fault_description: e.target.value })} rows={3} data-testid="ws-fault" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Priority</Label>
-              <Select value={wsForm.priority} onValueChange={v => setWsForm({ ...wsForm, priority: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
-              </Select>
-            </div>
-            <div><Label>Assign Tech</Label>
-              <Select value={wsForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setWsForm({ ...wsForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
-                <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="space-y-1">
+              <DialogTitle className="text-lg">Check in workshop repair</DialogTitle>
+              <p className="text-sm text-muted-foreground">Create a job card with the essentials. Intake, quote and repair evidence can be captured after check-in.</p>
             </div>
           </div>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
+              <div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">1. Customer</h3></div>
+              <div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} placeholder="Name or business" data-testid="ws-customer" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} placeholder="Best contact number" /></div>
+                <div><Label>Email</Label><Input value={wsForm.customer_email} onChange={e => setWsForm({ ...wsForm, customer_email: e.target.value })} placeholder="name@example.com" type="email" /></div>
+              </div>
+            </section>
+            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
+              <div className="flex items-center gap-2"><Monitor className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">2. Device received</h3></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>Type</Label>
+                  <Select value={wsForm.device_type || "laptop"} onValueChange={v => setWsForm({ ...wsForm, device_type: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="laptop">Laptop</SelectItem><SelectItem value="desktop">Desktop</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="tablet">Tablet</SelectItem><SelectItem value="printer">Printer</SelectItem><SelectItem value="network">Network device</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Brand</Label><Input value={wsForm.device_brand} onChange={e => setWsForm({ ...wsForm, device_brand: e.target.value })} placeholder="Dell" /></div>
+                <div><Label>Model</Label><Input value={wsForm.device_model} onChange={e => setWsForm({ ...wsForm, device_model: e.target.value })} placeholder="Latitude" /></div>
+              </div>
+              <div><Label>Serial number</Label><Input value={wsForm.serial_number} onChange={e => setWsForm({ ...wsForm, serial_number: e.target.value })} placeholder="Record if available" className="font-mono" /></div>
+            </section>
+          </div>
+          <section className="rounded-xl border border-purple-500/20 bg-purple-500/[0.035] p-4 space-y-3">
+            <div className="flex items-center gap-2"><ClipboardList className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">3. Repair brief</h3><span className="text-xs text-muted-foreground ml-auto">Give the bench technician useful starting context</span></div>
+            <div><Label>Reported fault <span className="text-destructive">*</span></Label><Textarea value={wsForm.fault_description} onChange={e => setWsForm({ ...wsForm, fault_description: e.target.value })} rows={4} placeholder="What is the device doing, when did it start, and what has already been tried?" data-testid="ws-fault" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><Label>Priority</Label>
+                <Select value={wsForm.priority} onValueChange={v => setWsForm({ ...wsForm, priority: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="low">Low — when convenient</SelectItem><SelectItem value="normal">Normal — standard queue</SelectItem><SelectItem value="high">High — expedite</SelectItem><SelectItem value="critical">Critical — urgent repair</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Bench technician</Label>
+                <Select value={wsForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setWsForm({ ...wsForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
+                  <SelectTrigger><SelectValue placeholder="Leave in workshop queue" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Unassigned — workshop queue</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+          </section>
+          <div className="flex gap-2 text-xs text-muted-foreground px-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />The job starts as checked in. Capture arrival condition, accessories and a signed intake from the job card.</div>
         </div>
-        <DialogFooter><Button onClick={handleCreateWsJob} data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Create Job</Button></DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between">
+          <span className="text-xs text-muted-foreground hidden sm:block">A job number and repair timeline will be created immediately.</span>
+          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateWsJob} disabled={!wsForm.customer_name.trim() || !wsForm.fault_description.trim()} className="bg-purple-600 hover:bg-purple-700" data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Check in device</Button></div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -325,45 +350,19 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
 export function CreateFieldJobDialog({ open, onOpenChange, fjForm, setFjForm, users, handleCreateFjJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Radio className="w-5 h-5 text-cyan-400" />New Cabling / WISP Job</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Customer Name</Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} data-testid="fj-customer" /></div>
-            <div><Label>Phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} /></div>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-cyan-500/[0.12] via-cyan-500/[0.04] to-transparent">
+          <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><Radio className="w-5 h-5 text-cyan-300" /></div><div><DialogTitle className="text-lg">Dispatch field work</DialogTitle><p className="text-sm text-muted-foreground mt-1">Create a clear site brief, schedule the visit and give the field technician what they need before departure.</p></div></div>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer & location</h3></div><div className="grid grid-cols-2 gap-3"><div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} placeholder="Customer or site" data-testid="fj-customer" /></div><div><Label>Contact phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} placeholder="On-site contact" /></div></div><div><Label>Service address <span className="text-destructive">*</span></Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} placeholder="Full site address" data-testid="fj-address" /></div><div><Label>Zone / area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div></section>
+            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">2. Dispatch plan</h3></div><div><Label>Job category</Label><Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site survey</SelectItem></SelectContent></Select></div><div className="grid grid-cols-3 gap-3"><div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div><div><Label>Arrival time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div><div><Label>Duration</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} placeholder="Minutes" /></div></div><div><Label>Field technician</Label><Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}><SelectTrigger><SelectValue placeholder="Leave in dispatch queue" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned — dispatch queue</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select></div></section>
           </div>
-          <div><Label>Service Address</Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} data-testid="fj-address" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Zone / Area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div>
-            <div><Label>Job Category</Label>
-              <Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site Survey</SelectItem></SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div><Label>Description</Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={2} data-testid="fj-description" /></div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div>
-            <div><Label>Time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div>
-            <div><Label>Duration (min)</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Priority</Label>
-              <Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="normal">Normal</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
-              </Select>
-            </div>
-            <div><Label>Assign Tech</Label>
-              <Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}>
-                <SelectTrigger><SelectValue placeholder="Assign" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          </div>
+          <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 space-y-3"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">3. Site work brief</h3><span className="text-xs text-muted-foreground ml-auto">Make the first visit count</span></div><div><Label>Scope of work <span className="text-destructive">*</span></Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={4} placeholder="What needs to be installed, investigated or completed? Include site access, risks and any equipment expected on site." data-testid="fj-description" /></div><div><Label>Priority</Label><Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low — schedule when available</SelectItem><SelectItem value="normal">Normal — planned visit</SelectItem><SelectItem value="high">High — expedite dispatch</SelectItem><SelectItem value="critical">Critical — urgent site response</SelectItem></SelectContent></Select></div></section>
+          <div className="flex gap-2 text-xs text-muted-foreground px-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />After dispatch, capture site details, photos, materials and sign-off from the field job card.</div>
         </div>
-        <DialogFooter><Button onClick={handleCreateFjJob} data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Create Cabling / WISP Job</Button></DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between"><span className="text-xs text-muted-foreground hidden sm:block">A field job number and dispatch timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateFjJob} disabled={!fjForm.customer_name.trim() || !fjForm.service_address.trim() || !fjForm.description.trim()} className="bg-cyan-600 hover:bg-cyan-700" data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Dispatch field job</Button></div></DialogFooter>
       </DialogContent>
     </Dialog>
   );

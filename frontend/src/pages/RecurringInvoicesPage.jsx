@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import ReconcileDialog from "@/components/billing/ReconcileDialog";
 import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";
+import HeroTile from "@/components/HeroTile";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
@@ -50,29 +52,34 @@ export default function RecurringInvoicesPage() {
   const [showReconcile, setShowReconcile] = useState(null);
   const [showTemplateCreate, setShowTemplateCreate] = useState(false);
   const [showApplyTemplate, setShowApplyTemplate] = useState(null);
+  const [generateTarget, setGenerateTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [confirmSchedulerRun, setConfirmSchedulerRun] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Form
   const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", include_acronis_usage: false, include_pax8_usage: false, start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
   const [form, setForm] = useState(emptyForm);
   const [templateForm, setTemplateForm] = useState({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] });
-  const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false });
+  const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false, auto_send_email: "" });
 
   const fetchData = useCallback(async () => {
     try {
-      const [riRes, statsRes, tplRes, cliRes, schedRes] = await Promise.all([
+      const results = await Promise.allSettled([
         axios.get(`${API}/recurring-invoices/list`, { headers }),
         axios.get(`${API}/recurring-invoices/stats`, { headers }),
         axios.get(`${API}/invoice-templates`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/recurring-invoices/scheduler/status`, { headers }),
       ]);
-      setInvoices(riRes.data);
-      setStats(statsRes.data);
-      setTemplates(tplRes.data);
-      setClients(cliRes.data);
-      setSchedulerStatus(schedRes.data);
-    } catch { toast.error("Failed to load data"); }
+      const data = (index, fallback) => results[index].status === "fulfilled" ? results[index].value.data : fallback;
+      setInvoices(data(0, []));
+      setStats(data(1, { mrr: 0, arr: 0, active: 0, due_this_week: 0 }));
+      setTemplates(data(2, []));
+      setClients(data(3, []));
+      setSchedulerStatus(data(4, null));
+      if (results.every(result => result.status === "rejected")) toast.error("Failed to load recurring billing data");
+    } catch { toast.error("Failed to load recurring billing data"); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -93,10 +100,12 @@ export default function RecurringInvoicesPage() {
   const removeLineItem = (setter, idx) => setter(prev => ({ ...prev, line_items: prev.line_items.filter((_, i) => i !== idx) }));
 
   const calcSubtotal = (items) => items.reduce((a, li) => a + (parseFloat(li.amount) || 0), 0);
+  const hasValidLineItems = (items) => items?.length > 0 && items.every(li => li.description?.trim() && Number(li.quantity) > 0 && Number(li.rate) >= 0);
 
   const createRecurring = async () => {
-    if (!form.client_id || !form.description) { toast.error("Client and description required"); return; }
-    if (form.line_items.filter(li => li.description && li.amount).length === 0) { toast.error("Add at least one line item"); return; }
+    if (!form.client_id || !form.description.trim()) { toast.error("Client and description are required"); return; }
+    if (!hasValidLineItems(form.line_items)) { toast.error("Each line needs a description, positive quantity, and valid rate"); return; }
+    if (form.auto_send && !form.auto_send_email.trim()) { toast.error("Enter the invoice recipient email before enabling auto-send"); return; }
     setSaving(true);
     try {
       const data = { ...form, tax_rate: parseFloat(form.tax_rate) || 0, line_items: form.line_items.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
@@ -111,6 +120,9 @@ export default function RecurringInvoicesPage() {
 
   const saveEdit = async () => {
     if (!showEdit) return;
+    if (!showEdit.description?.trim()) { toast.error("Description is required"); return; }
+    if (!hasValidLineItems(showEdit.line_items)) { toast.error("Each line needs a description, positive quantity, and valid rate"); return; }
+    if (showEdit.auto_send && !showEdit.auto_send_email?.trim()) { toast.error("Enter the invoice recipient email before enabling auto-send"); return; }
     setSaving(true);
     try {
       const data = {
@@ -145,8 +157,9 @@ export default function RecurringInvoicesPage() {
     try {
       const res = await axios.post(`${API}/recurring-invoices/${id}/generate-now`, {}, { headers });
       toast.success(res.data.message);
+      setGenerateTarget(null);
       fetchData();
-    } catch { toast.error("Failed to generate"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to generate"); }
   };
 
   const duplicateRI = async (id) => {
@@ -158,16 +171,17 @@ export default function RecurringInvoicesPage() {
   };
 
   const deleteRI = async (id) => {
-    if (!window.confirm("Delete this recurring invoice?")) return;
     try {
       await axios.delete(`${API}/recurring-invoices/${id}`, { headers });
       toast.success("Deleted");
+      setDeleteTarget(null);
       fetchData();
     } catch { toast.error("Failed"); }
   };
 
   const createTemplate = async () => {
     if (!templateForm.name.trim()) { toast.error("Name required"); return; }
+    if (!hasValidLineItems(templateForm.line_items)) { toast.error("Each line needs a description, positive quantity, and valid rate"); return; }
     setSaving(true);
     try {
       const data = { ...templateForm, tax_rate: parseFloat(templateForm.tax_rate) || 0, line_items: templateForm.line_items.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
@@ -181,6 +195,7 @@ export default function RecurringInvoicesPage() {
 
   const applyTemplate = async () => {
     if (!showApplyTemplate || !applyForm.client_id) { toast.error("Select a client"); return; }
+    if (applyForm.auto_send && !applyForm.auto_send_email.trim()) { toast.error("Enter the invoice recipient email before enabling auto-send"); return; }
     setSaving(true);
     try {
       await axios.post(`${API}/invoice-templates/${showApplyTemplate.id}/apply`, applyForm, { headers });
@@ -205,11 +220,19 @@ export default function RecurringInvoicesPage() {
     setRunningScheduler(true);
     try {
       const res = await axios.post(`${API}/recurring-invoices/scheduler/run-now`, {}, { headers });
-      if (res.data.processed > 0) {
-        toast.success(`Generated ${res.data.processed} invoice(s)`);
+      const generated = res.data.generated ?? (res.data.results || []).filter(result => result.status === "generated").length;
+      const skipped = res.data.skipped_duplicates ?? (res.data.results || []).filter(result => result.status === "skipped").length;
+      const failed = (res.data.results || []).filter(result => result.status === "error").length;
+      if (failed > 0) {
+        toast.error(`${failed} billing stream(s) failed${generated ? `; ${generated} invoice(s) still generated` : ""}`);
+      } else if (generated > 0) {
+        toast.success(`Generated ${generated} invoice(s)${skipped ? ` · ${skipped} already existed` : ""}`);
+      } else if (skipped > 0) {
+        toast.info(`${skipped} billing period(s) already had an invoice`);
       } else {
         toast.info("No invoices due for generation");
       }
+      setConfirmSchedulerRun(false);
       fetchData();
     } catch { toast.error("Scheduler run failed"); }
     finally { setRunningScheduler(false); }
@@ -244,11 +267,11 @@ export default function RecurringInvoicesPage() {
   );
 
   return (
-    <div className="space-y-5" data-testid="recurring-invoices-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><RefreshCw className="w-6 h-6 text-blue-400" />Recurring Billing</h1>
-          <p className="text-muted-foreground mt-1">Manage recurring invoices, templates, and automated billing</p>
+    <div className="space-y-6" data-testid="recurring-invoices-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><RefreshCw className="w-4 h-4 text-violet-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Recurring Billing</h1><p className="text-sm text-muted-foreground">Contracts, templates, automated generation, and revenue health.</p></div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} data-testid="goto-billing-pro" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
@@ -260,19 +283,10 @@ export default function RecurringInvoicesPage() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { label: "Monthly MRR", value: `$${stats.mrr?.toLocaleString()}`, icon: DollarSign, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-            { label: "Annual ARR", value: `$${stats.arr?.toLocaleString()}`, icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/10" },
-            { label: "Active Templates", value: stats.active, icon: RefreshCw, color: "text-violet-400", bg: "bg-violet-500/10" },
-            { label: "Due This Week", value: stats.due_this_week, icon: Calendar, color: stats.due_this_week > 0 ? "text-amber-400" : "text-zinc-400", bg: stats.due_this_week > 0 ? "bg-amber-500/10" : "bg-zinc-500/10" },
-          ].map((s, i) => (
-            <Card key={`st-${i}`}>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center`}><s.icon className={`w-5 h-5 ${s.color}`} /></div>
-                <div><p className="text-2xl font-bold">{s.value}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</p></div>
-              </CardContent>
-            </Card>
-          ))}
+          <HeroTile label="Monthly recurring revenue" value={`$${(stats.mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-mrr" />
+          <HeroTile label="Annual recurring revenue" value={`$${(stats.arr || 0).toLocaleString()}`} icon={TrendingUp} glow="cyan" animated={false} onClick={() => { setTab("recurring"); setFilterStatus("all"); }} testId="recurring-metric-arr" />
+          <HeroTile label="Active billing streams" value={stats.active || 0} icon={RefreshCw} glow="violet" active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-active" />
+          <HeroTile label="Due this week" value={stats.due_this_week || 0} icon={Calendar} glow={stats.due_this_week > 0 ? "amber" : "emerald"} active={tab === "scheduler"} onClick={() => setTab("scheduler")} testId="recurring-metric-due" />
         </div>
       )}
 
@@ -340,7 +354,7 @@ export default function RecurringInvoicesPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="ghost" title="Generate Now" onClick={() => generateNow(ri.id)} data-testid={`gen-${ri.id}`}><Zap className="w-3 h-3 text-amber-400" /></Button>
+                          <Button size="sm" variant="ghost" title="Generate invoice now" onClick={() => setGenerateTarget(ri)} disabled={ri.status !== "active"} data-testid={`gen-${ri.id}`}><Zap className="w-3 h-3 text-amber-400" /></Button>
                           <Button size="sm" variant="ghost" title="Reconcile (bill-shock check)" onClick={() => setShowReconcile(ri)} data-testid={`reconcile-${ri.id}`}>
                             <DollarSign className="w-3 h-3 text-emerald-400" />
                           </Button>
@@ -348,7 +362,7 @@ export default function RecurringInvoicesPage() {
                           <Button size="sm" variant="ghost" title="Edit" onClick={() => setShowEdit({ ...ri, tax_rate: String(ri.tax_rate || 10) })}><Edit className="w-3 h-3" /></Button>
                           <Button size="sm" variant="ghost" title="History" onClick={() => setShowHistory(ri)}><Eye className="w-3 h-3" /></Button>
                           <Button size="sm" variant="ghost" title="Duplicate" onClick={() => duplicateRI(ri.id)}><Copy className="w-3 h-3" /></Button>
-                          <Button size="sm" variant="ghost" title="Delete" className="text-red-400" onClick={() => deleteRI(ri.id)}><Trash2 className="w-3 h-3" /></Button>
+                          <Button size="sm" variant="ghost" title={ri.invoices_generated > 0 ? "Streams with invoice history are retained" : "Delete"} className="text-red-400" onClick={() => setDeleteTarget(ri)} disabled={ri.invoices_generated > 0}><Trash2 className="w-3 h-3" /></Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -396,7 +410,7 @@ export default function RecurringInvoicesPage() {
                     <span>Used {tpl.usage_count || 0}x</span>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" className="flex-1" onClick={() => { setShowApplyTemplate(tpl); setApplyForm({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false }); }} data-testid={`apply-${tpl.id}`}>
+                    <Button size="sm" className="flex-1" onClick={() => { setShowApplyTemplate(tpl); setApplyForm({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false, auto_send_email: "" }); }} data-testid={`apply-${tpl.id}`}>
                       <Plus className="w-3 h-3 mr-1" />Use Template
                     </Button>
                     <Button size="sm" variant="ghost" className="text-red-400" onClick={() => deleteTemplate(tpl.id)}><Trash2 className="w-3 h-3" /></Button>
@@ -418,7 +432,7 @@ export default function RecurringInvoicesPage() {
                   <Badge className="bg-emerald-500/10 text-emerald-400 text-[9px] border border-emerald-500/20">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse" />Active
                   </Badge>
-                  <Button size="sm" onClick={runSchedulerNow} disabled={runningScheduler} data-testid="run-scheduler-btn">
+                  <Button size="sm" onClick={() => setConfirmSchedulerRun(true)} disabled={runningScheduler} data-testid="run-scheduler-btn">
                     {runningScheduler ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
                     Run Now
                   </Button>
@@ -449,7 +463,8 @@ export default function RecurringInvoicesPage() {
                 <p className="font-medium text-foreground text-sm">How it works:</p>
                 <p>The scheduler checks every 5 minutes for active recurring invoices whose next generation date is today or earlier.</p>
                 <p>When found, it automatically generates the invoice, updates the next generation date, and logs the event.</p>
-                <p>If auto-send is enabled on the recurring invoice, the generated invoice will be marked for email delivery.</p>
+                <p>Auto-send prepares the recipient details on the recurring billing record. Live email delivery requires a configured email provider and is verified separately.</p>
+                <p className="pt-1 text-foreground/80">Last scheduler activity: {schedulerStatus?.last_activity_at ? `${new Date(schedulerStatus.last_activity_at).toLocaleString()} · ${schedulerStatus.last_activity_status || "processed"}` : "No generation activity recorded yet"}</p>
               </div>
 
               <p className="text-sm font-medium mb-2">Recent Activity</p>
@@ -466,6 +481,7 @@ export default function RecurringInvoicesPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         {log.amount && <span className="font-mono font-bold">${log.amount?.toLocaleString()}</span>}
+                        {log.delivery?.requested && <Badge variant="outline" className={`text-[9px] ${log.delivery.status === "sent" ? "border-emerald-500/30 text-emerald-400" : log.delivery.status === "simulated" ? "border-amber-500/30 text-amber-400" : "border-rose-500/30 text-rose-400"}`}>Email {log.delivery.status}</Badge>}
                         <span className="text-muted-foreground">{log.timestamp ? new Date(log.timestamp).toLocaleString() : ""}</span>
                       </div>
                     </div>
@@ -516,7 +532,7 @@ export default function RecurringInvoicesPage() {
             </div>
             <div className="flex items-center gap-4 p-3 rounded-lg border">
               <Switch checked={form.auto_send} onCheckedChange={v => setForm(p => ({ ...p, auto_send: v }))} data-testid="ri-auto-send" />
-              <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Automatically email invoice when generated</p></div>
+              <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Send through the shared Microsoft 365 mailbox; delivery is recorded for every invoice.</p></div>
               {form.auto_send && <Input value={form.auto_send_email} onChange={e => setForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
             </div>
             <div className="flex items-center gap-4 p-3 rounded-lg border bg-sky-500/[0.03] border-sky-500/20">
@@ -646,11 +662,11 @@ export default function RecurringInvoicesPage() {
             {(showHistory?.generation_history || []).length === 0 ? (
               <p className="text-center py-8 text-muted-foreground text-sm">No invoices generated yet</p>
             ) : (
-              (showHistory?.generation_history || []).reverse().map((h, i) => (
-                <div key={`h-${i}`} className="flex items-center justify-between p-3 rounded-lg border text-sm">
-                  <div><p className="font-mono font-medium">{h.invoice_number}</p><p className="text-[10px] text-muted-foreground">{new Date(h.generated_at).toLocaleDateString()} by {h.generated_by}</p></div>
-                  <span className="font-mono font-bold">${h.amount?.toLocaleString()}</span>
-                </div>
+              [...(showHistory?.generation_history || [])].reverse().map((h, i) => (
+                <button key={`h-${i}`} type="button" onClick={() => { setShowHistory(null); navigate(`/invoices?invoice=${encodeURIComponent(h.invoice_id)}`); }} className="flex w-full items-center justify-between rounded-lg border p-3 text-left text-sm transition-colors hover:bg-muted/50">
+                  <div><p className="font-mono font-medium">{h.invoice_number}</p><p className="text-[10px] text-muted-foreground">{new Date(h.generated_at).toLocaleDateString()} by {h.generated_by}</p>{h.delivery?.requested && <Badge variant="outline" className={`mt-1 text-[9px] ${h.delivery.status === "sent" ? "border-emerald-500/30 text-emerald-400" : h.delivery.status === "mocked" ? "border-amber-500/30 text-amber-400" : "border-rose-500/30 text-rose-400"}`}>Email {h.delivery.status}</Badge>}</div>
+                  <div className="flex items-center gap-2"><span className="font-mono font-bold">${h.amount?.toLocaleString()}</span><ChevronRight className="h-4 w-4 text-muted-foreground" /></div>
+                </button>
               ))
             )}
           </div>
@@ -727,8 +743,9 @@ export default function RecurringInvoicesPage() {
             <div><Label>Start Date</Label><Input type="date" value={applyForm.start_date} onChange={e => setApplyForm(p => ({ ...p, start_date: e.target.value }))} /></div>
             <div className="flex items-center gap-3 p-3 rounded-lg border">
               <Switch checked={applyForm.auto_send} onCheckedChange={v => setApplyForm(p => ({ ...p, auto_send: v }))} />
-              <span className="text-sm">Auto-send invoices when generated</span>
+              <span className="text-sm">Auto-send invoices when generated (delivery is recorded)</span>
             </div>
+            {applyForm.auto_send && <div><Label>Invoice recipient email</Label><Input type="email" value={applyForm.auto_send_email} onChange={e => setApplyForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" /></div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowApplyTemplate(null)}>Cancel</Button>
@@ -736,6 +753,51 @@ export default function RecurringInvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!generateTarget} onOpenChange={open => !open && setGenerateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Generate an invoice now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will create and send {generateTarget?.description || "the recurring invoice"} for {generateTarget?.client_name || "this client"} into the invoice queue. The next generation date will advance to the following period.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => generateTarget && generateNow(generateTarget.id)} data-testid="confirm-generate-recurring">Generate Invoice</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this billing stream?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes {deleteTarget?.description || "the recurring invoice"}. Streams with generated invoice history are retained for financial traceability and cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Stream</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && deleteRI(deleteTarget.id)} data-testid="confirm-delete-recurring">Delete Stream</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmSchedulerRun} onOpenChange={setConfirmSchedulerRun}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Run the recurring scheduler now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Every active billing stream due today or earlier will generate an invoice immediately. This creates financial records and advances each processed stream to its next billing date; configured email delivery is attempted separately and remains auditable on the generated invoice.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runSchedulerNow} data-testid="confirm-run-scheduler">Run Scheduler</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ReconcileDialog
         open={!!showReconcile}

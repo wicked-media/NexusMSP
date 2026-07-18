@@ -47,7 +47,7 @@ async def billing_reconciliation(current_user: dict = Depends(get_current_user))
         if hours_used > included_hours:
             overage = hours_used - included_hours
             contract_discrepancies.append({
-                "client_id": cid, "contract_name": c.get("name", ""),
+                "contract_id": c.get("id", ""), "client_id": cid, "contract_name": c.get("name", ""),
                 "included_hours": included_hours, "hours_used": round(hours_used, 1),
                 "overage_hours": round(overage, 1),
                 "overage_value": round(overage * c.get("overage_rate", 100), 2),
@@ -58,6 +58,18 @@ async def billing_reconciliation(current_user: dict = Depends(get_current_user))
         {"status": "overdue"}, {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "total": 1, "due_date": 1}
     ).to_list(100)
     overdue_total = sum(i.get("total", 0) for i in overdue)
+
+    # Supplier invoice variances recorded against purchase orders. These are cost-control
+    # exceptions, not customer revenue, so keep them separate from recoverable revenue.
+    supplier_variances = await db.purchase_orders.find(
+        {"vendor_invoice_match.status": "variance"},
+        {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "total": 1, "vendor_invoice_match": 1}
+    ).to_list(200)
+    active_supplier_variances = [
+        po for po in supplier_variances
+        if (po.get("vendor_invoice_match") or {}).get("review", {}).get("status") != "accepted"
+    ]
+    supplier_variance_total = round(sum(abs(float((po.get("vendor_invoice_match") or {}).get("variance", 0) or 0)) for po in active_supplier_variances), 2)
 
     return {
         "unbilled_time": {
@@ -75,6 +87,12 @@ async def billing_reconciliation(current_user: dict = Depends(get_current_user))
             "invoices": overdue[:20],
             "total_count": len(overdue),
             "total_amount": round(overdue_total, 2),
+        },
+        "supplier_invoice_variances": {
+            "purchase_orders": active_supplier_variances[:20],
+            "total_count": len(active_supplier_variances),
+            "total_amount": supplier_variance_total,
+            "accepted_count": len(supplier_variances) - len(active_supplier_variances),
         },
         "total_recoverable": round(unbilled_amount + uninvoiced_products_total + overdue_total, 2),
     }

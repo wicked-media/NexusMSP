@@ -54,6 +54,7 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.507.0",
+    "markdown-it": "14.1.0",
     "next-themes": "^0.4.6",
     "react": "^19.0.0",
     "react-barcode": "^1.6.1",
@@ -63,7 +64,7 @@
     "react-hook-form": "^7.56.2",
     "react-resizable": "3.0.5",
     "react-resizable-panels": "^3.0.1",
-    "react-router-dom": "^7.5.1",
+    "react-router-dom": "7.5.1",
     "react-scripts": "5.0.1",
     "recharts": "^3.6.0",
     "sonner": "^2.0.3",
@@ -92,10 +93,9 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@craco/craco": "^7.1.0",
-    "@emergentbase/visual-edits": "https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz",
-    "@eslint/js": "9.23.0",
+    "babel-preset-react-app": "^10.1.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "9.23.0",
+    "eslint": "8.57.1",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.4",
@@ -104,5 +104,5 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17"
   },
-  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+  "packageManager": "pnpm@11.7.0"
 }

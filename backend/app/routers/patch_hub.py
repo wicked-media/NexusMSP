@@ -11,41 +11,42 @@ router = APIRouter()
 
 @router.get("/patch-hub/dashboard")
 async def patch_hub_dashboard(current_user: dict = Depends(get_current_user)):
-    """Unified patch management dashboard - OS + 3rd party combined"""
-    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "client_name": 1, "os": 1, "patch_status": 1, "pending_patches": 1, "type": 1}).to_list(500)
-    apps = await db.third_party_apps.find({}, {"_id": 0}).to_list(1000)
-    history = await db.patch_history.find({}, {"_id": 0}).sort("timestamp", -1).to_list(100)
-    if not history:
-        history = await _seed_patch_history(devices)
+    """Agent-backed Windows Update posture. Third-party patching is unassessed until integrated."""
+    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "client_name": 1, "os": 1, "pending_patches": 1, "security_assessed_at": 1}).to_list(5000)
+    device_ids = [device.get("id") for device in devices if device.get("id")]
+    agent_patches = await db.device_patches.find(
+        {"device_id": {"$in": device_ids}, "source": "windows-update-agent"}, {"_id": 0}
+    ).sort("detected_at", -1).to_list(5000) if device_ids else []
+    history = [
+        {"id": patch.get("id"), "device_id": patch.get("device_id"), "kb_id": patch.get("kb_article") or patch.get("kb_id"),
+         "title": patch.get("title"), "status": patch.get("status"), "timestamp": patch.get("detected_at")}
+        for patch in agent_patches
+    ]
 
-    total_devices = len(devices)
-    os_compliant = sum(1 for d in devices if d.get("patch_status") == "current")
-    os_needs = sum(1 for d in devices if d.get("patch_status") == "needs_attention")
-    os_critical = sum(1 for d in devices if d.get("patch_status") == "critical")
-    total_pending = sum(d.get("pending_patches", 0) for d in devices)
-
-    app_total = len(apps)
-    app_current = sum(1 for a in apps if a.get("status") == "current")
-    app_outdated = app_total - app_current
+    assessed_devices = [device for device in devices if device.get("security_assessed_at")]
+    total_devices = len(assessed_devices)
+    os_compliant = sum(1 for d in assessed_devices if int(d.get("pending_patches") or 0) == 0)
+    os_needs = sum(1 for d in assessed_devices if 0 < int(d.get("pending_patches") or 0) <= 10)
+    os_critical = sum(1 for d in assessed_devices if int(d.get("pending_patches") or 0) > 10)
+    total_pending = sum(int(d.get("pending_patches") or 0) for d in assessed_devices)
 
     recent_failures = [h for h in history if h.get("status") == "failed"][:10]
 
-    # Ring status
-    rings = await _get_rings_with_status()
-
-    # Upcoming patches
-    upcoming = await db.patch_queue.find({"status": "pending"}, {"_id": 0}).sort("scheduled_for", 1).to_list(20)
-    if not upcoming:
-        upcoming = await _seed_patch_queue(devices)
+    # Deployment rings and third-party application patching are intentionally not
+    # inferred from Windows Update telemetry.
+    rings = []
+    upcoming = [patch for patch in history if patch.get("status") == "pending"][:20]
 
     return {
-        "os_summary": {"total_devices": total_devices, "compliant": os_compliant, "needs_attention": os_needs, "critical": os_critical, "compliance_pct": round(os_compliant / total_devices * 100, 1) if total_devices else 0, "total_pending_patches": total_pending},
-        "app_summary": {"total_apps": app_total, "current": app_current, "outdated": app_outdated, "compliance_pct": round(app_current / app_total * 100, 1) if app_total else 0},
+        "os_summary": {"total_devices": total_devices, "managed_devices": len(devices), "unassessed": len(devices) - total_devices, "compliant": os_compliant, "needs_attention": os_needs, "critical": os_critical, "compliance_pct": round(os_compliant / total_devices * 100, 1) if total_devices else 0, "total_pending_patches": total_pending},
+        "app_summary": {"available": False, "total_apps": 0, "current": 0, "outdated": 0, "compliance_pct": 0},
         "rings": rings,
         "recent_history": history[:20],
         "recent_failures": recent_failures,
         "upcoming_queue": upcoming[:15],
-        "stats_7d": await _get_7day_stats(),
+        "stats_7d": [],
+        "source": "nexus-agent",
+        "note": "Windows Update posture is reported by Nexus Agent. Third-party application patch compliance requires an integrated patch provider.",
     }
 
 
@@ -233,24 +234,28 @@ async def get_failed_remediations(current_user: dict = Depends(get_current_user)
 @router.get("/patch-hub/compliance-by-client")
 async def compliance_by_client(current_user: dict = Depends(get_current_user)):
     """Patch compliance breakdown per client"""
-    devices = await db.devices.find({}, {"_id": 0, "client_name": 1, "patch_status": 1, "pending_patches": 1}).to_list(500)
+    devices = await db.devices.find({}, {"_id": 0, "client_name": 1, "pending_patches": 1, "security_assessed_at": 1}).to_list(5000)
     clients = {}
     for d in devices:
         cn = d.get("client_name", "Unknown")
         if cn not in clients:
-            clients[cn] = {"client_name": cn, "total": 0, "compliant": 0, "needs_attention": 0, "critical": 0, "pending_patches": 0}
+            clients[cn] = {"client_name": cn, "total": 0, "assessed": 0, "unassessed": 0, "compliant": 0, "needs_attention": 0, "critical": 0, "pending_patches": 0}
         clients[cn]["total"] += 1
-        ps = d.get("patch_status", "unknown")
-        if ps == "current":
+        if not d.get("security_assessed_at"):
+            clients[cn]["unassessed"] += 1
+            continue
+        clients[cn]["assessed"] += 1
+        pending = int(d.get("pending_patches") or 0)
+        if pending == 0:
             clients[cn]["compliant"] += 1
-        elif ps == "needs_attention":
+        elif pending <= 10:
             clients[cn]["needs_attention"] += 1
-        elif ps == "critical":
+        else:
             clients[cn]["critical"] += 1
-        clients[cn]["pending_patches"] += d.get("pending_patches", 0)
+        clients[cn]["pending_patches"] += pending
     result = []
     for c in clients.values():
-        c["compliance_pct"] = round(c["compliant"] / c["total"] * 100, 1) if c["total"] else 0
+        c["compliance_pct"] = round(c["compliant"] / c["assessed"] * 100, 1) if c["assessed"] else 0
         result.append(c)
     return sorted(result, key=lambda x: x["compliance_pct"])
 

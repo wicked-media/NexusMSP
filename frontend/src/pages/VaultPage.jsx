@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,7 @@ export default function VaultPage() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("passwords");
   const [form, setForm] = useState({ name: "", username: "", password: "", url: "", notes: "", category: "general", client_name: "" });
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -39,7 +39,7 @@ export default function VaultPage() {
       setAudit(aRes.data);
     } catch { toast.error("Failed to load vault"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 

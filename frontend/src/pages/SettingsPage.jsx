@@ -78,7 +78,7 @@ const SETTINGS_INDEX = [
   // Integrations
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
-  { tab: "integrations", anchor: "resend-settings-card", label: "Resend Email Delivery", keywords: "resend email smtp api key transactional onboarding welcome email notifications" },
+  { tab: "integrations", anchor: "microsoft365-delivery-card", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
@@ -217,7 +217,7 @@ export default function SettingsPage() {
           axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
           axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
           axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/settings/resend`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/settings/email-delivery`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
@@ -252,7 +252,7 @@ export default function SettingsPage() {
           if (mbxRes.data.tenant_id) {
             setMailboxForm(f => ({
               ...f, tenant_id: mbxRes.data.tenant_id || "", client_id: mbxRes.data.client_id || "",
-              client_secret: mbxRes.data.client_secret ? "********" : "",
+              client_secret: mbxRes.data.client_secret_set ? "********" : "",
               redirect_uri: mbxRes.data.redirect_uri || "", mailbox_email: mbxRes.data.mailbox_email || "",
               email_to_lead_enabled: mbxRes.data.email_to_lead_enabled !== false,
               email_to_ticket_enabled: mbxRes.data.email_to_ticket_enabled || false,
@@ -553,10 +553,6 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div><Label>Login Tagline</Label><Input value={branding.login_tagline || ""} onChange={e => setBranding(p => ({ ...p, login_tagline: e.target.value }))} placeholder="Unified RMM & PSA platform for modern managed service providers" /><p className="text-[10px] text-muted-foreground mt-1">Shown below the main heading on the login page</p></div>
             <div><Label>Feature Pills (comma-separated)</Label><Input value={(branding.login_features || []).join(", ")} onChange={e => setBranding(p => ({ ...p, login_features: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))} placeholder="RMM, Ticketing, Invoicing, Networking, Assets, Reporting" /><p className="text-[10px] text-muted-foreground mt-1">Tags shown at the bottom of the login hero section</p></div>
-            <div className="flex items-center gap-3 p-3 rounded-lg border">
-              <Switch checked={branding.powered_by_visible !== false} onCheckedChange={v => setBranding(p => ({ ...p, powered_by_visible: v }))} data-testid="powered-by-toggle" />
-              <div><p className="text-sm font-medium">Show "Made with Emergent" badge</p><p className="text-[10px] text-muted-foreground">Toggle the powered-by badge visibility</p></div>
-            </div>
           </CardContent>
         </Card>
 
@@ -962,7 +958,23 @@ export default function SettingsPage() {
       </>)}
 
       {/* ==================== MAILBOX TAB ==================== */}
-      {activeTab === "mailbox" && (<>
+      {activeTab === "mailbox" && (
+        <Card id="mailbox-o365-card" className="border-blue-500/25 bg-blue-500/[0.03]" data-testid="mailbox-o365-card">
+          <CardHeader>
+            <div className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" /><CardTitle>Microsoft 365 Mailboxes</CardTitle></div>
+            <CardDescription>Mailbox connection, inbox routing, automatic sync, outbound roles, delivery tests, and the email audit live in one dedicated workspace.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Badge className={mailboxConnected ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}>{mailboxConnected ? "Connected" : "Not connected"}</Badge>
+              {mailboxConnected && <span className="font-mono text-xs">{mailbox?.mailbox_email}</span>}
+            </div>
+            <Button onClick={() => navigate("/o365-setup")} data-testid="open-dedicated-o365-setup"><Mail className="mr-2 h-4 w-4" />Open Microsoft 365 Mailboxes</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {false && activeTab === "mailbox" && (<>
 
       {/* Mailbox Connection Status */}
       <Card className={mailboxConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
@@ -1051,7 +1063,7 @@ export default function SettingsPage() {
               </div>
               <Separator />
               <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-reply to incoming emails</p><p className="text-xs text-muted-foreground">Send acknowledgement reply</p></div>
+                <div><p className="text-sm font-medium">Auto-reply to incoming emails</p><p className="text-xs text-muted-foreground">Send acknowledgement through the Platform notices mailbox; automatic senders are skipped.</p></div>
                 <Switch checked={mailboxForm.auto_reply_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, auto_reply_enabled: v })} />
               </div>
               {mailboxForm.auto_reply_enabled && (
@@ -1258,8 +1270,18 @@ export default function SettingsPage() {
       </Card>
 
 
-      {/* Resend Email Integration */}
-      <Card data-testid="resend-settings-card">
+      <Card data-testid="microsoft365-delivery-card">
+        <CardHeader>
+          <div className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-500" /><CardTitle>Microsoft 365 Email Delivery</CardTitle></div>
+          <CardDescription>The shared Microsoft 365 mailbox is used for leads, tickets, invoices, reminders, and platform notifications.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Connect and test the mailbox once in Email Intake. NexusMSP uses that same Graph connection for outbound delivery.</p>
+          <Button onClick={() => navigate("/o365-setup")} data-testid="open-o365-delivery-settings"><Mail className="mr-2 h-4 w-4" />Manage Microsoft 365 Mailboxes</Button>
+        </CardContent>
+      </Card>
+
+      {false && <Card data-testid="resend-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Mail className="w-5 h-5 text-emerald-500" />
@@ -1380,7 +1402,7 @@ export default function SettingsPage() {
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
 
       {/* SMS - MobileMessage Integration */}

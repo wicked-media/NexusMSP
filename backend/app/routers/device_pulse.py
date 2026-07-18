@@ -102,9 +102,12 @@ async def fleet_pulse(current_user: dict = Depends(get_current_user)):
             "status": d.get("status", "unknown"),
             "health": health,
             "criticality": criticality,
-            "cpu": d.get("cpu_usage", 0) or 0,
-            "ram": d.get("ram_usage", 0) or 0,
-            "disk": d.get("disk_usage", 0) or 0,
+            # Devices imported from integrations and devices enrolled through
+            # the Nexus agent use slightly different telemetry field names.
+            # Normalise them here so the Pulse wall never displays a false 0%.
+            "cpu": d.get("cpu_usage") or d.get("cpu_load") or d.get("cpu_percent") or 0,
+            "ram": d.get("memory_usage") or d.get("ram_usage") or d.get("memory_pct") or d.get("mem_percent") or 0,
+            "disk": d.get("disk_usage") or d.get("disk_pct") or 0,
             "cpu_spark": _sparkline(did, "cpu", lo=5, hi=95),
             "ram_spark": _sparkline(did, "ram", lo=10, hi=90),
             "disk_spark": _sparkline(did, "disk", lo=20, hi=98),

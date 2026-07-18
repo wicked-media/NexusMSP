@@ -32,21 +32,31 @@ import uuid
 import zipfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import log_activity
 
 logger = logging.getLogger("nexus_agent")
 router = APIRouter(tags=["NexusOps Agent"])
 
-# Where the compiled Windows agent binary lives in the backend filesystem.
-AGENT_BINARY_PATH = Path(os.environ.get("NEXUS_AGENT_BINARY") or "/app/agent/dist/nexus-agent.exe")
+ONLINE_WINDOW_SECONDS = 180
+MAX_FLEET_TARGETS = 200
+
+# Where the compiled Windows agent binary lives. Production can set
+# NEXUS_AGENT_BINARY; local development uses the repository's agent/dist.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_LOCAL_AGENT_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-agent.exe"
+_CONTAINER_AGENT_BINARY = Path("/app/agent/dist/nexus-agent.exe")
+AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NEXUS_AGENT_BINARY") else (
+    _CONTAINER_AGENT_BINARY if _CONTAINER_AGENT_BINARY.exists() else _LOCAL_AGENT_BINARY
+)
 AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.0-dev"
 
 # Cached binary fingerprint (computed lazily; invalidated when mtime changes).
@@ -135,6 +145,44 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _online_cutoff() -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=ONLINE_WINDOW_SECONDS)).isoformat()
+
+
+def _is_online(last_seen: Any) -> bool:
+    try:
+        last = datetime.fromisoformat(str(last_seen or "").replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - last).total_seconds() < ONLINE_WINDOW_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_agent_admin(user: dict) -> bool:
+    role = str(user.get("role") or "").lower()
+    return bool(user.get("is_admin") or role in {"admin", "owner"})
+
+
+def _can_execute_agent_commands(user: dict) -> bool:
+    if _is_agent_admin(user):
+        return True
+    permissions = user.get("permissions") or {}
+    return bool((permissions.get("agent_commands") or {}).get("execute"))
+
+
+async def require_agent_operator(user=Depends(get_current_user)) -> dict:
+    if not _can_execute_agent_commands(user):
+        raise HTTPException(403, "Agent command permission required")
+    return user
+
+
+def _batch_scope(batch_id: str, user: dict) -> dict[str, Any]:
+    query: dict[str, Any] = {"batch_id": batch_id}
+    if not _is_agent_admin(user):
+        identities = [value for value in {user.get("id"), user.get("email")} if value]
+        query["queued_by"] = {"$in": identities}
+    return query
+
+
 async def _verify_agent_token(db, x_agent_token: str | None) -> dict:
     if not x_agent_token:
         raise HTTPException(401, "missing agent token")
@@ -174,6 +222,13 @@ async def queue_command_for_device(device_doc: dict, kind: str, payload: dict, q
     nid = device_doc.get("nexus_agent_id")
     if not nid:
         return None
+    agent = await db.nexus_agents.find_one({
+        "id": nid,
+        "is_active": True,
+        "last_seen": {"$gte": _online_cutoff()},
+    }, {"_id": 1})
+    if not agent:
+        raise HTTPException(409, "NexusOps Agent is offline; command was not queued")
     cmd_id = str(uuid.uuid4())
     await db.nexus_agent_commands.insert_one({
         "id": cmd_id,
@@ -213,31 +268,34 @@ class HeartbeatPayload(BaseModel):
 
 
 class CommandRequest(BaseModel):
-    kind: str  # run_script | run_powershell | run_cmd | reboot | shutdown | kill_process | ping
+    kind: Literal["run_script", "run_powershell", "run_cmd", "reboot", "shutdown", "kill_process", "ping"]
     payload: dict = Field(default_factory=dict)
+    include_offline: bool = False
 
 
 class CommandResult(BaseModel):
     id: str
-    status: str
+    status: Literal["ok", "error", "timeout"]
     exit_code: int = 0
-    stdout: str = ""
-    stderr: str = ""
-    duration_ms: int = 0
+    stdout: str = Field(default="", max_length=70_000)
+    stderr: str = Field(default="", max_length=20_000)
+    duration_ms: int = Field(default=0, ge=0, le=86_400_000)
 
 
 class InstallerBuildRequest(BaseModel):
-    client_id: str
-    note: str = ""
+    client_id: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=500)
 
 
 class NexusAgentSettings(BaseModel):
-    heartbeat_secs: int = 60
-    poll_secs: int = 10
-    server_url: str = ""           # full https URL the agent should call back to
+    heartbeat_secs: int = Field(default=60, ge=15, le=3600)
+    poll_secs: int = Field(default=10, ge=2, le=300)
+    server_url: str = Field(default="", max_length=2048)  # full https URL the agent should call back to
     splashtop_enabled: bool = False
-    splashtop_deploy_code_default: str = ""
+    splashtop_deploy_code_default: str = Field(default="", max_length=500)
     auto_update_enabled: bool = True
+    winget_enabled: bool = False
+    winget_allowed_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 # ----------------------------------------------------------------------
@@ -340,6 +398,121 @@ async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "Enrol
     await db.devices.update_one(device_filter, update, upsert=True)
 
 
+def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Translate the lightweight agent heartbeat into the schema used by Devices.
+
+    The agent deliberately reports a compact cross-platform snapshot.  Keeping
+    the translation here makes agent-enrolled endpoints look identical to
+    devices reported by the legacy full inventory agent.
+    """
+    disks = snapshot.get("disks") or []
+    nics = snapshot.get("nics") or []
+    disk_percent = max((float(d.get("percent") or 0) for d in disks), default=0)
+    total_gb = round(sum(float(d.get("total_gb") or 0) for d in disks), 2)
+    used_gb = round(sum(float(d.get("used_gb") or 0) for d in disks), 2)
+    uptime_seconds = int(snapshot.get("uptime_sec") or 0)
+
+    # Prefer a routable IPv4 address. Link-local addresses are not useful for
+    # a technician trying to identify or reach the endpoint.
+    ip_address = ""
+    for nic in nics:
+        for address in nic.get("ipv4") or []:
+            value = str(address).split("/")[0]
+            if value and not value.startswith(("127.", "169.254.")) and ":" not in value:
+                ip_address = value
+                break
+        if ip_address:
+            break
+
+    device_update = {
+        # DeviceDetailPage gauges use these canonical names.
+        "cpu_usage": float(snapshot.get("cpu_percent") or 0),
+        "memory_usage": float(snapshot.get("mem_percent") or 0),
+        "disk_usage": disk_percent,
+        # Keep the compact list-view fields in sync as well.
+        "cpu_load": float(snapshot.get("cpu_percent") or 0),
+        "memory_pct": float(snapshot.get("mem_percent") or 0),
+        "disk_pct": disk_percent,
+        "processor": str(snapshot.get("cpu_model") or "").strip(),
+        "processor_cores": int(snapshot.get("cpu_count") or 0),
+        "ram_gb": round(float(snapshot.get("mem_total_mb") or 0) / 1024, 1),
+        "storage_total_gb": total_gb,
+        "storage_used_gb": used_gb,
+        "storage_free_gb": round(total_gb - used_gb, 2),
+        "uptime_sec": uptime_seconds,
+        "uptime_hours": round(uptime_seconds / 3600, 1),
+        "uptime_display": f"{uptime_seconds // 86400}d {(uptime_seconds % 86400) // 3600}h",
+    }
+    if snapshot.get("boot_time"):
+        device_update["last_reboot"] = datetime.fromtimestamp(int(snapshot["boot_time"]), tz=timezone.utc).isoformat()
+    if snapshot.get("os_version"):
+        device_update["os_build"] = str(snapshot["os_version"]).split("Build ")[-1]
+    if ip_address:
+        device_update["ip_address"] = ip_address
+
+    security = snapshot.get("security") or {}
+    if security:
+        defender_enabled = bool(security.get("defender_enabled"))
+        realtime_enabled = bool(security.get("real_time_enabled"))
+        firewall_enabled = bool(security.get("firewall_enabled"))
+        signature_age = int(security.get("signature_age_days") or 0)
+        pending_updates = int(security.get("pending_update_count") or 0)
+        encryption = str(security.get("encryption_status") or "Unknown")
+        # Transparent scoring: 40 Defender + 20 signatures + 20 firewall +
+        # 10 patch status + 10 encryption. Each input remains visible in UI.
+        score = 0
+        score += 40 if defender_enabled and realtime_enabled else 0
+        score += 20 if signature_age <= 3 else (10 if signature_age <= 7 else 0)
+        score += 20 if firewall_enabled else 0
+        score += 10 if pending_updates == 0 else 0
+        score += 10 if any(marker in encryption.lower() for marker in ("encrypted", "bitlocker on", "protection on")) else 0
+        device_update.update({
+            "security_assessed_at": _now(),
+            "compliance_score": score,
+            "antivirus": "Microsoft Defender" if security.get("defender_installed") else "Not detected",
+            "antivirus_status": "active" if defender_enabled and realtime_enabled else "inactive",
+            "edr_status": "active" if defender_enabled and realtime_enabled else "inactive",
+            "defender_real_time_enabled": realtime_enabled,
+            "defender_signature_age_days": signature_age,
+            "firewall_enabled": firewall_enabled,
+            "encryption_status": encryption,
+            "pending_patches": pending_updates,
+        })
+    hardware = snapshot.get("hardware") or {}
+    if hardware:
+        device_update.update({key: str(hardware.get(key) or "") for key in ("manufacturer", "model", "serial_number", "bios_version", "domain")})
+
+    disk_records = [
+        {
+            "id": str(uuid.uuid4()),
+            "drive_letter": disk.get("device") or disk.get("mount") or "",
+            "mount_point": disk.get("mount") or disk.get("device") or "",
+            "file_system": disk.get("fs_type") or "",
+            "total_gb": round(float(disk.get("total_gb") or 0), 2),
+            "used_gb": round(float(disk.get("used_gb") or 0), 2),
+            "free_gb": round(float(disk.get("total_gb") or 0) - float(disk.get("used_gb") or 0), 2),
+            "usage_percent": round(float(disk.get("percent") or 0), 2),
+            "disk_type": "Unknown",
+            "smart_status": "Unknown",
+        }
+        for disk in disks
+    ]
+    network_records = [
+        {
+            "id": str(uuid.uuid4()),
+            "adapter_name": nic.get("name") or "Unknown adapter",
+            "mac_address": nic.get("mac") or "",
+            "ip_address": next((str(v).split("/")[0] for v in (nic.get("ipv4") or []) if ":" not in str(v) and not str(v).startswith("169.254.")), ""),
+            "subnet": next((str(v).split("/")[1] for v in (nic.get("ipv4") or []) if ":" not in str(v) and "/" in str(v)), ""),
+            "ip_addresses": nic.get("ipv4") or [], "type": nic.get("type") or "ethernet",
+            "status": nic.get("status") or "down", "gateway": nic.get("gateway") or "",
+            "dns": nic.get("dns") or [], "speed_mbps": nic.get("speed_mbps") or 0,
+        }
+        for nic in nics
+    ]
+    return device_update, disk_records, network_records
+
+
 @router.post("/nexus-agent/heartbeat")
 async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None)):
     agent = await _verify_agent_token(db, x_agent_token)
@@ -354,7 +527,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
     for k in ("hostname", "os", "os_version", "os_platform", "arch",
               "cpu_percent", "cpu_count", "cpu_model",
               "mem_total_mb", "mem_used_mb", "mem_percent",
-              "uptime_sec"):
+              "uptime_sec", "security", "software", "hardware"):
         if k in snap:
             update[k] = snap[k]
     update["disks"] = snap.get("disks", [])
@@ -363,9 +536,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
 
     # Mirror into devices collection so the existing /devices page sees live data.
     try:
-        first_disk_pct = 0
-        if snap.get("disks"):
-            first_disk_pct = max((d.get("percent") or 0) for d in snap["disks"])
+        telemetry, disk_records, network_records = _agent_device_telemetry(snap)
         await db.devices.update_one(
             {"nexus_agent_id": agent["id"]},
             {"$set": {
@@ -374,17 +545,103 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
                 "hostname": snap.get("hostname", agent.get("hostname", "")),
                 "name": snap.get("hostname", agent.get("hostname", "")) or "Unnamed",
                 "os_name": snap.get("os_platform") or snap.get("os") or agent.get("os", ""),
+                "os": snap.get("os_platform") or snap.get("os") or agent.get("os", ""),
                 "os_version": snap.get("os_version", ""),
-                "cpu_load": snap.get("cpu_percent", 0),
-                "memory_pct": snap.get("mem_percent", 0),
-                "disk_pct": first_disk_pct,
-                "uptime_sec": snap.get("uptime_sec", 0),
+                "mac_address": agent.get("primary_mac", ""),
                 "agent_version": p.agent_version or agent.get("agent_version", ""),
                 "source": "nexus-agent",
+                **telemetry,
             }},
         )
+        mirrored_device = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1})
+        if mirrored_device and mirrored_device.get("id"):
+            device_id = mirrored_device["id"]
+            await db.device_disks.delete_many({"device_id": device_id})
+            if disk_records:
+                for record in disk_records:
+                    record.update({"device_id": device_id, "last_updated": now})
+                await db.device_disks.insert_many(disk_records)
+            await db.device_network.delete_many({"device_id": device_id})
+            if network_records:
+                for record in network_records:
+                    record.update({"device_id": device_id, "last_updated": now})
+                await db.device_network.insert_many(network_records)
+            await db.device_performance.insert_one({
+                "id": str(uuid.uuid4()), "device_id": device_id, "timestamp": now,
+                "cpu": telemetry["cpu_usage"], "memory": telemetry["memory_usage"], "disk": telemetry["disk_usage"],
+                "cpu_usage": telemetry["cpu_usage"], "memory_usage": telemetry["memory_usage"], "disk_usage": telemetry["disk_usage"],
+            })
+            security = snap.get("security") or {}
+            if security.get("pending_updates") is not None:
+                await db.device_patches.delete_many({"device_id": device_id, "source": "windows-update-agent", "status": "pending"})
+                pending = security.get("pending_updates") or []
+                if pending:
+                    await db.device_patches.insert_many([{
+                        "id": str(uuid.uuid4()), "device_id": device_id,
+                        "title": str(patch.get("title") or "Windows Update"),
+                        "kb_article": str(patch.get("kb") or ""),
+                        "status": "pending", "source": "windows-update-agent",
+                        "reboot_required": bool(patch.get("reboot_required")), "detected_at": now,
+                    } for patch in pending])
+            software = snap.get("software") or []
+            if software:
+                await db.device_software.delete_many({"device_id": device_id, "source": "nexus-agent"})
+                await db.device_software.insert_many([{
+                    "id": str(uuid.uuid4()), "device_id": device_id,
+                    "name": str(app.get("name") or "Unknown application"),
+                    "version": str(app.get("version") or ""),
+                    "publisher": str(app.get("publisher") or ""),
+                    "install_date": str(app.get("install_date") or ""),
+                    "size_mb": float(app.get("size_mb") or 0),
+                    "category": "installed_application", "source": "nexus-agent",
+                    "last_inventory_at": now,
+                } for app in software])
+                await db.devices.update_one({"id": device_id}, {"$set": {"installed_software_count": len(software)}})
+            # Keep a compact, technician-useful trail—not one noisy event per
+            # minute. Heartbeat inventory is summarised at most once per hour.
+            last_audit = agent.get("last_device_audit_at")
+            should_audit = True
+            if last_audit:
+                try:
+                    should_audit = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last_audit).replace("Z", "+00:00"))).total_seconds() >= 3600
+                except (TypeError, ValueError):
+                    pass
+            if should_audit:
+                await log_activity(
+                    {"id": "nexus-agent", "name": "NexusOps Agent"}, "agent_check_in", "device", device_id,
+                    snap.get("hostname") or "Endpoint",
+                    f"Inventory check-in: {len(snap.get('software') or [])} applications, {len(snap.get('disks') or [])} drives, {len(snap.get('nics') or [])} adapters.",
+                    metadata={"source": "nexus-agent", "security_assessed": bool(snap.get("security")), "pending_updates": (snap.get("security") or {}).get("pending_update_count", 0)},
+                )
+                await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"last_device_audit_at": now}})
+            last_event = agent.get("last_device_event_at")
+            should_event = True
+            if last_event:
+                try:
+                    should_event = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last_event).replace("Z", "+00:00"))).total_seconds() >= 3600
+                except (TypeError, ValueError):
+                    pass
+            if should_event:
+                security = snap.get("security") or {}
+                await db.device_events.insert_one({
+                    "id": str(uuid.uuid4()), "device_id": device_id, "event_type": "agent_check_in",
+                    "message": f"NexusOps Agent checked in · CPU {telemetry['cpu_usage']:.0f}% · memory {telemetry['memory_usage']:.0f}% · {security.get('pending_update_count', 0)} updates pending.",
+                    "severity": "info", "timestamp": now, "source": "nexus-agent",
+                })
+                await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"last_device_event_at": now}})
     except Exception:
-        pass
+        logger.exception("[nexus-agent] failed to mirror heartbeat into device inventory")
+
+    # Evaluate monitoring rules after the mirrored device telemetry is current.
+    # The evaluator owns duration/cooldown state, so regular heartbeats cannot
+    # create duplicate alerts or tickets.
+    try:
+        mirrored = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1})
+        if mirrored and mirrored.get("id"):
+            from app.routers.alert_rules import evaluate_alert_rules
+            await evaluate_alert_rules(device_ids=[mirrored["id"]], create_actions=True, actor="nexus-agent")
+    except Exception as exc:
+        logger.warning("[nexus-agent] monitoring evaluation failed: %s", exc)
 
     # Write a heartbeat history row (lightweight — for sparklines)
     try:
@@ -418,18 +675,20 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
 @router.get("/nexus-agent/commands/poll")
 async def commands_poll(x_agent_token: str | None = Header(None)):
     agent = await _verify_agent_token(db, x_agent_token)
-    # Atomically claim any pending commands for this device
+    # Read candidates, then atomically claim each one. The status predicate on
+    # update prevents overlapping polls from dispatching the same command twice.
     pending = await db.nexus_agent_commands.find({
         "device_id": agent["id"],
         "status": "pending",
     }).to_list(length=20)
     out: list[dict] = []
     for c in pending:
-        await db.nexus_agent_commands.update_one(
-            {"_id": c["_id"]},
+        claimed = await db.nexus_agent_commands.update_one(
+            {"_id": c["_id"], "status": "pending"},
             {"$set": {"status": "dispatched", "dispatched_at": _now()}},
         )
-        out.append({"id": c["id"], "kind": c["kind"], "payload": c.get("payload") or {}})
+        if claimed.modified_count == 1:
+            out.append({"id": c["id"], "kind": c["kind"], "payload": c.get("payload") or {}})
     return {"commands": out}
 
 
@@ -447,6 +706,39 @@ async def command_result(res: CommandResult, x_agent_token: str | None = Header(
             "completed_at": _now(),
         }},
     )
+    # Maintenance windows queue commands asynchronously; reconcile the window
+    # record when the agent returns instead of leaving a permanent "queued".
+    try:
+        maintenance_run = await db.maintenance_window_runs.find_one({"command_id": res.id}, {"_id": 0, "window_id": 1})
+        if maintenance_run:
+            run_status = "ok" if res.status == "ok" else "failed"
+            await db.maintenance_window_runs.update_one({"command_id": res.id}, {"$set": {
+                "status": run_status, "message": f"Agent command {res.status} (exit code {res.exit_code})", "finished_at": _now(),
+            }})
+            runs = await db.maintenance_window_runs.find({"window_id": maintenance_run["window_id"]}, {"_id": 0, "status": 1}).to_list(500)
+            counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
+            for run in runs:
+                counts[run.get("status", "skipped")] = counts.get(run.get("status", "skipped"), 0) + 1
+            await db.maintenance_windows.update_one({"id": maintenance_run["window_id"]}, {"$set": {"summary_counts": counts, "reconciled_at": _now()}})
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile maintenance command")
+    try:
+        mirrored = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1, "name": 1})
+        command = await db.nexus_agent_commands.find_one({"id": res.id, "device_id": agent["id"]}, {"_id": 0, "kind": 1})
+        if mirrored:
+            outcome = "completed" if res.status == "ok" else res.status
+            await log_activity(
+                {"id": "nexus-agent", "name": "NexusOps Agent"}, "agent_command", "device", mirrored["id"], mirrored.get("name", "Endpoint"),
+                f"{command.get('kind', 'agent command') if command else 'Agent command'} {outcome} (exit code {res.exit_code}, {res.duration_ms} ms).",
+                metadata={"command_id": res.id, "status": res.status, "exit_code": res.exit_code},
+            )
+            await db.device_events.insert_one({
+                "id": str(uuid.uuid4()), "device_id": mirrored["id"], "event_type": "script_executed",
+                "message": f"{command.get('kind', 'Agent command') if command else 'Agent command'} {outcome} (exit code {res.exit_code}).",
+                "severity": "info" if res.status == "ok" else "error", "timestamp": _now(), "source": "nexus-agent",
+            })
+    except Exception:
+        logger.exception("[nexus-agent] failed to write command audit entry")
     return {"ok": True}
 
 
@@ -461,19 +753,14 @@ async def list_agents(client_id: str | None = None, user=Depends(get_current_use
         q["client_id"] = client_id
     cursor = db.nexus_agents.find(q, {"agent_token": 0}).sort("last_seen", -1)
     agents = await cursor.to_list(length=2000)
-    now = datetime.now(timezone.utc)
     for a in agents:
         a.pop("_id", None)
-        try:
-            last = datetime.fromisoformat(a.get("last_seen", "").replace("Z", "+00:00"))
-            a["online"] = (now - last).total_seconds() < 180
-        except Exception:
-            a["online"] = False
+        a["online"] = _is_online(a.get("last_seen"))
     return agents
 
 
 @router.get("/nexus-agent/agents/{device_id}")
-async def get_agent(device_id: str, user=Depends(get_current_user)):
+async def get_agent(device_id: str, user=Depends(require_agent_operator)):
     agent = await db.nexus_agents.find_one({"id": device_id}, {"agent_token": 0, "_id": 0})
     if not agent:
         raise HTTPException(404, "agent not found")
@@ -486,10 +773,14 @@ async def get_agent(device_id: str, user=Depends(get_current_user)):
 
 
 @router.post("/nexus-agent/agents/{device_id}/command")
-async def queue_command(device_id: str, req: CommandRequest, user=Depends(get_current_user)):
-    agent = await db.nexus_agents.find_one({"id": device_id, "is_active": True})
+async def queue_command(device_id: str, req: CommandRequest, user=Depends(require_agent_operator)):
+    agent_query: dict[str, Any] = {"id": device_id, "is_active": True}
+    if not req.include_offline:
+        agent_query["last_seen"] = {"$gte": _online_cutoff()}
+    agent = await db.nexus_agents.find_one(agent_query)
     if not agent:
-        raise HTTPException(404, "agent not found")
+        detail = "agent is offline; set include_offline=true to queue for later" if not req.include_offline else "agent not found"
+        raise HTTPException(409 if not req.include_offline else 404, detail)
     cmd_id = str(uuid.uuid4())
     doc = {
         "id": cmd_id,
@@ -506,7 +797,11 @@ async def queue_command(device_id: str, req: CommandRequest, user=Depends(get_cu
 
 
 @router.get("/nexus-agent/agents/{device_id}/commands")
-async def agent_commands(device_id: str, limit: int = 50, user=Depends(get_current_user)):
+async def agent_commands(
+    device_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    user=Depends(require_agent_operator),
+):
     cur = db.nexus_agent_commands.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1)
     return await cur.to_list(length=limit)
 
@@ -566,14 +861,18 @@ def _build_installer_zip(client_id: str, client_name: str, enrollment_token: str
 
 
 @router.post("/nexus-agent/installers/build")
-async def build_installer(req: InstallerBuildRequest, request: Request, user=Depends(get_current_user)):
+async def build_installer(req: InstallerBuildRequest, request: Request, user=Depends(require_agent_operator)):
     client = await db.clients.find_one({"id": req.client_id}, {"_id": 0, "id": 1, "name": 1})
     if not client:
         raise HTTPException(404, "client not found")
 
     # Load admin settings for server_url (fallback to request origin)
     settings = await db.nexus_agent_settings.find_one({"_id": "settings"}) or {}
-    server_url = settings.get("server_url") or str(request.url).rsplit("/api/", 1)[0]
+    server_url = str(settings.get("server_url") or "").strip()
+    if not server_url:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+        server_url = f"{scheme}://{host}" if host else str(request.base_url)
     server_url = server_url.rstrip("/")
 
     # Read the compiled binary
@@ -613,6 +912,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "client_id": req.client_id,
         "client_name": client["name"],
         "enrollment_token": enrollment_token,
+        "server_url": server_url,
         "storage_path": storage_path if put_result else "",
         "download_token": download_token,
         "size_bytes": len(zip_bytes),
@@ -623,10 +923,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     }
     await db.nexus_agent_installers.insert_one(manifest)
 
-    api_base = str(request.url).rsplit("/api/", 1)[0].rstrip("/")
-    # Prefer X-Forwarded-Host (set by reverse proxy) so download URL points at public domain.
-    fwd_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    fwd_proto = request.headers.get("x-forwarded-proto") or "https"
+    # Keep a direct local request on its real scheme (HTTP in local development),
+    # while still respecting the public origin supplied by a reverse proxy.
+    api_base = str(request.base_url).rstrip("/")
+    fwd_host = request.headers.get("x-forwarded-host")
+    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     if fwd_host:
         api_base = f"{fwd_proto}://{fwd_host}"
     return {
@@ -635,6 +936,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "filename": f"NexusOpsAgent_{client['name'].replace(' ', '_')}.zip",
         "size_bytes": len(zip_bytes),
         "agent_version": AGENT_VERSION,
+        "server_url": server_url,
         "enrollment_token": enrollment_token,
     }
 
@@ -656,7 +958,7 @@ async def installer_download(token: str):
             client_id=manifest["client_id"],
             client_name=manifest["client_name"],
             enrollment_token=manifest["enrollment_token"],
-            server_url=(await db.nexus_agent_settings.find_one({"_id": "settings"}) or {}).get("server_url") or "",
+            server_url=str(manifest.get("server_url") or "").strip(),
             binary_bytes=AGENT_BINARY_PATH.read_bytes(),
         )
     filename = f"NexusOpsAgent_{manifest['client_name'].replace(' ', '_')}.zip"
@@ -665,7 +967,7 @@ async def installer_download(token: str):
 
 
 @router.get("/nexus-agent/installers")
-async def list_installers(client_id: str | None = None, user=Depends(get_current_user)):
+async def list_installers(client_id: str | None = None, user=Depends(require_agent_operator)):
     q: dict[str, Any] = {"is_deleted": False}
     if client_id:
         q["client_id"] = client_id
@@ -719,7 +1021,10 @@ async def fleet_version_distribution(user=Depends(get_current_user)):
 
 
 @router.get("/nexus-agent/fleet/activity")
-async def fleet_activity(limit: int = 60, user=Depends(get_current_user)):
+async def fleet_activity(
+    limit: int = Query(60, ge=1, le=200),
+    user=Depends(get_current_user),
+):
     """Bloomberg-style ticker of recent fleet events: enrollments + commands +
     heartbeat anomalies. Most-recent first."""
     events: list[dict] = []
@@ -748,18 +1053,17 @@ async def fleet_activity(limit: int = 60, user=Depends(get_current_user)):
             "by": c.get("queued_by"),
             "tone": "emerald" if c.get("status") == "ok" else "rose" if c.get("status") == "error" else "amber" if c.get("status") == "timeout" else "cyan",
         })
-    # Pulse rows are heavy; only flag the agents that went offline/online recently
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
-    cur = db.nexus_agents.find({"last_seen": {"$gte": cutoff}}, {"_id": 0}).sort("last_seen", -1).limit(20)
-    async for a in cur:
+    # Use immutable heartbeat rows so the feed represents actual events rather
+    # than repeatedly presenting each agent's mutable last_seen value as new.
+    cur = db.nexus_agent_heartbeats.find({}, {"_id": 0}).sort("at", -1).limit(20)
+    async for heartbeat in cur:
         events.append({
             "kind": "heartbeat",
             "label": "HEARTBEAT",
-            "at": a.get("last_seen"),
-            "device_id": a.get("id"),
-            "hostname": a.get("hostname"),
-            "cpu_percent": a.get("cpu_percent"),
-            "mem_percent": a.get("mem_percent"),
+            "at": heartbeat.get("at"),
+            "device_id": heartbeat.get("device_id"),
+            "cpu_percent": heartbeat.get("cpu_percent"),
+            "mem_percent": heartbeat.get("mem_percent"),
             "tone": "cyan",
         })
     # Hydrate hostname for command events
@@ -780,74 +1084,148 @@ async def fleet_activity(limit: int = 60, user=Depends(get_current_user)):
 
 
 @router.get("/nexus-agent/fleet/recent-enrollments")
-async def fleet_recent_enrollments(limit: int = 20, user=Depends(get_current_user)):
+async def fleet_recent_enrollments(
+    limit: int = Query(20, ge=1, le=100),
+    user=Depends(get_current_user),
+):
     cur = db.nexus_agents.find({}, {"_id": 0, "agent_token": 0}).sort("enrolled_at", -1).limit(limit)
-    return await cur.to_list(length=limit)
+    rows = await cur.to_list(length=limit)
+    agent_ids = [row.get("id") for row in rows if row.get("id")]
+    device_ids: dict[str, str] = {}
+    if agent_ids:
+        devices = db.devices.find(
+            {"nexus_agent_id": {"$in": agent_ids}},
+            {"_id": 0, "id": 1, "nexus_agent_id": 1},
+        )
+        async for device in devices:
+            if device.get("nexus_agent_id") and device.get("id"):
+                device_ids[device["nexus_agent_id"]] = device["id"]
+    for row in rows:
+        row["online"] = _is_online(row.get("last_seen"))
+        row["device_record_id"] = device_ids.get(row.get("id"))
+    return rows
 
 
 class FleetScriptRequest(BaseModel):
-    device_ids: list[str] = Field(default_factory=list)
-    client_id: str | None = None    # if set, target every online agent for this client
-    shell: str = "powershell"        # powershell | cmd | bash
-    script: str
-    timeout_sec: int = 120
+    device_ids: list[str] = Field(default_factory=list, max_length=MAX_FLEET_TARGETS)
+    client_id: str | None = Field(default=None, max_length=200)  # target every online agent for this client
+    shell: Literal["powershell", "cmd", "bash"] = "powershell"
+    script: str = Field(min_length=1, max_length=50_000)
+    timeout_sec: int = Field(default=120, ge=1, le=900)
+    include_offline: bool = False
 
 
 @router.post("/nexus-agent/fleet/run-script")
-async def fleet_run_script(req: FleetScriptRequest, user=Depends(get_current_user)):
+async def fleet_run_script(req: FleetScriptRequest, user=Depends(require_agent_operator)):
     """Fan out a single script across many endpoints in parallel.
     Returns a batch_id + the list of queued command IDs so the UI can stream results."""
     if not (req.script or "").strip():
         raise HTTPException(400, "script required")
 
+    base_query: dict[str, Any] = {"is_active": True}
+    if not req.include_offline:
+        base_query["last_seen"] = {"$gte": _online_cutoff()}
+
     targets: list[dict] = []
+    requested_ids = list(dict.fromkeys(req.device_ids))
     if req.device_ids:
-        cur = db.nexus_agents.find({"id": {"$in": req.device_ids}, "is_active": True}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1})
-        targets = await cur.to_list(length=len(req.device_ids))
+        cur = db.nexus_agents.find(
+            {**base_query, "id": {"$in": requested_ids}},
+            {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1},
+        )
+        targets = await cur.to_list(length=len(requested_ids))
     elif req.client_id:
-        cur = db.nexus_agents.find({"client_id": req.client_id, "is_active": True}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1})
-        targets = await cur.to_list(length=10000)
+        cur = db.nexus_agents.find(
+            {**base_query, "client_id": req.client_id},
+            {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1},
+        )
+        targets = await cur.to_list(length=MAX_FLEET_TARGETS + 1)
+        if len(targets) > MAX_FLEET_TARGETS:
+            raise HTTPException(400, f"fleet scripts are limited to {MAX_FLEET_TARGETS} devices per batch")
     else:
         raise HTTPException(400, "device_ids or client_id required")
 
     if not targets:
-        return {"batch_id": str(uuid.uuid4()), "command_ids": [], "targets": []}
+        detail = "No selected agents are currently online" if not req.include_offline else "No active agents matched"
+        raise HTTPException(409, detail)
 
     batch_id = str(uuid.uuid4())
     payload = {"shell": req.shell, "script": req.script, "timeout_sec": req.timeout_sec, "batch_id": batch_id}
-    cmd_ids: list[str] = []
     now = _now()
+    queued_by = user.get("email") or user.get("id")
+    docs: list[dict] = []
     for t in targets:
         cmd_id = str(uuid.uuid4())
-        await db.nexus_agent_commands.insert_one({
+        docs.append({
             "id": cmd_id,
             "device_id": t["id"],
             "hostname": t.get("hostname"),
             "kind": "run_script",
             "payload": payload,
             "status": "pending",
-            "queued_by": user.get("email") or user.get("id"),
+            "queued_by": queued_by,
             "created_at": now,
             "batch_id": batch_id,
         })
-        cmd_ids.append(cmd_id)
-    await _audit(db, "fleet_script", {"batch_id": batch_id, "count": len(cmd_ids), "by": user.get("email")})
+    try:
+        await db.nexus_agent_commands.insert_many(docs, ordered=True)
+    except Exception as exc:
+        await db.nexus_agent_commands.delete_many({"batch_id": batch_id, "status": "pending"})
+        logger.exception("[nexus-agent] failed to queue fleet batch %s", batch_id)
+        raise HTTPException(500, "Unable to queue the complete fleet batch") from exc
+
+    cmd_ids = [doc["id"] for doc in docs]
+    matched_ids = {target["id"] for target in targets}
+    skipped_ids = [device_id for device_id in requested_ids if device_id not in matched_ids]
+    await _audit(db, "fleet_script", {
+        "batch_id": batch_id,
+        "count": len(cmd_ids),
+        "skipped_count": len(skipped_ids),
+        "shell": req.shell,
+        "script_sha256": hashlib.sha256(req.script.encode("utf-8")).hexdigest(),
+        "by": queued_by,
+    })
     return {
         "batch_id": batch_id,
         "command_ids": cmd_ids,
         "targets": [{"id": t["id"], "hostname": t.get("hostname")} for t in targets],
+        "skipped_device_ids": skipped_ids,
     }
 
 
 @router.get("/nexus-agent/fleet/batch/{batch_id}")
-async def fleet_batch_status(batch_id: str, user=Depends(get_current_user)):
-    cur = db.nexus_agent_commands.find({"batch_id": batch_id}, {"_id": 0}).sort("created_at", 1)
-    cmds = await cur.to_list(length=10000)
-    counts = {"pending": 0, "dispatched": 0, "ok": 0, "error": 0, "timeout": 0}
+async def fleet_batch_status(batch_id: str, user=Depends(require_agent_operator)):
+    cur = db.nexus_agent_commands.find(_batch_scope(batch_id, user), {"_id": 0}).sort("created_at", 1)
+    cmds = await cur.to_list(length=MAX_FLEET_TARGETS)
+    if not cmds:
+        raise HTTPException(404, "batch not found")
+    counts = {"pending": 0, "dispatched": 0, "ok": 0, "error": 0, "timeout": 0, "cancelled": 0}
     for c in cmds:
         s = c.get("status", "pending")
         counts[s] = counts.get(s, 0) + 1
     return {"batch_id": batch_id, "total": len(cmds), "counts": counts, "commands": cmds}
+
+
+@router.post("/nexus-agent/fleet/batch/{batch_id}/cancel")
+async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)):
+    scope = _batch_scope(batch_id, user)
+    existing = await db.nexus_agent_commands.find_one(scope, {"_id": 1})
+    if not existing:
+        raise HTTPException(404, "batch not found")
+    result = await db.nexus_agent_commands.update_many(
+        {**scope, "status": "pending"},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": _now(),
+            "cancelled_by": user.get("email") or user.get("id"),
+        }},
+    )
+    await _audit(db, "fleet_script_cancel", {
+        "batch_id": batch_id,
+        "cancelled_count": result.modified_count,
+        "by": user.get("email") or user.get("id"),
+    })
+    return {"batch_id": batch_id, "cancelled": result.modified_count}
 
 
 # ----------------------------------------------------------------------
@@ -855,7 +1233,7 @@ async def fleet_batch_status(batch_id: str, user=Depends(get_current_user)):
 # ----------------------------------------------------------------------
 
 @router.get("/nexus-agent/settings")
-async def get_settings(user=Depends(get_current_user)):
+async def get_settings(user=Depends(require_agent_operator)):
     s = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
     return {
         "heartbeat_secs": s.get("heartbeat_secs", 60),
@@ -864,6 +1242,8 @@ async def get_settings(user=Depends(get_current_user)):
         "splashtop_enabled": s.get("splashtop_enabled", False),
         "splashtop_deploy_code_default": s.get("splashtop_deploy_code_default", ""),
         "auto_update_enabled": s.get("auto_update_enabled", True),
+        "winget_enabled": s.get("winget_enabled", False),
+        "winget_allowed_ids": s.get("winget_allowed_ids", []),
         "agent_version": AGENT_VERSION,
         "agent_binary_exists": AGENT_BINARY_PATH.exists(),
         "agent_binary_sha256": _binary_info()["sha256"],
@@ -872,7 +1252,7 @@ async def get_settings(user=Depends(get_current_user)):
 
 
 @router.put("/nexus-agent/settings")
-async def put_settings(payload: NexusAgentSettings, user=Depends(get_current_user)):
+async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_operator)):
     await db.nexus_agent_settings.update_one(
         {"_id": "settings"},
         {"$set": {
@@ -882,6 +1262,8 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(get_current_use
             "splashtop_enabled": payload.splashtop_enabled,
             "splashtop_deploy_code_default": payload.splashtop_deploy_code_default,
             "auto_update_enabled": payload.auto_update_enabled,
+            "winget_enabled": payload.winget_enabled,
+            "winget_allowed_ids": [item.strip() for item in payload.winget_allowed_ids if item.strip()],
             "updated_at": _now(),
             "updated_by": user.get("email") or user.get("id"),
         }},
@@ -897,6 +1279,12 @@ async def stats(user=Depends(get_current_user)):
     cutoff = (now - timedelta(minutes=3)).isoformat()
     online = await db.nexus_agents.count_documents({"is_active": True, "last_seen": {"$gte": cutoff}})
     cmds_pending = await db.nexus_agent_commands.count_documents({"status": "pending"})
+    assessed_devices = await db.devices.count_documents({"security_assessed_at": {"$exists": True, "$ne": None}})
+    managed_devices = await db.devices.count_documents({})
+    assessed_rows = await db.devices.find(
+        {"security_assessed_at": {"$exists": True, "$ne": None}}, {"_id": 0, "pending_patches": 1}
+    ).to_list(5000)
+    pending_updates = sum(int(row.get("pending_patches") or 0) for row in assessed_rows)
     by_client = await db.nexus_agents.aggregate([
         {"$match": {"is_active": True}},
         {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
@@ -908,6 +1296,9 @@ async def stats(user=Depends(get_current_user)):
         "online_agents": online,
         "offline_agents": max(0, total - online),
         "pending_commands": cmds_pending,
+        "assessed_devices": assessed_devices,
+        "managed_devices": managed_devices,
+        "pending_updates": pending_updates,
         "by_client": [{"client_id": r["_id"], "count": r["count"]} for r in by_client],
         "agent_version": AGENT_VERSION,
     }

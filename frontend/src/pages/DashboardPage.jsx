@@ -14,7 +14,7 @@ import {
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
   Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
   ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles,
-  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid
+  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, ListChecks, FileText, ShoppingCart
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,7 @@ import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
+import "@/styles/dashboard-ticker.css";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator
@@ -36,6 +37,7 @@ const ResponsiveGridLayout = WidthProvider(Responsive);
 
 // Widget metadata — label + icon for the "Add Widget" picker
 const WIDGET_META = {
+  "live-ticker":  { label: "Live Operations Ticker",  icon: Activity },
   "hero-tiles":   { label: "Hero Tile Strip",        icon: BarChart3 },
   "cross-bridge": { label: "Cross-Module Bridge",    icon: AlertTriangle },
   "team-pins":    { label: "Team Pins / NOC Strip",  icon: Users },
@@ -48,6 +50,7 @@ const WIDGET_META = {
   "churn":        { label: "Churn Risk",             icon: TrendingUp },
   "huntress":     { label: "Huntress Security",      icon: Shield },
   "attention":    { label: "Attention Banner",       icon: AlertCircle },
+  "focus-queue":  { label: "Technician Focus Queue", icon: ListChecks },
   "ticket-trend": { label: "Ticket Volume Chart",    icon: Activity },
   "fleet-health": { label: "Fleet Health",           icon: Cpu },
   "ops-insights": { label: "Operational Insights",   icon: Eye },
@@ -56,30 +59,38 @@ const WIDGET_META = {
   "activity":     { label: "Activity Feed",          icon: Zap },
 };
 
-// Default widget layout (lg breakpoint = 12 cols)
+// Technician-first default (lg breakpoint = 12 cols).  The dashboard starts
+// with one predictable visual rhythm: full-width status strips, then paired
+// work cards.  Less frequent executive/AI widgets remain available through
+// Customise rather than crowding the first screen.
 const DEFAULT_LAYOUT_LG = [
-  { i: "hero-tiles",  x: 0, y: 0,  w: 12, h: 2, minH: 2, minW: 6 },
-  { i: "cross-bridge",x: 0, y: 2,  w: 12, h: 5, minH: 3, minW: 6 },
-  { i: "team-pins",   x: 0, y: 7,  w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "hero-banner", x: 0, y: 10, w: 12, h: 3, minH: 2, minW: 6 },
-  { i: "standup",     x: 0, y: 13, w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "whats-new",   x: 0, y: 16, w: 4,  h: 6, minH: 4, minW: 3 },
-  { i: "threat",      x: 0, y: 16, w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "sla-radar",   x: 0, y: 18, w: 12, h: 3, minH: 2, minW: 4 },
-  { i: "blueprint",   x: 0, y: 21, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "churn",       x: 6, y: 21, w: 6,  h: 5, minH: 3, minW: 3 },
-  { i: "huntress",    x: 0, y: 26, w: 12, h: 4, minH: 2, minW: 4 },
-  { i: "attention",   x: 0, y: 30, w: 12, h: 2, minH: 1, minW: 4 },
-  { i: "ticket-trend",x: 0, y: 32, w: 8,  h: 6, minH: 4, minW: 4 },
-  { i: "fleet-health",x: 8, y: 32, w: 4,  h: 6, minH: 4, minW: 3 },
-  { i: "ops-insights",x: 0, y: 38, w: 12, h: 6, minH: 3, minW: 6 },
-  { i: "open-tix",    x: 0, y: 44, w: 5,  h: 7, minH: 4, minW: 3 },
-  { i: "alerts",      x: 5, y: 44, w: 3,  h: 7, minH: 4, minW: 2 },
-  { i: "activity",    x: 8, y: 44, w: 4,  h: 7, minH: 4, minW: 3 },
+  { i: "live-ticker", x: 0, y: 0,  w: 12, h: 1, minH: 1, minW: 6 },
+  { i: "hero-tiles",  x: 0, y: 1,  w: 12, h: 2, minH: 2, minW: 6 },
+  { i: "attention",   x: 0, y: 3,  w: 12, h: 1, minH: 1, minW: 6 },
+  { i: "focus-queue", x: 0, y: 4,  w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "open-tix",    x: 0, y: 7,  w: 6,  h: 7, minH: 5, minW: 4 },
+  { i: "sla-radar",   x: 6, y: 7,  w: 6,  h: 7, minH: 5, minW: 4 },
+  { i: "alerts",      x: 0, y: 14, w: 6,  h: 7, minH: 5, minW: 4 },
+  { i: "activity",    x: 6, y: 14, w: 6,  h: 7, minH: 5, minW: 4 },
+  { i: "ticket-trend",x: 0, y: 21, w: 6,  h: 6, minH: 4, minW: 4 },
+  { i: "fleet-health",x: 6, y: 21, w: 6,  h: 6, minH: 4, minW: 4 },
+  { i: "ops-insights",x: 0, y: 27, w: 12, h: 5, minH: 4, minW: 6 },
+  { i: "team-pins",   x: 0, y: 32, w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "standup",     x: 0, y: 35, w: 6,  h: 4, minH: 3, minW: 4 },
+  { i: "blueprint",   x: 6, y: 35, w: 6,  h: 4, minH: 3, minW: 4 },
+  { i: "threat",      x: 0, y: 39, w: 12, h: 2, minH: 1, minW: 6 },
+  // Optional modules retain placements so restoring them from Customise is
+  // immediate and never causes widget overlap.
+  { i: "cross-bridge",x: 0, y: 41, w: 12, h: 5, minH: 3, minW: 6 },
+  { i: "hero-banner", x: 0, y: 46, w: 12, h: 3, minH: 2, minW: 6 },
+  { i: "whats-new",   x: 0, y: 49, w: 6,  h: 5, minH: 4, minW: 4 },
+  { i: "churn",       x: 6, y: 49, w: 6,  h: 5, minH: 3, minW: 4 },
+  { i: "huntress",    x: 0, y: 54, w: 12, h: 4, minH: 2, minW: 6 },
 ];
 
-const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v2";
-const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v2";
+const DEFAULT_HIDDEN_WIDGETS = new Set(["cross-bridge", "hero-banner", "whats-new", "churn", "huntress"]);
+const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v6";
+const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v6";
 import TeamPinsStrip from "@/components/dashboard/TeamPinsStrip";
 import WhatsNewTile from "@/components/dashboard/WhatsNewTile";
 import { StandupDigestBanner } from "@/components/ai/StandupDigestBanner";
@@ -125,7 +136,16 @@ export default function DashboardPage() {
       setStats(statsRes.data);
       setEnhancedStats(enhancedRes.data);
       setTicketTrends(trendsRes.data);
-      setAlerts(alertsRes.data);
+      const liveAgentAlerts = (devicesRes.data || [])
+        .filter(device => device.security_assessed_at)
+        .flatMap(device => {
+          const pending = Number(device.pending_patches || 0);
+          const items = [];
+          if (device.status === "offline") items.push({ id: `agent-offline-${device.id}`, device_id: device.id, device_name: device.name, severity: "critical", title: "Agent-reported endpoint offline", message: `${device.name} is offline`, source: "nexus-agent" });
+          if (pending > 0) items.push({ id: `agent-patches-${device.id}`, device_id: device.id, device_name: device.name, severity: pending > 10 ? "critical" : "warning", title: "Pending Windows updates", message: `${device.name}: ${pending} pending update${pending === 1 ? "" : "s"}`, source: "nexus-agent" });
+          return items;
+        });
+      setAlerts([...(alertsRes.data || []), ...liveAgentAlerts]);
       setTickets(ticketsRes.data.slice(0, 8));
       setActivityFeed(activityRes.data);
       setDevices(devicesRes.data);
@@ -153,7 +173,12 @@ export default function DashboardPage() {
   const [layouts, setLayouts] = useState(() => {
     try {
       const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // New core widgets need an explicit layout entry. This prevents a
+        // hot-reloaded or older saved grid from silently omitting them.
+        if (parsed?.lg?.some(item => item.i === "focus-queue")) return parsed;
+      }
     } catch { /* ignore */ }
     return { lg: DEFAULT_LAYOUT_LG };
   });
@@ -162,7 +187,7 @@ export default function DashboardPage() {
       const saved = localStorage.getItem(HIDDEN_STORAGE_KEY);
       if (saved) return new Set(JSON.parse(saved));
     } catch { /* ignore */ }
-    return new Set();
+    return new Set(DEFAULT_HIDDEN_WIDGETS);
   });
   const persistHidden = (next) => {
     try { localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify([...next])); } catch { /* */ }
@@ -185,7 +210,7 @@ export default function DashboardPage() {
   };
   const resetLayout = () => {
     setLayouts({ lg: DEFAULT_LAYOUT_LG });
-    setHiddenWidgets(new Set());
+    setHiddenWidgets(new Set(DEFAULT_HIDDEN_WIDGETS));
     try {
       localStorage.removeItem(LAYOUT_STORAGE_KEY);
       localStorage.removeItem(HIDDEN_STORAGE_KEY);
@@ -235,10 +260,20 @@ export default function DashboardPage() {
   const warningDevices = devices.filter(d => d.status === "warning");
   const offlineDevices = devices.filter(d => d.status === "offline");
   const criticalTickets = tickets.filter(t => t.priority === "critical");
+  const myTickets = tickets.filter(t => t.assigned_to === user?.id || (!t.assigned_to && !t.assigned_name));
+  const queueTickets = (myTickets.length ? myTickets : tickets)
+    .slice()
+    .sort((a, b) => ({ critical: 0, high: 1, medium: 2, low: 3 }[a.priority] ?? 4) - ({ critical: 0, high: 1, medium: 2, low: 3 }[b.priority] ?? 4));
   const needsPatching = devices.filter(d => (d.pending_patches || 0) > 0);
   const statusDot = { open: "bg-blue-500", in_progress: "bg-amber-500", resolved: "bg-emerald-500", closed: "bg-gray-400" };
   const priorityColors = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
   const greeting = now.getHours() < 12 ? "Good Morning" : now.getHours() < 17 ? "Good Afternoon" : "Good Evening";
+  const openTicketQueue = (filters = {}) => {
+    try {
+      localStorage.setItem("nexus.tickets.applyView", JSON.stringify({ id: "dashboard", filters }));
+    } catch { /* the Tickets page can still open normally */ }
+    navigate("/tickets");
+  };
 
   const quickSearchResults = searchQuery ? [
     ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: "/tickets" })),
@@ -249,14 +284,27 @@ export default function DashboardPage() {
   if ((enhancedStats?.sla_breaches || 0) > 0) attentionItems.push({ label: `${enhancedStats.sla_breaches} SLA Breach${enhancedStats.sla_breaches > 1 ? "es" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: AlertCircle, path: "/tickets" });
   if (offlineDevices.length > 0) attentionItems.push({ label: `${offlineDevices.length} Offline Device${offlineDevices.length > 1 ? "s" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: Monitor, path: "/devices" });
   if ((enhancedStats?.outstanding || 0) > 1000) attentionItems.push({ label: `$${(enhancedStats.outstanding || 0).toLocaleString()} Outstanding`, color: "text-orange-400", bg: "bg-orange-500/10", borderColor: "border-orange-500/20", icon: DollarSign, path: "/invoices" });
-  if (needsPatching.length > 10) attentionItems.push({ label: `${needsPatching.length} Need Patching`, color: "text-amber-400", bg: "bg-amber-500/10", borderColor: "border-amber-500/20", icon: Shield, path: "/patch-hub" });
+  if (needsPatching.length > 0) attentionItems.push({ label: `${needsPatching.length} Need Patching`, color: "text-amber-400", bg: "bg-amber-500/10", borderColor: "border-amber-500/20", icon: Shield, path: "/patch-hub" });
   if (criticalTickets.length > 0) attentionItems.push({ label: `${criticalTickets.length} Critical Ticket${criticalTickets.length > 1 ? "s" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: Ticket, path: "/tickets" });
   if ((mspIntel?.urgentPredictions || []).length > 0) attentionItems.push({ label: `${mspIntel.urgentPredictions.length} Failure Prediction${mspIntel.urgentPredictions.length > 1 ? "s" : ""}`, color: "text-orange-400", bg: "bg-orange-500/10", borderColor: "border-orange-500/20", icon: AlertTriangle, path: "/predictive-failure" });
 
-  const chartData = ticketTrends.length > 0 ? ticketTrends : [
-    { date: "Mon", tickets: 12 }, { date: "Tue", tickets: 19 }, { date: "Wed", tickets: 15 },
-    { date: "Thu", tickets: 22 }, { date: "Fri", tickets: 18 }, { date: "Sat", tickets: 8 }, { date: "Sun", tickets: 5 }
+  const tickerItems = [
+    ...offlineDevices.slice(0, 4).map(device => ({ tone: "critical", icon: Monitor, label: `${device.name || device.hostname} is offline`, detail: device.client_name || "Endpoint", path: `/devices/${device.id}` })),
+    ...needsPatching.slice(0, 4).map(device => ({ tone: "warning", icon: Shield, label: `${device.name || device.hostname} has ${device.pending_patches} pending patch${Number(device.pending_patches) === 1 ? "" : "es"}`, detail: device.client_name || "Patch management", path: `/devices/${device.id}` })),
+    ...criticalTickets.slice(0, 4).map(ticket => ({ tone: "critical", icon: Ticket, label: `${ticket.ticket_number || "Ticket"}: ${ticket.title}`, detail: ticket.client_name || "Critical ticket", path: "/tickets" })),
+    ...(alerts || []).filter(alert => alert.severity === "critical" || alert.severity === "warning").slice(0, 4).map(alert => ({ tone: alert.severity === "critical" ? "critical" : "warning", icon: AlertTriangle, label: alert.title || alert.message || "Active alert", detail: alert.device_name || alert.source || "Monitoring", path: "/devices" })),
   ];
+  if (!tickerItems.length) tickerItems.push({ tone: "healthy", icon: CheckCircle, label: "All monitored services are nominal", detail: `${onlineDevices.length} endpoints reporting online`, path: "/devices" });
+
+  const focusActions = [
+    ...(enhancedStats?.sla_breaches ? [{ id: "sla", label: "Protect SLA commitments", detail: `${enhancedStats.sla_breaches} breach${enhancedStats.sla_breaches === 1 ? "" : "es"} need attention`, tone: "critical", icon: Clock, onClick: () => openTicketQueue({}) }] : []),
+    ...criticalTickets.slice(0, 1).map(ticket => ({ id: `critical-${ticket.id}`, label: ticket.title || "Critical ticket", detail: `${ticket.ticket_number || "Ticket"} · ${ticket.client_name || "Unassigned client"}`, tone: "critical", icon: Ticket, onClick: () => openTicketQueue({ priority: "critical" }) })),
+    ...offlineDevices.slice(0, 1).map(device => ({ id: `offline-${device.id}`, label: `${device.name || device.hostname} is offline`, detail: device.client_name || "Endpoint requires a check-in", tone: "critical", icon: Monitor, onClick: () => navigate(`/devices/${device.id}`) })),
+    ...needsPatching.slice(0, 1).map(device => ({ id: `patch-${device.id}`, label: "Review pending patching", detail: `${device.name || device.hostname} · ${device.pending_patches} pending`, tone: "warning", icon: Shield, onClick: () => navigate(`/devices/${device.id}`) })),
+  ].slice(0, 4);
+  if (!focusActions.length) focusActions.push({ id: "clear", label: "Your priority queue is clear", detail: "Review active work or plan proactive maintenance", tone: "healthy", icon: CheckCircle, onClick: () => navigate("/tickets") });
+
+  const chartData = ticketTrends;
 
   return (
     <PageShell>
@@ -267,7 +315,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Operations Command Bridge
+            <Sparkles className="w-6 h-6 text-violet-400" />Technician Workspace
           </h1>
           <p className="text-sm text-zinc-500">{greeting}, {user?.name?.split(" ")[0] || "Operator"} — live cross-module situational awareness</p>
         </div>
@@ -276,7 +324,10 @@ export default function DashboardPage() {
             <Search className="w-3 h-3 mr-1" />Quick Search <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">⌘K</kbd>
           </Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn"><Ticket className="w-3 h-3 mr-1" />Tickets</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn"><Users className="w-3 h-3 mr-1" />Leads</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn"><Monitor className="w-3 h-3 mr-1" />Devices</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/invoices")} data-testid="bridge-invoices-btn"><FileText className="w-3 h-3 mr-1" />Invoices</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/purchase-orders")} data-testid="bridge-purchase-orders-btn"><ShoppingCart className="w-3 h-3 mr-1" />Purchase Orders</Button>
           <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={fetchDashboardData} data-testid="bridge-refresh-btn"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
         </div>
       </div>
@@ -305,11 +356,13 @@ export default function DashboardPage() {
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider px-2 mb-2">Quick Actions</p>
                 {[
                   { icon: Ticket, label: "New Ticket", path: "/tickets", color: "text-blue-500" },
+                  { icon: FileText, label: "Invoices", path: "/invoices", color: "text-emerald-500" },
+                  { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders", color: "text-violet-500" },
                   { icon: Users, label: "New Client", path: "/clients", color: "text-emerald-500" },
                   { icon: Monitor, label: "Add Device", path: "/devices", color: "text-purple-500" },
                   { icon: Terminal, label: "Run Script", path: "/scripting", color: "text-orange-500" },
-                  { icon: CalendarDays, label: "Schedule", path: "/scheduling", color: "text-cyan-500" },
-                  { icon: UserCog, label: "Technicians", path: "/technicians", color: "text-pink-500" },
+                  { icon: CalendarDays, label: "Dispatch Calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
+                  { icon: UserCog, label: "Team Hub", path: "/team-hub?tab=technicians", color: "text-pink-500" },
                 ].map((item, i) => (
                   <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
                     <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>
@@ -392,16 +445,23 @@ export default function DashboardPage() {
         compactType="vertical"
       >
 
+      {!hiddenWidgets.has("live-ticker") && (
+      <div key="live-ticker" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("live-ticker"); }} className="nx-widget-hide" data-testid="hide-widget-live-ticker" aria-label="Hide Live Operations Ticker"><X className="w-3 h-3" /></button>
+        <LiveOpsTicker items={tickerItems} onNavigate={navigate} />
+      </div>
+      )}
+
       {!hiddenWidgets.has("hero-tiles") && (
       <div key="hero-tiles" className="nx-widget-card">
         <button onClick={(e) => { e.stopPropagation(); hideWidget("hero-tiles"); }} className="nx-widget-hide" data-testid="hide-widget-hero-tiles" aria-label="Hide Hero Tile Strip"><X className="w-3 h-3" /></button>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
-          <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} testId="bridge-tile-tickets" />
-          <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" testId="bridge-tile-online" />
-          <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} testId="bridge-tile-offline" />
-          <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} testId="bridge-tile-critical" />
-          <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" testId="bridge-tile-clients" />
-          <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="bridge-tile-mrr" />
+          <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} onClick={() => openTicketQueue({ status: "open" })} testId="bridge-tile-tickets" />
+          <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" onClick={() => navigate("/devices")} testId="bridge-tile-online" />
+          <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} onClick={() => navigate("/devices")} testId="bridge-tile-offline" />
+          <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} onClick={() => navigate("/security")} testId="bridge-tile-critical" />
+          <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" onClick={() => navigate("/clients")} testId="bridge-tile-clients" />
+          <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/revenue-forecast")} testId="bridge-tile-mrr" />
         </div>
       </div>
       )}
@@ -565,6 +625,31 @@ export default function DashboardPage() {
           <CheckCircle className="w-3.5 h-3.5" /> All systems nominal — nothing to escalate
         </div>
       )}
+      </div>
+      )}
+
+      {!hiddenWidgets.has("focus-queue") && (
+      <div key="focus-queue" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("focus-queue"); }} className="nx-widget-hide" data-testid="hide-widget-focus-queue" aria-label="Hide Technician Focus Queue"><X className="w-3 h-3" /></button>
+        <Card className="h-full overflow-hidden" data-testid="technician-focus-queue">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2"><ListChecks className="w-4 h-4 text-violet-400" />Technician focus</CardTitle>
+            <span className="text-[10px] text-muted-foreground">Work these next</span>
+          </CardHeader>
+          <CardContent className="pt-0 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+            {focusActions.map(action => {
+              const Icon = action.icon;
+              const tone = action.tone === "critical" ? "border-red-500/25 bg-red-500/[0.06] hover:bg-red-500/[0.1] text-red-300" : action.tone === "warning" ? "border-amber-500/25 bg-amber-500/[0.06] hover:bg-amber-500/[0.1] text-amber-200" : "border-emerald-500/25 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.1] text-emerald-200";
+              return (
+                <button key={action.id} onClick={action.onClick} className={`group flex items-center gap-3 text-left rounded-xl border px-3 py-2.5 transition-all ${tone}`} data-testid={`focus-action-${action.id}`}>
+                  <span className="w-8 h-8 rounded-lg bg-black/15 flex items-center justify-center shrink-0"><Icon className="w-4 h-4" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate">{action.label}</span><span className="block text-[10px] opacity-70 truncate mt-0.5">{action.detail}</span></span>
+                  <ChevronRight className="w-4 h-4 opacity-45 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
       </div>
       )}
 
@@ -744,12 +829,12 @@ export default function DashboardPage() {
         <button onClick={(e) => { e.stopPropagation(); hideWidget("open-tix"); }} className="nx-widget-hide" data-testid="hide-widget-open-tix" aria-label="Hide Open Tickets"><X className="w-3 h-3" /></button>
         <Card className="h-full" data-testid="open-tickets-card">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2"><Ticket className="w-4 h-4 text-blue-400" />Open Tickets</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/tickets")} className="text-[10px] h-5 px-2">{stats.open_tickets} total<ExternalLink className="w-2.5 h-2.5 ml-1" /></Button>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2"><Ticket className="w-4 h-4 text-blue-400" />{myTickets.length ? "My Queue" : "Open Tickets"}</CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/tickets")} className="text-[10px] h-5 px-2">{myTickets.length ? `${myTickets.length} mine` : `${stats.open_tickets} total`}<ExternalLink className="w-2.5 h-2.5 ml-1" /></Button>
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[240px]">
-              {tickets.length > 0 ? tickets.map(t => (
+              {queueTickets.length > 0 ? queueTickets.map(t => (
                 <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 cursor-pointer border-b border-border/20 last:border-0 transition-colors" onClick={() => navigate("/tickets")} data-testid={`dash-ticket-${t.id}`}>
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot[t.status] || "bg-gray-400"} shadow-[0_0_4px_rgba(59,130,246,0.3)]`} />
                   <div className="flex-1 min-w-0">
@@ -830,5 +915,25 @@ export default function DashboardPage() {
       </ResponsiveGridLayout>
     </div>
     </PageShell>
+  );
+}
+
+function LiveOpsTicker({ items, onNavigate }) {
+  const repeated = [...items, ...items];
+  return (
+    <div className="nx-live-ticker h-full" data-testid="live-ops-ticker">
+      <div className="nx-live-ticker__label"><Activity className="w-3.5 h-3.5" /><span>Live ops</span><span className="nx-live-ticker__pulse" /></div>
+      <div className="nx-live-ticker__viewport">
+        <div className="nx-live-ticker__track">
+          {repeated.map((item, index) => {
+            const Icon = item.icon || Activity;
+            return <button key={`${item.label}-${index}`} onClick={() => onNavigate(item.path)} className={`nx-live-ticker__item nx-live-ticker__item--${item.tone}`}>
+              <Icon className="w-3.5 h-3.5 shrink-0" /><span className="font-medium">{item.label}</span><span className="nx-live-ticker__detail">{item.detail}</span>
+            </button>;
+          })}
+        </div>
+      </div>
+      <span className="nx-live-ticker__refresh">Refreshes every minute</span>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
@@ -61,21 +62,25 @@ export default function RemoteAccessPage() {
   const [savingProvider, setSavingProvider] = useState(false);
   const [testingProvider, setTestingProvider] = useState(null);
   const [providerTestResult, setProviderTestResult] = useState({});
-  const headers = { Authorization: `Bearer ${token}` };
+  const [remotePolicy, setRemotePolicy] = useState({ default_provider: "rustdesk", allow_fallback: true, require_consent: true, require_ticket_reference: false });
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [dRes, sRes, cRes, pRes] = await Promise.all([
+      const [dRes, sRes, cRes, pRes, policyRes] = await Promise.all([
         axios.get(`${API}/rustdesk/all-devices`, { headers }),
         axios.get(`${API}/rustdesk/sessions`, { headers }),
         axios.get(`${API}/rustdesk/config`, { headers }),
         axios.get(`${API}/remote-providers`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/remote-access/policy`, { headers }).catch(() => ({ data: null })),
       ]);
       setDevices(dRes.data);
       setSessions(sRes.data);
       setConfig(cRes.data?.value || cRes.data);
       setProviders(pRes.data || []);
+      if (policyRes.data) setRemotePolicy(policyRes.data);
       axios.get(`${API}/rustdesk/agent-deployments`, { headers }).then(r => setDeployments(r.data)).catch(() => {});
       const cfg = cRes.data?.value || cRes.data;
       if (cfg?.enabled && cfg?.server_url) {
@@ -83,7 +88,17 @@ export default function RemoteAccessPage() {
       }
     } catch { toast.error("Failed to load remote access data"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
+
+  const saveRemotePolicy = async () => {
+    setSavingPolicy(true);
+    try {
+      const res = await axios.put(`${API}/remote-access/policy`, remotePolicy, { headers });
+      setRemotePolicy(res.data);
+      toast.success("Remote access policy saved");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save remote policy"); }
+    finally { setSavingPolicy(false); }
+  };
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -401,22 +416,17 @@ export default function RemoteAccessPage() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-3">
+      <MetricStrip columns={5}>
         {[
-          { label: "Total Devices", value: devices.length, icon: Monitor, color: "text-blue-400" },
-          { label: "RustDesk Registered", value: registered.length, icon: Link2, color: "text-emerald-400" },
-          { label: "Unregistered", value: unregistered.length, icon: Unlink, color: "text-amber-400" },
-          { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400" },
-          { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-purple-400" },
+          { label: "Total Devices", value: devices.length, icon: Monitor, color: "text-sky-400", accent: "sky" },
+          { label: "RustDesk Registered", value: registered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
+          { label: "Unregistered", value: unregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
+          { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400", accent: "cyan" },
+          { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-violet-400", accent: "violet" },
         ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`text-2xl font-bold ${st.color}`}>{st.value}</p>
-            </CardContent>
-          </Card>
+          <MetricTile key={st.label} label={st.label} value={st.value} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`remote-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
-      </div>
+      </MetricStrip>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
@@ -618,6 +628,29 @@ export default function RemoteAccessPage() {
             </div>
             <Badge variant="outline" className="text-xs">{providers.filter(p => p.active).length} Active / {providers.length} Available</Badge>
           </div>
+
+          <Card className="border-cyan-500/20 bg-cyan-500/[0.03]" data-testid="remote-access-policy">
+            <CardContent className="py-4">
+              <div className="flex flex-col xl:flex-row xl:items-center gap-4 justify-between">
+                <div>
+                  <p className="font-medium text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" />Remote access policy</p>
+                  <p className="text-xs text-muted-foreground mt-1">Sets the default technician path, consent controls, and audit behaviour for every device.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-36">
+                    <Label className="text-[10px] uppercase text-muted-foreground">Default tool</Label>
+                    <Select value={remotePolicy.default_provider} onValueChange={v => setRemotePolicy(p => ({ ...p, default_provider: v }))}>
+                      <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="rustdesk">RustDesk</SelectItem><SelectItem value="splashtop">Splashtop</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2 pt-4"><Switch checked={!!remotePolicy.require_consent} onCheckedChange={v => setRemotePolicy(p => ({ ...p, require_consent: v }))} /><Label className="text-xs">Confirm consent</Label></div>
+                  <div className="flex items-center gap-2 pt-4"><Switch checked={!!remotePolicy.require_ticket_reference} onCheckedChange={v => setRemotePolicy(p => ({ ...p, require_ticket_reference: v }))} /><Label className="text-xs">Require ticket</Label></div>
+                  <Button size="sm" onClick={saveRemotePolicy} disabled={savingPolicy} className="mt-4"><Save className="w-3 h-3 mr-1" />{savingPolicy ? "Saving" : "Save policy"}</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {providers.map(p => {

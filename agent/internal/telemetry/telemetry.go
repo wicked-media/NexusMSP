@@ -52,6 +52,9 @@ type Snapshot struct {
 	MemPercent   float64        `json:"mem_percent"`
 	Disks        []DiskInfo     `json:"disks,omitempty"`
 	NICs         []NICInfo      `json:"nics,omitempty"`
+	Security     *SecurityInfo  `json:"security,omitempty"`
+	Software     []SoftwareInfo `json:"software,omitempty"`
+	Hardware     *HardwareInfo  `json:"hardware,omitempty"`
 }
 
 type DiskInfo struct {
@@ -64,9 +67,14 @@ type DiskInfo struct {
 }
 
 type NICInfo struct {
-	Name string   `json:"name"`
-	MAC  string   `json:"mac,omitempty"`
-	IPv4 []string `json:"ipv4,omitempty"`
+	Name      string   `json:"name"`
+	MAC       string   `json:"mac,omitempty"`
+	IPv4      []string `json:"ipv4,omitempty"`
+	Type      string   `json:"type,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Gateway   string   `json:"gateway,omitempty"`
+	DNS       []string `json:"dns,omitempty"`
+	SpeedMbps float64  `json:"speed_mbps,omitempty"`
 }
 
 // Collect returns a full snapshot — best-effort, never panics.
@@ -122,6 +130,12 @@ func Collect() Snapshot {
 			s.NICs = append(s.NICs, NICInfo{Name: n.Name, MAC: n.HardwareAddr, IPv4: ips})
 		}
 	}
+	s.NICs = enrichNICs(s.NICs)
+	// Security inventory is OS-specific and always best-effort.  It is kept
+	// separate so a failed Defender or update query never interrupts check-in.
+	s.Security = collectSecurity()
+	s.Software = collectSoftware()
+	s.Hardware = collectHardware()
 	return s
 }
 
@@ -132,4 +146,41 @@ func contains(s []string, v string) bool {
 
 func round2(f float64) float64 {
 	return float64(int(f*100+0.5)) / 100
+}
+
+// SecurityInfo contains the endpoint controls used for the MSP compliance
+// score. Unknown values mean the endpoint could not be assessed, not failed.
+type SecurityInfo struct {
+	DefenderInstalled bool        `json:"defender_installed"`
+	DefenderEnabled   bool        `json:"defender_enabled"`
+	RealTimeEnabled   bool        `json:"real_time_enabled"`
+	SignatureAgeDays  int         `json:"signature_age_days,omitempty"`
+	FirewallEnabled   bool        `json:"firewall_enabled"`
+	EncryptionStatus  string      `json:"encryption_status,omitempty"`
+	PendingUpdateCount int        `json:"pending_update_count,omitempty"`
+	PendingUpdates    []PatchInfo `json:"pending_updates,omitempty"`
+}
+
+type PatchInfo struct {
+	Title           string `json:"title"`
+	KB              string `json:"kb,omitempty"`
+	RebootRequired  bool   `json:"reboot_required,omitempty"`
+}
+
+// SoftwareInfo is deliberately limited to uninstall-registry information: it
+// is stable, read-only, and works without a separate inventory dependency.
+type SoftwareInfo struct {
+	Name        string  `json:"name"`
+	Version     string  `json:"version,omitempty"`
+	Publisher   string  `json:"publisher,omitempty"`
+	InstallDate string  `json:"install_date,omitempty"`
+	SizeMB      float64 `json:"size_mb,omitempty"`
+}
+
+type HardwareInfo struct {
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	SerialNumber string `json:"serial_number,omitempty"`
+	BIOSVersion  string `json:"bios_version,omitempty"`
+	Domain       string `json:"domain,omitempty"`
 }

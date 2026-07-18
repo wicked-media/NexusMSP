@@ -119,13 +119,16 @@ export default function DeviceDossier({ deviceId, headers, API }) {
           </div>
         </div>
 
-        {/* Change timeline */}
+        {/* Recent operational evidence */}
         <div>
           <div className="text-[10px] uppercase tracking-widest font-mono text-zinc-500 flex items-center gap-1 mb-2">
-            <Activity className="w-3 h-3" />What Changed (24h)
+            <Activity className="w-3 h-3" />Recent signals & changes (24h)
           </div>
           {change_timeline.length === 0 ? (
-            <p className="text-xs text-zinc-500 text-center py-3">No changes in the last 24 hours.</p>
+            <div className="rounded-md border border-dashed border-zinc-800 px-4 py-4 text-center">
+              <p className="text-xs text-zinc-400">No operational changes recorded in the last 24 hours.</p>
+              <p className="mt-1 text-[10px] text-zinc-600">The next agent check-in, command, patch scan, or device change will appear here.</p>
+            </div>
           ) : (
             <ScrollArea className="h-[200px] pr-2">
               <div className="relative pl-5">

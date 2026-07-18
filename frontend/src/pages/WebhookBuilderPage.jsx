@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,7 @@ export default function WebhookBuilderPage() {
   const [testingId, setTestingId] = useState(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ name: "", trigger: "ticket.created", method: "POST", url: "", headers: '{"Content-Type": "application/json"}', payload_template: "", retry_count: 3, retry_delay: 30 });
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -50,7 +50,7 @@ export default function WebhookBuilderPage() {
       setSamplePayloads(tRes.data.sample_payloads || {});
     } catch { toast.error("Failed to load webhooks"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

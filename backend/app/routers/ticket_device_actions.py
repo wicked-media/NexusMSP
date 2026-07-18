@@ -14,7 +14,7 @@ import asyncio
 
 from app.database import db
 from app.routers.auth import get_current_user
-from app.routers.nexus_agent import queue_command_for_device, _audit as _agent_audit
+from app.routers.nexus_agent import queue_command_for_device, require_agent_operator, _audit as _agent_audit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,7 +58,8 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
         "is_system_action": True,
         "created_at": _now(),
     })
-    await db.ticket_audit.insert_one({
+    # Keep device actions alongside all other ticket activity for the Audit tab.
+    await db.ticket_audit_log.insert_one({
         "id": uuid.uuid4().hex,
         "ticket_id": ticket_id,
         "user_id": user.get("id"),
@@ -72,7 +73,7 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
 # ─────────────────────── Power actions ───────────────────────
 
 @router.post("/tickets/{ticket_id}/device/reboot")
-async def device_reboot(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_reboot(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     cmd_id = await queue_command_for_device(device, "reboot", {"delay_sec": 30}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Reboot queued", f"{device.get('name')} via NexusOps Agent")
@@ -80,7 +81,7 @@ async def device_reboot(ticket_id: str, device_id: str | None = Query(None), cur
 
 
 @router.post("/tickets/{ticket_id}/device/shutdown")
-async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     cmd_id = await queue_command_for_device(device, "shutdown", {"delay_sec": 60}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Shutdown queued", f"{device.get('name')} · 60s grace")
@@ -96,7 +97,7 @@ async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None)
 
 
 @router.post("/tickets/{ticket_id}/device/run-checks")
-async def device_run_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_run_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Trigger an immediate telemetry refresh (no-op ping at the moment)."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
     cmd_id = await queue_command_for_device(device, "ping", {}, current_user.get("email") or "system")
@@ -105,7 +106,7 @@ async def device_run_checks(ticket_id: str, device_id: str | None = Query(None),
 
 
 @router.post("/tickets/{ticket_id}/device/install-patches")
-async def device_install_patches(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_install_patches(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     # Requires PSWindowsUpdate module on the endpoint
     script = "if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) { Install-PackageProvider NuGet -Force; Install-Module PSWindowsUpdate -Force -SkipPublisherCheck }; Import-Module PSWindowsUpdate; Get-WindowsUpdate -Install -AcceptAll -IgnoreReboot"
@@ -115,7 +116,7 @@ async def device_install_patches(ticket_id: str, device_id: str | None = Query(N
 
 
 @router.post("/tickets/{ticket_id}/device/send-message")
-async def device_send_message(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_send_message(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Pop a message on the user's screen via msg.exe."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
     title = (payload.get("title") or "Message from IT").strip().replace("'", "")
@@ -129,21 +130,27 @@ async def device_send_message(ticket_id: str, payload: dict = Body(...), device_
 
 
 @router.post("/tickets/{ticket_id}/device/run-script")
-async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Generic script runner — pass {shell, script, timeout_sec}."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
     shell = payload.get("shell", "powershell")
     script = (payload.get("script") or "").strip()
     if not script:
         raise HTTPException(400, "script required")
+    if shell not in {"powershell", "cmd", "bash"}:
+        raise HTTPException(400, "shell must be powershell, cmd, or bash")
+    if len(script) > 50_000:
+        raise HTTPException(400, "script is limited to 50000 characters")
     timeout = int(payload.get("timeout_sec") or 120)
+    if timeout < 1 or timeout > 900:
+        raise HTTPException(400, "timeout_sec must be between 1 and 900")
     cmd_id = await queue_command_for_device(device, "run_script", {"shell": shell, "script": script, "timeout_sec": timeout}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Script queued", f"{device.get('name','')} ({shell})")
     return {"success": True, "command_id": cmd_id}
 
 
 @router.post("/tickets/{ticket_id}/device/kill-process")
-async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
+async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     pid = int(payload.get("pid") or 0)
     if pid <= 0:
@@ -199,7 +206,7 @@ async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_c
 # ─────────────────────── Fan-out ───────────────────────
 
 @router.post("/tickets/{ticket_id}/device/fanout/{action}")
-async def device_fanout(ticket_id: str, action: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
+async def device_fanout(ticket_id: str, action: str, payload: dict = Body(default={}), current_user: dict = Depends(require_agent_operator)):
     """Run a single action against every linked device that has a NexusOps Agent."""
     allowed = {"run-checks", "install-patches", "reboot", "shutdown", "send-message"}
     if action not in allowed:

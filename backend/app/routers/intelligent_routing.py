@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import uuid
 import random; random = random.SystemRandom()
 from app.database import db
@@ -9,6 +10,28 @@ from app.auth import get_current_user
 router = APIRouter()
 
 SKILL_CATEGORIES = ["networking", "security", "cloud", "hardware", "software", "email", "backup", "voip", "printing", "database"]
+
+_DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _routing_availability(working_hours: dict) -> tuple[bool, bool]:
+    """Return (available_now, opted_in_to_auto_assign) for a technician."""
+    working_hours = working_hours or {}
+    auto_assign = working_hours.get("auto_assign", True) is not False
+    if working_hours.get("on_call"):
+        return True, auto_assign
+    try:
+        now = datetime.now(ZoneInfo(working_hours.get("timezone") or "Australia/Sydney"))
+    except Exception:
+        now = datetime.now(timezone.utc)
+    day = (working_hours.get("schedule") or {}).get(_DAY_NAMES[now.weekday()], {})
+    if not day.get("enabled"):
+        return False, auto_assign
+    start, end = day.get("start") or "", day.get("end") or ""
+    if not start or not end:
+        return False, auto_assign
+    clock = now.strftime("%H:%M")
+    return start <= clock < end, auto_assign
 
 @router.get("/intelligent-routing/dashboard")
 async def get_routing_dashboard(current_user: dict = Depends(get_current_user)):
@@ -33,7 +56,7 @@ async def get_routing_dashboard(current_user: dict = Depends(get_current_user)):
         if not skills_profile:
             skills_profile = {"skills": {cat: random.randint(1, 5) for cat in random.sample(SKILL_CATEGORIES, random.randint(3, 7))}}
 
-        is_available = wh.get("on_call", False) or True
+        is_available, auto_assign = _routing_availability(wh)
         capacity = max(0, 8 - open_tickets)
 
         tech_profiles.append({
@@ -41,7 +64,7 @@ async def get_routing_dashboard(current_user: dict = Depends(get_current_user)):
             "open_tickets": open_tickets, "resolved_today": resolved_today,
             "avg_resolve_minutes": avg_resolve_mins,
             "skills": skills_profile.get("skills", {}),
-            "is_available": is_available, "on_call": wh.get("on_call", False),
+            "is_available": is_available, "on_call": wh.get("on_call", False), "auto_assign": auto_assign,
             "capacity": capacity, "utilization_pct": round(open_tickets / 8 * 100),
             "sla_compliance": round(random.uniform(85, 100), 1),
             "csat_score": round(random.uniform(3.5, 5.0), 1),
@@ -84,6 +107,10 @@ async def route_ticket(ticket_id: str, current_user: dict = Depends(get_current_
 
     scores = []
     for t in techs:
+        settings = await db.user_settings.find_one({"user_id": t["id"]}, {"_id": 0, "working_hours": 1}) or {}
+        available_now, auto_assign = _routing_availability(settings.get("working_hours", {}))
+        if not auto_assign or not available_now:
+            continue
         open_count = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
         capacity_score = max(0, 100 - open_count * 15)
         skill_score = random.randint(40, 100)
@@ -91,6 +118,8 @@ async def route_ticket(ticket_id: str, current_user: dict = Depends(get_current_
         total = round(capacity_score * 0.4 + skill_score * 0.4 + availability_score * 0.2)
         scores.append({"tech": t, "score": total, "capacity_score": capacity_score, "skill_score": skill_score, "availability_score": availability_score, "open_tickets": open_count})
 
+    if not scores:
+        raise HTTPException(status_code=400, detail="No technicians are currently available for auto-assignment")
     scores.sort(key=lambda x: x["score"], reverse=True)
     best = scores[0]
 

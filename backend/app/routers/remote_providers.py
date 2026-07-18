@@ -45,6 +45,8 @@ SUPPORTED_PROVIDERS = [
             {"key": "api_key", "label": "API Key", "type": "password", "placeholder": "Your Splashtop API key"},
             {"key": "api_secret", "label": "API Secret", "type": "password", "placeholder": "Your Splashtop API secret"},
             {"key": "team_id", "label": "Team ID", "type": "text", "placeholder": "Your Splashtop team ID"},
+            {"key": "deployment_code", "label": "Deployment Code", "type": "password", "placeholder": "Splashtop Streamer deployment code"},
+            {"key": "streamer_installer_url", "label": "Streamer Installer URL", "type": "url", "placeholder": "https://.../Splashtop_Streamer.exe"},
         ],
         "docs_url": "https://www.splashtop.com/remote-support",
     },

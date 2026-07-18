@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import httpx
+import os
 from app.database import db
 from app.auth import get_current_user
 
@@ -48,6 +49,31 @@ async def _rustdesk_api_request(method: str, path: str, data: dict = None):
             return None
     except Exception:
         return None
+
+@router.post("/rustdesk/sync/devices")
+async def sync_rustdesk_devices(current_user: dict = Depends(get_current_user)):
+    """Read the Pro device inventory and link matching NexusMSP endpoints."""
+    config = await _get_rustdesk_config()
+    base, token = config.get("server_url", ""), config.get("api_key", "")
+    if not base or not token:
+        raise HTTPException(400, "RustDesk server URL and API token are required")
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(f"{base}/api/devices", params={"pageSize": 1000, "current": 1}, headers={"Authorization": f"Bearer {token}"})
+    if response.status_code != 200:
+        raise HTTPException(502, f"RustDesk API returned HTTP {response.status_code}")
+    payload = response.json()
+    devices = payload.get("data") or []
+    linked = 0
+    for item in devices:
+        info = item.get("info") or {}
+        hostname = str(info.get("hostname") or info.get("name") or item.get("id") or "").strip()
+        doc = {"id": str(uuid.uuid4()), "rustdesk_guid": item.get("guid"), "rustdesk_id": item.get("id"), "hostname": hostname, "status": item.get("status"), "last_online": item.get("last_online"), "raw": item, "synced_at": datetime.now(timezone.utc).isoformat()}
+        await db.rustdesk_devices.update_one({"rustdesk_guid": item.get("guid")}, {"$set": doc}, upsert=True)
+        local = await db.devices.find_one({"hostname": hostname}, {"_id": 0, "id": 1})
+        if local and item.get("id"):
+            await db.devices.update_one({"id": local["id"]}, {"$set": {"rustdesk_id": str(item["id"]), "rustdesk_guid": item.get("guid"), "remote_access_updated_at": datetime.now(timezone.utc).isoformat()}})
+            linked += 1
+    return {"success": True, "synced": len(devices), "linked": linked, "total": payload.get("total", len(devices))}
 
 @router.get("/rustdesk/config")
 async def get_rustdesk_global_config(current_user: dict = Depends(get_current_user)):

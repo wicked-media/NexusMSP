@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -13,7 +14,7 @@ import { toast } from "sonner";
 import {
   Bold, Italic, Underline, Link as LinkIcon, Image as ImageIcon,
   AlignLeft, AlignCenter, AlignRight, List, Palette, Trash2, Plus, Check,
-  Sparkles, Eye, Loader2, Star, Mail,
+  Sparkles, Eye, Loader2, Star, Mail, Send,
 } from "lucide-react";
 
 const TEMPLATE_VARS = [
@@ -200,6 +201,9 @@ export default function SignatureManager() {
   const [form, setForm] = useState({ name: "", html: "", scope: "all", is_default: false });
   const [presetOpen, setPresetOpen] = useState(false);
   const [tab, setTab] = useState("edit");
+  const [testOpen, setTestOpen] = useState(false);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testSending, setTestSending] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -254,17 +258,26 @@ export default function SignatureManager() {
     } catch { toast.error("Failed"); }
   };
 
+  const sendTest = async () => {
+    setTestSending(true);
+    try {
+      const r = await axios.post(`${API}/email-signatures/send-test`, { to_email: testRecipient }, { headers });
+      toast.success(`Test sent to ${r.data.recipient}`);
+      setTestOpen(false);
+      setTestRecipient("");
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not send test"); }
+    finally { setTestSending(false); }
+  };
+
   return (
     <div className="space-y-4" data-testid="signature-manager">
       <Card>
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base flex items-center gap-2"><Mail className="w-4 h-4" />Email Signatures</CardTitle>
-            <p className="text-xs text-zinc-500 mt-1">Outlook-grade rich signatures, auto-applied to ticket emails. Use template variables for dynamic content.</p>
+            <p className="text-xs text-zinc-500 mt-1">Rich signatures are rendered server-side for technician-sent tickets, field and workshop updates, invoices, leads, and purchase orders.</p>
           </div>
-          <Button size="sm" variant="outline" className="text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={startNew} data-testid="sig-new-btn">
-            <Plus className="w-3 h-3 mr-1" />New
-          </Button>
+          <div className="flex items-center gap-2"><Button size="sm" variant="ghost" onClick={() => setTestOpen(true)} disabled={!signatures.some(s => s.is_default)} data-testid="sig-test-btn"><Send className="w-3 h-3 mr-1" />Send test</Button><Button size="sm" variant="outline" className="text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={startNew} data-testid="sig-new-btn"><Plus className="w-3 h-3 mr-1" />New</Button></div>
         </CardHeader>
         <CardContent>
           {signatures.length === 0 ? (
@@ -357,6 +370,14 @@ export default function SignatureManager() {
             <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
             <Button onClick={save} variant="outline" className="text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" data-testid="sig-save-btn"><Check className="w-3 h-3 mr-1" />Save</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={testOpen} onOpenChange={setTestOpen}>
+        <DialogContent className="max-w-md" data-testid="sig-test-dialog">
+          <DialogHeader><DialogTitle>Send signature test</DialogTitle><DialogDescription>This sends a real Microsoft 365 email using your current default signature. No message is sent until you confirm.</DialogDescription></DialogHeader>
+          <div className="space-y-2"><Label>Send test to</Label><Input type="email" value={testRecipient} onChange={e => setTestRecipient(e.target.value)} placeholder="you@example.com" data-testid="sig-test-recipient" /></div>
+          <DialogFooter><Button variant="ghost" onClick={() => setTestOpen(false)}>Cancel</Button><Button onClick={sendTest} disabled={testSending || !testRecipient.trim()}><Send className="w-3 h-3 mr-1" />{testSending ? "Sending…" : "Send test"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

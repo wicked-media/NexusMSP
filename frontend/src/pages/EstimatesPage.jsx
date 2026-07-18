@@ -21,6 +21,7 @@ import {
 import { format } from "date-fns";
 import { EstimateFollowupButton } from "@/components/ai/EstimateFollowupButton";
 import { EstimateAIBundle } from "@/components/ai/EstimateAIBundle";
+import HeroTile from "@/components/HeroTile";
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30", icon: CircleDot, pulse: false },
@@ -164,7 +165,8 @@ export default function EstimatesPage() {
   const calcSubtotal = (items) => items.reduce((s, i) => s + (i.quantity || 0) * (i.unit_price || 0), 0);
 
   const filtered = estimates.filter(e => {
-    if (statusFilter !== "all" && e.status !== statusFilter) return false;
+    if (statusFilter === "active" && !["published", "sent"].includes(e.status)) return false;
+    if (!["all", "active"].includes(statusFilter) && e.status !== statusFilter) return false;
     if (search && !e.title?.toLowerCase().includes(search.toLowerCase()) && !e.estimate_number?.toLowerCase().includes(search.toLowerCase()) && !e.client_name?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -279,11 +281,11 @@ export default function EstimatesPage() {
   const approvedCount = estimates.filter(e => e.status === "approved").length;
 
   return (
-    <div className="space-y-5" data-testid="estimates-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Estimates</h1>
-          <p className="text-muted-foreground">{estimates.length} estimates &middot; ${stats?.total_value?.toLocaleString() || 0} total value</p>
+    <div className="space-y-6" data-testid="estimates-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><FileText className="w-4 h-4 text-sky-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Estimates</h1><p className="text-sm text-muted-foreground">{estimates.length} estimates · ${stats?.total_value?.toLocaleString() || 0} total value</p></div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
@@ -293,21 +295,11 @@ export default function EstimatesPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-5 gap-3">
-        <Card className="cursor-pointer hover:border-zinc-500/40" onClick={() => setStatusFilter("all")} data-testid="stat-total">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black">{estimates.length}</p><p className="text-[11px] text-muted-foreground">Total</p></div><FileText className="w-5 h-5 text-muted-foreground" /></div></CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-zinc-500/40" onClick={() => setStatusFilter("draft")} data-testid="stat-draft">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-zinc-400">{draftCount}</p><p className="text-[11px] text-muted-foreground">Drafts</p></div><CircleDot className="w-5 h-5 text-zinc-400" /></div></CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-blue-500/40" onClick={() => setStatusFilter("published")}>
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-blue-400">{activeCount}</p><p className="text-[11px] text-muted-foreground">Active</p></div><div className="w-3 h-3 rounded-full bg-blue-400 animate-pulse" style={{ boxShadow: "0 0 12px #3b82f6" }} /></div></CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:border-emerald-500/40" onClick={() => setStatusFilter("approved")} data-testid="stat-approved">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-emerald-400">{approvedCount}</p><p className="text-[11px] text-muted-foreground">Approved</p></div><CheckCircle className="w-5 h-5 text-emerald-400" /></div></CardContent>
-        </Card>
-        <Card data-testid="stat-value">
-          <CardContent className="pt-4 pb-3"><div className="flex items-center justify-between"><div><p className="text-2xl font-black text-emerald-400">${stats?.approved_value?.toLocaleString() || 0}</p><p className="text-[11px] text-muted-foreground">Approved Value</p></div><DollarSign className="w-5 h-5 text-emerald-400" /></div></CardContent>
-        </Card>
+        <HeroTile label="All estimates" value={estimates.length} icon={FileText} glow="cyan" active={statusFilter === "all"} onClick={() => setStatusFilter("all")} testId="stat-total" />
+        <HeroTile label="Drafts" value={draftCount} icon={CircleDot} glow="zinc" active={statusFilter === "draft"} onClick={() => setStatusFilter("draft")} testId="stat-draft" />
+        <HeroTile label="Awaiting decision" value={activeCount} icon={Clock} glow="sky" active={statusFilter === "active"} onClick={() => setStatusFilter("active")} testId="stat-active" />
+        <HeroTile label="Approved" value={approvedCount} icon={CheckCircle} glow="emerald" active={statusFilter === "approved"} onClick={() => setStatusFilter("approved")} testId="stat-approved" />
+        <HeroTile label="Approved value" value={`$${stats?.approved_value?.toLocaleString() || 0}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => setStatusFilter("approved")} testId="stat-value" />
       </div>
 
       {/* Filters */}
@@ -321,6 +313,7 @@ export default function EstimatesPage() {
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="active">Awaiting Decision</SelectItem>
             <SelectItem value="published">Published</SelectItem>
             <SelectItem value="sent">Sent</SelectItem>
             <SelectItem value="approved">Approved</SelectItem>

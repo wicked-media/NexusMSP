@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
 import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3, Zap, Activity, Flame, Command, Rows3, AlignJustify, Maximize2 } from "lucide-react";
@@ -51,6 +51,7 @@ const emptyForm = { name: "", client_id: "", device_type: "workstation", os: "Wi
 
 export default function DevicesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { token } = useAuth();
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
@@ -83,6 +84,12 @@ export default function DevicesPage() {
   const [pulseCount, setPulseCount] = useState(0);
 
   const headers = { Authorization: `Bearer ${token}` };
+  const filterSource = searchParams.get("source");
+
+  useEffect(() => {
+    const clientId = searchParams.get("clientId");
+    if (clientId) setFilterClient(clientId);
+  }, [searchParams]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -182,6 +189,7 @@ export default function DevicesPage() {
   }, []);
 
   const filtered = devices.filter(d => {
+    if (filterSource && d.source !== filterSource) return false;
     if (filterStatus !== "all" && d.status !== filterStatus) return false;
     if (filterType !== "all" && d.device_type !== filterType) return false;
     if (filterClient !== "all" && d.client_id !== filterClient) return false;
@@ -551,6 +559,21 @@ export default function DevicesPage() {
             {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        {filterSource === "nexus-agent" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 text-xs text-cyan-300 border-cyan-500/30"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("source");
+              setSearchParams(next);
+            }}
+            data-testid="clear-device-source-filter"
+          >
+            <Sparkles className="w-3 h-3 mr-1" />Nexus agents only ×
+          </Button>
+        )}
         <div className="ml-auto flex gap-1 items-center">
           {selectedDevices.length > 0 && (
             <Button size="sm" variant="outline" className="h-9 text-xs text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">

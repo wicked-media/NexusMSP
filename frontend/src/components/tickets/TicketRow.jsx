@@ -7,9 +7,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Shield, Wrench, Truck, Eye, MessageSquare, Paperclip, Lock, AlertTriangle,
-  MoreHorizontal, ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark,
+  ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark,
 } from "lucide-react";
 import { differenceInHours, formatDistanceToNow } from "date-fns";
+import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
 
 /* ─────────────────────────────────────────────────────────────────
    Density mode tokens — Linear/Plain.com inspired
@@ -23,18 +24,8 @@ export const DENSITY = {
 /* ─────────────────────────────────────────────────────────────────
    Status pill — Linear-style: tiny uppercase, mono, semantic color
    ───────────────────────────────────────────────────────────────── */
-const STATUS_TONE = {
-  open:        "text-zinc-300 bg-zinc-900/60 border-zinc-700/50",
-  pending:     "text-amber-300 bg-amber-950/60 border-amber-800/50",
-  in_progress: "text-cyan-300 bg-cyan-950/60 border-cyan-800/50",
-  on_hold:     "text-violet-300 bg-violet-950/60 border-violet-800/50",
-  resolved:    "text-emerald-300 bg-emerald-950/60 border-emerald-800/50",
-  closed:      "text-zinc-500 bg-zinc-950/60 border-zinc-800/50",
-  blocked:     "text-rose-300 bg-rose-950/60 border-rose-800/50",
-};
-
 export function StatusPill({ status, label }) {
-  const tone = STATUS_TONE[status] || STATUS_TONE.open;
+  const tone = TICKET_STATUS_STYLES[status] || TICKET_STATUS_STYLES.open;
   return (
     <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-[1px] font-mono text-[9px] uppercase tracking-[0.12em] ${tone}`}>
       <span className="w-1 h-1 rounded-full bg-current opacity-70" />
@@ -46,19 +37,6 @@ export function StatusPill({ status, label }) {
 /* ─────────────────────────────────────────────────────────────────
    Priority left-border accent (sticky 2px)
    ───────────────────────────────────────────────────────────────── */
-const PRIORITY_BORDER = {
-  critical: "border-l-rose-500",
-  high:     "border-l-orange-500",
-  medium:   "border-l-amber-500",
-  low:      "border-l-emerald-500",
-};
-const PRIORITY_DOT = {
-  critical: "bg-rose-500",
-  high:     "bg-orange-500",
-  medium:   "bg-amber-500",
-  low:      "bg-emerald-500",
-};
-
 /* ─────────────────────────────────────────────────────────────────
    Active viewers — overlapping cyan-ring avatars
    ───────────────────────────────────────────────────────────────── */
@@ -116,8 +94,8 @@ export function TicketRow({
     <div
       onClick={() => onOpen?.(ticket)}
       className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer transition-colors
-        ${PRIORITY_BORDER[ticket.priority] || "border-l-zinc-700"}
-        ${isSelected ? "bg-violet-500/[0.06]" : "hover:bg-white/[0.025]"}
+        ${TICKET_PRIORITY_STYLES[ticket.priority]?.border || "border-l-zinc-700"}
+        ${isSelected ? "bg-violet-500/[0.08]" : isOverdue ? "bg-rose-500/[0.025] hover:bg-rose-500/[0.055]" : ticket.priority === "critical" ? "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]" : "hover:bg-white/[0.025]"}
         ${isClosed ? "opacity-55" : ""}`}
       data-testid={`ticket-row-${ticket.id}`}
     >
@@ -127,7 +105,7 @@ export function TicketRow({
       </div>
 
       {/* Ticket # — monospace, always-visible */}
-      <code className={`${d.number} font-mono text-zinc-500 tabular-nums w-[78px] shrink-0`} data-testid={`ticket-badge-${ticket.id}`}>
+      <code className={`${d.number} font-mono ${isOverdue ? "text-rose-300" : "text-zinc-500"} tabular-nums w-[78px] shrink-0`} data-testid={`ticket-badge-${ticket.id}`}>
         {ticket.ticket_number}
       </code>
 
@@ -136,7 +114,7 @@ export function TicketRow({
 
       {/* Title + tags */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
-        <span className={`${d.title} truncate ${noteCount === 0 && !isClosed ? "font-medium text-zinc-100" : "text-zinc-200"}`}>
+        <span className={`${d.title} truncate ${isOverdue || ticket.priority === "critical" ? "font-semibold text-zinc-100" : noteCount === 0 && !isClosed ? "font-medium text-zinc-100" : "text-zinc-200"}`}>
           {ticket.title}
         </span>
         {ticket.escalated && <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" title="Escalated" />}
@@ -188,12 +166,7 @@ export function TicketRow({
         </span>
       )}
 
-      {/* Quick action — appears on hover */}
-      <div className={`opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0`} onClick={e => e.stopPropagation()}>
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-white/5">
-          <MoreHorizontal className="w-3.5 h-3.5 text-zinc-500" />
-        </Button>
-      </div>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-700 opacity-0 transition-opacity group-hover/row:opacity-100" />
     </div>
   );
 }
@@ -215,11 +188,12 @@ export function TicketGroupSection({ title, count, defaultOpen = true, tone = "z
     <div data-testid={testId}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.02] transition-colors border-b border-white/[0.04] sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-sm z-10"
+        className="w-full flex items-center gap-2 border-y border-white/[0.05] bg-white/[0.018] px-3 py-2 hover:bg-white/[0.04] transition-colors sticky top-0 backdrop-blur-sm z-10"
       >
-        {open ? <ChevronDown className="w-3 h-3 text-zinc-600" /> : <ChevronRight className="w-3 h-3 text-zinc-600" />}
-        <span className={`text-[10px] uppercase tracking-[0.2em] font-mono font-semibold ${toneMap[tone]}`}>{title}</span>
-        <span className="text-[10px] font-mono text-zinc-600 tabular-nums">{count}</span>
+        <span className={`flex h-5 w-5 items-center justify-center rounded-md bg-white/[0.04] ${toneMap[tone]}`}>{open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}</span>
+        <span className={`text-[10px] uppercase tracking-[0.16em] font-mono font-semibold ${toneMap[tone]}`}>{title}</span>
+        <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-mono text-zinc-500 tabular-nums">{count}</span>
+        <span className="ml-auto text-[9px] uppercase tracking-[0.12em] text-zinc-600">{open ? "Collapse" : "Expand"}</span>
       </button>
       {open && <div>{children}</div>}
     </div>

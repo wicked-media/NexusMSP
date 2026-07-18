@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
-from app.routers.email_utils import send_email, is_resend_configured
+from app.routers.email_utils import send_email, is_microsoft365_configured
 import uuid
 import os
 
@@ -104,7 +104,7 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
     # Send the email
     html = _build_invite_email_html(invite)
     subject = f"You're invited to join NexusOps as a {invite['role'].replace('_',' ').title()}"
-    email_result = await send_email(email, subject, html)
+    email_result = await send_email(email, subject, html, category="notifications")
 
     # Update invite with email status
     await db.tech_invites.update_one(
@@ -115,7 +115,7 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
     return {
         "invite": {k: v for k, v in invite.items() if k != "token"},
         "email": email_result,
-        "resend_configured": is_resend_configured(),
+        "email_configured": await is_microsoft365_configured(),
     }
 
 
@@ -147,13 +147,13 @@ async def resend_invite(invite_id: str, current_user: dict = Depends(get_current
 
     html = _build_invite_email_html(invite)
     subject = "Reminder: You're invited to join NexusOps"
-    email_result = await send_email(invite["email"], subject, html)
+    email_result = await send_email(invite["email"], subject, html, category="notifications")
 
     await db.tech_invites.update_one(
         {"id": invite_id},
         {"$set": {"email_status": email_result["status"], "last_resent_at": datetime.now(timezone.utc).isoformat()}}
     )
-    return {"email": email_result, "resend_configured": is_resend_configured()}
+    return {"email": email_result, "email_configured": await is_microsoft365_configured()}
 
 
 @router.post("/technicians/accept-invite")

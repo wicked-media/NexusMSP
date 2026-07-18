@@ -24,12 +24,13 @@ export default function CostPerTicketPage() {
   return (
     <div className="space-y-6" data-testid="cost-per-ticket-page">
       <div><h1 className="text-2xl font-bold tracking-tight">Cost-Per-Ticket Analytics</h1>
-        <p className="text-muted-foreground text-sm mt-1">True cost analysis per ticket including labor</p></div>
+        <p className="text-muted-foreground text-sm mt-1">True cost analysis combining labour and linked supplier purchase orders.</p></div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <Card><CardContent className="pt-4 pb-3 text-center"><Ticket className="w-4 h-4 mx-auto mb-1" /><p className="text-xl font-bold">{data.summary.total_tickets}</p><p className="text-xs text-muted-foreground">Total Tickets</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold">{data.summary.tickets_with_time}</p><p className="text-xs text-muted-foreground">With Time Logged</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3 text-center"><DollarSign className="w-4 h-4 mx-auto mb-1 text-green-500" /><p className="text-xl font-bold">${data.summary.total_labor_cost.toLocaleString()}</p><p className="text-xs text-muted-foreground">Total Labor Cost</p></CardContent></Card>
+        <Card><CardContent className="pt-4 pb-3 text-center"><DollarSign className="w-4 h-4 mx-auto mb-1 text-amber-500" /><p className="text-xl font-bold">${(data.summary.total_supplier_cost || 0).toLocaleString()}</p><p className="text-xs text-muted-foreground">Supplier Cost</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3 text-center"><DollarSign className="w-4 h-4 mx-auto mb-1 text-blue-500" /><p className="text-xl font-bold">${data.summary.avg_cost_per_ticket}</p><p className="text-xs text-muted-foreground">Avg Cost/Ticket</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3 text-center"><Clock className="w-4 h-4 mx-auto mb-1" /><p className="text-xl font-bold">{data.summary.avg_hours_per_ticket}h</p><p className="text-xs text-muted-foreground">Avg Hours/Ticket</p></CardContent></Card>
       </div>
@@ -44,12 +45,12 @@ export default function CostPerTicketPage() {
               <TabsTrigger value="priority">By Priority</TabsTrigger>
             </TabsList>
             <TabsContent value="tickets">
-              <Table><TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Client</TableHead><TableHead>Category</TableHead><TableHead>Priority</TableHead><TableHead>Hours</TableHead><TableHead>Cost</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+              <Table><TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Client</TableHead><TableHead>Category</TableHead><TableHead>Priority</TableHead><TableHead>Hours</TableHead><TableHead>Labor</TableHead><TableHead>Supplier</TableHead><TableHead>Total Cost</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
                 <TableBody>{data.tickets.map(t => (
                   <TableRow key={t.ticket_id} data-testid={`cost-ticket-${t.ticket_id}`}>
                     <TableCell className="font-medium max-w-[200px] truncate">{t.title}</TableCell><TableCell className="text-sm">{t.client_name}</TableCell>
                     <TableCell className="capitalize text-xs">{t.category}</TableCell><TableCell><Badge variant="outline" className="capitalize text-xs">{t.priority}</Badge></TableCell>
-                    <TableCell>{t.hours_spent}h</TableCell><TableCell className="font-mono">${t.labor_cost.toLocaleString()}</TableCell>
+                    <TableCell>{t.hours_spent}h</TableCell><TableCell className="font-mono">${t.labor_cost.toLocaleString()}</TableCell><TableCell className="font-mono text-amber-400">${(t.supplier_cost || 0).toLocaleString()}</TableCell><TableCell className="font-mono font-semibold">${(t.total_cost ?? t.labor_cost).toLocaleString()}</TableCell>
                     <TableCell><Badge variant="outline" className="capitalize text-xs">{t.status}</Badge></TableCell>
                   </TableRow>
                 ))}</TableBody></Table>

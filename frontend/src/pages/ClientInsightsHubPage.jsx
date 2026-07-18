@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Loader2, Users, HeartPulse, AlertTriangle, Smile, Activity } from "lucide-react";
+import { Loader2, Users, HeartPulse, AlertTriangle, Smile, Activity, Radar } from "lucide-react";
 
 const TABS = [
+  { id: "portfolio-radar", label: "Portfolio Radar", icon: Radar, page: () => import("./HealthRadarPage") },
   { id: "customer-health", label: "Customer Health", icon: Users, page: () => import("./CustomerHealthPage") },
   { id: "client-health", label: "RMM Health", icon: HeartPulse, page: () => import("./ClientHealthPage") },
   { id: "client-risk", label: "Risk", icon: AlertTriangle, page: () => import("./ClientRiskPage") },
@@ -13,8 +13,7 @@ const TABS = [
 const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
 
 export default function ClientInsightsHubPage() {
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("customer-health");
+  const [activeTab, setActiveTab] = useState("portfolio-radar");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -35,7 +34,7 @@ export default function ClientInsightsHubPage() {
       <div className="border-b border-border bg-card/50">
         <div className="px-6 pt-5">
           <h1 className="text-2xl font-semibold tracking-tight">Client Insights</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Unified view of client health, risk, sentiment and activity.</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Portfolio health, client risk, sentiment and operational activity in one place.</p>
         </div>
         <div className="px-4 mt-4 flex items-center gap-1 overflow-x-auto">
           {TABS.map(t => {
@@ -58,7 +57,7 @@ export default function ClientInsightsHubPage() {
       </div>
       <div>
         <Suspense fallback={<div className="p-12 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>}>
-          <Active />
+          <Active embedded={activeTab === "portfolio-radar"} />
         </Suspense>
       </div>
     </div>

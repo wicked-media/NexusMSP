@@ -4,7 +4,7 @@ import uuid
 import secrets
 from app.database import db
 from app.auth import get_current_user
-from app.routers.email_utils import send_email, is_resend_configured
+from app.routers.email_utils import send_email, is_microsoft365_configured
 
 router = APIRouter()
 
@@ -255,13 +255,13 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
 
     # Send welcome email
     send_welcome = data.get("send_welcome_email", True)
-    if send_welcome and is_resend_configured():
+    if send_welcome and await is_microsoft365_configured():
         branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
         msp_name = branding.get("company_name", "NexusOps")
         primary_color = branding.get("primary_color", "#10b981")
         portal_url = data.get("portal_url", "")
         html = _portal_welcome_email_html(name, email, password, client["name"] if client else "", portal_url, msp_name, primary_color)
-        result = await send_email(email, f"Welcome to {msp_name} Portal", html)
+        result = await send_email(email, f"Welcome to {msp_name} Portal", html, category="notifications")
         safe["email_status"] = result.get("status", "unknown")
     else:
         safe["email_status"] = "skipped"
@@ -314,13 +314,13 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
     result = {"message": "Password reset", "temp_password": new_password, "email": user["email"]}
 
     # Send reset email
-    if is_resend_configured():
+    if await is_microsoft365_configured():
         branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
         msp_name = branding.get("company_name", "NexusOps")
         primary_color = branding.get("primary_color", "#10b981")
         portal_url = data.get("portal_url", "")
         html = _password_reset_email_html(user.get("name", ""), user["email"], new_password, msp_name, portal_url, primary_color)
-        email_result = await send_email(user["email"], f"{msp_name} - Password Reset", html)
+        email_result = await send_email(user["email"], f"{msp_name} - Password Reset", html, category="notifications")
         result["email_status"] = email_result.get("status", "unknown")
 
     return result

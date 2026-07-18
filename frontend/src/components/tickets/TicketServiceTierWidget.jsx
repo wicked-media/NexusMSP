@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, Award, Crown, Gem, CheckCircle2, Clock, Sparkles, Pencil } from "lucide-react";
+import { Shield, Award, Crown, Gem, CheckCircle2, Clock, Sparkles, Pencil, Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { collectionFromResponse } from "@/lib/ticketWorkspaceHelpers";
 
 const ICON_MAP = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 
@@ -20,7 +21,8 @@ function formatSla(minutes) {
 
 /**
  * Sidebar widget showing the client's service tier with SLA targets + features.
- * Admin can edit the assigned tier inline via a dropdown.
+ * The tier is always inherited from the client account; it is never a
+ * ticket-level setting.
  */
 export default function TicketServiceTierWidget({ ticketId, clientId, token, isAdmin = false }) {
   const [data, setData] = useState(null);
@@ -44,7 +46,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
   const fetchTiers = async () => {
     try {
       const res = await axios.get(`${API}/service-tiers`, { headers });
-      setTiers(res.data.filter(t => t.is_active));
+      setTiers(collectionFromResponse(res.data, ["tiers", "service_tiers"]).filter(t => t.is_active));
     } catch { /* */ }
   };
 
@@ -79,8 +81,9 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
       <Card data-testid="service-tier-widget-empty" className="border-dashed border-zinc-700/40">
         <CardContent className="py-3 space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <Shield className="w-3.5 h-3.5" />No service tier assigned
+            <Shield className="w-3.5 h-3.5" />No client service tier configured
           </div>
+          <p className="text-[10px] leading-4 text-zinc-500">Set the tier on {data?.client_name || "the client account"}; tickets inherit it automatically.</p>
           {isAdmin && tiers.length > 0 && (
             <Select onValueChange={handleAssign} disabled={saving}>
               <SelectTrigger className="h-7 text-[11px]" data-testid="service-tier-assign-select">
@@ -133,6 +136,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
         </div>
       </CardHeader>
       <CardContent className="pt-0 space-y-2.5">
+        <div className="flex items-center gap-1.5 text-[10px] text-zinc-500"><Building2 className="h-3 w-3" />Inherited from {data?.client_name || "client account"}</div>
         {editing && isAdmin && (
           <Select value={tier.id} onValueChange={handleAssign} disabled={saving}>
             <SelectTrigger className="h-7 text-[11px]" data-testid="service-tier-change-select">
@@ -209,13 +213,14 @@ export function ServiceTierChip({ ticketId, token }) {
   return (
     <Badge
       variant="outline"
-      className="gap-1 text-[10px] font-semibold border-current"
+      className="h-7 gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold border-current"
       style={{ color: tier.color, borderColor: `${tier.color}66`, backgroundColor: `${tier.color}10` }}
       data-testid="service-tier-chip"
-      title={`Service tier: ${tier.name}`}
+      title={`Client entitlement: ${tier.name} · Response target ${formatSla(tier.response_sla_minutes)} · Resolution target ${formatSla(tier.resolution_sla_minutes)}`}
     >
       <Icon className="w-3 h-3" />
-      {tier.name}
+      <span>{tier.name}</span>
+      {tier.response_sla_minutes != null && <span className="border-l border-current/30 pl-1.5 font-mono opacity-80">{formatSla(tier.response_sla_minutes)} response</span>}
     </Badge>
   );
 }

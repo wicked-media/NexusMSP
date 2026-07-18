@@ -1,9 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
-import os
 import io
-import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user
@@ -159,36 +157,15 @@ async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict 
     </div>
     """
 
-    # Attempt to send via Resend
-    import resend
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    sender_email = os.environ.get("SENDER_EMAIL", "tickets@nexusops.io")
-    email_status = "sent"
-
-    if resend_key and not resend_key.startswith("re_test_placeholder"):
-        resend.api_key = resend_key
-        try:
-            import base64
-            params = {
-                "from": f"{company_name} <{sender_email}>",
-                "to": [recipient_email],
-                "subject": subject,
-                "html": html_body,
-                "attachments": [{
-                    "filename": f"ticket_{ticket_number}_conversation.pdf",
-                    "content": base64.b64encode(pdf_bytes).decode("utf-8"),
-                    "type": "application/pdf",
-                }]
-            }
-            await asyncio.to_thread(resend.Emails.send, params)
-            email_status = "sent"
-            logger.info(f"Client notification email sent to {recipient_email} for ticket {ticket_number}")
-        except Exception as e:
-            email_status = "failed"
-            logger.error(f"Failed to send client notification: {e}")
-    else:
-        email_status = "sent"
-        logger.info(f"Client notification email marked sent (demo mode) to {recipient_email} for ticket {ticket_number}")
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        recipient_email,
+        subject,
+        html_body,
+        category="ticket_comments",
+        attachments=[{"filename": f"ticket_{ticket_number}_conversation.pdf", "content": bytes(pdf_bytes), "content_type": "application/pdf"}],
+    )
+    email_status = delivery.get("status", "failed")
 
     # Record the notification
     notif_record = {
@@ -199,6 +176,8 @@ async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict 
         "recipient_email": recipient_email,
         "subject": subject,
         "status": email_status,
+        "delivery_message": delivery.get("message", ""),
+        "sender_mailbox": delivery.get("sender"),
         "has_pdf": True,
         "sent_by": current_user["id"],
         "sent_by_name": current_user["name"],

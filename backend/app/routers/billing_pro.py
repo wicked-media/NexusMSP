@@ -95,16 +95,12 @@ async def bulk_invoice_action(data: dict, current_user: dict = Depends(get_curre
         res = await db.invoices.update_many({"id": {"$in": ids}, "status": "draft"}, {"$set": {"status": "sent", "sent_at": now}})
         return {"updated": res.modified_count, "action": action}
     if action == "mark_paid":
-        res = await db.invoices.update_many(
-            {"id": {"$in": ids}},
-            {"$set": {"status": "paid", "payment_status": "paid", "paid_date": now}}
-        )
-        return {"updated": res.modified_count, "action": action}
+        raise HTTPException(status_code=409, detail="Use Record Payment so the amount, method, and audit history are retained")
     if action == "void":
-        res = await db.invoices.update_many({"id": {"$in": ids}}, {"$set": {"status": "cancelled", "voided_at": now, "voided_by": current_user.get("name", "")}})
+        res = await db.invoices.update_many({"id": {"$in": ids}, "payment_status": {"$in": ["unpaid", None]}, "status": {"$nin": ["cancelled", "voided"]}}, {"$set": {"status": "cancelled", "voided_at": now, "voided_by": current_user.get("name", "")}})
         return {"updated": res.modified_count, "action": action}
     if action == "delete":
-        res = await db.invoices.delete_many({"id": {"$in": ids}})
+        res = await db.invoices.delete_many({"id": {"$in": ids}, "payment_status": {"$in": ["unpaid", None]}, "status": {"$in": ["draft", "pending_approval"]}})
         return {"deleted": res.deleted_count, "action": action}
     raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
@@ -693,11 +689,26 @@ async def bulk_import_products(data: dict, current_user: dict = Depends(get_curr
 @router.put("/billing-pro/products/{product_id}/pricing-tiers")
 async def set_tier_pricing(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Body: {tiers: [{min_qty: 1, unit_price: 100}, {min_qty: 10, unit_price: 90}, ...]}"""
-    tiers = sorted(data.get("tiers", []), key=lambda t: int(t.get("min_qty", 1)))
-    await db.products.update_one(
+    raw_tiers = data.get("tiers", [])
+    if not isinstance(raw_tiers, list):
+        raise HTTPException(status_code=422, detail="Tiers must be a list")
+    tiers = []
+    for tier in raw_tiers:
+        try:
+            min_qty = int(tier.get("min_qty", 0))
+            unit_price = float(tier.get("unit_price", -1))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Each tier requires a valid minimum quantity and unit price")
+        if min_qty < 1 or unit_price < 0:
+            raise HTTPException(status_code=422, detail="Tier quantities must be at least 1 and prices cannot be negative")
+        tiers.append({"min_qty": min_qty, "unit_price": unit_price})
+    tiers.sort(key=lambda tier: tier["min_qty"])
+    result = await db.products.update_one(
         {"id": product_id},
         {"$set": {"pricing_tiers": tiers, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Product not found")
     return {"message": f"Saved {len(tiers)} tier(s)", "tiers": tiers}
 
 

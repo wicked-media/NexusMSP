@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Plus, Search, Loader2, ClipboardCheck, BarChart3, ArrowLeft,
@@ -21,6 +22,7 @@ import {
   History, Trash2, Eye
 } from "lucide-react";
 import { format } from "date-fns";
+import HeroTile from "@/components/HeroTile";
 
 const STATUS_COLORS = {
   in_progress: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
@@ -39,6 +41,8 @@ export default function StocktakePage() {
   const [auditLog, setAuditLog] = useState([]);
   const [countSearch, setCountSearch] = useState("");
   const [scannerInput, setScannerInput] = useState("");
+  const [finalizeDialog, setFinalizeDialog] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const scanRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -70,6 +74,7 @@ export default function StocktakePage() {
   };
 
   const handleCreateSession = async () => {
+    if (!newForm.name.trim()) { toast.error("Give this stocktake a session name"); return; }
     try {
       const res = await axios.post(`${API}/stocktake/sessions`, newForm, { headers });
       toast.success(`Stocktake ${res.data.session_number} created with ${res.data.total_items} items`);
@@ -82,9 +87,10 @@ export default function StocktakePage() {
 
   const handleCount = async (item, qty) => {
     if (!viewSession) return;
+    const safeQty = Math.max(0, Number.isFinite(Number(qty)) ? Math.floor(Number(qty)) : 0);
     try {
       await axios.put(`${API}/stocktake/sessions/${viewSession.id}/count`, {
-        product_id: item.product_id, counted_qty: qty, product_name: item.product_name
+        product_id: item.product_id, counted_qty: safeQty, product_name: item.product_name
       }, { headers });
       fetchSession(viewSession.id);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to update count"); }
@@ -114,6 +120,7 @@ export default function StocktakePage() {
       toast.success(`Stocktake finalized. ${res.data.adjustments_made} adjustments applied.`);
       fetchSession(viewSession.id);
       fetchData();
+      setFinalizeDialog(false);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to finalize"); }
   };
 
@@ -123,10 +130,43 @@ export default function StocktakePage() {
       toast.success("Session deleted");
       if (viewSession?.id === id) setViewSession(null);
       fetchData();
+      setDeleteTarget(null);
     } catch { toast.error("Failed to delete"); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+
+  const finalizeConfirmation = (
+    <AlertDialog open={finalizeDialog} onOpenChange={setFinalizeDialog}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Finalize this stocktake?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will apply the counted quantities as inventory adjustments. Uncounted products keep their existing stock level.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Counting</AlertDialogCancel>
+          <AlertDialogAction className="bg-green-600 text-white hover:bg-green-700" onClick={handleFinalize} data-testid="confirm-finalize-stocktake">Finalize & Apply Adjustments</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  const deleteConfirmation = (
+    <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {deleteTarget?.session_number}?</AlertDialogTitle>
+          <AlertDialogDescription>This removes the in-progress count and its audit trail. Completed stocktakes remain as inventory history.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Session</AlertDialogCancel>
+          <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-stocktake">Delete Session</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   // ========== SESSION DETAIL VIEW ==========
   if (viewSession) {
@@ -154,27 +194,11 @@ export default function StocktakePage() {
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Card><CardContent className="pt-4 text-center">
-            <p className="text-xs text-muted-foreground">Progress</p>
-            <p className="text-2xl font-bold">{progressPct}%</p>
-            <Progress value={progressPct} className="mt-2 h-1.5" />
-          </CardContent></Card>
-          <Card><CardContent className="pt-4 text-center">
-            <p className="text-xs text-muted-foreground">Counted / Total</p>
-            <p className="text-2xl font-bold">{s.counted_items} / {s.total_items}</p>
-          </CardContent></Card>
-          <Card><CardContent className="pt-4 text-center">
-            <p className="text-xs text-muted-foreground">Variances</p>
-            <p className="text-2xl font-bold text-amber-400">{s.variance_count}</p>
-          </CardContent></Card>
-          <Card className="border-red-500/20"><CardContent className="pt-4 text-center">
-            <p className="text-xs text-muted-foreground">Stock Loss</p>
-            <p className="text-2xl font-bold text-red-400">${s.stock_loss_value?.toFixed(2)}</p>
-          </CardContent></Card>
-          <Card className="border-green-500/20"><CardContent className="pt-4 text-center">
-            <p className="text-xs text-muted-foreground">Stock Gain</p>
-            <p className="text-2xl font-bold text-green-400">${s.stock_gain_value?.toFixed(2)}</p>
-          </CardContent></Card>
+          <HeroTile label="Count progress" value={`${progressPct}%`} icon={ClipboardCheck} glow="cyan" animated={false} />
+          <HeroTile label="Counted items" value={`${s.counted_items} / ${s.total_items}`} icon={CheckCircle} glow="emerald" animated={false} />
+          <HeroTile label="Variances" value={s.variance_count || 0} icon={AlertTriangle} glow={s.variance_count > 0 ? "amber" : "emerald"} animated={false} />
+          <HeroTile label="Stock loss" value={`$${(s.stock_loss_value || 0).toFixed(2)}`} icon={TrendingDown} glow="rose" animated={false} />
+          <HeroTile label="Stock gain" value={`$${(s.stock_gain_value || 0).toFixed(2)}`} icon={TrendingUp} glow="emerald" animated={false} />
         </div>
 
         {/* Barcode Scanner Strip */}
@@ -206,7 +230,7 @@ export default function StocktakePage() {
           {varianceItems.length > 0 && <Badge variant="outline" className="text-amber-400">{varianceItems.length} variances</Badge>}
           <div className="flex-1" />
           {s.status === "in_progress" && (
-            <Button onClick={handleFinalize} className="bg-green-600 hover:bg-green-700" data-testid="finalize-stocktake">
+            <Button onClick={() => setFinalizeDialog(true)} className="bg-green-600 hover:bg-green-700" data-testid="finalize-stocktake">
               <CheckCircle className="w-4 h-4 mr-1" />Finalize & Adjust Stock
             </Button>
           )}
@@ -271,7 +295,7 @@ export default function StocktakePage() {
                         <TableCell className="text-right">
                           <div className="flex items-center gap-1 justify-end">
                             <Input type="number" min="0" className="w-20 h-8 text-sm font-mono text-right"
-                              defaultValue={item.counted_qty ?? ""}
+                              value={item.counted_qty ?? ""}
                               onBlur={e => { const v = parseInt(e.target.value); if (!isNaN(v)) handleCount(item, v); }}
                               onKeyDown={e => { if (e.key === "Enter") { const v = parseInt(e.target.value); if (!isNaN(v)) handleCount(item, v); } }}
                               data-testid={`count-input-${item.product_id}`} />
@@ -310,6 +334,7 @@ export default function StocktakePage() {
             </CardContent>
           </Card>
         )}
+        {finalizeConfirmation}{deleteConfirmation}
       </div>
     );
   }
@@ -335,14 +360,14 @@ export default function StocktakePage() {
         </TabsList>
 
         <TabsContent value="sessions">
-          {/* Stats */}
+          {/* Shared inventory overview */}
           {report && (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><ClipboardCheck className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Total Sessions</p><p className="text-xl font-bold">{report.total_sessions}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Stock in Hand (Cost)</p><p className="text-xl font-bold">${report.stock_in_hand_cost?.toLocaleString()}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Stock in Hand (Retail)</p><p className="text-xl font-bold">${report.stock_in_hand_retail?.toLocaleString()}</p></div></div></CardContent></Card>
-              <Card className="border-red-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><TrendingDown className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Total Stock Loss</p><p className="text-xl font-bold text-red-400">${report.total_stock_loss?.toLocaleString()}</p></div></div></CardContent></Card>
-              <Card className="border-green-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Total Stock Gain</p><p className="text-xl font-bold text-green-400">${report.total_stock_gain?.toLocaleString()}</p></div></div></CardContent></Card>
+              <HeroTile label="Stocktake sessions" value={report.total_sessions || 0} icon={ClipboardCheck} glow="cyan" animated={false} />
+              <HeroTile label="Stock at cost" value={`$${(report.stock_in_hand_cost || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} />
+              <HeroTile label="Stock at retail" value={`$${(report.stock_in_hand_retail || 0).toLocaleString()}`} icon={DollarSign} glow="cyan" animated={false} />
+              <HeroTile label="Stock loss" value={`$${(report.total_stock_loss || 0).toLocaleString()}`} icon={TrendingDown} glow="rose" animated={false} />
+              <HeroTile label="Stock gain" value={`$${(report.total_stock_gain || 0).toLocaleString()}`} icon={TrendingUp} glow="emerald" animated={false} />
             </div>
           )}
 
@@ -377,7 +402,7 @@ export default function StocktakePage() {
                         <div className="w-24"><Progress value={pct} className="h-2" /><p className="text-[10px] text-muted-foreground text-center mt-1">{pct}%</p></div>
                         {s.stock_loss_value > 0 && <div className="text-center"><p className="text-xs text-muted-foreground">Loss</p><p className="font-medium text-red-400">${s.stock_loss_value?.toFixed(2)}</p></div>}
                         <p className="text-xs text-muted-foreground">{s.created_at ? format(new Date(s.created_at), "MMM d, yyyy") : ""}</p>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(s.id)}><Trash2 className="w-3 h-3" /></Button>
+                        {s.status === "in_progress" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete in-progress stocktake" onClick={() => setDeleteTarget(s)}><Trash2 className="w-3 h-3" /></Button>}
                         <ChevronRight className="w-4 h-4 text-muted-foreground" />
                       </div>
                     </div>
@@ -469,6 +494,7 @@ export default function StocktakePage() {
           <DialogFooter><Button onClick={handleCreateSession} data-testid="start-stocktake-btn"><ClipboardCheck className="w-4 h-4 mr-1" />Start Stocktake</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+      {deleteConfirmation}
     </div>
   );
 }

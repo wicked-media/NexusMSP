@@ -27,6 +27,8 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         email = client.get("email", "") if client else ""
     if not email:
         raise HTTPException(status_code=400, detail="No email address provided or found for client")
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=422, detail="A valid recipient email address is required")
     subject = data.get("subject", f"Invoice {invoice.get('invoice_number', '')} from NexusOps")
     message = data.get("message", "")
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
@@ -45,40 +47,48 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         </table>
         <p>Thank you for your business.</p>
         <p>Regards,<br/>{company}</p>"""
-    import resend
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    sender = os.environ.get("SENDER_EMAIL", "billing@nexusops.io")
-    sent = False
-    if resend_key and not resend_key.startswith("re_test_placeholder"):
-        resend.api_key = resend_key
-        try:
-            await asyncio.to_thread(resend.Emails.send, {
-                "from": f"{company} Billing <{sender}>",
-                "to": [email],
-                "subject": subject,
-                "html": f"<div style='font-family:sans-serif;max-width:600px;margin:auto;'>{message}</div>",
-            })
-            sent = True
-        except Exception as e:
-            logger.error(f"Invoice email failed: {e}")
+    from app.routers.email_signatures import append_default_signature
+    message, _, signature_id = await append_default_signature(
+        body=message,
+        body_type="html",
+        current_user=current_user,
+        subject=subject,
+    )
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        email,
+        subject,
+        f"<div style='font-family:sans-serif;max-width:600px;margin:auto;'>{message}</div>",
+        category="billing",
+    )
+    sent = delivery.get("status") == "sent"
+    delivery_status = delivery.get("status", "failed")
     record = {
         "id": str(uuid.uuid4()),
         "invoice_id": invoice_id,
         "email": email,
         "subject": subject,
-        "sent": sent or not resend_key,
+        "sent": sent,
+        "delivery_status": delivery_status,
         "sent_by": current_user["id"],
         "sent_by_name": current_user.get("name", ""),
+        "signature_id": signature_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.invoice_emails.insert_one(record)
     record.pop("_id", None)
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+    update = {
         "last_emailed_to": email,
         "last_emailed_at": datetime.now(timezone.utc).isoformat(),
-    }})
-    await log_activity(current_user, "emailed", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Invoice emailed to {email}")
-    return {"message": f"Invoice emailed to {email}", "sent": sent or not resend_key}
+        "last_email_delivery_status": delivery_status,
+    }
+    if sent and invoice.get("status") in {"draft", "pending_approval"}:
+        update["status"] = "sent"
+    await db.invoices.update_one({"id": invoice_id}, {"$set": update})
+    activity_action = "emailed" if sent else "email_attempted"
+    activity_detail = f"Invoice emailed to {email}" if sent else f"Invoice email {delivery_status} for {email}"
+    await log_activity(current_user, activity_action, "invoice", invoice_id, invoice.get("invoice_number", ""), activity_detail)
+    return {"message": delivery.get("message") or (f"Invoice emailed to {email}" if sent else f"Email recorded; connect Microsoft 365 to deliver to {email}"), "sent": sent, "delivery_status": delivery_status, "email_id": delivery.get("email_id")}
 
 
 @router.get("/invoices/{invoice_id}/email-history")
@@ -105,6 +115,18 @@ async def create_credit_note(data: dict, current_user: dict = Depends(get_curren
     invoice = None
     if invoice_id:
         invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        if invoice.get("status") in {"cancelled", "voided"}:
+            raise HTTPException(status_code=409, detail="Cannot issue a credit note for a voided invoice")
+    try:
+        total = round(float(data.get("total", 0)), 2)
+        subtotal = round(float(data.get("subtotal", total)), 2)
+        tax = round(float(data.get("tax", 0)), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Credit note amounts must be valid numbers")
+    if total <= 0:
+        raise HTTPException(status_code=422, detail="Credit note total must be greater than zero")
     cn = {
         "id": str(uuid.uuid4()),
         "credit_note_number": f"CN-{count + 1001:04d}",
@@ -113,9 +135,9 @@ async def create_credit_note(data: dict, current_user: dict = Depends(get_curren
         "client_id": data.get("client_id") or (invoice.get("client_id") if invoice else ""),
         "client_name": data.get("client_name") or (invoice.get("client_name") if invoice else ""),
         "line_items": data.get("line_items", []),
-        "subtotal": float(data.get("subtotal", 0)),
-        "tax": float(data.get("tax", 0)),
-        "total": float(data.get("total", 0)),
+        "subtotal": subtotal,
+        "tax": tax,
+        "total": total,
         "reason": data.get("reason", ""),
         "status": "issued",
         "applied_to_invoice": False,
@@ -125,6 +147,7 @@ async def create_credit_note(data: dict, current_user: dict = Depends(get_curren
     }
     await db.credit_notes.insert_one(cn)
     cn.pop("_id", None)
+    await log_activity(current_user, "created", "credit_note", cn["id"], cn["credit_note_number"], f"Issued credit note {cn['credit_note_number']} for ${total:.2f}", metadata={"invoice_id": invoice_id, "total": total})
     return cn
 
 
@@ -141,11 +164,18 @@ async def apply_credit_note(cn_id: str, data: dict, current_user: dict = Depends
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    credit_amount = cn.get("total", 0)
-    new_paid = float(invoice.get("amount_paid", 0)) + credit_amount
+    if invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Cannot apply a credit note to a voided invoice")
+    if cn.get("client_id") and cn.get("client_id") != invoice.get("client_id"):
+        raise HTTPException(status_code=409, detail="Credit note client does not match the invoice client")
+    credit_amount = float(cn.get("total", 0) or 0)
+    outstanding = max(0, float(invoice.get("total", 0) or 0) - float(invoice.get("amount_paid", 0) or 0))
+    if credit_amount <= 0 or credit_amount > outstanding + 0.005:
+        raise HTTPException(status_code=422, detail=f"Credit must be greater than zero and no more than the outstanding balance of ${outstanding:.2f}")
+    new_paid = float(invoice.get("amount_paid", 0) or 0) + credit_amount
     new_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
     await db.invoices.update_one({"id": invoice_id}, {
-        "$set": {"amount_paid": new_paid, "payment_status": new_status},
+        "$set": {"amount_paid": new_paid, "payment_status": new_status, "status": "paid" if new_status == "paid" else invoice.get("status")},
         "$push": {"payments": {
             "amount": credit_amount, "method": "credit_note",
             "date": datetime.now(timezone.utc).isoformat(),
@@ -159,7 +189,8 @@ async def apply_credit_note(cn_id: str, data: dict, current_user: dict = Depends
         "applied_at": datetime.now(timezone.utc).isoformat(),
         "status": "applied",
     }})
-    return {"message": f"Credit of ${credit_amount:.2f} applied to invoice", "new_balance": float(invoice.get("total", 0)) - new_paid}
+    await log_activity(current_user, "credit_applied", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Applied credit note {cn.get('credit_note_number', '')} for ${credit_amount:.2f}", metadata={"credit_note_id": cn_id, "amount": credit_amount})
+    return {"message": f"Credit of ${credit_amount:.2f} applied to invoice", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
 
 
 # ============== LATE FEE AUTOMATION ==============

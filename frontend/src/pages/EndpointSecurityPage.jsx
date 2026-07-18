@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,11 +20,12 @@ import { formatDistanceToNow } from "date-fns";
 const STATUS_COLORS = {
   online: "text-green-400", offline: "text-red-400", isolated: "text-purple-400", needs_attention: "text-amber-400",
 };
-const AV_COLORS = { active: "text-green-400", outdated: "text-amber-400", disabled: "text-red-400" };
+const AV_COLORS = { active: "text-green-400", inactive: "text-red-400", not_assessed: "text-muted-foreground" };
 const PATCH_COLORS = { up_to_date: "text-green-400", pending: "text-amber-400", critical_missing: "text-red-400" };
 
 export default function EndpointSecurityPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [endpoints, setEndpoints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -34,6 +36,9 @@ export default function EndpointSecurityPage() {
   const fetchEndpoints = useCallback(async () => {
     setLoading(true);
     try {
+      const response = await axios.get(`${API}/endpoint-security/scores`, { headers });
+      setEndpoints(response.data?.scores || []);
+      return;
       // Pull both demo SOC endpoints and live Huntress agents — merge when Huntress is configured
       const [socRes, huntAgentsRes, huntStatusRes] = await Promise.all([
         axios.get(`${API}/soc/endpoints`, { headers }),
@@ -119,7 +124,7 @@ export default function EndpointSecurityPage() {
   const stats = {
     total: endpoints.length, online: endpoints.filter(e => e.status === "online").length,
     offline: endpoints.filter(e => e.status === "offline").length, isolated: endpoints.filter(e => e.status === "isolated").length,
-    av_issues: endpoints.filter(e => e.av_status !== "active").length,
+    av_issues: endpoints.filter(e => e.assessed && e.av_status !== "active").length,
     patch_critical: endpoints.filter(e => e.patch_status === "critical_missing").length,
     high_risk: endpoints.filter(e => e.risk_score > 70).length,
   };
@@ -129,7 +134,7 @@ export default function EndpointSecurityPage() {
   return (
     <div className="space-y-6" data-testid="endpoint-security">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Endpoint Security</h1><p className="text-muted-foreground">{endpoints.length} managed endpoints</p></div>
+        <div><h1 className="text-3xl font-bold tracking-tight">Endpoint Security</h1><p className="text-muted-foreground">Live Nexus Agent security posture for {endpoints.length} managed endpoints</p></div>
         <Button variant="outline" onClick={fetchEndpoints}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
       </div>
 
@@ -151,10 +156,10 @@ export default function EndpointSecurityPage() {
       <Card><CardContent className="p-0">
         <Table>
           <TableHeader>
-            <TableRow><TableHead>Hostname</TableHead><TableHead>OS</TableHead><TableHead>Org</TableHead><TableHead>Status</TableHead><TableHead>AV</TableHead><TableHead>Firewall</TableHead><TableHead>Patches</TableHead><TableHead>Risk</TableHead><TableHead>Last Seen</TableHead><TableHead></TableHead></TableRow>
+            <TableRow><TableHead>Hostname</TableHead><TableHead>OS</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead><TableHead>Defender</TableHead><TableHead>Firewall</TableHead><TableHead>Encryption</TableHead><TableHead>Patches</TableHead><TableHead>Risk</TableHead><TableHead>Last Seen</TableHead><TableHead></TableHead></TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No endpoints match</TableCell></TableRow> :
+            {filtered.length === 0 ? <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No endpoints match</TableCell></TableRow> :
             filtered.map(ep => (
               <TableRow key={ep.id} className={ep.risk_score > 70 ? "bg-red-500/5" : ""} data-testid={`endpoint-${ep.id}`}>
                 <TableCell className="font-mono text-sm font-medium">{ep.hostname}</TableCell>
@@ -167,23 +172,17 @@ export default function EndpointSecurityPage() {
                   </div>
                 </TableCell>
                 <TableCell><Badge variant="outline" className={`text-[10px] ${AV_COLORS[ep.av_status]}`}>{ep.av_status === "active" ? <ShieldCheck className="w-3 h-3 mr-1" /> : <ShieldAlert className="w-3 h-3 mr-1" />}{ep.av_status}</Badge></TableCell>
-                <TableCell><span className={`text-xs ${ep.firewall === "enabled" ? "text-green-400" : "text-red-400"}`}>{ep.firewall}</span></TableCell>
+                <TableCell><span className={`text-xs ${ep.firewall === "enabled" ? "text-green-400" : ep.firewall === "not_assessed" ? "text-muted-foreground" : "text-red-400"}`}>{ep.firewall?.replace(/_/g, " ")}</span></TableCell>
+                <TableCell><span className={`text-xs ${ep.encryption === "encrypted" ? "text-green-400" : ep.encryption === "not_assessed" ? "text-muted-foreground" : "text-red-400"}`}>{ep.encryption?.replace(/_/g, " ")}</span></TableCell>
                 <TableCell><Badge variant="outline" className={`text-[10px] ${PATCH_COLORS[ep.patch_status]}`}>{ep.patch_status?.replace(/_/g, " ")}</Badge></TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${ep.risk_score > 70 ? "bg-red-500/20 text-red-400" : ep.risk_score > 40 ? "bg-amber-500/20 text-amber-400" : "bg-green-500/20 text-green-400"}`}>{ep.risk_score}</div>
+                    <div className={`w-8 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${ep.risk_score == null ? "bg-muted text-muted-foreground" : ep.risk_score > 70 ? "bg-red-500/20 text-red-400" : ep.risk_score > 40 ? "bg-amber-500/20 text-amber-400" : "bg-green-500/20 text-green-400"}`}>{ep.risk_score ?? "—"}</div>
                   </div>
                 </TableCell>
                 <TableCell className="text-[10px] text-muted-foreground">{ep.last_seen ? formatDistanceToNow(new Date(ep.last_seen), { addSuffix: true }) : "-"}</TableCell>
                 <TableCell>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Scan" onClick={() => handleScan(ep.id)} disabled={actionLoading === ep.id}><Scan className="w-3 h-3" /></Button>
-                    {ep.status !== "isolated" ? (
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-purple-400" title="Isolate" onClick={() => handleIsolate(ep.id)} disabled={actionLoading === ep.id}><Lock className="w-3 h-3" /></Button>
-                    ) : (
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-400" title="Restore" onClick={() => handleUnisolate(ep.id)} disabled={actionLoading === ep.id}><Unlock className="w-3 h-3" /></Button>
-                    )}
-                  </div>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" title="View device" onClick={() => navigate(`/devices/${ep.device_id || ep.id}`)}><Eye className="w-3 h-3 mr-1" />View</Button>
                 </TableCell>
               </TableRow>
             ))}

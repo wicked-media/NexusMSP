@@ -13,7 +13,8 @@ import { toast } from "sonner";
 import { Calendar, Clock, Wrench, Power, RefreshCw, Download, Loader2, Sparkles, History, Trash2, Play, X, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 
 const ACTION_OPTIONS = [
-  { key: "install-patches", label: "Install Patches", icon: Download, color: "emerald" },
+  { key: "install-patches", label: "Windows Update", icon: Download, color: "emerald" },
+  { key: "install-winget", label: "Approved Apps", icon: Download, color: "cyan" },
   { key: "run-checks", label: "Run Checks", icon: RefreshCw, color: "violet" },
   { key: "reboot", label: "Reboot", icon: Power, color: "amber" },
 ];
@@ -112,7 +113,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
 
           <div>
             <Label className="text-xs">Actions to run on each device</Label>
-            <div className="grid grid-cols-3 gap-2 mt-1">
+            <div className="grid grid-cols-4 gap-2 mt-1">
               {ACTION_OPTIONS.map(({ key, label, icon: Icon, color }) => (
                 <Button key={key} variant={actions.includes(key) ? "default" : "outline"}
                   className={actions.includes(key) ? `bg-${color}-500/30 text-${color}-200 border-${color}-500/50 hover:bg-${color}-500/40` : ""}

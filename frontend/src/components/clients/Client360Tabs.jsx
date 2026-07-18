@@ -76,7 +76,7 @@ export function Client360Subscriptions({ clientId, token }) {
         {!grid.hiddenWidgets.has("stats") && (
           <div key="stats" className="nx-widget-card">
             <grid.HideBtn id="stats" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 h-full">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 h-full">
               <Stat label="Active subs" value={data.count} color="sky" icon={Boxes} />
               <Stat label="Total seats" value={data.total_seats} color="violet" icon={Users} />
               <Stat label="Monthly" value={fmt$(data.total_monthly_aud)} color="emerald" icon={DollarSign} />
@@ -190,8 +190,12 @@ export function Client360Security({ clientId, token }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 h-full">
               <Stat label="MFA coverage" value={s.mfa_pct != null ? `${s.mfa_pct}%` : "—"} color={mfaColor} icon={KeyRound} />
               <Stat label="CIPP hygiene" value={s.cipp_hygiene != null ? `${s.cipp_hygiene}/100` : "—"} color={hygColor} icon={ShieldCheck} />
-              <Stat label="Huntress agents" value={s.huntress_agents || 0} color="violet" icon={Server} />
-              <Stat label="Critical alerts" value={s.huntress_critical || 0} color={s.huntress_critical > 0 ? "rose" : "emerald"} icon={ShieldAlert} />
+              <Stat label="Assessed endpoints" value={`${s.assessed_endpoints || 0}/${s.managed_endpoints || 0}`} color={s.assessed_endpoints ? "violet" : "zinc"} icon={ShieldCheck} />
+              <Stat label="Defender active" value={`${s.defender_active || 0}/${s.assessed_endpoints || 0}`} color={s.assessed_endpoints && s.defender_active === s.assessed_endpoints ? "emerald" : "zinc"} icon={ShieldCheck} />
+              <Stat label="Firewall on" value={`${s.firewall_enabled || 0}/${s.assessed_endpoints || 0}`} color={s.assessed_endpoints && s.firewall_enabled === s.assessed_endpoints ? "emerald" : "zinc"} icon={ShieldCheck} />
+              <Stat label="Encrypted" value={`${s.encrypted_endpoints || 0}/${s.assessed_endpoints || 0}`} color={s.assessed_endpoints && s.encrypted_endpoints === s.assessed_endpoints ? "emerald" : "zinc"} icon={KeyRound} />
+              <Stat label="Pending updates" value={s.pending_updates || 0} color={s.pending_updates ? "amber" : "emerald"} icon={AlertCircle} />
+              <Stat label="Huntress alerts" value={s.huntress_critical || 0} color={s.huntress_critical > 0 ? "rose" : "zinc"} icon={ShieldAlert} />
             </div>
           </div>
         )}
@@ -382,10 +386,12 @@ export function Client360Assets({ clientId, token }) {
 
   return (
     <div className="space-y-4" data-testid="client360-assets">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Stat label="Total devices" value={data.total} color="sky" icon={Server} />
-        <Stat label="Online" value={data.online} color="emerald" icon={CheckCircle2} />
-        <Stat label="Offline" value={data.offline} color="rose" icon={AlertCircle} />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Stat label="Total devices" value={data.total} color="sky" icon={Server} />
+          <Stat label="Online" value={data.online} color="emerald" icon={CheckCircle2} />
+          <Stat label="Offline" value={data.offline} color="rose" icon={AlertCircle} />
+          <Stat label="Assessed" value={`${data.assessed || 0}/${data.total || 0}`} color={data.assessed ? "violet" : "zinc"} icon={ShieldCheck} />
+          <Stat label="Pending updates" value={data.pending_updates || 0} color={data.pending_updates ? "amber" : "emerald"} icon={AlertCircle} />
       </div>
 
       <div className="text-[10px] uppercase tracking-widest text-zinc-500 mt-4">Device Families (by model)</div>
@@ -405,7 +411,8 @@ export function Client360Assets({ clientId, token }) {
               {(g.devices_preview || []).slice(0, 4).map((d) => (
                 <div key={d.id} className="text-[11px] flex items-center gap-2">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${d.status === "online" ? "bg-emerald-400" : d.status === "offline" ? "bg-rose-400" : "bg-amber-400"}`} />
-                  <span className="text-zinc-300 flex-1 truncate">{d.name}</span>
+                    <span className="text-zinc-300 flex-1 truncate">{d.name}</span>
+                    {d.assessed && d.pending_patches > 0 && <span className="text-amber-400 font-mono text-[9px]">{d.pending_patches} upd</span>}
                   <span className="text-zinc-500 font-mono text-[9px]">{d.ip_address || "—"}</span>
                 </div>
               ))}

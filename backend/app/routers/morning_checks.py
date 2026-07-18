@@ -88,7 +88,7 @@ async def get_morning_checks(current_user: dict = Depends(get_current_user)):
             "online": len(online),
             "offline": len(offline),
             "warning": len(warning),
-            "offline_list": [{"name": d.get("name") or d.get("hostname", "Unknown"), "client_name": d.get("client_name", ""), "device_type": d.get("device_type", ""), "last_seen": d.get("last_seen", "")} for d in offline[:20]],
+            "offline_list": [{"id": d.get("id", ""), "name": d.get("name") or d.get("hostname", "Unknown"), "client_name": d.get("client_name", ""), "device_type": d.get("device_type", ""), "last_seen": d.get("last_seen", "")} for d in offline[:20]],
         },
         "tickets": {
             "total_open": len(open_tickets),

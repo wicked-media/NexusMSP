@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import ticket_audit
 
 router = APIRouter()
 
@@ -91,19 +92,8 @@ async def update_ticket_categorisation(ticket_id: str, data: dict, current_user:
 
     await db.tickets.update_one({"id": ticket_id}, {"$set": patch})
 
-    # Audit log
-    audit = {
-        "ticket_id": ticket_id,
-        "action": "categorisation_updated",
-        "actor": current_user.get("id"),
-        "actor_name": current_user.get("name"),
-        "changes": {k: v for k, v in patch.items() if k != "updated_at"},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    try:
-        await db.ticket_audit.insert_one({**audit})
-    except Exception:
-        pass
+    changes = [f"{key.replace('_', ' ')}: {value}" for key, value in patch.items() if key != "updated_at"]
+    await ticket_audit(ticket_id, current_user, "categorisation_updated", "; ".join(changes))
 
     return await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
 

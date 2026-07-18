@@ -11,12 +11,10 @@ export default function UpsellPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/upsell/opportunities`, { headers });
+      const res = await axios.get(`${API}/upsell/opportunities`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
     } catch { toast.error("Failed to scan for opportunities"); }
     finally { setLoading(false); }

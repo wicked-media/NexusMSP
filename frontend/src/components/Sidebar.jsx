@@ -25,19 +25,24 @@ function NotificationBell({ token, collapsed }) {
     const refId = n.ref_id;
     if (!refType || !refId) return null;
     switch (refType) {
-      case "ticket": return "/tickets";
-      case "contract": return "/contracts";
+      case "ticket": return `/tickets?ticket=${encodeURIComponent(refId)}`;
+      case "contract": return `/contracts?contract=${encodeURIComponent(refId)}`;
       case "device": return `/devices/${refId}`;
+      case "lead": return `/leads?lead=${encodeURIComponent(refId)}`;
+      case "purchase_order": return `/purchase-orders?po=${encodeURIComponent(refId)}`;
+      case "chat_channel": return `/team-chat?channel=${encodeURIComponent(refId)}${n.thread_id ? `&thread=${encodeURIComponent(n.thread_id)}` : ''}`;
       default: return null;
     }
   };
 
   const handleNotificationClick = (n) => {
     const link = getNotificationLink(n);
-    if (link) {
+    if (!n.read) {
       axios.post(`${API}/notifications/mark-read`, { ids: [n.id] }, { headers }).catch(() => {});
       setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-      setUnreadCount(prev => Math.max(0, prev - (n.read ? 0 : 1)));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    }
+    if (link) {
       setIsOpen(false);
       navigate(link);
     }
@@ -75,11 +80,12 @@ function NotificationBell({ token, collapsed }) {
     } catch {}
   };
 
-  const severityColor = { critical: "bg-red-500", warning: "bg-amber-500", info: "bg-blue-500" };
-  const typeIcon = { sla_breach: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT" };
+  const severityColor = { critical: "bg-rose-500", warning: "bg-amber-500", info: "bg-sky-500" };
+  const typeIcon = { sla_breach: "SLA", sla_warning: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT", ticket_updated: "TKT", new_lead: "LEAD", supplier_invoice_follow_up: "PO", chat_mention: "CHAT", chat_broadcast: "CHAT", thread_reply: "CHAT" };
+  const attentionCount = notifications.filter(n => !n.read && ["critical", "warning"].includes(n.severity)).length;
 
   return (
-    <div className={`px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
+    <div className={`relative px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -98,28 +104,30 @@ function NotificationBell({ token, collapsed }) {
         </TooltipTrigger>
         {collapsed && <TooltipContent side="right">Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
       </Tooltip>
-      {isOpen && !collapsed && (
-        <div className="absolute left-[260px] top-16 w-80 bg-card border rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-panel">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="text-sm font-semibold">Notifications</span>
+      {isOpen && (
+        <div className="absolute left-full top-0 z-50 ml-3 w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border bg-card shadow-2xl" data-testid="notification-panel">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <div><span className="text-sm font-semibold">Notification inbox</span><p className="mt-0.5 text-[11px] text-muted-foreground">{attentionCount > 0 ? `${attentionCount} needs attention` : unreadCount > 0 ? `${unreadCount} unread updates` : "You’re up to date"}</p></div>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
             </div>
           </div>
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-[390px] overflow-y-auto p-1.5">
             {notifications.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No notifications</p>
+              <p className="text-sm text-muted-foreground text-center py-10">No notifications</p>
             ) : notifications.map(n => (
               <div key={n.id} onClick={() => handleNotificationClick(n)}
-                className={`px-4 py-3 border-b border-border/30 cursor-pointer hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
+                className={`rounded-xl px-3 py-3 cursor-pointer hover:bg-muted/70 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
                 <div className="flex items-start gap-3">
                   <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${severityColor[n.severity] || 'bg-blue-500'}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded">{typeIcon[n.type] || 'SYS'}</span>
-                      <p className="text-xs font-medium truncate">{n.message}</p>
+                      {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                      <p className="text-xs font-semibold truncate">{n.title || n.message}</p>
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</p>
+                    {n.title && n.message && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground line-clamp-2">{n.message}</p>}
+                    <p className="text-[10px] text-muted-foreground mt-1">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</p>
                   </div>
                 </div>
               </div>
@@ -152,29 +160,21 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
   const childrenCount = hasChildren ? item.children.reduce((s, c) => s + (counts[c.path] || 0), 0) : 0;
   const badgeCount = ownCount + childrenCount;
 
-  const handleClick = () => {
-    if (hasChildren) {
-      if (collapsed) {
-        navigate(item.path);
-      } else {
-        toggleMenu(item.path);
-      }
-    } else {
-      navigate(item.path);
-    }
-  };
+  const navigateToItem = () => navigate(item.path);
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <div>
+          <div className="flex items-center">
           <button
-            onClick={handleClick}
-            className={`flex items-center w-full rounded-lg transition-all duration-150 group ${
+            onClick={navigateToItem}
+            className={`flex items-center ${hasChildren && !collapsed ? "flex-1 rounded-l-lg" : "w-full rounded-lg"} transition-all duration-150 group ${
               collapsed
                 ? `p-2.5 justify-center ${isHighlighted ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
                 : `px-3 py-1.5 gap-2.5 ${isHighlighted ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
             }`}
+            aria-label={item.label}
             data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
           >
             {item.icon && (
@@ -189,12 +189,21 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
               <>
                 <span className="text-[12px] flex-1 text-left truncate">{item.label}</span>
                 {!isExpanded && badgeCount > 0 && <NavBadge count={badgeCount} />}
-                {hasChildren && (
-                  <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                )}
               </>
             )}
           </button>
+          {hasChildren && !collapsed && (
+            <button
+              onClick={() => toggleMenu(item.path)}
+              className={`self-stretch px-2 rounded-r-lg transition-colors ${isHighlighted ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              aria-label={`Toggle ${item.label} submenu`}
+              aria-expanded={isExpanded}
+              data-testid={`nav-toggle-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
+            >
+              <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+          </div>
           {/* Children */}
           {!collapsed && hasChildren && isExpanded && (
             <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">

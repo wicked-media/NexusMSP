@@ -409,11 +409,11 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
     except Exception as e:
         logger.warning(f"PDF generation failed for email: {e}")
 
-    # Send via email_utils (Resend)
+    # Send through the Microsoft 365 billing mailbox.
     email_status = "sent"
     email_message = f"Invoice emailed to {to_email}"
     try:
-        from app.routers.email_utils import send_email, is_resend_configured
+        from app.routers.email_utils import send_email
         # Build HTML email body
         inv_num = invoice.get("invoice_number", "N/A")
         total = invoice.get("total", 0)
@@ -438,33 +438,15 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
         </div>
         """
 
-        if is_resend_configured() and pdf_bytes:
-            # Send with PDF attachment via Resend
-            import resend
-            import os
-            resend.api_key = os.environ.get("RESEND_API_KEY", "")
-            sender = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
-            import asyncio
-            result = await asyncio.to_thread(resend.Emails.send, {
-                "from": sender,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_body,
-                "attachments": [{"filename": pdf_filename, "content": list(pdf_bytes)}],
-            })
-            email_status = "sent"
-            email_message = f"Invoice emailed to {to_email} with PDF attached"
-            logger.info(f"[EMAIL SENT] Invoice {inv_num} to {to_email} | ID: {result.get('id')}")
-        elif is_resend_configured():
-            # Send without attachment
-            result = await send_email(to_email, subject, html_body)
-            email_status = result.get("status", "sent")
-            email_message = result.get("message", email_message)
-        else:
-            # Mocked
-            logger.info(f"[EMAIL MOCK] Invoice {inv_num} to {to_email}")
-            email_status = "mocked"
-            email_message = f"Invoice email logged (Resend not configured). To: {to_email}"
+        result = await send_email(
+            to_email,
+            subject,
+            html_body,
+            category="billing",
+            attachments=[{"filename": pdf_filename, "content": pdf_bytes, "content_type": "application/pdf"}] if pdf_bytes else None,
+        )
+        email_status = result.get("status", "failed")
+        email_message = result.get("message", email_message)
     except Exception as e:
         logger.error(f"Email send failed: {e}")
         email_status = "failed"

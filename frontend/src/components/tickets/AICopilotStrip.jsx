@@ -19,6 +19,7 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [burndown, setBurndown] = useState(null);
+  const deviceState = typeof deviceStatus?.status === "string" ? deviceStatus.status.toLowerCase() : null;
 
   useEffect(() => {
     if (!ticket?.id) return;
@@ -45,7 +46,7 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
     if (ticket.blocked_by_ticket_number) return { label: `Resolve ${ticket.blocked_by_ticket_number} first`, tone: "rose", target: "blocker" };
     if (burndown?.breach) return { label: "SLA breached — escalate now", tone: "rose", target: "escalate" };
     if (burndown?.pct >= 75 && !burndown?.is_resolved) return { label: `${burndown.pct}% of SLA used — pick this up`, tone: "amber", target: "ack" };
-    if (deviceStatus && (deviceStatus.status || "").toLowerCase() !== "online") return { label: "Device is offline — try Wake-on-LAN", tone: "amber", target: "wol" };
+    if (deviceState && deviceState !== "online") return { label: "Device is offline — try Wake-on-LAN", tone: "amber", target: "wol" };
     if (deviceStatus?.needs_reboot) return { label: "Device needs reboot — schedule a window", tone: "cyan", target: "reboot" };
     if (deviceStatus?.checks_failing > 0) return { label: `${deviceStatus.checks_failing} check${deviceStatus.checks_failing === 1 ? "" : "s"} failing — investigate`, tone: "amber", target: "checks" };
     if (deviceStatus?.patches_pending > 0) return { label: `${deviceStatus.patches_pending} patches pending — install`, tone: "cyan", target: "patches" };
@@ -68,21 +69,19 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
   const ageLabel = ageHours == null ? "" : ageHours < 24 ? `${ageHours}h old` : `${Math.round(ageHours / 24)}d old`;
 
   return (
-    <div data-testid="ai-copilot-strip" className={`relative overflow-hidden rounded-xl border border-white/[0.06] bg-gradient-to-r ${toneStyle.bar}`}>
-      {/* Subtle scanline */}
-      <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(180deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px)" }} />
+    <div data-testid="ai-copilot-strip" className={`relative overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-r ${toneStyle.bar}`}>
 
-      <div className="relative flex items-center gap-3 px-4 py-2.5">
+      <div className="relative flex items-center gap-3 px-4 py-3">
         {/* Brand icon */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center shadow-[0_8px_18px_rgba(139,92,246,0.16)]">
             <Sparkles className="w-3.5 h-3.5 text-violet-300" />
           </div>
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-violet-300/80">Co-Pilot</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Next best action</span>
         </div>
 
         {/* Stats strip */}
-        <div className="flex items-center gap-3 text-[11px] text-zinc-500 font-mono">
+        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
           {ageLabel && <span data-testid="copilot-age">{ageLabel}</span>}
           {burndown?.available && (
             <span data-testid="copilot-sla">
@@ -90,7 +89,7 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
             </span>
           )}
           {ticket.note_count != null && <span>{ticket.note_count} notes</span>}
-          {deviceStatus && <span className={`${(deviceStatus.status || "").toLowerCase() === "online" ? "text-emerald-400" : "text-rose-400"}`}>● {deviceStatus.status || "?"}</span>}
+          {deviceState && <span className={`${deviceState === "online" ? "text-emerald-400" : "text-rose-400"}`}>● {deviceStatus.status}</span>}
         </div>
 
         <div className="flex-1" />
@@ -103,7 +102,7 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
         {/* Next best action chip */}
         <button
           onClick={() => onActionClick?.(nextAction.target)}
-          className={`group/cta flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${toneStyle.chip} text-[11px] font-medium hover:scale-[1.02] transition-transform`}
+          className={`group/cta flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${toneStyle.chip} text-[11px] font-semibold hover:scale-[1.02] transition-transform`}
           data-testid={`copilot-action-${nextAction.target}`}
         >
           <Zap className="w-3 h-3" />

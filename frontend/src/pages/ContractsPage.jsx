@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
+import HeroTile from "@/components/HeroTile";
 
 const slaShieldConfig = {
   platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
@@ -74,6 +76,7 @@ const statusConfig = {
 
 export default function ContractsPage() {
   const { token } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [contracts, setContracts] = useState([]);
   const [clients, setClients] = useState([]);
   const [lineItems, setLineItems] = useState([]);
@@ -222,6 +225,22 @@ export default function ContractsPage() {
     setIsDialogOpen(true);
   };
 
+  useEffect(() => {
+    const contractId = searchParams.get("contract");
+    if (!contractId || contracts.length === 0 || isDialogOpen) return;
+    const contract = contracts.find(item => item.id === contractId);
+    if (contract) {
+      openEditDialog(contract);
+    } else {
+      toast.error("Contract not found");
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("contract");
+    setSearchParams(next, { replace: true });
+    // Deliberately runs once contracts have populated so an alert can open its record.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contracts, searchParams]);
+
   const openAddLineItem = (contract) => {
     setLineItemForm({
       ...lineItemForm,
@@ -262,19 +281,12 @@ export default function ContractsPage() {
 
   return (
     <PageShell data-testid="contracts-page">
-      <MetricStrip columns={5}>
-        <MetricTile label="Total Contracts" value={contracts.length} accent="indigo" icon={<FileText className="w-2.5 h-2.5 text-indigo-400" />} testid="contracts-metric-total" />
-        <MetricTile label="Monthly Value" value={`$${totalValue.toLocaleString()}`} accent="emerald" icon={<DollarSign className="w-2.5 h-2.5 text-emerald-400" />} testid="contracts-metric-value" />
-        <MetricTile label="Active" value={contracts.filter(c => c.status === 'active').length} accent="sky" icon={<Calendar className="w-2.5 h-2.5 text-sky-400" />} testid="contracts-metric-active" />
-        <MetricTile label="Expiring (90d)" value={renewalAlerts.length} accent={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} icon={<Calendar className="w-2.5 h-2.5 text-amber-400" />} testid="contracts-metric-expiring" />
-        <MetricTile label="Line Items" value={lineItems.length} accent="violet" icon={<FileText className="w-2.5 h-2.5 text-violet-400" />} testid="contracts-metric-lineitems" />
-      </MetricStrip>
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Contracts</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Manage service agreements and recurring billing</p>
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><Shield className="w-4 h-4 text-violet-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Contracts</h1><p className="text-sm text-muted-foreground">Service agreements, renewals, and recurring billing.</p></div>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
@@ -332,8 +344,16 @@ export default function ContractsPage() {
                       <SelectItem value="retainer">Retainer</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-              </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <HeroTile label="All contracts" value={contracts.length} icon={FileText} glow="cyan" testId="contracts-metric-total" />
+        <HeroTile label="Monthly value" value={`$${totalValue.toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="contracts-metric-value" />
+        <HeroTile label="Active" value={contracts.filter(c => c.status === 'active').length} icon={Calendar} glow="sky" testId="contracts-metric-active" />
+        <HeroTile label="Expiring in 90 days" value={renewalAlerts.length} icon={Calendar} glow={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} testId="contracts-metric-expiring" />
+        <HeroTile label="Line items" value={lineItems.length} icon={FileText} glow="violet" testId="contracts-metric-lineitems" />
+      </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Start Date</Label>
@@ -428,7 +448,10 @@ export default function ContractsPage() {
           <CardContent>
             <div className="space-y-2">
               {renewalAlerts.slice(0, 5).map(alert => (
-                <div key={alert.contract_id} className={`flex items-center justify-between p-3 rounded-lg border ${alert.urgency === "critical" ? "bg-red-500/5 border-red-500/20" : alert.urgency === "warning" ? "bg-amber-500/5 border-amber-500/20" : "bg-blue-500/5 border-blue-500/20"}`}>
+                <button type="button" key={alert.contract_id} onClick={() => {
+                  const contract = contracts.find(item => item.id === alert.contract_id);
+                  if (contract) openEditDialog(contract);
+                }} className={`flex w-full items-center justify-between rounded-lg border p-3 text-left transition-colors hover:bg-muted/40 ${alert.urgency === "critical" ? "bg-red-500/5 border-red-500/20" : alert.urgency === "warning" ? "bg-amber-500/5 border-amber-500/20" : "bg-blue-500/5 border-blue-500/20"}`}>
                   <div className="flex items-center gap-3">
                     <Badge className={`text-[10px] ${alert.urgency === "critical" ? "bg-red-500/20 text-red-400" : alert.urgency === "warning" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"}`}>{alert.days_remaining} days</Badge>
                     <div>
@@ -440,7 +463,7 @@ export default function ContractsPage() {
                     <p className="font-mono text-sm">${(alert.value || 0).toLocaleString()}/mo</p>
                     <Badge variant="outline" className="text-[9px] capitalize"><SLAShieldBadge tier={alert.sla_tier} /></Badge>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </CardContent>

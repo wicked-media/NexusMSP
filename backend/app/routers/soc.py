@@ -184,38 +184,36 @@ async def get_huntress_incidents(user=Depends(get_current_user)):
 
 @router.get("/soc/dashboard")
 async def get_soc_dashboard(user=Depends(get_current_user)):
-    """Aggregated SOC dashboard from all sources."""
-    agents = generate_mock_agents(30)
-    incidents = generate_mock_incidents(15)
-    summary = generate_mock_summary(agents, incidents)
-
-    # Get persisted alerts from DB
-    db_alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
-
-    # Dark web mock
-    dark_web = [
-        {"id": f"dw-{uuid.uuid4().hex[:6]}", "type": "credential_leak", "source": "Dark Web Forum", "severity": "high", "details": f"Email found in breach: admin@{random.choice(['acmecorp','techstart','summitlegal'])}.com", "found_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 72))).isoformat()}
-        for _ in range(random.randint(2, 5))
-    ]
-
-    # Vulnerability summary
-    vuln_summary = {
-        "critical": random.randint(2, 8), "high": random.randint(5, 15),
-        "medium": random.randint(10, 30), "low": random.randint(15, 50),
-        "last_scan": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 24))).isoformat(),
+    """Operational SOC view from stored alerts and enrolled Nexus devices only."""
+    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
+    alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    open_alerts = [a for a in alerts if a.get("status") in {"new", "investigating", "open"}]
+    critical_alerts = [a for a in open_alerts if a.get("severity") == "critical"]
+    online = sum(1 for d in devices if d.get("status") == "online")
+    offline = sum(1 for d in devices if d.get("status") == "offline")
+    security_scores = [float(d["security_score"]) for d in devices if isinstance(d.get("security_score"), (int, float))]
+    vulnerabilities = await db.vulnerabilities.find({}, {"_id": 0, "severity": 1, "discovered_at": 1}).to_list(2000)
+    vuln_summary = {severity: sum(1 for v in vulnerabilities if v.get("severity") == severity) for severity in ("critical", "high", "medium", "low")}
+    vuln_summary["last_scan"] = max((v.get("discovered_at") for v in vulnerabilities if v.get("discovered_at")), default=None)
+    dark_web = await db.dark_web_alerts.find({}, {"_id": 0}).sort("found_at", -1).to_list(100)
+    identity_threats = await db.identity_threats.count_documents({"status": {"$in": ["new", "open", "investigating"]}})
+    phishing_running = await db.phishing_campaigns.count_documents({"status": {"$in": ["active", "running"]}})
+    summary = {
+        "total_agents": len(devices), "online": online, "offline": offline,
+        "isolated": sum(1 for d in devices if d.get("isolated")),
+        "needs_attention": sum(1 for d in devices if d.get("status") in {"needs_attention", "degraded"}),
+        "health_pct": round((online / len(devices)) * 100) if devices else 0,
+        "total_incidents": len(alerts), "open_incidents": len(open_alerts),
+        "critical_incidents": len(critical_alerts), "resolved_last_24h": 0,
+        "avg_response_time_min": None, "threats_blocked_30d": 0,
     }
-
     return {
-        "huntress": summary,
-        "agents": agents[:10],
-        "incidents": incidents[:8],
-        "persisted_alerts": db_alerts[:20],
-        "dark_web_alerts": dark_web,
+        "huntress": summary, "agents": devices[:10], "incidents": open_alerts[:8],
+        "persisted_alerts": alerts[:20], "dark_web_alerts": dark_web,
         "vulnerability_summary": vuln_summary,
-        "compliance_score": random.randint(65, 95),
-        "identity_threats": random.randint(0, 5),
-        "phishing_tests_running": random.randint(0, 3),
-        "mock_data": True,
+        "compliance_score": round(sum(security_scores) / len(security_scores)) if security_scores else None,
+        "identity_threats": identity_threats, "phishing_tests_running": phishing_running,
+        "mock_data": False,
     }
 
 
@@ -223,29 +221,6 @@ async def get_soc_dashboard(user=Depends(get_current_user)):
 async def get_soc_alerts(user=Depends(get_current_user)):
     """Get all SOC alerts from all sources."""
     db_alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    # Merge with mock Huntress incidents
-    incidents = generate_mock_incidents(10)
-    for inc in incidents:
-        # Check if not already in DB
-        exists = any(a.get("source_id") == inc["id"] for a in db_alerts)
-        if not exists:
-            db_alerts.append({
-                "id": f"alert-{inc['id']}",
-                "source": "huntress",
-                "source_id": inc["id"],
-                "title": inc["title"],
-                "severity": inc["severity"],
-                "status": inc["status"] if inc["status"] in ["new", "investigating", "remediated", "closed"] else "new",
-                "hostname": inc["hostname"],
-                "organization": inc["organization"],
-                "description": inc["description"],
-                "mitre_attack": inc.get("mitre_attack"),
-                "indicators": inc.get("indicators", []),
-                "remediation_steps": inc.get("remediation_steps", []),
-                "created_at": inc["created_at"],
-                "assigned_to": inc.get("assigned_to"),
-                "ticket_id": inc.get("ticket_id"),
-            })
     db_alerts.sort(key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("severity", "low"), 4))
     return db_alerts
 
@@ -267,6 +242,12 @@ async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_c
     now = datetime.now(timezone.utc).isoformat()
     ticket_id = str(uuid.uuid4())
     ticket_num = f"SEC-{random.randint(1000,9999)}"
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0}) or {}
+    device = None
+    if alert.get("device_id"):
+        device = await db.devices.find_one({"id": alert["device_id"]}, {"_id": 0})
+    if not device and alert.get("hostname"):
+        device = await db.devices.find_one({"name": alert["hostname"]}, {"_id": 0})
 
     ticket = {
         "id": ticket_id,
@@ -278,6 +259,10 @@ async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_c
         "status": "open",
         "source": "soc_alert",
         "soc_alert_id": alert_id,
+        "client_id": (device or {}).get("client_id") or alert.get("client_id"),
+        "client_name": (device or {}).get("client_name") or alert.get("organization") or alert.get("client_name"),
+        "device_id": (device or {}).get("id") or alert.get("device_id"),
+        "device_ids": [((device or {}).get("id") or alert.get("device_id"))] if ((device or {}).get("id") or alert.get("device_id")) else [],
         "created_by": user["id"],
         "created_by_name": user.get("name", "System"),
         "created_at": now,

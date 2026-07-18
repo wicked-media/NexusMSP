@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,16 +8,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { DollarSign, HardDrive, Users, Loader2, TrendingUp, Database, BarChart3, Zap } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import HeroTile from "@/components/HeroTile";
 
 export default function UsageBillingPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     axios.get(`${API}/usage-billing/overview`, { headers }).then(r => setData(r.data)).catch(() => toast.error("Failed to load")).finally(() => setLoading(false));
-  }, []);
+  }, [headers]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   if (!data) return null;
@@ -25,17 +28,23 @@ export default function UsageBillingPage() {
   const s = data.summary;
 
   return (
-    <div className="space-y-5" data-testid="usage-billing-page">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Usage-Based Billing</h1>
-        <p className="text-sm text-muted-foreground">Track metered services, device counts, and per-unit billing across all clients</p>
+    <div className="space-y-6" data-testid="usage-billing-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><Database className="w-4 h-4 text-sky-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Usage Billing</h1><p className="text-sm text-muted-foreground">Metered services, device counts, and per-unit revenue by client.</p></div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")} data-testid="usage-go-recurring"><TrendingUp className="w-4 h-4 mr-1" />Recurring</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="usage-go-invoices"><DollarSign className="w-4 h-4 mr-1" />Invoices</Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-3">
-        <Card><CardContent className="pt-4 pb-3"><DollarSign className="w-5 h-5 text-emerald-400 mb-1" /><p className="text-2xl font-bold">${s.total_mrr.toLocaleString()}</p><p className="text-[11px] text-muted-foreground">Total MRR</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><Users className="w-5 h-5 text-blue-400 mb-1" /><p className="text-2xl font-bold">{s.total_clients}</p><p className="text-[11px] text-muted-foreground">Clients on Usage Plans</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><HardDrive className="w-5 h-5 text-violet-400 mb-1" /><p className="text-2xl font-bold">${s.avg_per_device.toFixed(2)}</p><p className="text-[11px] text-muted-foreground">Avg Per Device</p></CardContent></Card>
-        <Card className="border-amber-500/20"><CardContent className="pt-4 pb-3"><Zap className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold text-amber-400">${s.overages_this_month.toLocaleString()}</p><p className="text-[11px] text-muted-foreground">Overages This Month</p></CardContent></Card>
+        <HeroTile label="Usage MRR" value={`$${(s.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/recurring-invoices")} testId="usage-metric-mrr" />
+        <HeroTile label="Clients on plans" value={s.total_clients || 0} icon={Users} glow="cyan" testId="usage-metric-clients" />
+        <HeroTile label="Average per device" value={`$${(s.avg_per_device || 0).toFixed(2)}`} icon={HardDrive} glow="violet" animated={false} testId="usage-metric-device" />
+        <HeroTile label="Overages this month" value={`$${(s.overages_this_month || 0).toLocaleString()}`} icon={Zap} glow={(s.overages_this_month || 0) > 0 ? "amber" : "emerald"} animated={false} onClick={() => navigate("/invoices")} testId="usage-metric-overages" />
       </div>
 
       <Card>

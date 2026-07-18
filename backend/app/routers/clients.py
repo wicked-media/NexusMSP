@@ -85,9 +85,17 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     asset_map = {}
     async for row in db.devices.aggregate([
         {"$match": {"client_id": {"$in": client_ids}}},
-        {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "online": {"$sum": {"$cond": [{"$eq": ["$status", "online"]}, 1, 0]}}}},
+        {"$group": {
+            "_id": "$client_id", "count": {"$sum": 1},
+            "online": {"$sum": {"$cond": [{"$eq": ["$status", "online"]}, 1, 0]}},
+            "assessed": {"$sum": {"$cond": [{"$ne": [{"$ifNull": ["$security_assessed_at", None]}, None]}, 1, 0]}},
+            "pending_patches": {"$sum": {"$cond": [
+                {"$ne": [{"$ifNull": ["$security_assessed_at", None]}, None]},
+                {"$ifNull": ["$pending_patches", 0]}, 0,
+            ]}},
+        }},
     ]):
-        asset_map[row["_id"]] = {"total": row["count"], "online": row["online"]}
+        asset_map[row["_id"]] = {"total": row["count"], "online": row["online"], "assessed": row.get("assessed", 0), "pending_patches": int(row.get("pending_patches") or 0)}
 
     contact_map = {}
     async for row in db.contacts.aggregate([
@@ -139,7 +147,7 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     for c in clients:
         cid = c["id"]
         health = await _calc_health(c)
-        amap = asset_map.get(cid, {"total": 0, "online": 0})
+        amap = asset_map.get(cid, {"total": 0, "online": 0, "assessed": 0, "pending_patches": 0})
         omap = overdue_map.get(cid, {"count": 0, "amount": 0})
         contract = active_contract_map.get(cid, {})
         mrr = float(contract.get("mrr") or c.get("mrr") or 0)
@@ -162,6 +170,8 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
             "open_tickets": open_tix_map.get(cid, 0),
             "asset_count": amap["total"],
             "assets_online": amap["online"],
+            "assets_assessed": amap["assessed"],
+            "patch_pending": amap["pending_patches"],
             "contact_count": contact_map.get(cid, 0),
             "overdue_count": omap["count"],
             "overdue_amount": round(omap.get("amount", 0), 2),
@@ -191,6 +201,8 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
         "prospects": sum(1 for r in results if r["lifecycle"] == "prospect"),
         "with_acronis": sum(1 for r in results if r["integrations"]["acronis"]),
         "with_pax8": sum(1 for r in results if r["integrations"]["pax8"]),
+        "patch_pending": sum(r["patch_pending"] for r in results),
+        "assessed_endpoints": sum(r["assets_assessed"] for r in results),
     }
 
     return {"summary": summary, "clients": results}
@@ -199,6 +211,9 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 async def get_client_activity_timeline(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get combined activity timeline for a client"""
     timeline = []
+    client_devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    device_names = {device.get("id"): device.get("name") or device.get("id") for device in client_devices}
+    device_ids = list(device_names)
     
     # Recent tickets
     tickets = await db.tickets.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(20)
@@ -216,6 +231,27 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
         time_entries = await db.time_entries.find({"ticket_id": {"$in": client_ticket_ids}}, {"_id": 0}).sort("date", -1).to_list(20)
         for te in time_entries:
             timeline.append({"type": "time_entry", "title": te.get("description", "Time logged"), "minutes": te.get("minutes"), "billable": te.get("billable"), "timestamp": te.get("date"), "id": te.get("id")})
+
+    # Agent and operator activity are operational evidence for this client.
+    if device_ids:
+        activity_logs = await db.activity_logs.find(
+            {"entity_type": "device", "entity_id": {"$in": device_ids}}, {"_id": 0}
+        ).sort("created_at", -1).to_list(50)
+        for entry in activity_logs:
+            timeline.append({
+                "type": "device_activity", "title": entry.get("details") or entry.get("action", "Device activity").replace("_", " "),
+                "device_name": entry.get("entity_name") or device_names.get(entry.get("entity_id")),
+                "status": entry.get("action"), "timestamp": entry.get("created_at"), "id": f"activity-{entry.get('id')}",
+            })
+        device_events = await db.device_events.find(
+            {"device_id": {"$in": device_ids}}, {"_id": 0}
+        ).sort("timestamp", -1).to_list(50)
+        for event in device_events:
+            timeline.append({
+                "type": "device_event", "title": event.get("message") or event.get("event_type", "Device event").replace("_", " "),
+                "device_name": device_names.get(event.get("device_id")), "status": event.get("severity"),
+                "timestamp": event.get("timestamp"), "id": f"event-{event.get('id')}",
+            })
     
     # Sort by timestamp descending
     timeline.sort(key=lambda x: x.get("timestamp", "") or "", reverse=True)
@@ -298,32 +334,90 @@ async def _calc_health(client):
 
 # ============== NOTIFICATIONS ==============
 
+NOTIFICATION_PREFERENCE_KEYS = {
+    "ticket_assigned": "inapp_ticket_assigned",
+    "ticket_updated": "inapp_ticket_updated",
+    "ticket_escalated": "inapp_ticket_escalated",
+    "sla_breach": "inapp_sla_breach",
+    "sla_warning": "inapp_sla_warning",
+    "device_offline": "inapp_device_offline",
+    "contract_renewal": "inapp_contract_renewal",
+    "new_lead": "inapp_new_lead",
+    "email_received": "inapp_email_received",
+}
+
+NOTIFICATION_PREFERENCE_DEFAULTS = {
+    "inapp_ticket_assigned": True,
+    "inapp_ticket_updated": True,
+    "inapp_ticket_escalated": True,
+    "inapp_sla_breach": True,
+    "inapp_sla_warning": True,
+    "inapp_device_offline": True,
+    "inapp_contract_renewal": True,
+    "inapp_new_lead": True,
+    "inapp_email_received": True,
+}
+
+async def _visible_notifications(current_user: dict, unread_only: bool = False) -> list:
+    """Return only the in-app notification categories this technician has enabled."""
+    settings = await db.user_settings.find_one({"user_id": current_user["id"]}, {"_id": 0, "notification_prefs": 1}) or {}
+    prefs = {**NOTIFICATION_PREFERENCE_DEFAULTS, **settings.get("notification_prefs", {})}
+    user_id = current_user["id"]
+    # Chat mention notifications originally used target_user_id.  Read both
+    # shapes so existing alerts remain visible while new producers use the
+    # standard user_id field.
+    notifications = await db.notifications.find(
+        {"$or": [{"user_id": {"$in": [user_id, "all"]}}, {"target_user_id": user_id}]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    visible = []
+    for notification in notifications:
+        # Shared notifications retain read/dismiss state per technician.  This keeps a
+        # service-wide device or SLA alert available to other technicians after one
+        # person has acknowledged it.
+        is_shared = notification.get("user_id") == "all"
+        if is_shared and user_id in notification.get("dismissed_by", []):
+            continue
+        is_read = user_id in notification.get("read_by", []) if is_shared else notification.get("read", False)
+        if unread_only and is_read:
+            continue
+        if not prefs.get(NOTIFICATION_PREFERENCE_KEYS.get(notification.get("type"), ""), True):
+            continue
+        if is_shared:
+            notification["read"] = is_read
+        visible.append(notification)
+        if len(visible) == 50:
+            break
+    return visible
+
 @router.get("/notifications")
 async def get_notifications(current_user: dict = Depends(get_current_user)):
-    """Get all notifications for current user"""
-    notifs = await db.notifications.find({"user_id": {"$in": [current_user["id"], "all"]}}, {"_id": 0}).sort("created_at", -1).to_list(50)
-    return notifs
+    """Get notifications visible under the current technician's in-app preferences."""
+    return await _visible_notifications(current_user)
 
 @router.get("/notifications/unread-count")
 async def get_unread_count(current_user: dict = Depends(get_current_user)):
-    count = await db.notifications.count_documents({"user_id": {"$in": [current_user["id"], "all"]}, "read": False})
-    return {"count": count}
+    return {"count": len(await _visible_notifications(current_user, unread_only=True))}
 
 @router.post("/notifications/mark-read")
 async def mark_notifications_read(data: dict, current_user: dict = Depends(get_current_user)):
     ids = data.get("ids", [])
     if ids:
-        await db.notifications.update_many({"id": {"$in": ids}}, {"$set": {"read": True}})
+        scope = {"id": {"$in": ids}, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}, {"user_id": "all"}]}
+        await db.notifications.update_many({**scope, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}]}, {"$set": {"read": True}})
+        await db.notifications.update_many({**scope, "user_id": "all"}, {"$addToSet": {"read_by": current_user["id"]}})
     else:
-        await db.notifications.update_many({"user_id": {"$in": [current_user["id"], "all"]}}, {"$set": {"read": True}})
+        await db.notifications.update_many({"$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}]}, {"$set": {"read": True}})
+        await db.notifications.update_many({"user_id": "all"}, {"$addToSet": {"read_by": current_user["id"]}})
     return {"message": "Notifications marked as read"}
 
 @router.post("/notifications/delete")
 async def delete_notifications(data: dict, current_user: dict = Depends(get_current_user)):
     ids = data.get("ids", [])
     if ids:
-        await db.notifications.delete_many({"id": {"$in": ids}})
-    return {"message": f"Deleted {len(ids)} notifications"}
+        scope = {"id": {"$in": ids}, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}, {"user_id": "all"}]}
+        await db.notifications.delete_many({**scope, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}]})
+        await db.notifications.update_many({**scope, "user_id": "all"}, {"$addToSet": {"dismissed_by": current_user["id"]}})
+    return {"message": f"Dismissed {len(ids)} notifications"}
 
 @router.post("/notifications/generate")
 async def generate_notifications(current_user: dict = Depends(get_current_user)):

@@ -94,6 +94,14 @@
 }
 
 @layer utilities {
+    .ticket-workspace-scroll {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    .ticket-workspace-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
     /* Glassy ticket detail card aesthetic — gradient bg + subtle border + accent glow.
        Apply to root container; all rounded-lg/border children pick up the look without per-Card edits. */
     .ticket-glass > div > [class*="rounded-lg"][class*="border"],

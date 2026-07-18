@@ -30,15 +30,29 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
     acronis = await _get_settings("acronis")
     pax8 = await _get_settings("pax8")
     stripe = await _get_settings("stripe")
-    resend = await _get_settings("resend")
+    microsoft365 = await _get_settings("o365_mailbox")
     sms = await _get_settings("sms")
     xero = await _get_settings("xero")
     splynx = await _get_settings("splynx")
     syncro = await _get_settings("syncro")
     suped = await _get_settings("suped")
     domotz = await _get_settings("domotz")
+    rustdesk = await _get_settings("rustdesk")
+    rustdesk_legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+    rustdesk_legacy_value = rustdesk_legacy.get("value") if isinstance(rustdesk_legacy.get("value"), dict) else {}
 
     tiles = [
+        {
+            "key": "rustdesk",
+            "name": "RustDesk",
+            "category": "remote-access",
+            "description": "Self-hosted remote access for managed endpoints",
+            "configured": bool(rustdesk.get("server_url") or rustdesk_legacy_value.get("server_url")),
+            "last_synced_at": rustdesk.get("updated_at") or rustdesk_legacy.get("updated_at"),
+            "last_test_status": rustdesk.get("last_test_status") or rustdesk_legacy.get("last_test_status"),
+            "command_center": "/remote-access",
+            "settings_anchor": "rustdesk-settings-card",
+        },
         {
             "key": "cipp",
             "name": "CIPP (M365 Management)",
@@ -128,15 +142,15 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
             "settings_anchor": "xero-settings-card",
         },
         {
-            "key": "resend",
-            "name": "Resend",
+            "key": "microsoft365",
+            "name": "Microsoft 365 Email",
             "category": "email",
-            "description": "Transactional email",
-            "configured": bool(resend.get("api_key")),
-            "last_synced_at": None,
-            "last_test_status": resend.get("last_test_status"),
-            "command_center": None,
-            "settings_anchor": "resend-settings-card",
+            "description": "Shared mailboxes, intake, and role-based outbound delivery",
+            "configured": bool(microsoft365.get("enabled") and microsoft365.get("connected")),
+            "last_synced_at": microsoft365.get("last_graph_sync") or microsoft365.get("updated_at"),
+            "last_test_status": microsoft365.get("last_outbound_test_status"),
+            "command_center": "/o365-setup",
+            "settings_anchor": "microsoft365-delivery-card",
         },
         {
             "key": "sms",

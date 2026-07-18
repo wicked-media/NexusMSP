@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import axios from "axios";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -27,7 +27,14 @@ function useApi(token) {
 export default function InsightsHubPage() {
   const { token } = useAuth();
   const api = useApi(token);
-  const [tab, setTab] = useState("overload");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState(requestedTab === "runbooks" ? "runbooks" : "overload");
+
+  const selectTab = (nextTab) => {
+    setTab(nextTab);
+    setSearchParams(nextTab === "overload" ? {} : { tab: nextTab }, { replace: true });
+  };
 
   return (
     <PageShell>
@@ -42,7 +49,7 @@ export default function InsightsHubPage() {
           </div>
         </div>
 
-        <Tabs value={tab} onValueChange={setTab} className="w-full">
+        <Tabs value={tab} onValueChange={selectTab} className="w-full">
           <TabsList className="flex-wrap h-auto" data-testid="insights-tabs">
             <TabsTrigger value="overload" data-testid="tab-overload"><Brain className="w-3 h-3 mr-1" />Tech Load</TabsTrigger>
             <TabsTrigger value="patches" data-testid="tab-patches"><AlertOctagon className="w-3 h-3 mr-1" />Patch Anomalies</TabsTrigger>

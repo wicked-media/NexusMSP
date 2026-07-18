@@ -575,7 +575,7 @@ Create user · Manage licenses · Reset password · Block / Unblock sign-in · O
 | Guest posture | 10 |
 | Modern auth CA | 5 |
 
-"Send Digest" emails an HTML hygiene report via Resend.
+"Send Digest" emails an HTML hygiene report through the selected Microsoft 365 mailbox.
 
 ## Client Health integration
 M365 hygiene contributes 10% to linked client's Health Score.
@@ -704,7 +704,7 @@ Tabs: Overview · Performance · Patches · Software · Sessions · Audit. See *
 | **Pre-scan Risks (AI)** (rose) *(NEW)* | Claude + heuristic dispute scan BEFORE sending. Returns flags + per-line justifications. |
 
 ### Send actions
-- Email Invoice — opens Resend mail dialog with template
+- Email Invoice — opens the Microsoft 365 mail dialog with template and PDF attachment
 - SMS Reminder (when not paid) — MobileMessage text with template
 
 ### AI helpers
@@ -1177,12 +1177,13 @@ async def list_help_articles(q: Optional[str] = None, current_user: dict = Depen
                 "updated_at": _now_iso(),
             })
 
-    # Ensure modern articles + prunes are applied at least once
+    # Apply each versioned product catalogue update once. This keeps shipped
+    # guidance current without touching admin-authored articles.
     try:
-        from app.routers._help_seed_modern import STALE_SLUGS, MODERN_ARTICLES
-        # Run once: presence of whats-new doc is the sentinel
-        sentinel = await db.help_articles.find_one({"slug": "whats-new"}, {"_id": 0})
-        if not sentinel:
+        from app.routers._help_seed_modern import HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES
+        metadata = db.help_center_metadata
+        catalog = await metadata.find_one({"key": "catalog_version"}, {"_id": 0, "value": 1})
+        if catalog is None or catalog.get("value") != HELP_CATALOG_VERSION:
             if STALE_SLUGS:
                 await db.help_articles.delete_many({"slug": {"$in": STALE_SLUGS}})
             for a in MODERN_ARTICLES:
@@ -1193,6 +1194,11 @@ async def list_help_articles(q: Optional[str] = None, current_user: dict = Depen
                 else:
                     doc["created_at"] = _now_iso()
                     await db.help_articles.insert_one(doc)
+            await metadata.update_one(
+                {"key": "catalog_version"},
+                {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
+                upsert=True,
+            )
     except Exception:
         pass
     qry = {}
@@ -1258,9 +1264,9 @@ async def delete_help_article(slug: str, current_user: dict = Depends(get_curren
 async def reseed(current_user: dict = Depends(get_current_user)):
     """Reseed default + modern articles. Also prunes stale slugs from prior versions."""
     try:
-        from app.routers._help_seed_modern import STALE_SLUGS, MODERN_ARTICLES
+        from app.routers._help_seed_modern import HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES
     except Exception:
-        STALE_SLUGS, MODERN_ARTICLES = [], []
+        HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES = "", [], []
 
     stale = set(STALE_SLUGS or [])
 
@@ -1291,6 +1297,13 @@ async def reseed(current_user: dict = Depends(get_current_user)):
             doc["created_at"] = _now_iso()
             await db.help_articles.insert_one(doc)
         modern_seeded += 1
+
+    if HELP_CATALOG_VERSION:
+        await db.help_center_metadata.update_one(
+            {"key": "catalog_version"},
+            {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
+            upsert=True,
+        )
 
     return {
         "seeded": len(default_to_seed),

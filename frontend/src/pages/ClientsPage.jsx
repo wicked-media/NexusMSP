@@ -22,6 +22,7 @@ import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
 import ClientWarRoom from "@/components/clients/ClientWarRoom";
 import HeroTile from "@/components/HeroTile";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { ClientProfilePictureUploader, ClientCoverImage } from "@/components/clients/ClientProfileAssets";
 import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
@@ -156,13 +157,13 @@ function ClientListItem({ client, selected, onClick }) {
           {client.industry && <span className="truncate max-w-[80px]">{client.industry}</span>}
           {client.open_tickets > 0 && <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="w-2.5 h-2.5 inline mr-0.5" />{client.open_tickets}</span>}
           <span><HardDrive className="w-2.5 h-2.5 inline mr-0.5" />{client.asset_count}</span>
+          {client.patch_pending > 0 && <span className="text-amber-400"><Shield className="w-2.5 h-2.5 inline mr-0.5" />{client.patch_pending} patches</span>}
           {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />{client.overdue_count}</span>}
         </div>
-        <div className="flex items-center gap-1 mt-1.5">
-          <IntegrationChip type="rmm" active={client.integrations.rmm} />
-          <IntegrationChip type="acronis" active={client.integrations.acronis} />
-          <IntegrationChip type="pax8" active={client.integrations.pax8} />
-          <IntegrationChip type="m365" active={client.integrations.m365} />
+        <div className="flex items-center gap-3 mt-1.5 text-[10px] font-mono">
+          <span className={client.assets_assessed > 0 ? "text-emerald-400" : "text-zinc-500"}>● Agent {client.assets_assessed || 0}/{client.asset_count || 0}</span>
+          <span className={client.integrations.acronis ? "text-sky-400" : "text-zinc-500"}>● Backup {client.integrations.acronis ? "linked" : "not linked"}</span>
+          <span className={client.integrations.m365 ? "text-blue-400" : "text-zinc-500"}>● M365 {client.integrations.m365 ? "linked" : "not linked"}</span>
         </div>
       </div>
       <div className="flex flex-col items-end gap-0.5 shrink-0">
@@ -182,8 +183,8 @@ function ClientListItem({ client, selected, onClick }) {
 
 function TopMetric({ label, value, trend, color = "indigo" }) {
   // Delegate to HeroTile for platform-wide consistency. Map legacy color → glow tone.
-  const glowMap = { indigo: "violet", violet: "violet", emerald: "emerald", amber: "amber", rose: "rose", red: "rose", sky: "cyan", cyan: "cyan", zinc: "zinc" };
-  return <HeroTile label={label} value={value} subtitle={trend} glow={glowMap[color] || "violet"} animated={typeof value === "number"} />;
+  const accentMap = { indigo: "violet", violet: "violet", emerald: "emerald", amber: "amber", rose: "rose", red: "rose", sky: "sky", cyan: "cyan", zinc: "zinc" };
+  return <MetricTile label={label} value={value} trend={trend} accent={accentMap[color] || "violet"} testid={`clients-metric-${label.toLowerCase().replace(/\s+/g, "-")}`} />;
 }
 
 export default function ClientsPage() {
@@ -301,18 +302,21 @@ export default function ClientsPage() {
   if (loading) return <div className="p-8 flex items-center gap-2 text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" />Loading portfolio...</div>;
 
   const s = data.summary || {};
+  const attentionClients = (data.clients || [])
+    .filter(client => client.patch_pending > 0 || client.risk_level === "critical" || client.risk_level === "at_risk")
+    .sort((a, b) => (b.patch_pending || 0) - (a.patch_pending || 0) || (a.health_score || 0) - (b.health_score || 0));
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 flex flex-col" data-testid="clients-page">
         {/* Portfolio metric strip */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 px-6 py-4 sticky top-0 z-10 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-900/60">
-          <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : null} color="indigo" />
-          <TopMetric label="Portfolio MRR" value={`$${(s.total_mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} color="emerald" />
-          <TopMetric label="Avg Health" value={`${s.avg_health || 0}`} color={s.avg_health >= 80 ? "emerald" : s.avg_health >= 60 ? "amber" : "rose"} />
-          <TopMetric label="At Risk" value={s.at_risk || 0} trend={s.at_risk ? "requires attention" : "healthy"} color={s.at_risk ? "amber" : "emerald"} />
-          <TopMetric label="Acronis Linked" value={`${s.with_acronis || 0}/${s.client_count || 0}`} color="sky" />
-          <TopMetric label="Pax8 Linked" value={`${s.with_pax8 || 0}/${s.client_count || 0}`} color="indigo" />
+        <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-900/60">
+        <MetricStrip columns={4}>
+          <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : "managed portfolio"} color="indigo" />
+          <TopMetric label="Assessed Endpoints" value={s.assessed_endpoints || 0} trend="Nexus Agent evidence" color="sky" />
+          <TopMetric label="Patch Exposure" value={s.patch_pending || 0} trend={(s.patch_pending || 0) > 0 ? "updates need review" : "no agent-reported updates"} color={(s.patch_pending || 0) > 0 ? "amber" : "emerald"} />
+          <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
+        </MetricStrip>
         </div>
 
         <div className="flex flex-1 min-h-0">
@@ -392,6 +396,14 @@ export default function ClientsPage() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
+              {!search && lifecycleFilter === "all" && riskFilter === "all" && integrationFilter === "all" && tierFilter === "all" && attentionClients.length > 0 && (
+                <div className="p-3 border-b border-amber-500/20 bg-amber-500/[0.04]">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-amber-300 font-semibold mb-2"><AlertTriangle className="w-3 h-3" />Needs attention</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {attentionClients.slice(0, 4).map(client => <button key={client.id} onClick={() => setSelectedId(client.id)} className="text-[10px] px-2 py-1 rounded border border-amber-500/20 text-amber-200 hover:bg-amber-500/10">{client.name}{client.patch_pending ? ` · ${client.patch_pending} patches` : ""}</button>)}
+                  </div>
+                </div>
+              )}
               {filtered.length === 0 ? (
                 <div className="p-8 text-center text-sm text-zinc-500">
                   <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
@@ -603,8 +615,8 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
                 <div className="space-y-2">
                   {activity.slice(0, 8).map((a, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                      <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : a.type?.startsWith("device") ? "bg-cyan-400" : "bg-amber-400"}`} />
+                      <span className="text-zinc-300 flex-1 truncate">{a.title}{a.device_name ? <span className="text-zinc-500"> · {a.device_name}</span> : null}</span>
                       {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
                       <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
                     </div>

@@ -396,6 +396,8 @@ async def bulk_invoice_action(action: str, data: dict, current_user: dict = Depe
             continue
         try:
             if action == "void":
+                if inv.get("payment_status") in {"paid", "partial"} or inv.get("status") in {"cancelled", "voided"}:
+                    raise ValueError("Paid, partially paid, or already voided invoices cannot be bulk voided")
                 await db.invoices.update_one({"id": inv_id}, {"$set": {
                     "status": "cancelled",
                     "voided_at": _now_iso(),

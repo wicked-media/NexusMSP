@@ -13,6 +13,10 @@ import uuid
 
 from app.database import db
 from app.routers.auth import get_current_user
+from app.services.activity import log_activity
+
+
+MAINTENANCE_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 router = APIRouter()
 
@@ -22,7 +26,10 @@ def _now() -> str:
 
 
 async def _audit(ticket_id: str, user: dict, action: str, details: str):
-    await db.ticket_audit.insert_one({
+    # The ticket detail Audit tab is backed by ticket_audit_log.  Keep workflow
+    # events in that canonical collection so technicians see the full story in
+    # one place instead of having to infer actions from a separate activity view.
+    await db.ticket_audit_log.insert_one({
         "id": uuid.uuid4().hex,
         "ticket_id": ticket_id,
         "user_id": user.get("id"),
@@ -93,8 +100,14 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
     start_iso = payload.get("start")
     duration_min = int(payload.get("duration_min") or 60)
     notes = (payload.get("notes") or "").strip()
+    device_id = (payload.get("device_id") or "").strip()
+    actions = payload.get("actions") or ["install-patches"]
     if not start_iso:
         raise HTTPException(400, "start (ISO datetime) required")
+    if not 5 <= duration_min <= 1440:
+        raise HTTPException(400, "duration_min must be between 5 and 1440")
+    if not isinstance(actions, list) or not actions or any(action not in MAINTENANCE_ACTIONS for action in actions):
+        raise HTTPException(400, f"actions must contain only: {sorted(MAINTENANCE_ACTIONS)}")
     try:
         start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
     except Exception:
@@ -103,17 +116,39 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "device_id": 1, "client_id": 1, "title": 1})
     if not ticket:
         raise HTTPException(404, "Ticket not found")
+    device_id = device_id or ticket.get("device_id") or ""
+    if not device_id:
+        raise HTTPException(400, "Link a device to the ticket before scheduling maintenance")
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Linked device not found")
+
+    scheduled_at = start_dt.isoformat()
+    device_meta = {
+        "id": device["id"], "name": device.get("name") or device.get("hostname"),
+        "client_id": device.get("client_id"), "client_name": device.get("client_name"),
+        "nexus_agent_id": device.get("nexus_agent_id"), "status": device.get("status"),
+    }
 
     window = {
-        "id": uuid.uuid4().hex,
+        "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
-        "device_id": ticket.get("device_id"),
+        "parent_ticket_id": ticket_id,
+        "device_id": device_id,
+        "device_ids": [device_id],
+        "devices_meta": [device_meta],
         "client_id": ticket.get("client_id"),
+        "name": f"Ticket maintenance - {ticket.get('title', '')[:80]}",
         "title": f"Maintenance — {ticket.get('title', '')[:80]}",
-        "start": start_dt.isoformat(),
+        "description": notes[:600],
+        "actions": actions,
+        "scheduled_at": scheduled_at,
+        "start": scheduled_at,
         "end": (start_dt + timedelta(minutes=duration_min)).isoformat(),
         "duration_min": duration_min,
         "notes": notes,
+        "notify_clients": bool(payload.get("notify_clients", False)),
+        "script_id": payload.get("script_id"),
         "status": "scheduled",
         "created_by_id": current_user.get("id"),
         "created_by_name": current_user.get("name"),
@@ -127,7 +162,8 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
         "maintenance_end": window["end"],
         "updated_at": _now(),
     }})
-    await _audit(ticket_id, current_user, "maintenance_scheduled", f"{window['start']} for {duration_min}m")
+    await _audit(ticket_id, current_user, "maintenance_scheduled", f"{window['start']} for {duration_min}m; {', '.join(actions)}")
+    await log_activity(current_user, "maintenance_window_created", "maintenance_window", window["id"], window["name"], f"1 device; {scheduled_at}; {', '.join(actions)}")
     return {"success": True, "window": window}
 
 

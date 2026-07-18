@@ -108,12 +108,9 @@ export default function PatchHubPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Patch Hub</h1>
-          <p className="text-muted-foreground text-sm">Unified patch management - OS, 3rd party apps, deployment rings, intelligence</p>
+          <p className="text-muted-foreground text-sm">Nexus Agent Windows Update posture and approved patch scheduling</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-1" />Export Report</Button>
-          <Button size="sm"><Play className="w-4 h-4 mr-1" />Run Patch Cycle</Button>
-        </div>
+        <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">Agent-reported updates</Badge>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -139,15 +136,15 @@ export default function PatchHubPage() {
               <div className="text-xs text-muted-foreground mt-1">{os.compliant || 0}/{os.total_devices || 0} devices current</div>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
-              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">App Compliance</div><Layers className="w-5 h-5 text-green-500" /></div>
-              <div className="text-3xl font-bold mt-1">{app.compliance_pct || 0}%</div>
-              <Progress value={app.compliance_pct || 0} className="mt-2 h-2" />
-              <div className="text-xs text-muted-foreground mt-1">{app.current || 0}/{app.total_apps || 0} apps current</div>
+              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">3rd-party apps</div><Layers className="w-5 h-5 text-muted-foreground" /></div>
+              <div className="text-2xl font-bold mt-2 text-muted-foreground">Not assessed</div>
+              <Progress value={0} className="mt-3 h-2" />
+              <div className="text-xs text-muted-foreground mt-1">Connect a patch provider to assess applications</div>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
               <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">Pending Patches</div><Clock className="w-5 h-5 text-yellow-500" /></div>
               <div className="text-3xl font-bold mt-1">{os.total_pending_patches || 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">Across all devices</div>
+              <div className="text-xs text-muted-foreground mt-1">Across {os.total_devices || 0} assessed devices</div>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
               <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">Critical Devices</div><AlertTriangle className="w-5 h-5 text-red-500" /></div>
@@ -183,6 +180,7 @@ export default function PatchHubPage() {
                       </div>
                     </div>
                   ))}
+                  {(dashboard?.rings || []).length === 0 && <p className="text-sm text-muted-foreground py-8 text-center">No deployment rings configured. Schedule approved patches from a ticket or device.</p>}
                 </div>
               </CardContent>
             </Card>
@@ -198,7 +196,7 @@ export default function PatchHubPage() {
                     <div className="w-32"><Progress value={c.compliance_pct} className="h-2" /></div>
                     <div className="w-16 text-right text-sm font-medium">{c.compliance_pct}%</div>
                     <Badge variant={c.critical > 0 ? "destructive" : c.needs_attention > 0 ? "secondary" : "default"} className="text-xs">
-                      {c.critical > 0 ? `${c.critical} crit` : c.needs_attention > 0 ? `${c.needs_attention} warn` : "OK"}
+                      {c.unassessed > 0 ? `${c.unassessed} unassessed` : c.critical > 0 ? `${c.critical} crit` : c.needs_attention > 0 ? `${c.needs_attention} warn` : "OK"}
                     </Badge>
                   </div>
                 ))}

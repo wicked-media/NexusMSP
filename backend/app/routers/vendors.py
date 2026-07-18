@@ -43,6 +43,23 @@ async def create_vendor(data: dict, current_user: dict = Depends(get_current_use
     return {k: v for k, v in vendor.items() if k != "_id"}
 
 
+@router.get("/vendors/{vendor_id}")
+async def get_vendor(vendor_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a supplier with its PO history and live purchasing totals."""
+    vendor = await db.vendors.find_one({"id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    purchase_orders = await db.purchase_orders.find(
+        {"vendor_id": vendor_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    vendor["purchase_orders"] = purchase_orders
+    vendor["total_orders"] = len(purchase_orders)
+    vendor["total_spent"] = round(sum(float(po.get("total", 0) or 0) for po in purchase_orders), 2)
+    vendor["open_orders"] = sum(1 for po in purchase_orders if po.get("status") in {"draft", "pending_approval", "approved", "submitted", "partial"})
+    return vendor
+
+
 @router.put("/vendors/{vendor_id}")
 async def update_vendor(vendor_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     v = await db.vendors.find_one({"id": vendor_id})

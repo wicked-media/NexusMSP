@@ -66,7 +66,7 @@ export default function ComplianceCenterPage() {
       const { data } = await axios.get(`${API}/compliance/scan/${selectedClient}?framework=${framework}`, { headers });
       setCurrentScan(data);
       setScanReports(prev => [data, ...prev]);
-      toast.success(`Compliance scan complete: ${data.score}%`);
+      toast.success(`Evidence check complete: ${data.score}% pass rate`);
     } catch { toast.error("Scan failed"); }
     setScanning(false);
   };
@@ -84,7 +84,7 @@ export default function ComplianceCenterPage() {
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-500 to-violet-700 flex items-center justify-center"><Shield className="w-5 h-5 text-white" /></div>
             Compliance Center
           </h1>
-          <p className="text-muted-foreground mt-1">Framework tracking, automated scanning, and report generation</p>
+          <p className="text-muted-foreground mt-1">Evidence-based endpoint checks, framework tracking, and report generation</p>
         </div>
         <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
@@ -143,19 +143,19 @@ export default function ComplianceCenterPage() {
             <div className="flex gap-3 items-center">
               <Select value={selectedClient} onValueChange={setSelectedClient}><SelectTrigger className="w-[220px]"><SelectValue placeholder="Select client..." /></SelectTrigger><SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
               <Select value={framework} onValueChange={setFramework}><SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger><SelectContent>{frameworks.map(f => <SelectItem key={f.id} value={f.id}>{f.name} ({f.controls} controls)</SelectItem>)}</SelectContent></Select>
-              <Button onClick={runScan} disabled={scanning}><RefreshCw className={`w-4 h-4 mr-2 ${scanning ? "animate-spin" : ""}`} />{scanning ? "Scanning..." : "Run Scan"}</Button>
+              <Button onClick={runScan} disabled={scanning}><RefreshCw className={`w-4 h-4 mr-2 ${scanning ? "animate-spin" : ""}`} />{scanning ? "Scanning..." : "Check evidence"}</Button>
             </div>
           </CardContent></Card>
 
           {currentScan && (
             <Card className="border-2" style={{ borderColor: currentScan.score >= 80 ? "#22c55e" : currentScan.score >= 50 ? "#f59e0b" : "#ef4444" }}>
-              <CardHeader><div className="flex items-center justify-between"><CardTitle className="text-base flex items-center gap-2">{currentScan.score >= 80 ? <ShieldCheck className="w-5 h-5 text-green-500" /> : <ShieldX className="w-5 h-5 text-red-500" />}{currentScan.framework_name} - {currentScan.client_name}</CardTitle><Badge variant={currentScan.score >= 80 ? "default" : "destructive"}>{currentScan.score}%</Badge></div></CardHeader>
+              <CardHeader><div className="flex items-center justify-between"><CardTitle className="text-base flex items-center gap-2">{currentScan.score >= 80 ? <ShieldCheck className="w-5 h-5 text-green-500" /> : <ShieldX className="w-5 h-5 text-red-500" />}{currentScan.framework_name} - {currentScan.client_name}</CardTitle><Badge variant={currentScan.score >= 80 ? "default" : "destructive"}>{currentScan.score}% verified pass rate</Badge></div></CardHeader>
               <CardContent className="space-y-4">
                 <Progress value={currentScan.score} className="h-3" />
-                <p className="text-sm text-muted-foreground">{currentScan.passed}/{currentScan.total} controls passed</p>
-                <Table><TableHeader><TableRow><TableHead>Control ID</TableHead><TableHead>Control</TableHead><TableHead>Description</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                <p className="text-sm text-muted-foreground">{currentScan.passed}/{currentScan.evaluated || 0} evaluated controls passed · {currentScan.coverage_pct || 0}% framework evidence coverage · {currentScan.total - (currentScan.evaluated || 0)} controls need an evidence source</p>
+                <Table><TableHeader><TableRow><TableHead>Control ID</TableHead><TableHead>Control</TableHead><TableHead>Description</TableHead><TableHead>Evidence</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
                   <TableBody>{(currentScan.controls || []).map((ctrl, i) => (
-                    <TableRow key={`k-${i}`}><TableCell className="font-mono text-xs">{ctrl.id}</TableCell><TableCell className="font-medium text-sm">{ctrl.name}</TableCell><TableCell className="text-xs text-muted-foreground">{ctrl.description}</TableCell><TableCell><Badge variant={ctrl.status === "pass" ? "default" : "destructive"} className="text-xs">{ctrl.status === "pass" ? "PASS" : "FAIL"}</Badge></TableCell></TableRow>
+                    <TableRow key={`k-${i}`}><TableCell className="font-mono text-xs">{ctrl.id}</TableCell><TableCell className="font-medium text-sm">{ctrl.name}</TableCell><TableCell className="text-xs text-muted-foreground">{ctrl.description}</TableCell><TableCell className="text-xs text-muted-foreground">{ctrl.evidence || "No evidence"}</TableCell><TableCell><Badge variant={ctrl.status === "pass" ? "default" : ctrl.status === "not_assessed" ? "secondary" : "destructive"} className="text-xs">{ctrl.status === "pass" ? "PASS" : ctrl.status === "not_assessed" ? "NOT ASSESSED" : "FAIL"}</Badge></TableCell></TableRow>
                   ))}</TableBody></Table>
               </CardContent>
             </Card>

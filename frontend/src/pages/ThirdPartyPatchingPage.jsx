@@ -12,14 +12,12 @@ export default function ThirdPartyPatchingPage() {
   const [data, setData] = useState(null);
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [oRes, pRes] = await Promise.all([
-          axios.get(`${API}/third-party-patching/overview`, { headers }),
-          axios.get(`${API}/third-party-patching/policies`, { headers }),
+          axios.get(`${API}/third-party-patching/overview`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/third-party-patching/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
         setData(oRes.data);
         setPolicies(pRes.data);
@@ -27,7 +25,7 @@ export default function ThirdPartyPatchingPage() {
       setLoading(false);
     };
     fetchData();
-  }, []);
+  }, [token]);
 
   if (loading || !data) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
 

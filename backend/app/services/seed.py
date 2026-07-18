@@ -22,6 +22,7 @@ PERMISSION_PRESETS = {
         "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
         "scheduling": {"view": True, "create": False, "edit": False, "delete": False},
         "settings": {"view": False, "create": False, "edit": False, "delete": False},
+        "agent_commands": {"view": False, "execute": False},
     },
     "L2 Technician": {
         "tickets": {"view": True, "create": True, "edit": True, "delete": False},
@@ -40,6 +41,7 @@ PERMISSION_PRESETS = {
         "purchase_orders": {"view": True, "create": False, "edit": False, "delete": False},
         "scheduling": {"view": True, "create": True, "edit": False, "delete": False},
         "settings": {"view": False, "create": False, "edit": False, "delete": False},
+        "agent_commands": {"view": False, "execute": False},
     },
     "Senior Engineer": {
         "tickets": {"view": True, "create": True, "edit": True, "delete": True},
@@ -58,6 +60,7 @@ PERMISSION_PRESETS = {
         "purchase_orders": {"view": True, "create": True, "edit": True, "delete": False},
         "scheduling": {"view": True, "create": True, "edit": True, "delete": False},
         "settings": {"view": True, "create": False, "edit": False, "delete": False},
+        "agent_commands": {"view": True, "execute": True},
     },
     "Service Manager": {
         "tickets": {"view": True, "create": True, "edit": True, "delete": True},
@@ -76,6 +79,7 @@ PERMISSION_PRESETS = {
         "purchase_orders": {"view": True, "create": True, "edit": True, "delete": True},
         "scheduling": {"view": True, "create": True, "edit": True, "delete": True},
         "settings": {"view": True, "create": True, "edit": True, "delete": False},
+        "agent_commands": {"view": True, "execute": True},
     },
     "Dispatcher": {
         "tickets": {"view": True, "create": True, "edit": True, "delete": False},
@@ -94,6 +98,7 @@ PERMISSION_PRESETS = {
         "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
         "scheduling": {"view": True, "create": True, "edit": True, "delete": True},
         "settings": {"view": False, "create": False, "edit": False, "delete": False},
+        "agent_commands": {"view": False, "execute": False},
     },
 }
 

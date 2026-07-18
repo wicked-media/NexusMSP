@@ -184,6 +184,17 @@ async def _aggregate_security(client_id: str) -> dict:
     out = {"mfa_pct": None, "weak_passwords": 0, "breached": 0, "cipp_hygiene": None,
            "huntress_agents": 0, "huntress_critical": 0, "stale_users": 0}
 
+    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(500)
+    assessed = [device for device in devices if device.get("security_assessed_at")]
+    encrypted = lambda device: any(marker in str(device.get("encryption_status") or "").lower() for marker in ("encrypted", "bitlocker on", "protection on"))
+    out.update({
+        "managed_endpoints": len(devices), "assessed_endpoints": len(assessed),
+        "defender_active": sum(1 for device in assessed if device.get("antivirus_status") == "active" and device.get("defender_real_time_enabled")),
+        "firewall_enabled": sum(1 for device in assessed if device.get("firewall_enabled")),
+        "encrypted_endpoints": sum(1 for device in assessed if encrypted(device)),
+        "pending_updates": sum(int(device.get("pending_patches") or 0) for device in assessed),
+    })
+
     # CIPP hygiene
     cipp = await db.cipp_tenant_links.find_one({"client_id": client_id}, {"_id": 0, "tenant_id": 1})
     if cipp:
@@ -306,7 +317,8 @@ async def client_assets_detail(client_id: str, current_user: dict = Depends(get_
             "online": sum(1 for d in v if d.get("status") == "online"),
             "offline": sum(1 for d in v if d.get("status") == "offline"),
             "avg_age_years": round(sum(ages) / len(ages), 1) if ages else None,
-            "devices_preview": [{"id": d.get("id"), "name": d.get("name"), "status": d.get("status"), "os": d.get("os"), "ip_address": d.get("ip_address")} for d in v[:10]],
+            "devices_preview": [{"id": d.get("id"), "name": d.get("name"), "status": d.get("status"), "os": d.get("os"), "ip_address": d.get("ip_address"), "assessed": bool(d.get("security_assessed_at")), "pending_patches": int(d.get("pending_patches") or 0)} for d in v[:10]],
         })
     groups.sort(key=lambda x: -x["count"])
-    return {"groups": groups, "total": len(devices), "online": sum(g["online"] for g in groups), "offline": sum(g["offline"] for g in groups)}
+    assessed = [device for device in devices if device.get("security_assessed_at")]
+    return {"groups": groups, "total": len(devices), "online": sum(g["online"] for g in groups), "offline": sum(g["offline"] for g in groups), "assessed": len(assessed), "pending_updates": sum(int(device.get("pending_patches") or 0) for device in assessed)}

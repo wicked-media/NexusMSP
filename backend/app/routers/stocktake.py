@@ -194,7 +194,13 @@ async def finalize_stocktake(session_id: str, data: dict = {}, current_user: dic
 
 @router.delete("/stocktake/sessions/{session_id}")
 async def delete_stocktake_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    session = await db.stocktake_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Stocktake session not found")
+    if session.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Completed stocktakes are retained as inventory history and cannot be deleted")
     await db.stocktake_sessions.delete_one({"id": session_id})
+    await db.stocktake_audit.delete_many({"session_id": session_id})
     return {"message": "Session deleted"}
 
 @router.get("/stocktake/sessions/{session_id}/audit-log")

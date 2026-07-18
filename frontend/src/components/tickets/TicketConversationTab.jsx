@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { Send, MessageSquare, Mail, PhoneCall, Loader2, User, Zap } from "lucide-react";
+import { Send, MessageSquare, Mail, PhoneCall, Loader2, User, Zap, LockKeyhole } from "lucide-react";
 import DOMPurify from "dompurify";
 import { formatDistanceToNow } from "date-fns";
 
@@ -33,29 +33,33 @@ export default function TicketConversationTab({
 
   return (
     <>
-      {/* Message Type Selector */}
-      <div className="flex items-center gap-3 pb-2 border-b border-border/50">
-        <Select value={conversationType} onValueChange={setConversationType}>
-          <SelectTrigger className="w-[200px]" data-testid="conversation-type-select">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="note"><div className="flex items-center gap-2"><MessageSquare className="w-3 h-3" />Internal Note</div></SelectItem>
-            <SelectItem value="email"><div className="flex items-center gap-2"><Mail className="w-3 h-3" />Public Email</div></SelectItem>
-            <SelectItem value="sms"><div className="flex items-center gap-2"><PhoneCall className="w-3 h-3" />SMS</div></SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-muted-foreground">
-          {conversationType === "note" ? "Internal notes are only visible to your team" : conversationType === "email" ? "Emails will be sent to the client" : "SMS will be sent via MobileMessage to the client's mobile"}
-        </span>
+      {/* Message type / composer context */}
+      <div className="rounded-xl border border-white/[0.08] bg-black/[0.14] p-2.5 shadow-[0_10px_26px_rgba(0,0,0,0.12)]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-1" role="tablist" aria-label="Message type">
+            {[
+              { value: "note", label: "Internal note", icon: LockKeyhole },
+              { value: "email", label: "Email client", icon: Mail },
+              { value: "sms", label: "SMS", icon: PhoneCall },
+            ].map(({ value, label, icon: Icon }) => (
+              <Button key={value} type="button" variant="ghost" size="sm" onClick={() => setConversationType(value)} className={`h-8 gap-1.5 px-2.5 text-xs ${conversationType === value ? "bg-violet-500/[0.18] text-violet-100 hover:bg-violet-500/[0.22]" : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200"}`} data-testid={value === "note" ? "conversation-type-select" : undefined}>
+                <Icon className="h-3.5 w-3.5" />{label}
+              </Button>
+            ))}
+          </div>
+          <span className={`text-[11px] ${conversationType === "note" ? "text-amber-300" : conversationType === "email" ? "text-sky-300" : "text-emerald-300"}`}>
+            {conversationType === "note" ? "Visible to your team only" : conversationType === "email" ? "Sent and tracked on this ticket" : "Sent through MobileMessage"}
+          </span>
+        </div>
       </div>
 
       {/* Internal Note Form */}
       {conversationType === "note" && (
-        <div className="space-y-2">
+        <div className="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.035] p-3">
           <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" />
-          <div className="flex items-center gap-3 flex-wrap">
-            <Button size="sm" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1" />Add Note</Button>
+          <div className="flex items-center justify-between gap-3 flex-wrap border-t border-amber-500/15 pt-2">
+            <span className="text-[10px] text-amber-300/80">Notes stay private to your team.</span>
+            <div className="flex items-center gap-2">
             {cannedResponses.length > 0 && (
               <Select value="" onValueChange={v => { const tmpl = cannedResponses.find(c => c.id === v); if (tmpl) setNewNote(prev => prev ? `${prev}\n${tmpl.content}` : tmpl.content); }}>
                 <SelectTrigger className="w-[180px] h-8 text-xs" data-testid="quick-template-picker"><SelectValue placeholder="Insert template..." /></SelectTrigger>
@@ -68,6 +72,8 @@ export default function TicketConversationTab({
                 </SelectContent>
               </Select>
             )}
+            <Button size="sm" className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1.5" />Add note</Button>
+            </div>
           </div>
         </div>
       )}
@@ -93,9 +99,19 @@ export default function TicketConversationTab({
             <Label className="text-xs">Body</Label>
             <RichTextEditor content={emailForm.body} onChange={body => setEmailForm({ ...emailForm, body })} placeholder="Write your email..." minHeight="320px" />
           </div>
-          {emailSignature && <div className="border rounded p-2 bg-muted/30"><p className="text-xs text-muted-foreground mb-1">Signature:</p><div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} /></div>}
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.035] p-2.5">
+            <div className="flex items-center justify-between gap-3 mb-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Sender signature</p>
+              <span className="text-[10px] text-sky-300/75">Applied securely when sent</span>
+            </div>
+            {emailSignature ? (
+              <div className="text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailSignature) }} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No default signature is set. Add one in My Settings to apply it to outgoing email.</p>
+            )}
+          </div>
           <div className="flex justify-end">
-            <Button size="sm" onClick={handleSendEmail} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
+            <Button size="sm" onClick={handleSendEmail} disabled={!emailForm.to?.trim()} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
           </div>
         </div>
       )}
@@ -145,9 +161,10 @@ export default function TicketConversationTab({
       )}
 
       {/* Unified Conversation Timeline */}
-      <div className="border rounded-lg overflow-hidden" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "200px" }}>
+      <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-black/[0.10]" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "240px" }}>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/[0.07] bg-[#111318]/95 px-3 py-2 backdrop-blur"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Ticket activity</span><span className="text-[10px] text-zinc-600">{allItems.length} item{allItems.length === 1 ? "" : "s"}</span></div>
         {allItems.length === 0 ? (
-          <p className="text-center py-8 text-muted-foreground">No conversation items yet</p>
+          <p className="text-center py-10 text-sm text-muted-foreground">No activity yet. Add an internal note or send the first update.</p>
         ) : allItems.map(item => {
           if (item._type === "note") {
             const isInternal = item.is_internal;

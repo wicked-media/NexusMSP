@@ -297,24 +297,22 @@ async def notify_workshop_customer(job_id: str, data: dict, current_user: dict =
     subject = data.get("subject", f"Update on your repair - {job.get('job_number', '')}")
     message = data.get("message", "")
     notification_type = data.get("notification_type", "status_update")
-    # Try sending via Resend
-    import resend
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    sender_email = os.environ.get("SENDER_EMAIL", "workshop@nexusops.io")
-    sent = False
-    if resend_key and not resend_key.startswith("re_test_placeholder") and email:
-        resend.api_key = resend_key
-        try:
-            params = {
-                "from": f"NexusOps Workshop <{sender_email}>",
-                "to": [email],
-                "subject": subject,
-                "html": f"<div style='font-family:sans-serif;'>{message}</div>",
-            }
-            await asyncio.to_thread(resend.Emails.send, params)
-            sent = True
-        except Exception as e:
-            logger.error(f"Workshop notification email failed: {e}")
+    # Use the same server-side signature pipeline as ticket email, so every
+    # technician-authored customer update carries their current rich signature.
+    from app.routers.email_signatures import append_default_signature
+    message, _, signature_id = await append_default_signature(
+        body=message,
+        body_type="html",
+        current_user=current_user,
+        subject=subject,
+    )
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        email,
+        subject,
+        f"<div style='font-family:sans-serif;'>{message}</div>",
+        category="ticket_replies",
+    )
     # Log the notification
     notif = {
         "id": str(uuid.uuid4()),
@@ -323,7 +321,11 @@ async def notify_workshop_customer(job_id: str, data: dict, current_user: dict =
         "email": email,
         "subject": subject,
         "message": message,
-        "sent": sent or not resend_key,
+        "signature_id": signature_id,
+        "sent": delivery.get("status") == "sent",
+        "delivery_status": delivery.get("status"),
+        "delivery_message": delivery.get("message"),
+        "sender_mailbox": delivery.get("sender"),
         "sent_by": current_user["id"],
         "sent_by_name": current_user.get("name", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),

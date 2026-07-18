@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,10 +12,14 @@ import { toast } from "sonner";
 import { Loader2, BarChart3, FileText, Users, DollarSign, TrendingUp, Briefcase, Download } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
+const REPORT_TABS = ["operational", "executive", "client", "financial", "roi"];
+
 export default function ReportsHubPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
-  const [tab, setTab] = useState("operational");
+  const location = useLocation();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const requestedTab = new URLSearchParams(location.search).get("tab");
+  const [tab, setTab] = useState(REPORT_TABS.includes(requestedTab) ? requestedTab : "operational");
   const [opData, setOpData] = useState(null);
   const [execReports, setExecReports] = useState([]);
   const [clientReports, setClientReports] = useState([]);
@@ -36,7 +41,19 @@ export default function ReportsHubPage() {
       setFinancialData(fin.data);
       setRoiData(Array.isArray(roi.data) ? roi.data : roi.data?.reports || []);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [headers]);
+
+  useEffect(() => {
+    if (REPORT_TABS.includes(requestedTab)) setTab(requestedTab);
+  }, [requestedTab]);
+
+  const selectTab = (nextTab) => {
+    setTab(nextTab);
+    const url = new URL(window.location.href);
+    if (nextTab === "operational") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", nextTab);
+    window.history.replaceState({}, "", url);
+  };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -44,7 +61,7 @@ export default function ReportsHubPage() {
     <div className="space-y-5" data-testid="reports-hub">
       <div><h1 className="text-3xl font-bold tracking-tight">Reports Hub</h1><p className="text-sm text-muted-foreground">Operational, executive, client, financial, and ROI reporting — all in one place</p></div>
 
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={selectTab}>
         <TabsList className="flex flex-wrap h-auto gap-1">
           <TabsTrigger value="operational"><BarChart3 className="w-3 h-3 mr-1" />Operational</TabsTrigger>
           <TabsTrigger value="executive"><Briefcase className="w-3 h-3 mr-1" />Executive ({execReports.length})</TabsTrigger>

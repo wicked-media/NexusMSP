@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import HeroTile from "@/components/HeroTile";
 import {
   Activity, AlertTriangle, Server, Wifi, WifiOff, Shield, HardDrive,
   Clock, Users, CheckCircle, XCircle, RefreshCw, Loader2, Ticket,
@@ -57,6 +59,7 @@ function AnimatedCard({ children, className = "", delay = 0, ...props }) {
 
 export default function MorningChecksPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [emailDialog, setEmailDialog] = useState(false);
@@ -80,10 +83,10 @@ export default function MorningChecksPage() {
     setSending(true);
     try {
       const res = await axios.post(`${API}/morning-checks/send-email-report`, { to_email: emailTo.trim() }, { headers });
-      if (res.data.resend_configured) {
+      if (res.data.email_configured) {
         toast.success(res.data.message);
       } else {
-        toast.success("Email report logged (configure Resend API key for live delivery)");
+        toast.success("Email report logged (connect Microsoft 365 for live delivery)");
       }
       setEmailDialog(false);
       setEmailTo("");
@@ -180,78 +183,49 @@ export default function MorningChecksPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Health Score + Key Metrics Row */}
-      <div className="grid grid-cols-6 gap-3">
-        <AnimatedCard className="col-span-1 flex items-center justify-center overflow-hidden" delay={0} data-testid="health-gauge">
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-cyan-500/5" />
-          <CardContent className="pt-4 pb-3 relative">
-            <HealthGauge score={health_score} />
-          </CardContent>
-        </AnimatedCard>
-
-        {[
-          { label: "Devices Offline", value: devices.offline, total: devices.total, icon: WifiOff, color: devices.offline > 0 ? "text-red-400" : "text-emerald-400", gradient: devices.offline > 0 ? "from-red-500/15 to-red-600/5" : "from-emerald-500/15 to-emerald-600/5", danger: devices.offline > 0 },
-          { label: "Critical Tickets", value: tickets.critical_high, total: tickets.total_open, icon: AlertTriangle, color: tickets.critical_high > 0 ? "text-red-400" : "text-emerald-400", gradient: tickets.critical_high > 0 ? "from-red-500/15 to-red-600/5" : "from-emerald-500/15 to-emerald-600/5", danger: tickets.critical_high > 0 },
-          { label: "SLA Breaches", value: tickets.sla_breaches, icon: Clock, color: tickets.sla_breaches > 0 ? "text-red-400" : "text-emerald-400", gradient: tickets.sla_breaches > 0 ? "from-red-500/15 to-red-600/5" : "from-emerald-500/15 to-emerald-600/5", danger: tickets.sla_breaches > 0 },
-          { label: "Backups Failed", value: backups.failed, total: backups.total, icon: HardDrive, color: backups.failed > 0 ? "text-red-400" : "text-emerald-400", gradient: backups.failed > 0 ? "from-red-500/15 to-red-600/5" : "from-emerald-500/15 to-emerald-600/5", danger: backups.failed > 0 },
-          { label: "Security Alerts", value: security.critical_alerts, total: security.alerts_24h, icon: Shield, color: security.critical_alerts > 0 ? "text-amber-400" : "text-emerald-400", gradient: security.critical_alerts > 0 ? "from-amber-500/15 to-amber-600/5" : "from-emerald-500/15 to-emerald-600/5", danger: security.critical_alerts > 0 },
-        ].map((s, i) => {
-          const Icon = s.icon;
-          return (
-            <AnimatedCard key={`mc-${i}`} delay={(i + 1) * 80}
-              className={`overflow-hidden group ${s.danger ? "border-red-500/20" : ""}`}
-              data-testid={`mc-${s.label.toLowerCase().replace(/\s/g, "-")}`}>
-              <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
-              <CardContent className="pt-4 pb-3 relative">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
-                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mt-0.5">{s.label}</p>
-                    {s.total !== undefined && <p className="text-[9px] text-muted-foreground/50">of {s.total} total</p>}
-                  </div>
-                  <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${s.gradient} flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-300`}>
-                    <Icon className={`w-6 h-6 ${s.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </AnimatedCard>
-          );
-        })}
+      {/* Standard command tiles — shared with Tickets, Devices and Billing */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-testid="morning-check-metric-strip">
+        <HeroTile label="Fleet Health" value={`${health_score}%`} subtitle={sConf.label} icon={Activity} glow={overallStatus === "critical" ? "rose" : overallStatus === "degraded" ? "amber" : "emerald"} onClick={() => navigate("/devices")} testId="mc-health-score" />
+        <HeroTile label="Offline" value={devices.offline} subtitle={`${devices.total} monitored`} icon={WifiOff} glow={devices.offline > 0 ? "rose" : "emerald"} onClick={() => navigate("/devices")} testId="mc-devices-offline" />
+        <HeroTile label="Critical Tickets" value={tickets.critical_high} subtitle={`${tickets.total_open} open`} icon={AlertTriangle} glow={tickets.critical_high > 0 ? "rose" : "emerald"} onClick={() => navigate("/tickets?attention=critical_high")} testId="mc-critical-tickets" />
+        <HeroTile label="SLA Breaches" value={tickets.sla_breaches} subtitle="Requires response" icon={Clock} glow={tickets.sla_breaches > 0 ? "rose" : "emerald"} onClick={() => navigate("/tickets?attention=sla_breach")} testId="mc-sla-breaches" />
+        <HeroTile label="Backup Failures" value={backups.failed} subtitle={`${backups.total} jobs`} icon={HardDrive} glow={backups.failed > 0 ? "rose" : "emerald"} onClick={() => navigate("/backup-center")} testId="mc-backups-failed" />
+        <HeroTile label="Security Alerts" value={security.critical_alerts} subtitle={`${security.alerts_24h} in 24h`} icon={Shield} glow={security.critical_alerts > 0 ? "amber" : "emerald"} onClick={() => navigate("/notifications?severity=critical")} testId="mc-security-alerts" />
       </div>
 
       {/* Issues Summary Strip */}
       {issueCount > 0 && (
         <div className="flex gap-2 flex-wrap" data-testid="issues-strip">
           {devices.offline > 0 && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-red-500/10 border-red-500/20 text-red-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/devices")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-red-500/10 border-red-500/20 text-red-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <WifiOff className="w-3.5 h-3.5" />{devices.offline} Offline Device{devices.offline > 1 ? "s" : ""}<ChevronRight className="w-3 h-3 opacity-50" />
-            </div>
+            </button>
           )}
           {tickets.sla_breaches > 0 && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-red-500/10 border-red-500/20 text-red-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/tickets?attention=sla_breach")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-red-500/10 border-red-500/20 text-red-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <Clock className="w-3.5 h-3.5" />{tickets.sla_breaches} SLA Breach{tickets.sla_breaches > 1 ? "es" : ""}<ChevronRight className="w-3 h-3 opacity-50" />
-            </div>
+            </button>
           )}
           {backups.failed > 0 && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-orange-500/10 border-orange-500/20 text-orange-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/backup-center")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-orange-500/10 border-orange-500/20 text-orange-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <HardDrive className="w-3.5 h-3.5" />{backups.failed} Backup Failure{backups.failed > 1 ? "s" : ""}<ChevronRight className="w-3 h-3 opacity-50" />
-            </div>
+            </button>
           )}
           {tickets.unassigned > 0 && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-purple-500/10 border-purple-500/20 text-purple-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/tickets?attention=unassigned")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-purple-500/10 border-purple-500/20 text-purple-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <Ticket className="w-3.5 h-3.5" />{tickets.unassigned} Unassigned<ChevronRight className="w-3 h-3 opacity-50" />
-            </div>
+            </button>
           )}
           {patches_pending > 0 && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-amber-500/10 border-amber-500/20 text-amber-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/patch-hub")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-amber-500/10 border-amber-500/20 text-amber-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <Shield className="w-3.5 h-3.5" />{patches_pending} Critical Patches<ChevronRight className="w-3 h-3 opacity-50" />
-            </div>
+            </button>
           )}
         </div>
       )}
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Left Column */}
         <div className="space-y-4">
           {/* Offline Devices */}
@@ -268,7 +242,7 @@ export default function MorningChecksPage() {
               <CardContent>
                 <div className="space-y-1.5">
                   {devices.offline_list.map((d, i) => (
-                    <div key={`off-${i}`} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
+                    <button type="button" key={`off-${i}`} onClick={() => d.id && navigate(`/devices/${d.id}`)} className="flex w-full items-center justify-between text-left text-sm px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
                       <div className="flex items-center gap-2.5">
                         <div className="w-2 h-2 rounded-full bg-red-400" style={{ animation: "pulseGlow 2s ease-in-out infinite" }} />
                         <span className="font-medium text-xs">{d.name}</span>
@@ -277,7 +251,7 @@ export default function MorningChecksPage() {
                         <span className="text-[10px] text-muted-foreground">{d.client_name}</span>
                         <Badge variant="outline" className="text-[9px] border-border/40">{d.device_type}</Badge>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardContent>
@@ -298,7 +272,7 @@ export default function MorningChecksPage() {
               <CardContent>
                 <div className="space-y-1.5">
                   {tickets.critical_list.map((t, i) => (
-                    <div key={`ct-${i}`} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10 hover:bg-amber-500/10 transition-colors">
+                    <button type="button" key={`ct-${i}`} onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`)} className="flex w-full items-center justify-between text-left text-sm px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10 hover:bg-amber-500/10 transition-colors">
                       <div className="flex-1 min-w-0">
                         <p className="truncate font-medium text-xs">{t.title}</p>
                         <p className="text-[10px] text-muted-foreground">{t.client_name}</p>
@@ -307,7 +281,7 @@ export default function MorningChecksPage() {
                         <Badge className={`text-[9px] ${t.priority === "critical" ? "bg-red-500/15 text-red-400 border border-red-500/20" : "bg-orange-500/15 text-orange-400 border border-orange-500/20"}`}>{t.priority}</Badge>
                         <span className="text-[10px] text-muted-foreground">{t.assigned_name || "Unassigned"}</span>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardContent>
@@ -328,10 +302,10 @@ export default function MorningChecksPage() {
               <CardContent>
                 <div className="space-y-1.5">
                   {tickets.overnight_list.map((t, i) => (
-                    <div key={`ov-${i}`} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-blue-500/5 border border-blue-500/10 hover:bg-blue-500/10 transition-colors">
+                    <button type="button" key={`ov-${i}`} onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`)} className="flex w-full items-center justify-between text-left text-sm px-3 py-2 rounded-lg bg-blue-500/5 border border-blue-500/10 hover:bg-blue-500/10 transition-colors">
                       <div className="flex-1 min-w-0"><p className="truncate font-medium text-xs">{t.title}</p><p className="text-[10px] text-muted-foreground">{t.client_name}</p></div>
                       <Badge className={`text-[9px] ${t.priority === "critical" ? "bg-red-500/15 text-red-400" : t.priority === "high" ? "bg-orange-500/15 text-orange-400" : "bg-zinc-500/15 text-zinc-400"}`}>{t.priority}</Badge>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardContent>
@@ -406,30 +380,10 @@ export default function MorningChecksPage() {
           </AnimatedCard>
 
           {/* Quick Stats Row */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: "Unassigned Tickets", value: tickets.unassigned, icon: Ticket, color: tickets.unassigned > 0 ? "text-purple-400" : "text-emerald-400", gradient: "from-purple-500/15 to-purple-600/5" },
-              { label: "Critical Patches", value: patches_pending, icon: Shield, color: patches_pending > 0 ? "text-amber-400" : "text-emerald-400", gradient: "from-amber-500/15 to-amber-600/5" },
-              { label: "Invoices Due", value: recurring_due.length, icon: DollarSign, color: recurring_due.length > 0 ? "text-violet-400" : "text-zinc-400", gradient: "from-violet-500/15 to-violet-600/5" },
-            ].map((s, i) => {
-              const Icon = s.icon;
-              return (
-                <AnimatedCard key={`qs-${i}`} delay={280 + i * 80} className="overflow-hidden group" data-testid={`${s.label.toLowerCase().replace(/\s/g, "-")}-stat`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
-                  <CardContent className="pt-3 pb-2 relative">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
-                        <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{s.label}</p>
-                      </div>
-                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${s.gradient} flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
-                        <Icon className={`w-4 h-4 ${s.color}`} />
-                      </div>
-                    </div>
-                  </CardContent>
-                </AnimatedCard>
-              );
-            })}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <HeroTile label="Unassigned" value={tickets.unassigned} subtitle="Tickets awaiting triage" icon={Ticket} glow={tickets.unassigned > 0 ? "violet" : "emerald"} onClick={() => navigate("/tickets?attention=unassigned")} testId="mc-unassigned-tickets" />
+            <HeroTile label="Critical Patches" value={patches_pending} subtitle="Pending remediation" icon={Shield} glow={patches_pending > 0 ? "amber" : "emerald"} onClick={() => navigate("/patch-hub")} testId="mc-critical-patches" />
+            <HeroTile label="Recurring Due" value={recurring_due.length} subtitle="Billing runs to review" icon={DollarSign} glow={recurring_due.length > 0 ? "violet" : "emerald"} onClick={() => navigate("/recurring-invoices")} testId="mc-recurring-due" />
           </div>
 
           {/* Overdue Invoices */}

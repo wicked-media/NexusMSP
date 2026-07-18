@@ -15,7 +15,11 @@ export function usePresenceHeartbeat() {
     const detectBusyState = () => {
       const path = location.pathname + location.search;
       const ticketMatch = path.match(/ticket=([\w-]+)/);
+      const invoiceMatch = path.match(/invoice=([\w-]+)/);
+      const poMatch = path.match(/(?:po|purchase_order)=([\w-]+)/);
       if (ticketMatch) return `ticket:${ticketMatch[1]}`;
+      if (invoiceMatch) return `invoice:${invoiceMatch[1]}`;
+      if (poMatch) return `po:${poMatch[1]}`;
       if (path.includes("/war-room")) return "warroom";
       if (path.includes("/remote-tools") || path.includes("/devices/")) return "remote";
       return null;

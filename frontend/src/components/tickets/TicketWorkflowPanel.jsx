@@ -13,9 +13,10 @@ import {
   Workflow, Link2, GitBranch, CalendarClock, Star, X, Loader2, Search, ShieldAlert,
 } from "lucide-react";
 import { API } from "@/App";
+import { TicketToolAction } from "@/components/tickets/TicketWorkspaceShell";
 
 /** Workflow polish: Block-on chain · Convert to change · Maintenance window · Send CSAT */
-export default function TicketWorkflowPanel({ ticket, allTickets, headers, refresh }) {
+export default function TicketWorkflowPanel({ ticket, allTickets, headers, refresh, embedded = false }) {
   const [confirm, setConfirm] = useState(null); // "block" | "change" | "maint" | "csat"
   const [busy, setBusy] = useState(false);
 
@@ -45,7 +46,12 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
     if (!ticket?.id) return;
     let alive = true;
     axios.get(`${API}/tickets/${ticket.id}/maintenance-window`, { headers })
-      .then(r => alive && setMaintWindow(r.data || null))
+      .then(r => {
+        if (!alive) return;
+        const windowData = r.data?.window || r.data;
+        const hasValidStart = windowData?.start && !Number.isNaN(new Date(windowData.start).getTime());
+        setMaintWindow(hasValidStart ? windowData : null);
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, [ticket?.id, headers]);
@@ -96,6 +102,7 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
         start: new Date(maintStart).toISOString(),
         duration_min: Number(maintDuration) || 60,
         notes: maintNotes,
+        actions: ["install-patches"],
       }, { headers });
       toast.success("Maintenance window scheduled");
       setMaintWindow(r.data?.window || null);
@@ -121,13 +128,13 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
 
   return (
     <>
-      <Card data-testid="ticket-workflow-panel" className="border-amber-500/15">
-        <CardHeader className="pb-2">
+      <Card data-testid="ticket-workflow-panel" className={embedded ? "sm:col-span-2 border-0 bg-transparent shadow-none" : "border-amber-500/15"}>
+        <CardHeader className={embedded ? "hidden" : "pb-2"}>
           <CardTitle className="text-sm flex items-center gap-1.5">
             <Workflow className="w-4 h-4 text-amber-400" />Workflow
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2.5">
+        <CardContent className={embedded ? "space-y-2.5 p-0" : "space-y-2.5"}>
           {/* Block-on status */}
           {blockedBy ? (
             <div className="flex items-center justify-between p-2 rounded-lg border border-rose-500/30 bg-rose-500/[0.05]">
@@ -147,7 +154,7 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
                 <span className="text-[11px] font-medium">Maintenance scheduled</span>
               </div>
               <p className="text-[10px] text-muted-foreground">
-                {new Date(maintWindow.start).toLocaleString()} for {maintWindow.duration_min}m
+                {new Date(maintWindow.scheduled_at || maintWindow.start).toLocaleString()} for {maintWindow.duration_min}m
               </p>
             </div>
           )}
@@ -160,19 +167,11 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
           )}
 
           {/* Action buttons */}
-          <div className="grid grid-cols-2 gap-1.5">
-            <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={() => setConfirm("block")} data-testid="workflow-block-btn">
-              <Link2 className="w-3 h-3 mr-1 text-rose-400" />Block on…
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={() => setConfirm("change")} disabled={isChange} data-testid="workflow-change-btn">
-              <GitBranch className="w-3 h-3 mr-1 text-purple-400" />Convert to Change
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={() => setConfirm("maint")} data-testid="workflow-maint-btn">
-              <CalendarClock className="w-3 h-3 mr-1 text-cyan-400" />Maintenance
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[11px] justify-start" onClick={() => setConfirm("csat")} disabled={ticket.csat_sent} data-testid="workflow-csat-btn">
-              <Star className="w-3 h-3 mr-1 text-amber-400" />{ticket.csat_sent ? "CSAT Sent" : "Send CSAT"}
-            </Button>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <TicketToolAction icon={Link2} title="Block on ticket" description="Pause this work until another ticket is resolved." state={blockedBy ? "attention" : "ready"} stateLabel={blockedBy ? "Blocked" : undefined} busy={busy} onClick={() => setConfirm("block")} testId="workflow-block-btn" />
+            <TicketToolAction icon={GitBranch} title="Convert to change" description="Move planned or higher-risk work into change control." state="attention" stateLabel={isChange ? "Converted" : undefined} disabled={isChange} busy={busy} onClick={() => setConfirm("change")} testId="workflow-change-btn" />
+            <TicketToolAction icon={CalendarClock} title="Schedule maintenance" description="Set a maintenance window and record implementation notes." busy={busy} onClick={() => setConfirm("maint")} testId="workflow-maint-btn" />
+            <TicketToolAction icon={Star} title={ticket.csat_sent ? "CSAT sent" : "Send CSAT"} description="Request feedback after the work is complete." state="connected" stateLabel={ticket.csat_sent ? "Sent" : undefined} disabled={ticket.csat_sent} busy={busy} onClick={() => setConfirm("csat")} testId="workflow-csat-btn" />
           </div>
         </CardContent>
       </Card>

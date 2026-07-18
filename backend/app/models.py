@@ -9,11 +9,11 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: str = "technician"
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    two_factor_code: Optional[str] = None
 
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -53,6 +53,7 @@ class User(BaseModel):
         "purchase_orders": {"view": False, "create": False, "edit": False, "delete": False},
         "scheduling": {"view": True, "create": False, "edit": False, "delete": False},
         "settings": {"view": False, "create": False, "edit": False, "delete": False},
+        "agent_commands": {"view": False, "execute": False},
     })
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -484,6 +485,13 @@ class RemoteSession(BaseModel):
     session_type: str = "remote_desktop"  # remote_desktop, terminal, file_transfer
     status: str = "active"  # active, ended, failed
     rustdesk_id: Optional[str] = None
+    provider: str = "rustdesk"  # rustdesk, splashtop, screenconnect, etc.
+    provider_device_id: Optional[str] = None
+    ticket_id: Optional[str] = None
+    consent_required: bool = False
+    consent_confirmed: bool = False
+    consent_confirmed_at: Optional[datetime] = None
+    launch_status: str = "requested"  # requested, launched, handoff_required, failed
     device_type: Optional[str] = None  # desktop, server, laptop, workstation
     was_locked_before_disconnect: Optional[bool] = None
     lock_action_on_disconnect: Optional[str] = None  # locked, unlocked, no_change

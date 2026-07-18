@@ -96,7 +96,7 @@ export default function AuditTrailPage() {
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-white" /></div>
             Audit Trail
           </h1>
-          <p className="text-muted-foreground mt-1">Complete system activity log with compliance-grade event tracking</p>
+          <p className="text-muted-foreground mt-1">Recorded NexusMSP device, ticket, maintenance, and administrative activity</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => exportCSV(filtered)} data-testid="export-audit-btn"><Download className="w-4 h-4 mr-1" />Export CSV</Button>
@@ -110,7 +110,7 @@ export default function AuditTrailPage() {
           <Card className="border-border/40">
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between mb-1"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Events</p><Activity className="w-4 h-4 text-foreground" /></div>
-              <p className="text-2xl font-bold">{summary.total_events}</p>
+              <p className="text-2xl font-bold">{summary.total_events}</p><p className="text-[10px] text-muted-foreground">Persisted events only</p>
             </CardContent>
           </Card>
           <Card className="border-border/40">

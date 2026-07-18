@@ -184,11 +184,9 @@ function PortalDashboard({ goTo }) {
   const { token, user, profile } = usePortalAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/dashboard`, { headers }).then(r => setStats(r.data.stats)).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    axios.get(`${API}/dashboard`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setStats(r.data.stats)).catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
 
   if (loading || !stats) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -237,14 +235,12 @@ function PortalTickets() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", category: "support", priority: "medium" });
   const [submitting, setSubmitting] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const fetch = useCallback(() => { setLoading(true); axios.get(`${API}/tickets`, { headers }).then(r => setTickets(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]);
+  const fetch = useCallback(() => { setLoading(true); axios.get(`${API}/tickets`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setTickets(r.data)).catch(() => {}).finally(() => setLoading(false)); }, [token]);
   useEffect(() => { fetch(); }, [fetch]);
 
   const createTicket = async (e) => {
     e.preventDefault(); setSubmitting(true);
-    try { await axios.post(`${API}/tickets`, form, { headers }); toast.success("Ticket submitted!"); setShowCreate(false); setForm({ title: "", description: "", category: "support", priority: "medium" }); fetch(); }
+    try { await axios.post(`${API}/tickets`, form, { headers: { Authorization: `Bearer ${token}` } }); toast.success("Ticket submitted!"); setShowCreate(false); setForm({ title: "", description: "", category: "support", priority: "medium" }); fetch(); }
     catch { toast.error("Failed to create ticket"); } finally { setSubmitting(false); }
   };
 

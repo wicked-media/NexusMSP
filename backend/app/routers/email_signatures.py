@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Optional
 import re
 import uuid
+from html import escape
+from email.utils import parseaddr
 from app.database import db
 from app.auth import get_current_user
 
@@ -64,6 +66,59 @@ def _render(html: str, ctx: dict) -> str:
         key = match.group(1)
         return str(ctx.get(key, ""))
     return TEMPLATE_VAR_RE.sub(sub, html)
+
+
+def _is_reply(subject: str) -> bool:
+    """Treat standard reply/forward subjects as a reply for signature scope."""
+    normalised = (subject or "").strip().lower()
+    return normalised.startswith(("re:", "fw:", "fwd:"))
+
+
+async def append_default_signature(
+    *,
+    body: str,
+    body_type: str,
+    current_user: dict,
+    subject: str = "",
+    ticket_id: Optional[str] = None,
+) -> tuple[str, str, Optional[str]]:
+    """Append the caller's default signature once, rendered for this message.
+
+    This is deliberately server-side so ticket replies and the standalone mail
+    composer always use the signed-in technician's signature rather than a
+    browser-local copy.  The HTML marker also prevents duplicate signatures if
+    a draft is saved and later sent again.
+    """
+    marker = "<!--nx-signature-->"
+    body = body or ""
+    if marker in body or "[[NX_SIG]]" in body:
+        return body, body_type or "html", None
+
+    signature = await db.email_signatures.find_one(
+        {"user_id": current_user["id"], "is_default": True}, {"_id": 0},
+    )
+    rendered = ""
+    signature_id = None
+    if signature:
+        scope = signature.get("scope", "all")
+        message_scope = "reply" if _is_reply(subject) else "new"
+        if scope not in ("all", message_scope):
+            return body, body_type or "html", None
+        rendered = _render(signature.get("html", ""), await _build_context(current_user["id"], ticket_id))
+        signature_id = signature.get("id")
+    else:
+        # Retain signatures saved through the legacy profile field.
+        user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "email_signature": 1}) or {}
+        legacy = user.get("email_signature") or ""
+        if legacy:
+            rendered = f"<pre style='font-family:inherit;margin:0;'>{escape(legacy)}</pre>"
+
+    if not rendered:
+        return body, body_type or "html", None
+    if (body_type or "html").lower() != "html":
+        body = f"<div>{escape(body).replace(chr(10), '<br/>')}</div>"
+        body_type = "html"
+    return f"{body}<br/><br/>{marker}{rendered}", body_type or "html", signature_id
 
 
 # --- CRUD -------------------------------------------------------------------
@@ -145,6 +200,30 @@ async def set_default(sig_id: str, current_user: dict = Depends(get_current_user
     )
     await db.email_signatures.update_one({"id": sig_id}, {"$set": {"is_default": True}})
     return {"message": "Default signature set"}
+
+
+@router.post("/email-signatures/send-test")
+async def send_signature_test(data: dict, current_user: dict = Depends(get_current_user)):
+    """Send the caller's rendered default signature through Microsoft 365 on demand."""
+    recipient = (data.get("to_email") or "").strip()
+    _, address = parseaddr(recipient)
+    if not address or "@" not in address:
+        raise HTTPException(status_code=400, detail="Enter a valid test recipient")
+
+    body, _, signature_id = await append_default_signature(
+        body="<p>This is a NexusMSP signature test. The content below shows exactly how your default signature will appear on a new email.</p>",
+        body_type="html",
+        current_user=current_user,
+        subject="NexusMSP signature test",
+    )
+    if not signature_id:
+        raise HTTPException(status_code=400, detail="Set a default signature before sending a test")
+
+    from app.routers.email_utils import send_email
+    delivery = await send_email(address, "NexusMSP signature test", body, category="notifications")
+    if delivery.get("status") != "sent":
+        raise HTTPException(status_code=502, detail=delivery.get("message") or "Microsoft 365 could not send the test")
+    return {"message": "Signature test sent", "recipient": address, "signature_id": signature_id}
 
 
 # --- Render with ticket / context -----------------------------------------

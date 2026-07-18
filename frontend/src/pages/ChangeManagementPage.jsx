@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { GitBranch, Plus, CheckCircle, XCircle, Clock, Play, Flag } from "lucide-react";
 import { toast } from "sonner";
 
@@ -88,14 +89,14 @@ export default function ChangeManagementPage() {
       </div>
 
       {stats && (
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold">{stats.total}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold text-amber-500">{stats.pending_review}</p><p className="text-xs text-muted-foreground">Pending</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold text-green-500">{stats.approved}</p><p className="text-xs text-muted-foreground">Approved</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold text-blue-500">{stats.implementing}</p><p className="text-xs text-muted-foreground">Implementing</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold">{stats.completed}</p><p className="text-xs text-muted-foreground">Completed</p></CardContent></Card>
-          <Card><CardContent className="pt-4 pb-3 text-center"><p className="text-xl font-bold text-red-500">{stats.rejected}</p><p className="text-xs text-muted-foreground">Rejected</p></CardContent></Card>
-        </div>
+        <MetricStrip columns={6}>
+          <MetricTile label="Total changes" value={stats.total} accent="indigo" icon={<GitBranch className="w-2.5 h-2.5 text-indigo-400" />} testid="change-metric-total" />
+          <MetricTile label="Pending review" value={stats.pending_review} accent="amber" icon={<Clock className="w-2.5 h-2.5 text-amber-400" />} testid="change-metric-pending" />
+          <MetricTile label="Approved" value={stats.approved} accent="emerald" icon={<CheckCircle className="w-2.5 h-2.5 text-emerald-400" />} testid="change-metric-approved" />
+          <MetricTile label="Implementing" value={stats.implementing} accent="sky" icon={<Play className="w-2.5 h-2.5 text-sky-400" />} testid="change-metric-implementing" />
+          <MetricTile label="Completed" value={stats.completed} accent="violet" icon={<CheckCircle className="w-2.5 h-2.5 text-violet-400" />} testid="change-metric-completed" />
+          <MetricTile label="Rejected" value={stats.rejected} accent="rose" icon={<XCircle className="w-2.5 h-2.5 text-rose-400" />} testid="change-metric-rejected" />
+        </MetricStrip>
       )}
 
       <Card>

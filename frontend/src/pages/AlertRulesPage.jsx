@@ -29,6 +29,8 @@ export default function AlertRulesPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [healthCheck, setHealthCheck] = useState(null);
   const emptyForm = { name: "", description: "", metric: "cpu_usage", operator: "greater_than", threshold: "90", duration_minutes: "5", severity: "high", cooldown_minutes: "30", scope: "all", actions: [{ type: "create_ticket", config: { priority: "high" } }] };
   const [form, setForm] = useState(emptyForm);
 
@@ -72,13 +74,29 @@ export default function AlertRulesPage() {
     catch { toast.error("Failed"); }
   };
 
+  const evaluateRules = async () => {
+    setEvaluating(true);
+    try {
+      const res = await axios.post(`${API}/alert-rules/evaluate?dry_run=true`, {}, { headers });
+      const matches = (res.data?.matches || []).filter(m => m.status === "would_trigger").length;
+      setHealthCheck(res.data || null);
+      toast.success(`Health check complete: ${matches} rule${matches === 1 ? "" : "s"} would trigger.`);
+    } catch { toast.error("Unable to evaluate alert rules"); }
+    finally { setEvaluating(false); }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   return (
     <div className="space-y-5" data-testid="alert-rules-page">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Bell className="w-6 h-6 text-amber-400" />Alert Rules Engine</h1><p className="text-muted-foreground mt-1">Define threshold-based alerts with automated actions</p></div>
-        <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-rule-btn"><Plus className="w-4 h-4 mr-1" />New Rule</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={evaluateRules} disabled={evaluating} data-testid="evaluate-rules-btn">
+            {evaluating ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Play className="w-4 h-4 mr-1" />}Run health check
+          </Button>
+          <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-rule-btn"><Plus className="w-4 h-4 mr-1" />New Rule</Button>
+        </div>
       </div>
 
       {stats && (
@@ -95,6 +113,17 @@ export default function AlertRulesPage() {
           ))}
         </div>
       )}
+
+      {healthCheck && (() => {
+        const results = healthCheck.matches || [];
+        const wouldTrigger = results.filter(result => result.status === "would_trigger");
+        const waiting = results.filter(result => result.status === "waiting_for_duration");
+        const suppressed = results.filter(result => ["cooldown", "suppressed_by_maintenance"].includes(result.status));
+        return <Card className={wouldTrigger.length ? "border-amber-500/30 bg-amber-500/[0.04]" : "border-emerald-500/20 bg-emerald-500/[0.03]"} data-testid="alert-health-check-results">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><div><CardTitle className="text-sm flex items-center gap-2"><Shield className="h-4 w-4 text-cyan-400" />Latest health check</CardTitle><p className="mt-1 text-xs text-muted-foreground">Checked {healthCheck.checked_devices || 0} devices against {healthCheck.checked_rules || 0} active rules. This preview does not create alerts or tickets.</p></div><Badge className={wouldTrigger.length ? SEV_STYLES.high : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"}>{wouldTrigger.length ? `${wouldTrigger.length} would trigger` : "No immediate triggers"}</Badge></CardHeader>
+          <CardContent><div className="mb-3 flex flex-wrap gap-2 text-xs"><Badge variant="outline">{waiting.length} waiting for duration</Badge><Badge variant="outline">{suppressed.length} suppressed / cooling down</Badge></div>{results.length === 0 ? <p className="py-3 text-center text-sm text-muted-foreground">All monitored values are within their configured thresholds.</p> : <div className="divide-y rounded-lg border">{results.slice(0, 12).map((result, index) => <div key={`${result.rule_id}-${result.device_id}-${index}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"><div><span className="font-medium">{result.device_name}</span><span className="mx-1.5 text-muted-foreground">/</span><span>{result.rule_name}</span>{result.value != null && <span className="ml-2 font-mono text-muted-foreground">value {result.value}</span>}</div><Badge variant="outline" className="text-[10px] capitalize">{result.status.replace(/_/g, " ")}</Badge></div>)}</div>}</CardContent>
+        </Card>;
+      })()}
 
       {/* Rules Cards */}
       <div className="space-y-3">

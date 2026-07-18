@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth, useTheme } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,10 +16,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import SignatureManager from "@/components/email/SignatureManager";
 import {
-  User, Lock, Mail, Shield, Key, Bell, Clock, Palette, Globe, Award, Trophy,
-  Star, Zap, Plus, Trash2, Copy, Eye, EyeOff, Monitor, Smartphone, LogOut,
-  CheckCircle, XCircle, Fingerprint, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
-  Upload, Image
+  User, Lock, Mail, Shield, Bell, Clock, Palette, Globe, Award, Trophy,
+  Star, Zap, Plus, Trash2, Eye, EyeOff,
+  CheckCircle, XCircle, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
+  Upload, Image, RefreshCw, ShieldCheck
 } from "lucide-react";
 
 const BADGES = [
@@ -32,14 +33,28 @@ const BADGES = [
   { id: "knowledge_base", label: "Knowledge Base", description: "Wrote 10 KB articles", icon: "book", color: "#14b8a6" },
 ];
 
+const SETTINGS_SECTIONS = [
+  { key: "profile", icon: User, label: "Profile", description: "Identity, contact details and skills" },
+  { key: "security", icon: Lock, label: "Security", description: "Password, two-factor authentication and keys" },
+  { key: "signature", icon: Mail, label: "Email signature", description: "Compose a professional default signature" },
+  { key: "notifications", icon: Bell, label: "Notifications", description: "Choose which updates reach you" },
+  { key: "schedule", icon: Clock, label: "Availability", description: "Working hours, on-call and auto-assignment" },
+  { key: "display", icon: Palette, label: "Appearance", description: "Theme, density and local workspace preferences" },
+  { key: "badges", icon: Trophy, label: "Achievements", description: "Progress, badges and recent contribution" },
+];
+
 export default function TechSettingsPage() {
   const { user, token } = useAuth();
   const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("profile");
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = searchParams.get("tab");
+    return SETTINGS_SECTIONS.some(section => section.key === requested) ? requested : "profile";
+  });
 
   // Profile
   const [profileForm, setProfileForm] = useState({ name: "", phone: "", job_title: "", specialties: "" });
@@ -59,25 +74,11 @@ export default function TechSettingsPage() {
   const [disablePw, setDisablePw] = useState("");
   const [showDisable2FA, setShowDisable2FA] = useState(false);
 
-  // Security Keys
-  const [securityKeys, setSecurityKeys] = useState([]);
-  const [newKeyName, setNewKeyName] = useState("");
-  const [showAddKey, setShowAddKey] = useState(false);
-
   // Notifications
   const [notifPrefs, setNotifPrefs] = useState({});
 
   // Working Hours
   const [workHours, setWorkHours] = useState(null);
-
-  // API Keys
-  const [apiKeys, setApiKeys] = useState([]);
-  const [newApiKeyName, setNewApiKeyName] = useState("");
-  const [showNewKey, setShowNewKey] = useState(null);
-  const [showAddApiKey, setShowAddApiKey] = useState(false);
-
-  // Sessions
-  const [sessions, setSessions] = useState([]);
 
   // Display
   const [displayPrefs, setDisplayPrefs] = useState({});
@@ -92,36 +93,51 @@ export default function TechSettingsPage() {
   // Gamification
   const [gamProfile, setGamProfile] = useState(null);
 
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    setActiveTab(SETTINGS_SECTIONS.some(section => section.key === requestedTab) ? requestedTab : "profile");
+  }, [searchParams]);
+
   useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    setSearchParams(next, { replace: true });
+  };
 
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [pRes, tfRes, nRes, wRes, aRes, sRes, dRes] = await Promise.all([
+      const results = await Promise.allSettled([
         axios.get(`${API}/user-settings/profile`, { headers }),
         axios.get(`${API}/user-settings/2fa`, { headers }),
         axios.get(`${API}/user-settings/notifications`, { headers }),
         axios.get(`${API}/user-settings/working-hours`, { headers }),
-        axios.get(`${API}/user-settings/api-keys`, { headers }),
-        axios.get(`${API}/user-settings/sessions`, { headers }),
         axios.get(`${API}/user-settings/display`, { headers }),
       ]);
-      setProfile(pRes.data);
+      const dataAt = (index, fallback) => results[index]?.status === "fulfilled" ? results[index].value.data : fallback;
+      const profileData = dataAt(0, { name: user?.name || "", email: user?.email || "", role: user?.role || "technician" });
+      const twoFactorData = dataAt(1, { enabled: false, security_keys: [] });
+      const notificationData = dataAt(2, {});
+      const hoursData = dataAt(3, null);
+      const displayData = dataAt(4, {});
+
+      setProfile(profileData);
       setProfileForm({
-        name: pRes.data.name || "",
-        phone: pRes.data.phone || "",
-        job_title: pRes.data.job_title || "",
-        specialties: (pRes.data.specialties || []).join(", "),
+        name: profileData.name || "",
+        phone: profileData.phone || "",
+        job_title: profileData.job_title || "",
+        specialties: (profileData.specialties || []).join(", "),
       });
-      setSignature(pRes.data.email_signature || "");
-      setGamProfile(pRes.data.gamification);
-      setTwoFA(tfRes.data);
-      setSecurityKeys(tfRes.data.security_keys || []);
-      setNotifPrefs(nRes.data);
-      setWorkHours(wRes.data);
-      setApiKeys(aRes.data);
-      setSessions(sRes.data);
-      setDisplayPrefs(dRes.data);
+      setSignature(profileData.email_signature || "");
+      setGamProfile(profileData.gamification);
+      setTwoFA(twoFactorData);
+      setNotifPrefs(notificationData);
+      setWorkHours(hoursData);
+      setDisplayPrefs(displayData);
+      if (results.some(result => result.status === "rejected")) toast.warning("Some settings could not be loaded. You can still use the available sections.");
       // Fetch wallpaper settings
       try {
         const [wpRes, tplRes] = await Promise.all([
@@ -152,7 +168,7 @@ export default function TechSettingsPage() {
 
   const changePassword = async () => {
     if (pwForm.new_password !== pwForm.confirm_password) return toast.error("Passwords don't match");
-    if (pwForm.new_password.length < 6) return toast.error("Password must be at least 6 characters");
+    if (pwForm.new_password.length < 12) return toast.error("Use at least 12 characters");
     try {
       await axios.post(`${API}/user-settings/change-password`, { current_password: pwForm.current_password, new_password: pwForm.new_password }, { headers });
       toast.success("Password changed");
@@ -189,25 +205,6 @@ export default function TechSettingsPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const addSecurityKey = async () => {
-    try {
-      const res = await axios.post(`${API}/user-settings/security-keys/register`, { name: newKeyName || "Security Key" }, { headers });
-      toast.success(res.data.message);
-      setNewKeyName("");
-      setShowAddKey(false);
-      const tfRes = await axios.get(`${API}/user-settings/2fa`, { headers });
-      setSecurityKeys(tfRes.data.security_keys || []);
-    } catch { toast.error("Failed to register key"); }
-  };
-
-  const removeSecurityKey = async (keyId) => {
-    try {
-      await axios.delete(`${API}/user-settings/security-keys/${keyId}`, { headers });
-      setSecurityKeys(prev => prev.filter(k => k.id !== keyId));
-      toast.success("Key removed");
-    } catch { toast.error("Failed"); }
-  };
-
   const saveNotifications = async () => {
     try {
       await axios.put(`${API}/user-settings/notifications`, notifPrefs, { headers });
@@ -219,34 +216,6 @@ export default function TechSettingsPage() {
     try {
       await axios.put(`${API}/user-settings/working-hours`, workHours, { headers });
       toast.success("Working hours saved");
-    } catch { toast.error("Failed"); }
-  };
-
-  const createApiKey = async () => {
-    try {
-      const res = await axios.post(`${API}/user-settings/api-keys`, { name: newApiKeyName || "API Key" }, { headers });
-      setShowNewKey(res.data.key);
-      setNewApiKeyName("");
-      setShowAddApiKey(false);
-      const aRes = await axios.get(`${API}/user-settings/api-keys`, { headers });
-      setApiKeys(aRes.data);
-      toast.success("API key created");
-    } catch { toast.error("Failed"); }
-  };
-
-  const deleteApiKey = async (keyId) => {
-    try {
-      await axios.delete(`${API}/user-settings/api-keys/${keyId}`, { headers });
-      setApiKeys(prev => prev.filter(k => k.id !== keyId));
-      toast.success("API key revoked");
-    } catch { toast.error("Failed"); }
-  };
-
-  const revokeSession = async (sessionId) => {
-    try {
-      await axios.delete(`${API}/user-settings/sessions/${sessionId}`, { headers });
-      setSessions(prev => prev.filter(s => s.id !== sessionId));
-      toast.success("Session revoked");
     } catch { toast.error("Failed"); }
   };
 
@@ -264,29 +233,41 @@ export default function TechSettingsPage() {
   const nextLevelXp = level * 500;
   const xpProgress = Math.min(100, Math.round((xp % 500) / 5));
   const earnedBadges = gamProfile?.badges_earned || [];
+  const activeSection = SETTINGS_SECTIONS.find(section => section.key === activeTab) || SETTINGS_SECTIONS[0];
 
   return (
-    <div className="space-y-5" data-testid="tech-settings-page">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => window.history.back()} data-testid="settings-back">
-          <ArrowLeft className="w-4 h-4 mr-1" />Back
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">My Settings</h1>
-          <p className="text-sm text-muted-foreground">Manage your account, security, and preferences</p>
+    <div className="mx-auto max-w-[1440px] space-y-4 pb-8" data-testid="tech-settings-page">
+      <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_8%_0%,hsl(var(--primary)/0.22),transparent_38%),linear-gradient(110deg,hsl(var(--card)),hsl(var(--background)))] p-4 shadow-[0_16px_48px_-28px_hsl(var(--primary)/0.55)] md:px-6 md:py-5">
+        <div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-primary/20 blur-3xl" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <Button variant="ghost" size="icon" className="mt-0.5 shrink-0" onClick={() => window.history.back()} data-testid="settings-back" title="Go back">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div>
+              <div className="mb-2 flex items-center gap-2">
+                <h1 className="text-xl font-bold tracking-tight md:text-2xl">My Workspace</h1>
+                {profile?.role === "admin" && <Badge className="border-primary/20 bg-primary/10 text-primary"><ShieldCheck className="mr-1 h-3.5 w-3.5" />Administrator</Badge>}
+              </div>
+              <p className="max-w-xl text-sm text-muted-foreground">Your technician command centre for profile, security, communications, availability, and workspace preferences.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-background/60 p-1.5 backdrop-blur-sm">
+            <Button variant="outline" size="sm" onClick={() => selectTab("security")}><ShieldCheck className="mr-1.5 h-4 w-4" />Security</Button>
+            <Button variant="outline" size="sm" onClick={() => selectTab("notifications")}><Bell className="mr-1.5 h-4 w-4" />Alerts</Button>
+            <Button size="sm" onClick={fetchAll}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-        {/* Left: Profile Card */}
-        <Card className="lg:col-span-1 h-fit">
-          <CardContent className="pt-6 text-center space-y-4">
-            <div className="w-20 h-20 rounded-full bg-primary/20 text-primary mx-auto flex items-center justify-center text-2xl font-bold">
+      <div className="space-y-4">
+        <Card className="border-primary/15 bg-gradient-to-b from-card to-muted/20 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.7)]">
+          <CardContent className="space-y-4 pt-5 text-center">
+            <div className="w-16 h-16 rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/35 to-primary/10 text-primary mx-auto flex items-center justify-center text-xl font-bold shadow-lg shadow-primary/10">
               {profile?.name?.split(" ").map(n => n[0]).join("") || "U"}
             </div>
             <div>
-              <p className="font-semibold text-lg">{profile?.name}</p>
+              <p className="font-semibold text-base tracking-tight">{profile?.name}</p>
               <p className="text-sm text-muted-foreground">{profile?.email}</p>
               <Badge variant="outline" className="mt-1 capitalize">{profile?.role}</Badge>
             </div>
@@ -311,35 +292,27 @@ export default function TechSettingsPage() {
               </>
             )}
             <Separator />
-            <nav className="space-y-1 text-left">
-              {[
-                { key: "profile", icon: User, label: "Profile" },
-                { key: "security", icon: Lock, label: "Security" },
-                { key: "signature", icon: Mail, label: "Email Signature" },
-                { key: "notifications", icon: Bell, label: "Notifications" },
-                { key: "schedule", icon: Clock, label: "Working Hours" },
-                { key: "api", icon: Key, label: "API Keys" },
-                { key: "sessions", icon: Monitor, label: "Sessions" },
-                { key: "display", icon: Palette, label: "Display" },
-                { key: "badges", icon: Trophy, label: "Badges & Awards" },
-              ].map(item => (
+            <nav className="grid grid-cols-1 gap-1.5 text-left sm:grid-cols-2 xl:grid-cols-4" aria-label="My settings sections">
+              {SETTINGS_SECTIONS.map(item => (
                 <button
                   key={item.key}
-                  onClick={() => setActiveTab(item.key)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === item.key ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted"}`}
+                  onClick={() => selectTab(item.key)}
+                  className={`group w-full rounded-xl border px-3 py-3 text-left transition-all duration-200 ${activeTab === item.key ? "border-primary/30 bg-primary/10 text-primary shadow-[0_8px_20px_-16px_hsl(var(--primary)/0.9)]" : "border-border/50 bg-background/35 text-muted-foreground hover:-translate-y-px hover:border-primary/20 hover:bg-muted/80 hover:text-foreground"}`}
                   data-testid={`settings-tab-${item.key}`}
                 >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                  <ChevronRight className="w-3 h-3 ml-auto opacity-50" />
+                  <span className="flex items-center gap-2 text-sm font-medium"><span className={`rounded-lg p-1.5 ${activeTab === item.key ? "bg-primary/15" : "bg-muted group-hover:bg-primary/10"}`}><item.icon className="h-3.5 w-3.5" /></span>{item.label}<ChevronRight className="ml-auto h-3.5 w-3.5 opacity-50" /></span>
+                  <span className="ml-8 hidden pt-1 text-[11px] leading-snug opacity-75 xl:block">{item.description}</span>
                 </button>
               ))}
             </nav>
           </CardContent>
         </Card>
 
-        {/* Right: Settings Content */}
-        <div className="lg:col-span-3 space-y-4">
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-xl border border-primary/15 bg-gradient-to-r from-primary/[0.08] to-card px-4 py-3.5">
+            <div className="rounded-xl border border-primary/20 bg-primary/10 p-2.5 text-primary shadow-sm"><activeSection.icon className="h-5 w-5" /></div>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary/80">Workspace section</p><h2 className="font-semibold tracking-tight">{activeSection.label}</h2><p className="text-sm text-muted-foreground">{activeSection.description}</p></div>
+          </div>
 
           {/* PROFILE TAB */}
           {activeTab === "profile" && (
@@ -374,6 +347,7 @@ export default function TechSettingsPage() {
                     <div><Label>New Password</Label><Input type="password" value={pwForm.new_password} onChange={e => setPwForm({ ...pwForm, new_password: e.target.value })} data-testid="new-password" /></div>
                     <div><Label>Confirm New Password</Label><Input type="password" value={pwForm.confirm_password} onChange={e => setPwForm({ ...pwForm, confirm_password: e.target.value })} data-testid="confirm-password" /></div>
                   </div>
+                  <p className="text-xs text-muted-foreground">Use 12+ characters and at least three of: lowercase, uppercase, number, and symbol. Avoid your email name.</p>
                   <Button onClick={changePassword} data-testid="change-password-btn">Change Password</Button>
                 </CardContent>
               </Card>
@@ -440,39 +414,6 @@ export default function TechSettingsPage() {
                 </CardContent>
               </Card>
 
-              {/* FIDO2 Security Keys */}
-              <Card data-testid="settings-fido2-panel">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2"><Fingerprint className="w-5 h-5" />Security Keys (FIDO2)</CardTitle>
-                    <Button size="sm" onClick={() => setShowAddKey(true)} data-testid="add-security-key-btn"><Plus className="w-3 h-3 mr-1" />Add Key</Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {securityKeys.length > 0 ? (
-                    <div className="space-y-2">
-                      {securityKeys.map(key => (
-                        <div key={key.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30" data-testid={`security-key-${key.id}`}>
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Fingerprint className="w-5 h-5 text-blue-500" /></div>
-                            <div>
-                              <p className="text-sm font-medium">{key.name}</p>
-                              <p className="text-[10px] text-muted-foreground">Registered: {key.registered_at?.split("T")[0]} {key.last_used ? `| Last used: ${key.last_used.split("T")[0]}` : ""}</p>
-                            </div>
-                          </div>
-                          <Button variant="ghost" size="sm" className="text-destructive h-8" onClick={() => removeSecurityKey(key.id)}><Trash2 className="w-3 h-3" /></Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <Fingerprint className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
-                      <p className="text-sm text-muted-foreground">No security keys registered</p>
-                      <p className="text-xs text-muted-foreground mt-1">Add a FIDO2/WebAuthn security key for passwordless login</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
             </div>
           )}
 
@@ -487,25 +428,16 @@ export default function TechSettingsPage() {
               <CardHeader><CardTitle className="flex items-center gap-2"><Bell className="w-5 h-5" />Notification Preferences</CardTitle></CardHeader>
               <CardContent className="space-y-6">
                 {[
-                  { title: "Email Notifications", items: [
-                    { key: "email_ticket_assigned", label: "Ticket assigned to me" },
-                    { key: "email_ticket_updated", label: "Ticket updates" },
-                    { key: "email_sla_breach", label: "SLA breach alerts" },
-                    { key: "email_daily_digest", label: "Daily digest summary" },
-                  ]},
-                  { title: "In-App Notifications", items: [
-                    { key: "inapp_ticket_assigned", label: "Ticket assigned" },
-                    { key: "inapp_ticket_updated", label: "Ticket updates" },
-                    { key: "inapp_sla_breach", label: "SLA breach alerts" },
-                    { key: "inapp_device_offline", label: "Device offline alerts" },
-                  ]},
-                  { title: "SMS / Critical Alerts", items: [
-                    { key: "sms_critical_alerts", label: "Critical priority tickets" },
-                    { key: "sms_sla_breach", label: "SLA breach (SMS)" },
-                  ]},
-                  { title: "Desktop", items: [
-                    { key: "desktop_notifications", label: "Browser push notifications" },
-                    { key: "sound_enabled", label: "Notification sounds" },
+                  { title: "NexusMSP Notifications", items: [
+                    { key: "inapp_ticket_assigned", label: "Ticket assigned", description: "When work is assigned directly to you" },
+                    { key: "inapp_ticket_updated", label: "Ticket updates", description: "General updates on tickets you follow" },
+                    { key: "inapp_ticket_escalated", label: "Ticket escalations", description: "Priority changes and escalations" },
+                    { key: "inapp_sla_breach", label: "SLA breaches", description: "Critical response or resolution breaches" },
+                    { key: "inapp_sla_warning", label: "SLA warnings", description: "Tickets approaching their SLA target" },
+                    { key: "inapp_device_offline", label: "Device offline alerts", description: "Monitoring reports a device offline" },
+                    { key: "inapp_contract_renewal", label: "Contract renewals", description: "Agreements approaching their renewal date" },
+                    { key: "inapp_new_lead", label: "New leads", description: "Inbound or manually created lead records" },
+                    { key: "inapp_email_received", label: "Email intake", description: "Incoming mailbox events and email-created work" },
                   ]},
                 ].map(group => (
                   <div key={group.title}>
@@ -513,13 +445,14 @@ export default function TechSettingsPage() {
                     <div className="space-y-2">
                       {group.items.map(item => (
                         <div key={item.key} className="flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/30" data-testid={`notif-${item.key}`}>
-                          <span className="text-sm">{item.label}</span>
+                          <div><span className="text-sm font-medium">{item.label}</span>{item.description && <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>}</div>
                           <Switch checked={!!notifPrefs[item.key]} onCheckedChange={v => setNotifPrefs({ ...notifPrefs, [item.key]: v })} />
                         </div>
                       ))}
                     </div>
                   </div>
                 ))}
+                <div className="rounded-lg border border-muted bg-muted/20 p-3 text-xs text-muted-foreground">Email and SMS are sent by the relevant ticket, billing, lead, and monitoring workflows through their configured Microsoft 365 or SMS channel. They are not presented as personal toggles until individual delivery routing is available.</div>
                 <Button onClick={saveNotifications} data-testid="save-notif-btn">Save Preferences</Button>
               </CardContent>
             </Card>
@@ -532,10 +465,10 @@ export default function TechSettingsPage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label>Timezone</Label>
-                    <Select value={workHours.timezone || "Pacific/Auckland"} onValueChange={v => setWorkHours({ ...workHours, timezone: v })}>
+                    <Select value={workHours.timezone || "Australia/Sydney"} onValueChange={v => setWorkHours({ ...workHours, timezone: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {["Pacific/Auckland", "Australia/Sydney", "Australia/Melbourne", "America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Asia/Tokyo", "UTC"].map(tz => (
+                        {["Australia/Sydney", "Australia/Melbourne", "Pacific/Auckland", "America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Asia/Tokyo", "UTC"].map(tz => (
                           <SelectItem key={tz} value={tz}>{tz}</SelectItem>
                         ))}
                       </SelectContent>
@@ -552,6 +485,7 @@ export default function TechSettingsPage() {
                     </div>
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground">Auto-assignment now considers this timezone and weekly schedule. On-call availability overrides normal hours; turn off Auto-Assign to keep tickets out of routing.</p>
                 <div className="space-y-2">
                   {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => {
                     const d = workHours.schedule?.[day] || { enabled: false, start: "08:00", end: "17:00" };
@@ -582,92 +516,6 @@ export default function TechSettingsPage() {
                   })}
                 </div>
                 <Button onClick={saveWorkHours} data-testid="save-schedule-btn">Save Schedule</Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* API KEYS TAB */}
-          {activeTab === "api" && (
-            <Card data-testid="settings-api-panel">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2"><Key className="w-5 h-5" />API Keys</CardTitle>
-                  <Button size="sm" onClick={() => setShowAddApiKey(true)} data-testid="create-api-key-btn"><Plus className="w-3 h-3 mr-1" />New Key</Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {showNewKey && (
-                  <div className="p-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 mb-4" data-testid="new-api-key-display">
-                    <p className="text-sm font-medium text-emerald-400 mb-1">New API Key Created (copy it now, it won't be shown again):</p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 bg-muted px-3 py-2 rounded font-mono text-sm">{showNewKey}</code>
-                      <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(showNewKey); toast.success("Copied"); }}><Copy className="w-3 h-3" /></Button>
-                    </div>
-                    <Button variant="ghost" size="sm" className="mt-2 text-xs" onClick={() => setShowNewKey(null)}>Dismiss</Button>
-                  </div>
-                )}
-                {apiKeys.length > 0 ? (
-                  <div className="space-y-2">
-                    {apiKeys.map(key => (
-                      <div key={key.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30" data-testid={`api-key-${key.id}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Key className="w-5 h-5 text-amber-500" /></div>
-                          <div>
-                            <p className="text-sm font-medium">{key.name}</p>
-                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                              <code className="font-mono">{key.prefix}</code>
-                              <span>Created: {key.created_at?.split("T")[0]}</span>
-                              {key.scopes && <Badge variant="outline" className="text-[9px] h-4">{key.scopes.join(", ")}</Badge>}
-                            </div>
-                          </div>
-                        </div>
-                        <Button variant="ghost" size="sm" className="text-destructive h-8" onClick={() => deleteApiKey(key.id)}><Trash2 className="w-3 h-3" /></Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Key className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-30" />
-                    <p className="text-sm text-muted-foreground">No API keys created</p>
-                    <p className="text-xs text-muted-foreground mt-1">Create personal API tokens for third-party integrations and scripts</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* SESSIONS TAB */}
-          {activeTab === "sessions" && (
-            <Card data-testid="settings-sessions-panel">
-              <CardHeader><CardTitle className="flex items-center gap-2"><Monitor className="w-5 h-5" />Active Sessions</CardTitle></CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {sessions.map(s => (
-                    <div key={s.id} className={`flex items-center justify-between p-3 rounded-lg border ${s.is_current ? "border-emerald-500/20 bg-emerald-500/5" : "hover:bg-muted/30"}`} data-testid={`session-${s.id}`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${s.is_current ? "bg-emerald-500/10" : "bg-muted"}`}>
-                          {s.device?.toLowerCase().includes("mobile") ? <Smartphone className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium flex items-center gap-2">
-                            {s.device || "Unknown Device"}
-                            {s.is_current && <Badge className="bg-emerald-500/20 text-emerald-400 text-[9px]">Current</Badge>}
-                          </p>
-                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                            <span>{s.ip_address}</span>
-                            {s.location && <span>| {s.location}</span>}
-                            <span>| Last active: {s.last_active?.split("T")[0]}</span>
-                          </div>
-                        </div>
-                      </div>
-                      {!s.is_current && (
-                        <Button variant="ghost" size="sm" className="text-destructive h-8" onClick={() => revokeSession(s.id)}>
-                          <LogOut className="w-3 h-3 mr-1" />Revoke
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </CardContent>
             </Card>
           )}
@@ -861,56 +709,6 @@ export default function TechSettingsPage() {
                   )}
                 </div>
 
-                <Separator />
-
-                {/* Existing Display Prefs */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Date Format</Label>
-                    <Select value={displayPrefs.date_format || "MMM d, yyyy"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, date_format: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="MMM d, yyyy">Mar 20, 2026</SelectItem>
-                        <SelectItem value="dd/MM/yyyy">20/03/2026</SelectItem>
-                        <SelectItem value="MM/dd/yyyy">03/20/2026</SelectItem>
-                        <SelectItem value="yyyy-MM-dd">2026-03-20</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div><Label>Timezone</Label>
-                    <Select value={displayPrefs.timezone || "Pacific/Auckland"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, timezone: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {["Pacific/Auckland", "Australia/Sydney", "Australia/Melbourne", "America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "UTC"].map(tz => (
-                          <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Language</Label>
-                    <Select value={displayPrefs.language || "en"} onValueChange={v => setDisplayPrefs({ ...displayPrefs, language: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="en">English</SelectItem>
-                        <SelectItem value="es">Spanish</SelectItem>
-                        <SelectItem value="fr">French</SelectItem>
-                        <SelectItem value="de">German</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border">
-                    <div><p className="text-sm">Compact Mode</p><p className="text-xs text-muted-foreground">Reduce spacing for more content</p></div>
-                    <Switch checked={displayPrefs.compact_mode} onCheckedChange={v => setDisplayPrefs({ ...displayPrefs, compact_mode: v })} />
-                  </div>
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border">
-                    <div><p className="text-sm">Ticket Previews</p><p className="text-xs text-muted-foreground">Show ticket preview on hover</p></div>
-                    <Switch checked={displayPrefs.show_ticket_previews !== false} onCheckedChange={v => setDisplayPrefs({ ...displayPrefs, show_ticket_previews: v })} />
-                  </div>
-                </div>
-                <Button onClick={saveDisplay} data-testid="save-display-btn">Save Display Settings</Button>
               </CardContent>
             </Card>
           )}
@@ -1016,23 +814,6 @@ export default function TechSettingsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showAddKey} onOpenChange={setShowAddKey}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Register Security Key</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Insert your FIDO2/WebAuthn security key and give it a name.</p>
-          <Input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="e.g., YubiKey 5" data-testid="security-key-name" />
-          <DialogFooter><Button onClick={addSecurityKey} data-testid="register-key-btn"><Fingerprint className="w-4 h-4 mr-1" />Register Key</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showAddApiKey} onOpenChange={setShowAddApiKey}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Create API Key</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Generate a personal API token for integrations and scripts.</p>
-          <Input value={newApiKeyName} onChange={e => setNewApiKeyName(e.target.value)} placeholder="e.g., Monitoring Script" data-testid="api-key-name" />
-          <DialogFooter><Button onClick={createApiKey} data-testid="create-key-btn"><Key className="w-4 h-4 mr-1" />Create Key</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

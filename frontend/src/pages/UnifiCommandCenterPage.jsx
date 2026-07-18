@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -530,7 +530,7 @@ export default function UnifiCommandCenterPage() {
 
 function ControllersPanel() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [list, setList] = useState([]);
   const [selected, setSelected] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -549,7 +549,7 @@ function ControllersPanel() {
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     if (!selected) return;
     setLoading(true);
     try {
@@ -558,15 +558,15 @@ function ControllersPanel() {
     } catch (e) {
       setSummary({ error: e.response?.data?.detail || e.message, devices: [], clients: [], stats: {} });
     } finally { setLoading(false); }
-  };
-  useEffect(() => { fetchSummary(); /* eslint-disable-next-line */ }, [selected, token]);
+  }, [selected, headers]);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
   // Auto-refresh every 30s when toggled
   useEffect(() => {
     if (!autoRefresh) return;
     const id = setInterval(fetchSummary, 30000);
     return () => clearInterval(id);
-  }, [autoRefresh, selected]); // eslint-disable-line
+  }, [autoRefresh, fetchSummary]);
 
   const action = async (deviceId, act) => {
     if (!selected) return;

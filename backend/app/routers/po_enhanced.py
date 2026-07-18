@@ -309,31 +309,29 @@ async def email_po_to_vendor(po_id: str, data: dict, current_user: dict = Depend
         raise HTTPException(status_code=400, detail="No vendor email provided")
     subject = data.get("subject", f"Purchase Order {po.get('po_number', '')} from NexusOps")
     message = data.get("message", f"Please find attached Purchase Order {po.get('po_number', '')}.")
-    import resend
-    resend_key = os.environ.get("RESEND_API_KEY", "")
-    sender = os.environ.get("SENDER_EMAIL", "purchasing@nexusops.io")
-    sent = False
-    if resend_key and not resend_key.startswith("re_test_placeholder"):
-        resend.api_key = resend_key
-        try:
-            params = {
-                "from": f"NexusOps Purchasing <{sender}>",
-                "to": [email],
-                "subject": subject,
-                "html": f"<div style='font-family:sans-serif;'><p>{message}</p><hr/><p>PO: {po.get('po_number', '')}<br/>Total: ${po.get('total', 0):.2f}<br/>Expected Delivery: {po.get('expected_delivery', 'TBA')}</p></div>",
-            }
-            await asyncio.to_thread(resend.Emails.send, params)
-            sent = True
-        except Exception as e:
-            logger.error(f"PO email failed: {e}")
+    from app.routers.email_signatures import append_default_signature
+    email_body, _, signature_id = await append_default_signature(
+        body=(
+            f"<div style='font-family:sans-serif;'><p>{message}</p><hr/>"
+            f"<p>PO: {po.get('po_number', '')}<br/>Total: ${po.get('total', 0):.2f}<br/>"
+            f"Expected Delivery: {po.get('expected_delivery', 'TBA')}</p></div>"
+        ),
+        body_type="html",
+        current_user=current_user,
+        subject=subject,
+    )
+    from app.routers.email_utils import send_email
+    delivery = await send_email(email, subject, email_body, category="billing")
+    sent = delivery.get("status") == "sent"
     await db.purchase_orders.update_one({"id": po_id}, {"$set": {
         "status": "submitted" if po.get("status") in ("approved", "draft") else po.get("status"),
         "emailed_to": email,
         "emailed_at": datetime.now(timezone.utc).isoformat(),
+        "email_signature_id": signature_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
-    await _po_audit(po_id, "emailed_to_vendor", f"PO emailed to {email} (sent: {sent})", current_user)
-    return {"message": f"PO emailed to {email}", "sent": sent or not resend_key}
+    await _po_audit(po_id, "emailed_to_vendor", f"PO emailed to {email} ({delivery.get('status')})", current_user)
+    return {"message": delivery.get("message", f"PO emailed to {email}"), "sent": sent, "delivery_status": delivery.get("status"), "sender_mailbox": delivery.get("sender")}
 
 
 # ============== PO NOTES / COMMENTS ==============

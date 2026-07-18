@@ -1,824 +1,1205 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { Link, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  Hash, Lock, Plus, Send, Search, Smile, Paperclip, Pin, Trash2, Edit, Reply,
-  X, AtSign, CornerDownRight, CheckCheck, MessageSquarePlus, Users, MessageCircle,
-  Phone, Video, Info, Image as ImageIcon, MoreVertical, Mic, ArrowLeft
+  Activity,
+  AlertCircle,
+  ArrowLeft,
+  AtSign,
+  Check,
+  ChevronDown,
+  CornerDownRight,
+  Download,
+  Edit3,
+  FileText,
+  Hash,
+  Loader2,
+  Link as LinkIcon,
+  Lock,
+  MessageCircle,
+  MessageSquarePlus,
+  Paperclip,
+  PanelRightOpen,
+  Pin,
+  Plus,
+  Reply,
+  Search,
+  Send,
+  Smile,
+  Sparkles,
+  Trash2,
+  Users,
+  X,
 } from "lucide-react";
+import {
+  channelDisplayName,
+  filterChatChannels,
+  groupChatMessages,
+  PRESENCE_META,
+  totalUnread,
+} from "@/lib/teamChatHelpers";
 
-const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "😮", "🙏", "👀"];
+const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"];
 const TICKET_REGEX = /\/ticket\s+([\w-]+)/gi;
-
-// Slash command catalog — single source of truth for autocomplete + send() routing
+const INVOICE_REGEX = /\/invoice\s+([\w-]+)/gi;
+const PO_REGEX = /\/po\s+([\w-]+)/gi;
 const SLASH_COMMANDS = [
-  { cmd: "ticket",    args: "TKT-### status|priority <value>", desc: "Change ticket status or priority", icon: "🎟️" },
-  { cmd: "close",     args: "TKT-###",                          desc: "Close a ticket",                  icon: "🔒" },
-  { cmd: "assign",    args: "@user TKT-###",                    desc: "Assign ticket to a user",         icon: "👤" },
-  { cmd: "sla",       args: "TKT-###",                          desc: "Show SLA timers",                 icon: "📊" },
-  { cmd: "note",      args: "TKT-### <body>",                   desc: "Add internal note from chat",     icon: "📝" },
-  { cmd: "summarize", args: "",                                  desc: "AI summary of last 40 messages", icon: "🤖" },
-  { cmd: "page",      args: "<severity>",                        desc: "Page the team",                   icon: "📟" },
-  { cmd: "help",      args: "",                                  desc: "List all slash commands",         icon: "❓" },
+  { cmd: "po", args: "PO-####", description: "Link a purchase order" },
+  { cmd: "invoice", args: "INV-###", description: "Link an invoice" },
+  { cmd: "ticket", args: "TKT-### status|priority <value>", description: "Update a ticket" },
+  { cmd: "close", args: "TKT-###", description: "Close a ticket" },
+  { cmd: "assign", args: "@user TKT-###", description: "Assign a ticket" },
+  { cmd: "sla", args: "TKT-###", description: "Show SLA timers" },
+  { cmd: "note", args: "TKT-### <body>", description: "Add an internal note" },
+  { cmd: "summarize", args: "", description: "Summarize recent messages" },
+  { cmd: "page", args: "<severity>", description: "Page the team" },
+  { cmd: "help", args: "", description: "List commands" },
 ];
-const SLASH_CMD_NAMES = new Set(SLASH_COMMANDS.map(c => c.cmd));
+const SLASH_NAMES = new Set(SLASH_COMMANDS.map(command => command.cmd));
 
-// ============== Helpers ==============
-const formatRelativeTime = (ts) => {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+const initials = name => String(name || "?").split(/\s+/).filter(Boolean).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+const workItemLabel = busyState => {
+  if (!busyState) return "Available";
+  const [kind, reference] = String(busyState).split(":", 2);
+  if (kind === "ticket") return `Working ticket ${reference}`;
+  if (kind === "invoice") return `Reviewing invoice ${reference}`;
+  if (kind === "po") return `Working purchase order ${reference}`;
+  if (kind === "remote") return "In a remote session";
+  if (kind === "warroom") return "In a war room";
+  return "Working";
+};
+const avatarHue = value => {
+  let hash = 0;
+  for (const char of String(value || "")) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return Math.abs(hash) % 360;
+};
+const formatTime = value => value ? new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+const formatRelative = value => {
+  if (!value) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`;
+  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
+};
+const formatDay = value => {
+  if (!value || value === "unknown") return "Earlier";
+  const date = new Date(`${value}T00:00:00`);
+  const today = new Date();
+  const todayKey = today.toISOString().slice(0, 10);
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (value === todayKey) return "Today";
+  if (value === yesterday.toISOString().slice(0, 10)) return "Yesterday";
+  return date.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
 };
 
-const formatMessageTime = (ts) => {
-  if (!ts) return "";
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
-};
-
-const formatDateSeparator = (ts) => {
-  const d = new Date(ts);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const ymd = new Date(d); ymd.setHours(0, 0, 0, 0);
-  const days = Math.floor((today - ymd) / 86400000);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return d.toLocaleDateString([], { weekday: "long" });
-  return d.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
-};
-
-const initials = (name) => (name || "?").split(" ").map(s => s[0]).join("").slice(0, 2).toUpperCase();
-const avatarHue = (s) => { let h = 0; for (let i = 0; i < (s || "").length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h) % 360; };
-
-// ============== Main ==============
 export default function TeamChatPage() {
   const { token, user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedChannelId = searchParams.get("channel");
+  const requestedThreadId = searchParams.get("thread");
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-
   const [channels, setChannels] = useState([]);
   const [users, setUsers] = useState([]);
   const [presence, setPresence] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState(null);
   const [pinned, setPinned] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [readReceipts, setReadReceipts] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [mode, setMode] = useState("teams");
+  const [activeTab, setActiveTab] = useState("posts");
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [channelLoading, setChannelLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState("");
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [thread, setThread] = useState(null);
   const [threadInput, setThreadInput] = useState("");
-  const [showNewDialog, setShowNewDialog] = useState(false);
   const [emojiTarget, setEmojiTarget] = useState(null);
+  const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
-  const [typingUsers, setTypingUsers] = useState([]);
-  const [showInfo, setShowInfo] = useState(false);
-  const [slashIdx, setSlashIdx] = useState(0);
-  const fileRef = useRef(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [referenceMatches, setReferenceMatches] = useState([]);
+  const [referenceIndex, setReferenceIndex] = useState(0);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const scrollRef = useRef(null);
+  const activeIdRef = useRef(null);
+  const nearBottomRef = useRef(true);
+  const typingAtRef = useRef(0);
+  const fileRef = useRef(null);
+  const openedThreadRef = useRef("");
 
-  const activeChannel = channels.find(c => c.id === activeId);
+  const activeChannel = channels.find(channel => channel.id === activeId);
+  const presenceFor = userId => presence[userId]?.led || "offline";
+  const myPresence = presenceFor(user?.id);
 
-  // Compute slash autocomplete suggestions on every render based on the input
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+
+  const loadWorkspace = useCallback(async ({ quiet = false } = {}) => {
+    if (!token) return;
+    if (!quiet) setLoading(true);
+    try {
+      const [channelResponse, presenceResponse, userResponse] = await Promise.all([
+        axios.get(`${API}/chat/channels-preview`, { headers }),
+        axios.get(`${API}/presence`, { headers }),
+        axios.get(`${API}/users`, { headers }),
+      ]);
+      const nextChannels = channelResponse.data || [];
+      const presenceRows = presenceResponse.data?.users || [];
+      const userRows = Array.isArray(userResponse.data) ? userResponse.data : userResponse.data?.users || [];
+      setChannels(nextChannels);
+      setPresence(Object.fromEntries(presenceRows.map(row => [row.user_id, row])));
+      const activeUsers = userRows.filter(row => row.is_active !== false && row.archived !== true);
+      // Seeded/imported user records can occasionally contain the same person more than once.
+      // Keep the people picker deterministic and avoid creating duplicate DM targets.
+      setUsers(Array.from(new Map(activeUsers.map(row => [String(row.email || row.id).toLowerCase(), row])).values()));
+      setActiveId(current => requestedChannelId && nextChannels.some(channel => channel.id === requestedChannelId)
+        ? requestedChannelId
+        : current && nextChannels.some(channel => channel.id === current) ? current : nextChannels[0]?.id || null);
+      setError("");
+    } catch (requestError) {
+      setError(requestError?.response?.data?.detail || "Nexus Chat could not be loaded.");
+    } finally {
+      if (!quiet) setLoading(false);
+    }
+  }, [headers, requestedChannelId, token]);
+
+  useEffect(() => {
+    loadWorkspace();
+    const timer = setInterval(() => loadWorkspace({ quiet: true }), 8000);
+    return () => clearInterval(timer);
+  }, [loadWorkspace]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const heartbeat = () => axios.post(`${API}/presence/heartbeat`, {}, { headers }).catch(() => {});
+    heartbeat();
+    const timer = setInterval(heartbeat, 25000);
+    return () => clearInterval(timer);
+  }, [headers, token]);
+
+  const refreshChannel = useCallback(async ({ quiet = false } = {}) => {
+    const channelId = activeIdRef.current;
+    if (!channelId) return;
+    if (!quiet) setChannelLoading(true);
+    try {
+      const [messageResponse, pinResponse, fileResponse, typingResponse, receiptResponse] = await Promise.all([
+        axios.get(`${API}/chat/channels/${channelId}/messages`, { headers }),
+        axios.get(`${API}/chat/channels/${channelId}/pinned`, { headers }),
+        axios.get(`${API}/chat/channels/${channelId}/files`, { headers }),
+        axios.get(`${API}/chat/channels/${channelId}/typing`, { headers }),
+        axios.get(`${API}/chat/channels/${channelId}/read-receipts`, { headers }),
+      ]);
+      if (activeIdRef.current !== channelId) return;
+      setMessages(messageResponse.data || []);
+      setPinned(pinResponse.data || []);
+      setFiles(fileResponse.data || []);
+      setReadReceipts(receiptResponse.data || []);
+      setTypingUsers(typingResponse.data || []);
+      setChannels(current => current.map(channel => channel.id === channelId ? { ...channel, unread_count: 0 } : channel));
+      axios.post(`${API}/chat/channels/${channelId}/read`, {}, { headers }).catch(() => {});
+    } catch (requestError) {
+      if (activeIdRef.current === channelId) setError(requestError?.response?.data?.detail || "This conversation could not be refreshed.");
+    } finally {
+      if (!quiet && activeIdRef.current === channelId) setChannelLoading(false);
+    }
+  }, [headers]);
+
+  useEffect(() => {
+    setMessages([]);
+    setPinned([]);
+    setFiles([]);
+    setThread(null);
+    setActiveTab("posts");
+    nearBottomRef.current = true;
+    if (!activeId) return undefined;
+    refreshChannel();
+    const timer = setInterval(() => refreshChannel({ quiet: true }), 3000);
+    return () => clearInterval(timer);
+  }, [activeId, refreshChannel]);
+
+  const lastMessageId = messages.filter(message => !message.thread_id).at(-1)?.id;
+  useEffect(() => {
+    if (nearBottomRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [lastMessageId, activeId]);
+
   const slashSuggestions = useMemo(() => {
-    if (!input.startsWith("/")) return [];
-    const firstSpace = input.indexOf(" ");
-    if (firstSpace !== -1) return []; // user is typing args, not picking command
-    const q = input.slice(1).toLowerCase();
-    return SLASH_COMMANDS.filter(c => c.cmd.startsWith(q));
+    if (!input.startsWith("/") || input.includes(" ")) return [];
+    const term = input.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter(command => command.cmd.startsWith(term));
   }, [input]);
 
-  // Reset highlighted index when suggestion list shrinks
-  useEffect(() => { if (slashIdx >= slashSuggestions.length) setSlashIdx(0); }, [slashSuggestions.length, slashIdx]);
+  const referenceMatch = input.match(/^\/(ticket|invoice|po)\s+([^\s]*)$/i);
+  const referenceKind = referenceMatch?.[1]?.toLowerCase() || "";
+  const referenceQuery = referenceMatch?.[2] || "";
+  useEffect(() => {
+    if (!referenceKind) { setReferenceMatches([]); return undefined; }
+    const timer = setTimeout(() => {
+      axios.get(`${API}/chat/reference-search`, { params: { kind: referenceKind, q: referenceQuery }, headers })
+        .then(response => { setReferenceMatches(response.data || []); setReferenceIndex(0); })
+        .catch(() => setReferenceMatches([]));
+    }, 140);
+    return () => clearTimeout(timer);
+  }, [headers, referenceKind, referenceQuery]);
 
-  const pickSlashSuggestion = (cmd) => {
-    setInput(`/${cmd.cmd}${cmd.args ? " " : ""}`);
-    setSlashIdx(0);
+  const pickReference = reference => {
+    if (!referenceMatch) return;
+    setInput(`/${referenceMatch[1].toLowerCase()} ${reference.reference} `);
+    setReferenceMatches([]);
   };
 
-  // Initial load + presence + users
-  useEffect(() => {
-    if (!token) return;
-    let alive = true;
-    const load = async () => {
-      try {
-        const [chs, pr, us] = await Promise.all([
-          axios.get(`${API}/chat/channels-preview`, { headers }).then(r => r.data).catch(() => axios.get(`${API}/chat/channels`, { headers }).then(r => r.data)),
-          axios.get(`${API}/presence`, { headers }).then(r => r.data),
-          axios.get(`${API}/users`, { headers }).then(r => r.data).catch(() => []),
-        ]);
-        if (!alive) return;
-        setChannels(chs || []);
-        setPresence(Object.fromEntries((pr.users || []).map(u => [u.user_id, u.status])));
-        setUsers(us || []);
-        if (!activeId && chs.length > 0) setActiveId(chs[0].id);
-      } catch { /* ignore */ }
-    };
-    load();
-    const t = setInterval(load, 6000);
-    return () => { alive = false; clearInterval(t); };
-  }, [token]); // eslint-disable-line
+  const mentionSuggestions = useMemo(() => {
+    const match = input.match(/@([\w.-]*)$/);
+    if (!match) return [];
+    const term = match[1].toLowerCase();
+    const memberIds = activeChannel?.member_ids?.length ? new Set(activeChannel.member_ids) : null;
+    const teammates = users.filter(candidate => candidate.id !== user?.id && (!memberIds || memberIds.has(candidate.id)) && [candidate.name, candidate.email].some(value => value?.toLowerCase().includes(term))).slice(0, 6);
+    const broadcasts = activeChannel?.is_dm ? [] : [
+      { id: "broadcast-channel", broadcast: "channel", name: "Channel", detail: "Notify everyone in this channel" },
+      { id: "broadcast-here", broadcast: "here", name: "Here", detail: "Notify everyone currently active" },
+    ].filter(candidate => candidate.broadcast.includes(term) || candidate.name.toLowerCase().includes(term));
+    return [...broadcasts, ...teammates];
+  }, [activeChannel, input, user?.id, users]);
 
-  // Heartbeat
-  useEffect(() => {
-    if (!token) return;
-    const beat = () => axios.post(`${API}/presence/heartbeat`, {}, { headers }).catch(() => {});
-    beat();
-    const t = setInterval(beat, 25000);
-    return () => clearInterval(t);
-  }, [token]); // eslint-disable-line
+  useEffect(() => { setMentionIndex(0); }, [input, activeId]);
 
-  // Messages + typing poll
-  const refreshMessages = useCallback(async () => {
-    if (!activeId) return;
-    try {
-      const [msgsR, pinR, typR] = await Promise.all([
-        axios.get(`${API}/chat/channels/${activeId}/messages`, { headers }),
-        axios.get(`${API}/chat/channels/${activeId}/pinned`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/chat/channels/${activeId}/typing`, { headers }).catch(() => ({ data: [] })),
-      ]);
-      setMessages(msgsR.data || []);
-      setPinned(pinR.data || []);
-      setTypingUsers(typR.data || []);
-      axios.post(`${API}/chat/channels/${activeId}/read`, {}, { headers }).catch(() => {});
-    } catch { /* ignore */ }
-  }, [activeId, headers]);
+  const groupedMessages = useMemo(() => groupChatMessages(messages), [messages]);
+  const visibleChannels = useMemo(() => filterChatChannels(channels, mode, query), [channels, mode, query]);
 
-  useEffect(() => {
-    if (!activeId) return;
-    refreshMessages();
-    const t = setInterval(refreshMessages, 3000);
-    return () => clearInterval(t);
-  }, [activeId, refreshMessages]);
+  const selectChannel = channelId => {
+    setActiveId(channelId);
+    setSearchParams({ channel: channelId }, { replace: true });
+    setSearchResults(null);
+    setQuery("");
+    setMobileConversationOpen(true);
+    setShowInfo(false);
+  };
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, activeId]);
+  const sendTyping = () => {
+    if (!activeId || Date.now() - typingAtRef.current < 2000) return;
+    typingAtRef.current = Date.now();
+    axios.post(`${API}/chat/channels/${activeId}/typing`, {}, { headers }).catch(() => {});
+  };
 
   const send = async () => {
     const body = input.trim();
-    if (!body || !activeId) return;
+    if (!body || !activeId || sending) return;
+    const temporaryId = `pending-${Date.now()}`;
+    const optimistic = {
+      id: temporaryId,
+      channel_id: activeId,
+      user_id: user?.id,
+      user_name: user?.name,
+      body,
+      ts: new Date().toISOString(),
+      reactions: {},
+      pending: true,
+    };
     setInput("");
-    setSlashIdx(0);
-    // Detect slash commands; /ticket T-XXX alone stays as a regular message (renders inline TicketCard)
-    const firstToken = body.split(/\s+/)[0].slice(1).toLowerCase();
-    const isMentionOnly = /^\/ticket\s+[\w-]+\s*$/i.test(body);
-    if (body.startsWith("/") && SLASH_CMD_NAMES.has(firstToken) && !isMentionOnly) {
-      try {
-        await axios.post(`${API}/chat/slash`, { raw: body, channel_id: activeId }, { headers });
-        refreshMessages();
-      } catch (e) {
-        toast.error(e.response?.data?.detail || "Slash command failed");
-        setInput(body);
-      }
-      return;
+    setComposerEmojiOpen(false);
+    setSending(true);
+    setMessages(current => [...current, optimistic]);
+    nearBottomRef.current = true;
+    try {
+      const commandName = body.startsWith("/") ? body.split(/\s+/)[0].slice(1).toLowerCase() : "";
+      const ticketReferenceOnly = /^\/(?:ticket|invoice|po)\s+[\w-]+\s*$/i.test(body);
+      const response = body.startsWith("/") && SLASH_NAMES.has(commandName) && !ticketReferenceOnly
+        ? await axios.post(`${API}/chat/slash`, { channel_id: activeId, raw: body }, { headers })
+        : await axios.post(`${API}/chat/channels/${activeId}/messages`, { body }, { headers });
+      setMessages(current => [...current.filter(message => message.id !== temporaryId), response.data]);
+      loadWorkspace({ quiet: true });
+    } catch (requestError) {
+      setMessages(current => current.filter(message => message.id !== temporaryId));
+      setInput(body);
+      toast.error(requestError?.response?.data?.detail || "Message could not be sent");
+    } finally {
+      setSending(false);
     }
-    try { await axios.post(`${API}/chat/channels/${activeId}/messages`, { body }, { headers }); refreshMessages(); }
-    catch { toast.error("Send failed"); setInput(body); }
   };
 
-  const sendTyping = useCallback(() => { if (activeId) axios.post(`${API}/chat/channels/${activeId}/typing`, {}, { headers }).catch(() => {}); }, [activeId, headers]);
+  const searchMessages = async () => {
+    const term = query.trim();
+    if (!term) { setSearchResults(null); return; }
+    setSearching(true);
+    try {
+      const response = await axios.get(`${API}/chat/search`, { headers, params: { q: term } });
+      setSearchResults(response.data || []);
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Search failed");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const updateStatus = async manualState => {
+    try {
+      await axios.post(`${API}/presence/status`, { manual_state: manualState }, { headers });
+      await axios.post(`${API}/presence/heartbeat`, {}, { headers });
+      loadWorkspace({ quiet: true });
+    } catch {
+      toast.error("Status could not be updated");
+    }
+  };
+
+  const toggleReaction = async (messageId, emoji) => {
+    try {
+      const response = await axios.post(`${API}/chat/messages/${messageId}/reactions`, { emoji }, { headers });
+      setMessages(current => current.map(message => message.id === messageId ? { ...message, reactions: response.data.reactions } : message));
+      setThread(current => current && current.parent.id === messageId ? { ...current, parent: { ...current.parent, reactions: response.data.reactions } } : current);
+      setEmojiTarget(null);
+    } catch {
+      toast.error("Reaction could not be saved");
+    }
+  };
+
+  const openThread = async message => {
+    try {
+      const response = await axios.get(`${API}/chat/messages/${message.id}/thread`, { headers });
+      setThread(response.data);
+      setShowInfo(false);
+    } catch {
+      toast.error("Thread could not be opened");
+    }
+  };
+
+  const copyMessageLink = async message => {
+    const threadId = message.thread_id || message.id;
+    const url = `${window.location.origin}/team-chat?channel=${encodeURIComponent(activeId)}&thread=${encodeURIComponent(threadId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Message link copied");
+    } catch {
+      toast.error("Message link could not be copied");
+    }
+  };
+
+  useEffect(() => {
+    if (!requestedThreadId || !activeId || openedThreadRef.current === requestedThreadId) return;
+    let active = true;
+    axios.get(`${API}/chat/messages/${requestedThreadId}/thread`, { headers })
+      .then(response => {
+        if (!active) return;
+        openedThreadRef.current = requestedThreadId;
+        setThread(response.data);
+        setShowInfo(false);
+      })
+      .catch(() => active && toast.error("That thread is no longer available"));
+    return () => { active = false; };
+  }, [activeId, headers, requestedThreadId]);
 
   const sendThread = async () => {
     const body = threadInput.trim();
     if (!body || !thread) return;
     setThreadInput("");
-    try { await axios.post(`${API}/chat/messages/${thread.parent.id}/reply`, { body }, { headers });
-      const r = await axios.get(`${API}/chat/messages/${thread.parent.id}/thread`, { headers });
-      setThread(r.data); refreshMessages();
-    } catch { toast.error("Reply failed"); }
-  };
-
-  const openThread = async (msg) => {
-    try { const r = await axios.get(`${API}/chat/messages/${msg.id}/thread`, { headers }); setThread(r.data); }
-    catch { toast.error("Thread load failed"); }
-  };
-
-  const toggleReaction = async (msgId, emoji) => {
-    try { const r = await axios.post(`${API}/chat/messages/${msgId}/reactions`, { emoji }, { headers });
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions: r.data.reactions } : m));
-      if (thread?.parent.id === msgId) setThread(t => ({ ...t, parent: { ...t.parent, reactions: r.data.reactions } }));
-      setEmojiTarget(null);
-    } catch { toast.error("Reaction failed"); }
-  };
-
-  const startEdit = (msg) => { setEditingId(msg.id); setEditingText(msg.body); };
-  const saveEdit = async () => {
-    try { await axios.put(`${API}/chat/messages/${editingId}`, { body: editingText }, { headers }); setEditingId(null); refreshMessages(); }
-    catch { toast.error("Edit failed"); }
-  };
-  const deleteMsg = async (id) => {
-    if (!window.confirm("Delete this message?")) return;
-    try { await axios.delete(`${API}/chat/messages/${id}`, { headers }); refreshMessages(); } catch { toast.error("Delete failed"); }
-  };
-  const togglePin = async (msg) => {
-    try { await axios.post(`${API}/chat/messages/${msg.id}/${msg.pinned ? "unpin" : "pin"}`, {}, { headers }); refreshMessages(); } catch { toast.error("Pin failed"); }
-  };
-
-  const onUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { toast.error("Max 10 MB"); return; }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const b64 = reader.result.split(",")[1];
-      try { await axios.post(`${API}/chat/channels/${activeId}/upload`, { filename: file.name, content_type: file.type, base64: b64 }, { headers }); refreshMessages(); toast.success("Sent"); }
-      catch { toast.error("Upload failed"); }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const doSearch = async () => {
-    if (!searchTerm.trim()) { setSearchResults(null); return; }
-    try { const r = await axios.get(`${API}/chat/search`, { headers, params: { q: searchTerm } }); setSearchResults(r.data || []); }
-    catch { toast.error("Search failed"); }
-  };
-
-  // Filter sidebar by search term (chat name)
-  const filteredChannels = useMemo(() => {
-    if (!searchTerm) return channels;
-    const q = searchTerm.toLowerCase();
-    return channels.filter(c => (c.name || "").toLowerCase().includes(q));
-  }, [channels, searchTerm]);
-
-  // Group messages by day for separators
-  const groupedMessages = useMemo(() => {
-    const groups = [];
-    let currentDate = null;
-    let lastUserId = null;
-    for (const m of messages.filter(m => !m.thread_id)) {
-      const dateKey = (m.ts || "").slice(0, 10);
-      if (dateKey !== currentDate) {
-        groups.push({ type: "separator", label: formatDateSeparator(m.ts), key: `sep-${dateKey}` });
-        currentDate = dateKey;
-        lastUserId = null;
-      }
-      const grouped = lastUserId === m.user_id;
-      groups.push({ type: "msg", msg: m, grouped, key: m.id });
-      lastUserId = m.user_id;
+    try {
+      await axios.post(`${API}/chat/messages/${thread.parent.id}/reply`, { body }, { headers });
+      const response = await axios.get(`${API}/chat/messages/${thread.parent.id}/thread`, { headers });
+      setThread(response.data);
+      refreshChannel({ quiet: true });
+    } catch {
+      setThreadInput(body);
+      toast.error("Reply could not be sent");
     }
-    return groups;
-  }, [messages]);
+  };
+
+  const saveEdit = async () => {
+    const body = editingText.trim();
+    if (!body) return;
+    try {
+      await axios.put(`${API}/chat/messages/${editingId}`, { body }, { headers });
+      setEditingId(null);
+      refreshChannel({ quiet: true });
+    } catch {
+      toast.error("Message could not be edited");
+    }
+  };
+
+  const deleteMessage = async messageId => {
+    if (!window.confirm("Delete this message?")) return;
+    try {
+      await axios.delete(`${API}/chat/messages/${messageId}`, { headers });
+      refreshChannel({ quiet: true });
+    } catch {
+      toast.error("Message could not be deleted");
+    }
+  };
+
+  const togglePin = async message => {
+    try {
+      await axios.post(`${API}/chat/messages/${message.id}/${message.pinned ? "unpin" : "pin"}`, {}, { headers });
+      refreshChannel({ quiet: true });
+    } catch {
+      toast.error("Pin could not be updated");
+    }
+  };
+
+  const uploadFile = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !activeId) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error("Attachments are limited to 10 MB"); return; }
+    try {
+      const base64 = await readFileAsBase64(file);
+      await axios.post(`${API}/chat/channels/${activeId}/upload`, {
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        base64,
+      }, { headers });
+      toast.success("File shared");
+      refreshChannel({ quiet: true });
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "File could not be shared");
+    }
+  };
+
+  const downloadFile = async attachment => {
+    try {
+      const response = await axios.get(`${API}/chat/files/${attachment.file_id}`, { headers, responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.filename || "attachment";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("File could not be downloaded");
+    }
+  };
+
+  const pickMention = candidate => {
+    const handle = candidate.broadcast || candidate.email?.split("@")[0] || candidate.name.replace(/\s+/g, "");
+    setInput(current => current.replace(/@[\w.-]*$/, `@${handle} `));
+  };
+
+  const unread = totalUnread(channels);
+  const activePresence = activeChannel?.other_user_id ? presenceFor(activeChannel.other_user_id) : null;
+  const activeTeammates = users.filter(candidate => candidate.id !== user?.id && ["active", "busy", "dnd"].includes(presenceFor(candidate.id))).length;
 
   return (
-    <div className="h-[calc(100vh-60px)] flex bg-gradient-to-br from-background via-background to-violet-950/10 overflow-hidden" data-testid="team-chat-page">
-      {/* === SIDEBAR === */}
-      <aside className="w-[340px] border-r border-border/40 flex flex-col bg-card/30 backdrop-blur-xl">
-        {/* Sidebar header */}
-        <div className="p-4 border-b border-border/40">
-          <div className="flex items-center justify-between mb-3">
-            <h1 className="font-bold text-xl tracking-tight bg-gradient-to-r from-violet-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">Chats</h1>
-            <Button size="sm" variant="ghost" className="rounded-full h-9 w-9 p-0 hover:bg-violet-500/15 hover:text-violet-300" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn" title="New chat or channel">
-              <MessageSquarePlus className="w-4 h-4" />
+    <div className="h-[calc(100vh-60px)] min-h-[620px] flex overflow-hidden bg-[#111318] text-zinc-100" data-testid="team-chat-page">
+      <nav className="hidden md:flex w-[72px] shrink-0 flex-col items-center border-r border-white/5 bg-[#181a20] py-3" aria-label="Nexus Chat sections">
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-950/40">
+          <MessageCircle className="h-5 w-5 text-white" />
+        </div>
+        <RailButton icon={Activity} label="Inbox" active={mode === "activity"} badge={unread} onClick={() => setMode("activity")} />
+        <RailButton icon={MessageCircle} label="Direct" active={mode === "chat"} onClick={() => setMode("chat")} />
+        <RailButton icon={Users} label="Channels" active={mode === "teams"} onClick={() => setMode("teams")} />
+        <div className="mt-auto px-2 text-center text-[9px] uppercase tracking-[0.16em] text-zinc-600">Nexus<br />Chat</div>
+      </nav>
+
+      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[320px] shrink-0 flex-col border-r border-white/5 bg-[#1d1f26]`}>
+        <div className="border-b border-white/5 px-4 pb-3 pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-400">Nexus collaboration</p>
+              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : "Direct messages"}</h1>
+            </div>
+            <Button size="sm" className="h-9 w-9 rounded-lg bg-violet-600 p-0 hover:bg-violet-500" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn" aria-label="New conversation">
+              <MessageSquarePlus className="h-4 w-4" />
             </Button>
           </div>
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />{activeTeammates} online now</span>
+            {unread > 0 && <span className="rounded-full border border-violet-500/15 bg-violet-500/5 px-2 py-1 text-violet-300">{unread} need attention</span>}
+          </div>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => e.key === "Enter" && searchTerm && doSearch()} placeholder="Search chats or messages..." className="pl-9 h-9 text-sm rounded-full bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40" data-testid="chat-search" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            <Input
+              value={query}
+              onChange={event => { setQuery(event.target.value); if (!event.target.value) setSearchResults(null); }}
+              onKeyDown={event => event.key === "Enter" && searchMessages()}
+              placeholder="Search chats and messages"
+              className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-violet-500/50"
+              data-testid="chat-search"
+            />
+            {searching && <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-violet-400" />}
           </div>
         </div>
 
-        {/* Conversations list */}
+        {error && (
+          <div className="m-3 flex gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-200">
+            <AlertCircle className="h-4 w-4 shrink-0" /><span>{error}</span>
+          </div>
+        )}
+
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-0.5">
-            {filteredChannels.length === 0 ? (
-              <div className="text-center py-12 px-4">
-                <MessageCircle className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">No conversations yet</p>
-                <Button size="sm" className="mt-3" onClick={() => setShowNewDialog(true)}>
-                  <Plus className="w-3.5 h-3.5 mr-1" />Start a chat
-                </Button>
+          <div className="p-2">
+            {loading ? (
+              <ConversationSkeleton />
+            ) : visibleChannels.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <MessageCircle className="mx-auto mb-3 h-9 w-9 text-zinc-700" />
+                <p className="text-sm font-medium text-zinc-300">{mode === "activity" ? "You’re all caught up" : "No conversations found"}</p>
+                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : "Start a chat or create a team channel."}</p>
               </div>
-            ) : filteredChannels.map(c => (
-              <ChannelRow key={c.id} channel={c} active={activeId === c.id} presence={presence} onClick={() => { setActiveId(c.id); setSearchResults(null); setThread(null); }} />
+            ) : visibleChannels.map(channel => (
+              <ConversationRow
+                key={channel.id}
+                channel={channel}
+                active={channel.id === activeId}
+                presence={presenceFor(channel.other_user_id)}
+                onClick={() => selectChannel(channel.id)}
+              />
             ))}
           </div>
         </ScrollArea>
 
-        {/* Self avatar footer */}
-        <div className="p-3 border-t border-border/40 flex items-center gap-3">
-          <Avatar className="w-9 h-9 ring-2 ring-emerald-500/40">
-            <AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(user?.name)}, 60%, 35%)`, color: "white", fontSize: 12 }}>{initials(user?.name)}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user?.name}</p>
-            <p className="text-[10px] text-emerald-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Online</p>
-          </div>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex w-full items-center gap-3 border-t border-white/5 px-4 py-3 text-left hover:bg-white/[0.03]" data-testid="chat-status-menu">
+              <Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(user?.name)}>{initials(user?.name)}</AvatarFallback></Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{user?.name}</p>
+                <PresenceLabel status={myPresence} detail={workItemLabel(presence[user?.id]?.busy_state)} />
+              </div>
+              <ChevronDown className="h-4 w-4 text-zinc-600" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuLabel>Set your status</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {[
+              ["", "active", "Available"],
+              ["dnd", "dnd", "Do not disturb"],
+              ["break", "break", "On a break"],
+              ["away", "away", "Appear away"],
+            ].map(([value, status, label]) => (
+              <DropdownMenuItem key={status} onClick={() => updateStatus(value)}>
+                <span className={`h-2.5 w-2.5 rounded-full ${PRESENCE_META[status].dot}`} />{label}
+                {myPresence === status && <Check className="ml-auto h-4 w-4" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </aside>
 
-      {/* === MAIN === */}
-      <main className="flex-1 flex flex-col min-w-0 relative">
+      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col bg-[#15171c]`}>
         {!activeChannel ? (
-          <EmptyState onNew={() => setShowNewDialog(true)} />
+          <EmptyWorkspace onNew={() => setShowNewDialog(true)} />
         ) : (
           <>
-            {/* Header */}
-            <div className="px-5 py-3 border-b border-border/40 bg-card/30 backdrop-blur-xl flex items-center gap-3">
-              <Avatar className="w-10 h-10">
-                <AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(activeChannel.name)}, 55%, 40%)`, color: "white", fontSize: 13 }}>
-                  {activeChannel.is_dm ? initials(activeChannel.name) : <Hash className="w-4 h-4" />}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-semibold truncate">{activeChannel.name}</h2>
-                  {activeChannel.is_private && <Lock className="w-3 h-3 text-muted-foreground" />}
+            <header className="border-b border-white/5 bg-[#1a1c22] px-3 md:px-5">
+              <div className="flex h-16 items-center gap-3">
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 md:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to conversations"><ArrowLeft className="h-4 w-4" /></Button>
+                <ChannelAvatar channel={activeChannel} presence={activePresence} size="md" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="truncate text-base font-semibold">{channelDisplayName(activeChannel)}</h2>
+                    {activeChannel.is_private && <Lock className="h-3.5 w-3.5 text-zinc-500" />}
+                  </div>
+                  <p className="truncate text-xs text-zinc-500">
+                    {activeChannel.kind === "dm"
+                      ? PRESENCE_META[activePresence || "offline"].label
+                      : activeChannel.description || `${activeChannel.member_count || 0} members`}
+                  </p>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  {activeChannel.is_dm
-                    ? (presence[activeChannel.other_user_id] === "online" ? <><span className="text-emerald-400">●</span> Active now</> : "Offline")
-                    : `${activeChannel.member_ids?.length || 0} members${typingUsers.length > 0 ? ` · ${typingUsers[0].user_name} typing…` : ""}`}
-                </p>
+                {typingUsers.length > 0 && <span className="hidden text-xs text-violet-300 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
               </div>
-              <Button size="sm" variant="ghost" className="rounded-full h-9 w-9 p-0" title="Voice call (coming soon)"><Phone className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" className="rounded-full h-9 w-9 p-0" title="Video call (coming soon)"><Video className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" className="rounded-full h-9 w-9 p-0" onClick={() => setShowInfo(s => !s)} title="Info"><Info className="w-4 h-4" /></Button>
-            </div>
-
-            {/* Pinned strip */}
-            {pinned.length > 0 && (
-              <div className="px-5 py-2 border-b border-amber-500/20 bg-amber-500/[0.05] flex items-center gap-2 text-xs">
-                <Pin className="w-3 h-3 text-amber-400" />
-                <span className="font-medium text-amber-300">{pinned.length} Pinned:</span>
-                <span className="text-muted-foreground truncate">{pinned[0].body.slice(0, 80)}{pinned[0].body.length > 80 ? "…" : ""}</span>
+              <div className="flex h-10 items-end gap-5 text-sm">
+                {[
+                  ["posts", "Posts", MessageCircle, messages.filter(message => !message.thread_id).length],
+                  ["files", "Files", FileText, files.length],
+                  ["pins", "Pinned", Pin, pinned.length],
+                ].map(([value, label, Icon, count]) => (
+                  <button key={value} onClick={() => { setActiveTab(value); setSearchResults(null); }} className={`flex h-10 items-center gap-1.5 border-b-2 px-1 transition ${activeTab === value ? "border-violet-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
+                    <Icon className="h-3.5 w-3.5" />{label}{count > 0 && <span className="text-[10px] text-zinc-600">{count}</span>}
+                  </button>
+                ))}
               </div>
-            )}
+            </header>
 
-            {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-              {searchResults ? (
-                <SearchResultsView results={searchResults} headers={headers} onClose={() => { setSearchResults(null); setSearchTerm(""); }} userId={user?.id} />
-              ) : groupedMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground py-20">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center mb-4">
-                    <MessageCircle className="w-9 h-9 text-violet-400" />
-                  </div>
-                  <p className="font-medium">Send your first message</p>
-                  <p className="text-xs mt-1">Type below to start the conversation</p>
+            {searchResults ? (
+              <SearchResults results={searchResults} onSelect={result => { selectChannel(result.channel_id); openThread({ id: result.thread_id || result.id }); }} onClose={() => setSearchResults(null)} />
+            ) : activeTab === "files" ? (
+              <FilesView files={files} onDownload={downloadFile} />
+            ) : activeTab === "pins" ? (
+              <PinnedView messages={pinned} onOpenThread={openThread} />
+            ) : (
+              <>
+                <div
+                  ref={scrollRef}
+                  onScroll={event => { const node = event.currentTarget; nearBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}
+                  className="flex-1 overflow-y-auto"
+                  data-testid="chat-message-list"
+                >
+                  {channelLoading && messages.length === 0 ? (
+                    <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
+                  ) : groupedMessages.length === 0 ? (
+                    <ConversationWelcome channel={activeChannel} />
+                  ) : (
+                    <div className="mx-auto max-w-4xl px-3 py-5 md:px-8">
+                      {groupedMessages.map(group => group.type === "day" ? (
+                        <DayDivider key={group.key} label={formatDay(group.day)} />
+                      ) : (
+                        <MessageRow
+                          key={group.key}
+                          message={group.message}
+                          compact={group.compact}
+                          own={group.message.user_id === user?.id}
+                           currentUserId={user?.id}
+                           headers={headers}
+                           presence={presence}
+                           readReceipts={readReceipts}
+                          editing={editingId === group.message.id}
+                          editingText={editingText}
+                          onEditingText={setEditingText}
+                          onStartEdit={() => { setEditingId(group.message.id); setEditingText(group.message.body); }}
+                          onCancelEdit={() => setEditingId(null)}
+                          onSaveEdit={saveEdit}
+                          onDelete={() => deleteMessage(group.message.id)}
+                          onPin={() => togglePin(group.message)}
+                          onThread={() => openThread(group.message)}
+                          onCopyMessageLink={() => copyMessageLink(group.message)}
+                          onReact={emoji => toggleReaction(group.message.id, emoji)}
+                          emojiOpen={emojiTarget === group.message.id}
+                          onEmojiOpen={() => setEmojiTarget(group.message.id)}
+                          onEmojiClose={() => setEmojiTarget(null)}
+                          onDownload={downloadFile}
+                        />
+                      ))}
+                      {typingUsers.length > 0 && <TypingIndicator names={typingUsers.map(row => row.user_name)} />}
+                    </div>
+                  )}
                 </div>
-              ) : groupedMessages.map(g => g.type === "separator" ? (
-                <DateSeparator key={g.key} label={g.label} />
-              ) : (
-                <ChatBubble
-                  key={g.key} msg={g.msg} grouped={g.grouped} isOwn={g.msg.user_id === user?.id} headers={headers}
-                  onReact={(em) => toggleReaction(g.msg.id, em)}
-                  onThread={() => openThread(g.msg)}
-                  onEdit={() => startEdit(g.msg)}
-                  onDelete={() => deleteMsg(g.msg.id)}
-                  onPin={() => togglePin(g.msg)}
-                  onSetEmojiTarget={() => setEmojiTarget(g.msg.id)}
-                  emojiOpen={emojiTarget === g.msg.id}
-                  onCloseEmoji={() => setEmojiTarget(null)}
-                  editing={editingId === g.msg.id}
-                  editingText={editingText} setEditingText={setEditingText}
-                  onSaveEdit={saveEdit} onCancelEdit={() => setEditingId(null)}
-                />
-              ))}
-              {typingUsers.length > 0 && !searchResults && <TypingIndicator users={typingUsers} />}
-            </div>
 
-            {/* Composer */}
-            <div className="p-3 border-t border-border/40 bg-card/30 backdrop-blur-xl">
-              {/* Slash autocomplete dropdown */}
-              {slashSuggestions.length > 0 && (
-                <div className="mb-2 rounded-xl border border-violet-500/30 bg-card/95 backdrop-blur-xl shadow-2xl shadow-violet-500/10 overflow-hidden" data-testid="slash-autocomplete">
-                  <div className="px-3 py-1.5 border-b border-border/40 text-[10px] uppercase tracking-widest font-semibold text-muted-foreground flex items-center justify-between">
-                    <span>Slash commands</span>
-                    <span className="font-mono normal-case tracking-normal">↑↓ navigate · ↵ select · esc close</span>
-                  </div>
-                  <div className="max-h-64 overflow-auto">
-                    {slashSuggestions.map((c, i) => (
-                      <button
-                        key={c.cmd}
-                        onClick={() => pickSlashSuggestion(c)}
-                        onMouseEnter={() => setSlashIdx(i)}
-                        className={`w-full flex items-start gap-3 px-3 py-2 text-left transition-colors ${i === slashIdx ? "bg-violet-500/15" : "hover:bg-muted/30"}`}
-                        data-testid={`slash-suggestion-${c.cmd}`}
-                      >
-                        <span className="text-base leading-none mt-0.5">{c.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-2">
-                            <code className="text-sm font-mono font-semibold text-violet-300">/{c.cmd}</code>
-                            {c.args && <span className="text-[11px] text-muted-foreground/80 font-mono truncate">{c.args}</span>}
-                          </div>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">{c.desc}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="flex items-end gap-2">
-                <input ref={fileRef} type="file" className="hidden" onChange={onUpload} />
-                <Button size="sm" variant="ghost" className="rounded-full h-10 w-10 p-0 hover:bg-violet-500/10" onClick={() => fileRef.current?.click()} title="Attach"><Paperclip className="w-4 h-4" /></Button>
-                <div className="flex-1 relative">
-                  <Input
-                    value={input}
-                    onChange={e => { setInput(e.target.value); sendTyping(); setSlashIdx(0); }}
-                    onKeyDown={e => {
-                      if (slashSuggestions.length > 0) {
-                        if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx(i => (i + 1) % slashSuggestions.length); return; }
-                        if (e.key === "ArrowUp")   { e.preventDefault(); setSlashIdx(i => (i - 1 + slashSuggestions.length) % slashSuggestions.length); return; }
-                        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                          e.preventDefault();
-                          pickSlashSuggestion(slashSuggestions[slashIdx]);
+                <div className="border-t border-white/5 bg-[#1a1c22] p-3 md:px-5 md:py-4">
+                  <div className="relative mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#22242c] shadow-lg shadow-black/10 focus-within:border-violet-500/50">
+                    {referenceMatch && referenceMatches.length > 0 && (
+                      <SuggestionPanel className="bottom-full" title={`Link ${referenceMatch[1].toLowerCase()}`}>
+                        {referenceMatches.map((reference, index) => (
+                          <button key={reference.id || reference.reference} onMouseEnter={() => setReferenceIndex(index)} onClick={() => pickReference(reference)} className={`flex w-full items-start gap-3 px-3 py-2 text-left ${referenceIndex === index ? "bg-emerald-500/15" : "hover:bg-white/5"}`}>
+                            <FileText className="mt-0.5 h-4 w-4 text-emerald-400" />
+                            <div className="min-w-0"><code className="text-sm text-emerald-300">{reference.reference}</code><p className="truncate text-xs text-zinc-300">{reference.title}</p><p className="text-[11px] text-zinc-500">{reference.subtitle}</p></div>
+                          </button>
+                        ))}
+                        <p className="border-t border-white/5 px-3 py-1.5 text-[10px] text-zinc-500">Tab selects · keep typing to add context</p>
+                      </SuggestionPanel>
+                    )}
+                    {slashSuggestions.length > 0 && (
+                      <SuggestionPanel className="bottom-full" title="Commands">
+                        {slashSuggestions.map((command, index) => (
+                          <button key={command.cmd} onMouseEnter={() => setSlashIndex(index)} onClick={() => setInput(`/${command.cmd}${command.args ? " " : ""}`)} className={`flex w-full items-start gap-3 px-3 py-2 text-left ${slashIndex === index ? "bg-violet-500/15" : "hover:bg-white/5"}`}>
+                            <Sparkles className="mt-0.5 h-4 w-4 text-violet-400" />
+                            <div><code className="text-sm text-violet-300">/{command.cmd}</code> <span className="text-xs text-zinc-500">{command.args}</span><p className="text-xs text-zinc-500">{command.description}</p></div>
+                          </button>
+                        ))}
+                      </SuggestionPanel>
+                    )}
+                    {mentionSuggestions.length > 0 && !slashSuggestions.length && (
+                      <SuggestionPanel className="bottom-full" title="Mention a teammate">
+                        {mentionSuggestions.map((candidate, index) => (
+                          <button key={candidate.id} onMouseEnter={() => setMentionIndex(index)} onClick={() => pickMention(candidate)} className={`flex w-full items-center gap-3 px-3 py-2 text-left ${mentionIndex === index ? "bg-violet-500/15" : "hover:bg-white/5"}`}>
+                            {candidate.broadcast ? <div className="grid h-7 w-7 place-items-center rounded-full bg-violet-500/15 text-violet-300"><AtSign className="h-3.5 w-3.5" /></div> : <Avatar className="h-7 w-7"><AvatarFallback style={avatarStyle(candidate.name)}>{initials(candidate.name)}</AvatarFallback></Avatar>}
+                            <div><p className="text-sm">{candidate.broadcast ? `@${candidate.broadcast}` : candidate.name}</p><p className="text-[11px] text-zinc-500">{candidate.detail || candidate.email}</p></div>
+                          </button>
+                        ))}
+                      </SuggestionPanel>
+                    )}
+                    {composerEmojiOpen && (
+                      <div className="absolute bottom-full left-10 z-30 mb-2 flex gap-1 rounded-xl border border-white/10 bg-[#252832] p-2 shadow-2xl">
+                        {COMMON_EMOJIS.map(emoji => <button key={emoji} onClick={() => { setInput(current => `${current}${emoji}`); setComposerEmojiOpen(false); }} className="rounded-lg p-1.5 text-lg hover:bg-white/10">{emoji}</button>)}
+                      </div>
+                    )}
+                    <Textarea
+                      value={input}
+                      onChange={event => { setInput(event.target.value.slice(0, 5000)); sendTyping(); setSlashIndex(0); }}
+                      onKeyDown={event => {
+                        if (referenceMatches.length > 0 && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
+                          event.preventDefault();
+                          if (event.key === "ArrowDown") setReferenceIndex(index => (index + 1) % referenceMatches.length);
+                          else if (event.key === "ArrowUp") setReferenceIndex(index => (index - 1 + referenceMatches.length) % referenceMatches.length);
+                          else pickReference(referenceMatches[referenceIndex]);
                           return;
                         }
-                        if (e.key === "Escape") { e.preventDefault(); setInput(""); return; }
-                      }
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-                    }}
-                    placeholder={`Message ${activeChannel?.name || ""}…  type / for commands or @ to mention`}
-                    className="rounded-full pl-4 pr-12 h-10 bg-muted/40 border-0 focus-visible:ring-1 focus-visible:ring-violet-500/40"
-                    data-testid="chat-input"
-                  />
-                  <Button size="sm" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full h-8 w-8 p-0 hover:bg-violet-500/10" title="Emoji" onClick={() => { const em = COMMON_EMOJIS[Math.floor(Math.random() * COMMON_EMOJIS.length)]; setInput(p => p + em); }}><Smile className="w-4 h-4" /></Button>
+                        if (slashSuggestions.length > 0 && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
+                          event.preventDefault();
+                          if (event.key === "ArrowDown") setSlashIndex(index => (index + 1) % slashSuggestions.length);
+                          else if (event.key === "ArrowUp") setSlashIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+                          else setInput(`/${slashSuggestions[slashIndex].cmd}${slashSuggestions[slashIndex].args ? " " : ""}`);
+                          return;
+                        }
+                        if (mentionSuggestions.length > 0 && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
+                          event.preventDefault();
+                          if (event.key === "ArrowDown") setMentionIndex(index => (index + 1) % mentionSuggestions.length);
+                          else if (event.key === "ArrowUp") setMentionIndex(index => (index - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+                          else pickMention(mentionSuggestions[mentionIndex]);
+                          return;
+                        }
+                        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); }
+                      }}
+                      placeholder={`Message ${channelDisplayName(activeChannel)}`}
+                      className="min-h-[64px] resize-none border-0 bg-transparent px-4 pb-2 pt-3 text-sm shadow-none focus-visible:ring-0"
+                      data-testid="chat-input"
+                    />
+                    <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5 text-[10px]">
+                      <span className="mr-1 uppercase tracking-[0.14em] text-zinc-600">Ops actions</span>
+                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link ticket</button>
+                      <button type="button" onClick={() => setInput("/invoice ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link invoice</button>
+                      <button type="button" onClick={() => setInput("/po ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link PO</button>
+                      <button type="button" onClick={() => setInput("/note ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Add note</button>
+                      <button type="button" onClick={() => setInput("/page ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-200">Page on-call</button>
+                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">AI summary</button>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 pb-2">
+                      <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
+                      <ComposerButton icon={Paperclip} label="Attach file" onClick={() => fileRef.current?.click()} />
+                      <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
+                      <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
+                      <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Shift+Enter for a new line</span>
+                      <Button onClick={send} disabled={!input.trim() || sending} className="ml-auto h-8 rounded-lg bg-violet-600 px-3 hover:bg-violet-500" data-testid="chat-send">
+                        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <Button onClick={send} disabled={!input.trim()} className="rounded-full h-10 w-10 p-0 bg-gradient-to-br from-violet-500 to-cyan-500 hover:from-violet-600 hover:to-cyan-600 shadow-lg shadow-violet-500/25" data-testid="chat-send"><Send className="w-4 h-4" /></Button>
-              </div>
-            </div>
+              </>
+            )}
           </>
         )}
       </main>
 
-      {/* Info panel */}
       {showInfo && activeChannel && (
-        <aside className="w-72 border-l border-border/40 p-4 overflow-auto bg-card/20 backdrop-blur-xl">
-          <div className="text-center mb-4">
-            <Avatar className="w-20 h-20 mx-auto mb-2"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(activeChannel.name)}, 55%, 40%)`, color: "white", fontSize: 24 }}>{activeChannel.is_dm ? initials(activeChannel.name) : <Hash className="w-7 h-7" />}</AvatarFallback></Avatar>
-            <h3 className="font-semibold text-lg">{activeChannel.name}</h3>
-            <p className="text-xs text-muted-foreground">{activeChannel.is_private ? "Private" : "Public"} · {activeChannel.member_ids?.length || 0} members</p>
-          </div>
-          <h4 className="text-[10px] font-semibold uppercase text-muted-foreground mb-2">Members</h4>
-          <div className="space-y-2">
-            {(activeChannel.member_ids || []).map(uid => {
-              const u = users.find(x => x.id === uid);
-              if (!u) return null;
-              return (
-                <div key={uid} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/30">
-                  <Avatar className="w-7 h-7"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(u.name)}, 55%, 40%)`, color: "white", fontSize: 10 }}>{initials(u.name)}</AvatarFallback></Avatar>
-                  <div className="flex-1 min-w-0"><p className="text-sm truncate">{u.name}</p><p className="text-[10px] text-muted-foreground capitalize">{presence[u.id] || "offline"}</p></div>
-                </div>
-              );
-            })}
-          </div>
-        </aside>
+        <InfoPanel channel={activeChannel} users={users} presenceFor={presenceFor} currentUserId={user?.id} headers={headers} onUpdated={() => loadWorkspace({ quiet: true })} onClose={() => setShowInfo(false)} />
       )}
-
-      {/* Thread sidebar */}
       {thread && (
-        <aside className="w-96 border-l border-border/40 flex flex-col bg-card/30 backdrop-blur-xl" data-testid="thread-panel">
-          <div className="p-3 border-b border-border/40 flex items-center justify-between">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><CornerDownRight className="w-4 h-4 text-cyan-400" />Thread</h3>
-            <Button size="sm" variant="ghost" className="rounded-full h-7 w-7 p-0" onClick={() => setThread(null)}><X className="w-3.5 h-3.5" /></Button>
-          </div>
-          <div className="flex-1 overflow-auto p-3 space-y-1">
-            <ChatBubble msg={thread.parent} isOwn={thread.parent.user_id === user?.id} headers={headers} compact />
-            <div className="my-3 border-t border-border/40 pt-3 space-y-1">
-              {thread.replies.map(r => <ChatBubble key={r.id} msg={r} isOwn={r.user_id === user?.id} headers={headers} compact />)}
-            </div>
-          </div>
-          <div className="p-3 border-t border-border/40 flex gap-2">
-            <Input value={threadInput} onChange={e => setThreadInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendThread()} placeholder="Reply…" className="rounded-full bg-muted/40 border-0" data-testid="thread-input" />
-            <Button onClick={sendThread} size="sm" className="rounded-full h-9 w-9 p-0 bg-gradient-to-br from-violet-500 to-cyan-500" data-testid="thread-send"><Send className="w-3.5 h-3.5" /></Button>
-          </div>
-        </aside>
+        <ThreadPanel
+          thread={thread}
+          currentUserId={user?.id}
+          headers={headers}
+          input={threadInput}
+          onInput={setThreadInput}
+          onSend={sendThread}
+          onClose={() => setThread(null)}
+        />
       )}
 
-      {/* New chat dialog */}
-      <NewChatDialog open={showNewDialog} onOpenChange={setShowNewDialog} users={users} headers={headers} currentUserId={user?.id} onCreated={(ch) => { setChannels(prev => prev.find(c => c.id === ch.id) ? prev : [ch, ...prev]); setActiveId(ch.id); setShowNewDialog(false); }} />
+      <NewConversationDialog
+        open={showNewDialog}
+        onOpenChange={setShowNewDialog}
+        users={users}
+        currentUserId={user?.id}
+        headers={headers}
+        onCreated={channel => {
+          setChannels(current => [channel, ...current.filter(existing => existing.id !== channel.id)]);
+          setMode(channel.kind === "team" ? "teams" : "chat");
+          setActiveId(channel.id);
+          setSearchParams({ channel: channel.id }, { replace: true });
+          setMobileConversationOpen(true);
+          setShowNewDialog(false);
+        }}
+      />
     </div>
   );
 }
 
-// ============== Channel row in sidebar ==============
-function ChannelRow({ channel, active, presence, onClick }) {
-  const isOnline = channel.is_dm && presence[channel.other_user_id] === "online";
+function RailButton({ icon: Icon, label, active, badge = 0, onClick }) {
   return (
-    <button onClick={onClick} className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl transition-all ${active ? "bg-violet-500/15 ring-1 ring-violet-500/30" : "hover:bg-muted/40"}`} data-testid={`channel-${channel.id}`}>
-      <div className="relative shrink-0">
-        <Avatar className="w-11 h-11">
-          <AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(channel.name)}, 55%, 40%)`, color: "white", fontSize: 13 }}>
-            {channel.is_dm ? initials(channel.name) : <Hash className="w-5 h-5" />}
-          </AvatarFallback>
-        </Avatar>
-        {isOnline && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-card" />}
-      </div>
-      <div className="flex-1 min-w-0 text-left">
-        <div className="flex items-center justify-between gap-2">
-          <p className={`font-medium text-sm truncate ${channel.unread_count > 0 ? "" : ""}`}>{channel.name}</p>
-          <span className="text-[10px] text-muted-foreground shrink-0">{formatRelativeTime(channel.last_message?.ts || channel.created_at)}</span>
+    <button onClick={onClick} className={`relative mb-2 flex w-full flex-col items-center gap-1 border-l-2 py-2 text-[10px] ${active ? "border-violet-500 text-violet-300" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
+      <Icon className="h-5 w-5" />{label}
+      {badge > 0 && <span className="absolute right-3 top-0 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">{badge > 99 ? "99+" : badge}</span>}
+    </button>
+  );
+}
+
+function ConversationRow({ channel, active, presence, onClick }) {
+  const name = channelDisplayName(channel);
+  return (
+    <button onClick={onClick} className={`mb-0.5 flex w-full gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? "bg-violet-500/15" : "hover:bg-white/[0.04]"}`} data-testid={`channel-${channel.id}`}>
+      <ChannelAvatar channel={channel} presence={presence} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className={`truncate text-sm ${channel.unread_count ? "font-semibold text-white" : "font-medium text-zinc-300"}`}>{name}</p>
+          <span className="ml-auto shrink-0 text-[10px] text-zinc-600">{formatRelative(channel.last_message?.ts || channel.updated_at || channel.created_at)}</span>
         </div>
-        <div className="flex items-center justify-between gap-2 mt-0.5">
-          <p className={`text-xs truncate ${channel.unread_count > 0 ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-            {channel.last_message ? <><span className="text-muted-foreground">{channel.last_message.user_name?.split(" ")[0]}:</span> {channel.last_message.body || "📎 Attachment"}</> : <span className="italic text-muted-foreground/70">No messages yet</span>}
+        <div className="mt-0.5 flex items-center gap-2">
+          <p className={`truncate text-xs ${channel.unread_count ? "text-zinc-300" : "text-zinc-600"}`}>
+            {channel.last_message ? `${channel.last_message.user_name ? `${channel.last_message.user_name.split(" ")[0]}: ` : ""}${channel.last_message.body || "Attachment"}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
           </p>
-          {channel.unread_count > 0 && (
-            <span className="shrink-0 min-w-5 h-5 rounded-full bg-gradient-to-br from-violet-500 to-pink-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5 shadow-md">
-              {channel.unread_count > 99 ? "99+" : channel.unread_count}
-            </span>
-          )}
+          {channel.unread_count > 0 && <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-500 px-1.5 text-[10px] font-semibold text-white">{channel.unread_count > 99 ? "99+" : channel.unread_count}</span>}
         </div>
       </div>
     </button>
   );
 }
 
-// ============== Empty State ==============
-function EmptyState({ onNew }) {
+function ChannelAvatar({ channel, presence, size = "sm" }) {
+  const dimension = size === "md" ? "h-10 w-10" : "h-10 w-10";
+  const name = channelDisplayName(channel);
+  const statusMeta = presence ? PRESENCE_META[presence] || PRESENCE_META.offline : null;
   return (
-    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gradient-to-br from-background via-violet-950/5 to-cyan-950/5">
-      <div className="w-32 h-32 rounded-full bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center mb-6 shadow-2xl shadow-violet-500/10 animate-pulse">
-        <MessageCircle className="w-14 h-14 text-violet-400" />
-      </div>
-      <h2 className="text-2xl font-bold tracking-tight mb-2 bg-gradient-to-r from-violet-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">Welcome to Team Chat</h2>
-      <p className="text-sm text-muted-foreground max-w-sm mb-6">Start a direct message, create a group chat, or open a channel — built for fast, distraction-free internal collaboration.</p>
-      <Button onClick={onNew} className="rounded-full px-6 h-11 bg-gradient-to-r from-violet-500 to-cyan-500 hover:from-violet-600 hover:to-cyan-600 shadow-lg shadow-violet-500/25"><MessageSquarePlus className="w-4 h-4 mr-2" />Start a new chat</Button>
+    <div className="relative shrink-0">
+      <Avatar className={dimension}>
+        <AvatarFallback style={avatarStyle(name)}>{channel.kind === "team" ? <Hash className="h-4 w-4" /> : initials(name)}</AvatarFallback>
+      </Avatar>
+      {statusMeta && <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[#1d1f26] ${statusMeta.dot}`} />}
     </div>
   );
 }
 
-// ============== Search results ==============
-function SearchResultsView({ results, headers, onClose, userId }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3 px-2">
-        <h3 className="text-sm font-semibold">Search results ({results.length})</h3>
-        <Button size="sm" variant="ghost" onClick={onClose} className="rounded-full h-7 w-7 p-0"><X className="w-3.5 h-3.5" /></Button>
+function PresenceLabel({ status, detail }) {
+  const meta = PRESENCE_META[status] || PRESENCE_META.offline;
+  return <div><p className={`flex items-center gap-1.5 text-[11px] ${meta.text}`}><span className={`h-2 w-2 rounded-full ${meta.dot}`} />{meta.label}</p>{detail && detail !== "Available" && <p className="mt-0.5 truncate text-[10px] text-zinc-500">{detail}</p>}</div>;
+}
+
+function MessageRow({ message, compact, own, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
+  const [hovered, setHovered] = useState(false);
+  if (message.is_system) {
+    return (
+      <div className="my-3 flex justify-center">
+        <div className="max-w-2xl rounded-lg border border-violet-500/20 bg-violet-500/10 px-4 py-2 text-center text-xs text-violet-200">{message.body}</div>
       </div>
-      <div className="space-y-2">{results.map(m => (<ChatBubble key={m.id} msg={m} isOwn={m.user_id === userId} headers={headers} compact />))}</div>
+    );
+  }
+  return (
+    <div className={`group relative flex gap-3 rounded-lg px-2 py-1.5 hover:bg-white/[0.025] ${compact ? "mt-0" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <div className="w-9 shrink-0">{!compact && <Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(message.user_name)}>{initials(message.user_name)}</AvatarFallback></Avatar>}</div>
+      <div className="min-w-0 flex-1">
+        {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span><span className="text-[10px] text-zinc-600">{formatTime(message.ts)}</span>{message.edited && <span className="text-[9px] text-zinc-600">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
+        {editing ? (
+          <div className="flex gap-2"><Input value={editingText} onChange={event => onEditingText(event.target.value)} onKeyDown={event => event.key === "Enter" && onSaveEdit()} autoFocus className="h-9 border-white/10 bg-black/20" /><Button size="sm" onClick={onSaveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button></div>
+        ) : (
+          <div className={`text-sm leading-6 ${message.deleted ? "italic text-zinc-600" : "text-zinc-300"}`}>
+            <MessageBody body={message.body} headers={headers} presence={presence} />
+            {message.attachment && <AttachmentCard attachment={message.attachment} headers={headers} onDownload={() => onDownload(message.attachment)} />}
+          </div>
+        )}
+        {onReact && message.reactions && Object.keys(message.reactions).length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(message.reactions).map(([emoji, voters]) => <button key={emoji} onClick={() => onReact(emoji)} className={`rounded-full border px-2 py-0.5 text-xs ${voters.includes?.(currentUserId) ? "border-violet-500/50 bg-violet-500/15" : "border-white/10 bg-white/[0.03]"}`}>{emoji} <span className="text-zinc-500">{voters.length}</span></button>)}</div>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">{message.thread_count > 0 && onThread && <button onClick={onThread} className="flex items-center gap-1 text-xs font-medium text-violet-400 hover:text-violet-300"><CornerDownRight className="h-3.5 w-3.5" />{message.thread_count} {message.thread_count === 1 ? "reply" : "replies"}</button>}<MessageReadReceipt message={message} currentUserId={currentUserId} receipts={readReceipts} /></div>
+      </div>
+      {hovered && !editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
+        <div className="absolute right-3 top-0 flex -translate-y-1/2 items-center rounded-lg border border-white/10 bg-[#252832] p-0.5 shadow-xl">
+          {onReact && <MessageAction icon={Smile} label="React" onClick={onEmojiOpen} />}
+          {onThread && <MessageAction icon={Reply} label="Reply" onClick={onThread} />}
+          {onCopyMessageLink && <MessageAction icon={LinkIcon} label="Copy message link" onClick={onCopyMessageLink} />}
+          {onPin && <MessageAction icon={Pin} label={message.pinned ? "Unpin" : "Pin"} onClick={onPin} />}
+          {own && onStartEdit && <MessageAction icon={Edit3} label="Edit" onClick={onStartEdit} />}
+          {own && onDelete && <MessageAction icon={Trash2} label="Delete" onClick={onDelete} destructive />}
+        </div>
+      )}
+      {emojiOpen && (
+        <div className="absolute right-3 top-7 z-30 flex gap-1 rounded-xl border border-white/10 bg-[#252832] p-2 shadow-2xl">
+          {COMMON_EMOJIS.map(emoji => <button key={emoji} onClick={() => onReact(emoji)} className="rounded-lg p-1 text-base hover:bg-white/10">{emoji}</button>)}
+          <button onClick={onEmojiClose} className="ml-1 rounded-lg p-1 text-zinc-500 hover:bg-white/10"><X className="h-4 w-4" /></button>
+        </div>
+      )}
     </div>
   );
 }
 
-// ============== Date Separator ==============
-function DateSeparator({ label }) {
-  return (
-    <div className="flex items-center gap-3 my-4 px-4">
-      <div className="flex-1 h-px bg-border/30" />
-      <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-widest">{label}</span>
-      <div className="flex-1 h-px bg-border/30" />
-    </div>
-  );
+function MessageReadReceipt({ message, currentUserId, receipts }) {
+  if (!message.ts || message.pending || message.deleted || message.user_id !== currentUserId) return null;
+  const readers = (receipts || []).filter(receipt => receipt.user_id !== message.user_id && receipt.user_id !== currentUserId && receipt.last_read_at >= message.ts);
+  if (!readers.length) return null;
+  return <span className="flex items-center gap-1.5 text-[10px] text-zinc-500" title={`Seen by ${readers.map(reader => reader.user_name).join(", ")}`}><span className="flex -space-x-1">{readers.slice(0, 3).map(reader => <Avatar key={reader.user_id} className="h-4 w-4 border border-[#1d1f26]"><AvatarFallback className="text-[7px]" style={avatarStyle(reader.user_name)}>{initials(reader.user_name)}</AvatarFallback></Avatar>)}</span><Check className="h-3 w-3 text-emerald-400" />Seen{readers.length > 1 ? ` by ${readers.length}` : ""}</span>;
 }
 
-// ============== Typing indicator ==============
-function TypingIndicator({ users }) {
-  return (
-    <div className="flex items-center gap-2 px-3 py-2 ml-12">
-      <div className="bg-muted/60 rounded-2xl px-4 py-2 flex items-center gap-1">
-        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0s" }} />
-        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0.15s" }} />
-        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0.3s" }} />
-      </div>
-      <span className="text-[11px] text-muted-foreground italic">{users.map(u => u.user_name).join(", ")} typing</span>
-    </div>
-  );
+function MessageAction({ icon: Icon, label, onClick, destructive }) {
+  return <button onClick={onClick} title={label} className={`rounded-md p-1.5 hover:bg-white/10 ${destructive ? "text-rose-400" : "text-zinc-400"}`}><Icon className="h-3.5 w-3.5" /></button>;
 }
 
-// ============== Ticket Card embed ==============
-function TicketCard({ ticketNumber, headers }) {
-  const [card, setCard] = useState(null);
-  useEffect(() => { let alive = true; axios.get(`${API}/chat/ticket-card/${ticketNumber}`, { headers }).then(r => alive && setCard(r.data)).catch(() => {}); return () => { alive = false; }; }, [ticketNumber]); // eslint-disable-line
-  if (!card) return null;
-  const prio = card.priority || "medium";
-  const prioStyle = prio === "critical" ? "bg-rose-500/10 border-rose-500/40 text-rose-300" : prio === "high" ? "bg-amber-500/10 border-amber-500/40 text-amber-300" : prio === "low" ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300" : "bg-cyan-500/10 border-cyan-500/40 text-cyan-300";
-  return (
-    <a href={`/tickets?id=${card.id}`} className="block mt-2 p-3 rounded-xl border bg-card/60 hover:bg-card/80 hover:border-violet-500/40 transition w-full max-w-md backdrop-blur-sm">
-      <div className="flex items-center gap-2 mb-1.5">
-        <code className="text-[10px] font-mono bg-violet-500/10 text-violet-300 px-1.5 py-0.5 rounded">{card.ticket_number}</code>
-        <Badge variant="outline" className={`text-[9px] capitalize ${prioStyle}`}>{prio}</Badge>
-        <Badge variant="outline" className="text-[9px] capitalize">{card.status?.replace("_", " ")}</Badge>
-      </div>
-      <p className="text-sm font-medium">{card.title}</p>
-      <p className="text-[11px] text-muted-foreground mt-1">{card.client_name}{card.assigned_to_name ? ` · ${card.assigned_to_name}` : ""}{card.service_name ? ` · ${card.service_name}` : ""}</p>
-    </a>
-  );
-}
-
-function renderBody(body, headers) {
-  if (!body) return null;
-  const matches = [...body.matchAll(TICKET_REGEX)];
-  if (matches.length === 0) return <span className="whitespace-pre-wrap break-words">{body}</span>;
-  const parts = []; let last = 0;
-  matches.forEach((m, i) => {
-    if (m.index > last) parts.push(<span key={`t${i}`}>{body.slice(last, m.index)}</span>);
-    parts.push(<code key={`c${i}`} className="bg-violet-500/15 text-violet-300 px-1 rounded text-xs font-mono">{m[0]}</code>);
-    last = m.index + m[0].length;
-  });
-  if (last < body.length) parts.push(<span key="end">{body.slice(last)}</span>);
-  const ticketNumbers = [...new Set(matches.map(m => m[1]))];
+function MessageBody({ body, headers, presence }) {
+  const text = body || "";
+  const tickets = [...new Set([...text.matchAll(TICKET_REGEX)].map(match => match[1]))];
+  const invoices = [...new Set([...text.matchAll(INVOICE_REGEX)].map(match => match[1]))];
+  const purchaseOrders = [...new Set([...text.matchAll(PO_REGEX)].map(match => match[1]))];
+  if (!tickets.length && !invoices.length && !purchaseOrders.length) return <RichMessageText text={text} />;
   return (
     <>
-      <span className="whitespace-pre-wrap break-words">{parts}</span>
-      {ticketNumbers.map(n => <TicketCard key={n} ticketNumber={n} headers={headers} />)}
+      <RichMessageText text={text} />
+      {tickets.map(ticketNumber => <TicketCard key={ticketNumber} ticketNumber={ticketNumber} headers={headers} presence={presence} />)}
+      {invoices.map(invoiceNumber => <InvoiceCard key={invoiceNumber} invoiceNumber={invoiceNumber} headers={headers} presence={presence} />)}
+      {purchaseOrders.map(poNumber => <div key={poNumber}><PurchaseOrderCard poNumber={poNumber} headers={headers} presence={presence} /><WorkPresence kind="po" reference={poNumber} presence={presence} headers={headers} /></div>)}
     </>
   );
 }
 
-// ============== Bubble ==============
-function ChatBubble({ msg, grouped, isOwn, headers, onReact, onThread, onEdit, onDelete, onPin, onSetEmojiTarget, emojiOpen, onCloseEmoji, editing, editingText, setEditingText, onSaveEdit, onCancelEdit, compact }) {
-  const [hover, setHover] = useState(false);
-  const bubbleStyle = isOwn
-    ? "bg-gradient-to-br from-violet-500 to-cyan-600 text-white shadow-md shadow-violet-500/20"
-    : "bg-muted/60 text-foreground";
+function RichMessageText({ text }) {
+  return <span className="whitespace-pre-wrap break-words">{String(text || "").split(/(@[\w.-]+)/g).map((part, index) => part.startsWith("@") ? <span key={`${part}-${index}`} className={`rounded px-1 py-0.5 text-xs font-medium ${["@channel", "@here", "@everyone"].includes(part.toLowerCase()) ? "bg-amber-500/15 text-amber-200" : "bg-violet-500/15 text-violet-200"}`}>{part}</span> : part)}</span>;
+}
 
+function TicketCard({ ticketNumber, headers, presence }) {
+  const [ticket, setTicket] = useState(null);
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/chat/ticket-card/${ticketNumber}`, { headers }).then(response => active && setTicket(response.data)).catch(() => {});
+    return () => { active = false; };
+  }, [headers, ticketNumber]);
+  if (!ticket) return null;
   return (
-    <div className={`flex gap-2 ${isOwn ? "flex-row-reverse" : "flex-row"} ${grouped ? "mt-0.5" : "mt-3"} ${msg.deleted ? "opacity-50" : ""}`} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      {/* Avatar */}
-      <div className="w-9 shrink-0 flex justify-center">
-        {!grouped && !isOwn && (
-          <Avatar className="w-9 h-9 mt-1"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(msg.user_name)}, 55%, 40%)`, color: "white", fontSize: 11 }}>{initials(msg.user_name)}</AvatarFallback></Avatar>
-        )}
-      </div>
+    <Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`} className="mt-2 block max-w-lg rounded-lg border border-white/10 bg-black/20 p-3 transition hover:border-violet-500/40">
+      <div className="mb-1 flex items-center gap-2"><code className="text-xs text-violet-300">{ticket.ticket_number}</code><Badge variant="outline" className="text-[9px] capitalize">{ticket.priority}</Badge><Badge variant="outline" className="text-[9px] capitalize">{ticket.status?.replace(/_/g, " ")}</Badge></div>
+      <p className="text-sm font-medium text-zinc-200">{ticket.title}</p><p className="mt-1 text-xs text-zinc-500">{ticket.client_name}{ticket.assigned_to_name ? ` · ${ticket.assigned_to_name}` : ""}</p>
+      <WorkPresence kind="ticket" reference={ticket.ticket_number} presence={presence} headers={headers} />
+    </Link>
+  );
+}
 
-      <div className={`flex flex-col max-w-[68%] ${isOwn ? "items-end" : "items-start"}`}>
-        {!grouped && (
-          <div className={`flex items-center gap-2 mb-1 px-1 ${isOwn ? "flex-row-reverse" : ""}`}>
-            <span className="text-[12px] font-semibold">{msg.user_name}</span>
-            <span className="text-[10px] text-muted-foreground">{formatMessageTime(msg.ts)}</span>
-            {msg.pinned && <Pin className="w-2.5 h-2.5 text-amber-400" />}
-          </div>
-        )}
+function InvoiceCard({ invoiceNumber, headers, presence }) {
+  const [invoice, setInvoice] = useState(null);
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/chat/invoice-card/${invoiceNumber}`, { headers }).then(response => active && setInvoice(response.data)).catch(() => {});
+    return () => { active = false; };
+  }, [headers, invoiceNumber]);
+  if (!invoice) return null;
+  return (
+    <Link to={`/invoices?invoice=${encodeURIComponent(invoice.id)}`} className="mt-2 block max-w-lg rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] p-3 transition hover:border-emerald-400/50">
+      <div className="mb-1 flex items-center gap-2"><code className="text-xs text-emerald-300">{invoice.invoice_number}</code><Badge variant="outline" className="text-[9px] capitalize">{invoice.payment_status}</Badge></div>
+      <p className="text-sm font-medium text-zinc-200">{invoice.client_name || "Invoice"}</p><p className="mt-1 text-xs text-zinc-400">Total ${Number(invoice.total || 0).toFixed(2)} · Due ${Number(invoice.amount_due || 0).toFixed(2)}{invoice.due_date ? ` · Due ${invoice.due_date}` : ""}</p>
+      <WorkPresence kind="invoice" reference={invoice.invoice_number} presence={presence} headers={headers} />
+    </Link>
+  );
+}
 
-        <div className="relative group">
-          {editing ? (
-            <div className="flex gap-2 w-96">
-              <Input value={editingText} onChange={e => setEditingText(e.target.value)} onKeyDown={e => e.key === "Enter" && onSaveEdit()} className="h-9 rounded-full bg-muted/40 border-0" autoFocus />
-              <Button size="sm" onClick={onSaveEdit} className="h-9 rounded-full">Save</Button>
-              <Button size="sm" variant="ghost" onClick={onCancelEdit} className="h-9 rounded-full"><X className="w-3.5 h-3.5" /></Button>
-            </div>
-          ) : (
-            <div className={`px-3.5 py-2 rounded-2xl text-sm leading-relaxed ${bubbleStyle} ${isOwn ? "rounded-br-md" : "rounded-bl-md"} ${msg.pinned ? "ring-2 ring-amber-500/40" : ""}`}>
-              {renderBody(msg.body, headers)}
-              {msg.attachment?.is_image && (
-                <a href={`${API}/chat/files/${msg.attachment.file_id}`} target="_blank" rel="noopener" className="block mt-2 flex items-center gap-1 text-xs underline opacity-90"><ImageIcon className="w-3 h-3" />{msg.attachment.filename}</a>
-              )}
-              {msg.edited && <span className="ml-1.5 text-[9px] opacity-70">(edited)</span>}
-            </div>
-          )}
+function PurchaseOrderCard({ poNumber, headers, presence }) {
+  const [purchaseOrder, setPurchaseOrder] = useState(null);
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/chat/po-card/${poNumber}`, { headers }).then(response => active && setPurchaseOrder(response.data)).catch(() => {});
+    return () => { active = false; };
+  }, [headers, poNumber]);
+  if (!purchaseOrder) return null;
+  return <Link to={`/purchase-orders?po=${encodeURIComponent(purchaseOrder.id)}`} className="mt-2 block max-w-lg rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] p-3 transition hover:border-cyan-400/50"><div className="mb-1 flex items-center gap-2"><code className="text-xs text-cyan-300">{purchaseOrder.po_number}</code><Badge variant="outline" className="text-[9px] capitalize">{purchaseOrder.status}</Badge></div><p className="text-sm font-medium text-zinc-200">{purchaseOrder.vendor || "Purchase order"}</p><p className="mt-1 text-xs text-zinc-400">Total ${Number(purchaseOrder.total || 0).toFixed(2)}{purchaseOrder.expected_delivery ? ` · Expected ${purchaseOrder.expected_delivery}` : ""}</p></Link>;
+}
 
-          {/* Action toolbar */}
-          {hover && !editing && !compact && (
-            <div className={`absolute top-0 ${isOwn ? "right-full mr-2" : "left-full ml-2"} -translate-y-2 flex items-center gap-0.5 bg-card border rounded-full shadow-lg px-1 py-0.5 z-10`}>
-              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-full" onClick={onSetEmojiTarget} title="React"><Smile className="w-3.5 h-3.5" /></Button>
-              {onThread && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-full" onClick={onThread} title="Reply in thread"><Reply className="w-3.5 h-3.5" /></Button>}
-              {onPin && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-full" onClick={onPin} title={msg.pinned ? "Unpin" : "Pin"}><Pin className={`w-3.5 h-3.5 ${msg.pinned ? "text-amber-400 fill-amber-400" : ""}`} /></Button>}
-              {isOwn && onEdit && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-full" onClick={onEdit} title="Edit"><Edit className="w-3.5 h-3.5" /></Button>}
-              {isOwn && onDelete && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-full" onClick={onDelete} title="Delete"><Trash2 className="w-3.5 h-3.5 text-rose-400" /></Button>}
-            </div>
-          )}
+function WorkPresence({ kind, reference, presence, headers }) {
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/presence/work-activity`, { params: { work_item: `${kind}:${reference}`, limit: 2 }, headers })
+      .then(response => active && setEvents(response.data?.events || []))
+      .catch(() => active && setEvents([]));
+    return () => { active = false; };
+  }, [headers, kind, reference]);
+  const people = Object.values(presence || {}).filter(person => person.busy_state === `${kind}:${reference}` && person.led !== "offline");
+  if (!people.length && !events.length) return null;
+  const latest = events[0];
+  return <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/5 pt-2"><div className="flex -space-x-1.5">{people.slice(0, 4).map(person => <Avatar key={person.user_id} className="h-5 w-5 border border-[#1d1f26]"><AvatarFallback className="text-[8px]" style={avatarStyle(person.user_name)}>{initials(person.user_name)}</AvatarFallback></Avatar>)}</div>{people.length > 0 && <><p className="text-[10px] text-emerald-300">{people.length === 1 ? `${people[0].user_name} is active here` : `${people.length} technicians active here`}</p><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /></>}{latest && <p className="basis-full text-[10px] text-zinc-500">{latest.user_name || "Technician"} {latest.event === "left" ? "last left" : "opened"} {formatRelative(latest.created_at)}</p>}</div>;
+}
 
-          {/* Emoji picker */}
-          {emojiOpen && (
-            <div className={`absolute top-full mt-1 ${isOwn ? "right-0" : "left-0"} bg-card border rounded-xl shadow-2xl p-2 grid grid-cols-6 gap-1 z-20`}>
-              {COMMON_EMOJIS.map(em => <button key={em} onClick={() => onReact(em)} className="text-lg hover:bg-muted/60 rounded-lg p-1 transition">{em}</button>)}
-              <button onClick={onCloseEmoji} className="col-span-6 text-[10px] text-muted-foreground hover:underline mt-1">Close</button>
-            </div>
-          )}
-        </div>
+function AttachmentCard({ attachment, headers, onDownload }) {
+  return (
+    <div className="mt-2 w-full max-w-md overflow-hidden rounded-lg border border-white/10 bg-black/20">
+      {attachment.is_image && <ImageAttachmentPreview attachment={attachment} headers={headers} onDownload={onDownload} />}
+      <button onClick={onDownload} className="flex w-full items-center gap-3 p-3 text-left hover:bg-white/[0.03] hover:text-violet-100">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/15"><FileText className="h-4 w-4 text-violet-300" /></div>
+        <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{attachment.filename}</p><p className="text-[10px] text-zinc-600">{formatBytes(attachment.size)} · Download original</p></div><Download className="h-4 w-4 text-zinc-500" />
+      </button>
+    </div>
+  );
+}
 
-        {/* Reactions */}
-        {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-          <div className={`flex gap-1 mt-1 flex-wrap ${isOwn ? "justify-end" : "justify-start"}`}>
-            {Object.entries(msg.reactions).map(([emoji, users]) => (
-              <button key={emoji} onClick={() => onReact && onReact(emoji)} className="text-xs bg-card hover:bg-card/80 border rounded-full px-2 py-0.5 shadow-sm transition">{emoji} <span className="text-muted-foreground">{users.length}</span></button>
-            ))}
-          </div>
-        )}
+function ImageAttachmentPreview({ attachment, headers, onDownload }) {
+  const [source, setSource] = useState("");
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    axios.get(`${API}/chat/files/${attachment.file_id}`, { headers, responseType: "blob" })
+      .then(response => {
+        objectUrl = URL.createObjectURL(response.data);
+        if (active) setSource(objectUrl);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.file_id, headers]);
+  if (!source) return null;
+  return <button type="button" onClick={onDownload} title="Download original image" className="block max-h-80 w-full overflow-hidden border-b border-white/10 bg-black/30 text-left"><img src={source} alt={attachment.filename || "Shared image"} className="max-h-80 w-full object-contain" /></button>;
+}
 
-        {/* Thread count */}
-        {msg.thread_count > 0 && !compact && (
-          <button onClick={onThread} className={`mt-1 text-[11px] text-cyan-400 hover:underline flex items-center gap-1 ${isOwn ? "self-end" : ""}`}><CornerDownRight className="w-3 h-3" />{msg.thread_count} repl{msg.thread_count === 1 ? "y" : "ies"}</button>
-        )}
+function FilesView({ files, onDownload }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-5 md:p-8">
+      <div className="mx-auto max-w-4xl"><h3 className="mb-1 text-lg font-semibold">Shared files</h3><p className="mb-5 text-sm text-zinc-500">Files shared in this conversation.</p>
+        {files.length === 0 ? <EmptyContent icon={FileText} title="No shared files" body="Attachments shared in posts appear here." /> : <div className="overflow-hidden rounded-xl border border-white/5">{files.map(message => <button key={message.id} onClick={() => onDownload(message.attachment)} className="flex w-full items-center gap-3 border-b border-white/5 bg-white/[0.02] p-4 text-left last:border-0 hover:bg-white/[0.04]"><FileText className="h-5 w-5 text-violet-400" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{message.attachment.filename}</p><p className="text-xs text-zinc-600">{message.user_name} · {formatRelative(message.ts)} · {formatBytes(message.attachment.size)}</p></div><Download className="h-4 w-4 text-zinc-500" /></button>)}</div>}
       </div>
     </div>
   );
 }
 
-// ============== New Chat Dialog ==============
-function NewChatDialog({ open, onOpenChange, users, headers, currentUserId, onCreated }) {
+function PinnedView({ messages, onOpenThread }) {
+  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><h3 className="mb-1 text-lg font-semibold">Pinned posts</h3><p className="mb-5 text-sm text-zinc-500">Important updates kept for the team.</p>{messages.length === 0 ? <EmptyContent icon={Pin} title="Nothing pinned" body="Pin a post from its More actions menu." /> : <div className="space-y-3">{messages.map(message => <button key={message.id} onClick={() => onOpenThread(message)} className="block w-full rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4 text-left hover:border-amber-500/30"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500"><Pin className="h-3.5 w-3.5 text-amber-400" />Pinned by {message.pinned_by || "a teammate"} · {formatRelative(message.pinned_at || message.ts)}</div><p className="whitespace-pre-wrap text-sm text-zinc-300">{message.body}</p></button>)}</div>}</div></div>;
+}
+
+function SearchResults({ results, onSelect, onClose }) {
+  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-violet-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{result.user_name}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{result.body}</p></button>)}</div>}</div></div>;
+}
+
+function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpdated, onClose }) {
+  const memberIds = channel.kind === "team" && !channel.is_private ? users.map(user => user.id) : channel.member_ids || [];
+  const [draftMemberIds, setDraftMemberIds] = useState(memberIds);
+  const [savingMembers, setSavingMembers] = useState(false);
+  const canManageMembers = channel.kind === "team" && channel.is_private && channel.created_by === currentUserId;
+  useEffect(() => { setDraftMemberIds(memberIds); }, [channel.id]);
+  const addMember = userId => {
+    if (userId && !draftMemberIds.includes(userId)) setDraftMemberIds(current => [...current, userId]);
+  };
+  const removeMember = userId => {
+    if (userId !== currentUserId) setDraftMemberIds(current => current.filter(id => id !== userId));
+  };
+  const saveMembers = async () => {
+    setSavingMembers(true);
+    try {
+      await axios.put(`${API}/chat/channels/${channel.id}/members`, { member_ids: draftMemberIds }, { headers });
+      toast.success("Private channel members saved");
+      onUpdated?.();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Members could not be updated");
+    } finally {
+      setSavingMembers(false);
+    }
+  };
+  return (
+    <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
+      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+      {canManageMembers && <div className="border-b border-white/5 bg-violet-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-violet-200">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-violet-600 px-3 text-xs hover:bg-violet-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
+      <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><Avatar className="h-8 w-8"><AvatarFallback style={avatarStyle(member.name)}>{initials(member.name)}</AvatarFallback></Avatar><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
+    </aside>
+  );
+}
+
+function ThreadPanel({ thread, currentUserId, headers, input, onInput, onSend, onClose }) {
+  return (
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="thread-panel">
+      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><div><h3 className="font-semibold">Thread</h3><p className="text-xs text-zinc-600">{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</p></div><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+      <div className="flex-1 overflow-y-auto p-3"><MessageRow message={thread.parent} own={thread.parent.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />{thread.replies.length > 0 && <div className="my-3 border-t border-white/5" />}{thread.replies.map(reply => <MessageRow key={reply.id} message={reply} own={reply.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />)}</div>
+      <div className="border-t border-white/5 p-3"><div className="flex gap-2 rounded-lg border border-white/10 bg-black/20 p-2"><Input value={input} onChange={event => onInput(event.target.value)} onKeyDown={event => event.key === "Enter" && onSend()} placeholder="Reply to thread" className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" data-testid="thread-input" /><Button size="sm" onClick={onSend} disabled={!input.trim()} className="h-8 w-8 bg-violet-600 p-0"><Send className="h-3.5 w-3.5" /></Button></div></div>
+    </aside>
+  );
+}
+
+function NewConversationDialog({ open, onOpenChange, users, currentUserId, headers, onCreated }) {
   const [tab, setTab] = useState("dm");
-  const [selectedUsers, setSelectedUsers] = useState([]);
-  const [channelName, setChannelName] = useState("");
-  const [channelPrivate, setChannelPrivate] = useState(false);
-  const [groupName, setGroupName] = useState("");
-  const [searchQ, setSearchQ] = useState("");
-
-  useEffect(() => { if (open) { setSelectedUsers([]); setChannelName(""); setGroupName(""); setSearchQ(""); } }, [open]);
-
-  const filteredUsers = users.filter(u => u.id !== currentUserId && (!searchQ || u.name.toLowerCase().includes(searchQ.toLowerCase())));
-
-  const createDM = async () => {
-    if (selectedUsers.length !== 1) return toast.error("Select exactly 1 user for a DM");
-    try { const r = await axios.post(`${API}/chat/dm/${selectedUsers[0]}`, {}, { headers }); onCreated(r.data); toast.success("DM opened"); }
-    catch { toast.error("Failed"); }
+  const [selected, setSelected] = useState([]);
+  const [search, setSearch] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [privateChannel, setPrivateChannel] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setSelected([]); setSearch(""); setName(""); setDescription(""); setPrivateChannel(false); setTab("dm"); } }, [open]);
+  const candidates = users.filter(user => user.id !== currentUserId && (!search || `${user.name} ${user.email}`.toLowerCase().includes(search.toLowerCase())));
+  const toggle = id => setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+  const create = async () => {
+    setBusy(true);
+    try {
+      let response;
+      if (tab === "dm") response = await axios.post(`${API}/chat/dm/${selected[0]}`, {}, { headers });
+      else if (tab === "group") response = await axios.post(`${API}/chat/group-dm`, { member_ids: selected, name: name.trim() || undefined }, { headers });
+      else response = await axios.post(`${API}/chat/channels`, { name, description, is_private: privateChannel, member_ids: privateChannel ? selected : [] }, { headers });
+      onCreated(response.data);
+      toast.success(tab === "channel" ? "Channel created" : "Conversation opened");
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Conversation could not be created");
+    } finally { setBusy(false); }
   };
-
-  const createGroup = async () => {
-    if (selectedUsers.length < 2) return toast.error("Select at least 2 people for a group");
-    try { const r = await axios.post(`${API}/chat/group-dm`, { member_ids: selectedUsers, name: groupName || undefined }, { headers }); onCreated(r.data); toast.success("Group chat created"); }
-    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
-
-  const createChannel = async () => {
-    if (!channelName.trim()) return toast.error("Channel name required");
-    try { const r = await axios.post(`${API}/chat/channels`, { name: channelName, is_private: channelPrivate, member_ids: channelPrivate ? selectedUsers : [] }, { headers }); onCreated(r.data); toast.success("Channel created"); }
-    catch { toast.error("Failed"); }
-  };
-
-  const toggleUser = (id) => setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
+  const invalid = tab === "dm" ? selected.length !== 1 : tab === "group" ? selected.length < 2 : name.trim().length < 2;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><MessageSquarePlus className="w-5 h-5 text-violet-400" />Start a new chat</DialogTitle>
-          <DialogDescription>Direct message a teammate, start a group chat, or create a channel.</DialogDescription>
-        </DialogHeader>
-
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid grid-cols-3">
-            <TabsTrigger value="dm" data-testid="tab-dm"><MessageCircle className="w-3 h-3 mr-1" />DM</TabsTrigger>
-            <TabsTrigger value="group" data-testid="tab-group"><Users className="w-3 h-3 mr-1" />Group</TabsTrigger>
-            <TabsTrigger value="channel" data-testid="tab-channel"><Hash className="w-3 h-3 mr-1" />Channel</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="dm" className="space-y-3 mt-3">
-            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><Input placeholder="Find a teammate..." value={searchQ} onChange={e => setSearchQ(e.target.value)} className="pl-9 rounded-full bg-muted/40 border-0" /></div>
-            <ScrollArea className="h-72 -mx-1 px-1"><div className="space-y-1">
-              {filteredUsers.map(u => {
-                const checked = selectedUsers[0] === u.id;
-                return (
-                  <button key={u.id} onClick={() => setSelectedUsers([u.id])} className={`w-full flex items-center gap-3 p-2 rounded-lg ${checked ? "bg-violet-500/15 ring-1 ring-violet-500/30" : "hover:bg-muted/40"}`} data-testid={`pick-user-${u.id}`}>
-                    <Avatar className="w-9 h-9"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(u.name)}, 55%, 40%)`, color: "white", fontSize: 11 }}>{initials(u.name)}</AvatarFallback></Avatar>
-                    <div className="flex-1 text-left min-w-0"><p className="text-sm font-medium truncate">{u.name}</p><p className="text-[10px] text-muted-foreground truncate">{u.email}</p></div>
-                    {checked && <CheckCheck className="w-4 h-4 text-violet-400" />}
-                  </button>
-                );
-              })}
-            </div></ScrollArea>
-            <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={createDM} disabled={selectedUsers.length !== 1} data-testid="confirm-dm">Open DM</Button></DialogFooter>
-          </TabsContent>
-
-          <TabsContent value="group" className="space-y-3 mt-3">
-            <Input placeholder="Group name (optional, auto-generates from members)" value={groupName} onChange={e => setGroupName(e.target.value)} className="rounded-full bg-muted/40 border-0 px-4" data-testid="group-name" />
-            <p className="text-xs text-muted-foreground">Select 2+ teammates to start a group chat. They'll all see the messages.</p>
-            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><Input placeholder="Search teammates..." value={searchQ} onChange={e => setSearchQ(e.target.value)} className="pl-9 rounded-full bg-muted/40 border-0" /></div>
-            <ScrollArea className="h-60 -mx-1 px-1"><div className="space-y-1">
-              {filteredUsers.map(u => {
-                const checked = selectedUsers.includes(u.id);
-                return (
-                  <button key={u.id} onClick={() => toggleUser(u.id)} className={`w-full flex items-center gap-3 p-2 rounded-lg ${checked ? "bg-violet-500/15 ring-1 ring-violet-500/30" : "hover:bg-muted/40"}`} data-testid={`pick-group-${u.id}`}>
-                    <Avatar className="w-9 h-9"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(u.name)}, 55%, 40%)`, color: "white", fontSize: 11 }}>{initials(u.name)}</AvatarFallback></Avatar>
-                    <div className="flex-1 text-left min-w-0"><p className="text-sm font-medium truncate">{u.name}</p><p className="text-[10px] text-muted-foreground truncate">{u.email}</p></div>
-                    {checked && <div className="w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center"><CheckCheck className="w-3 h-3 text-white" /></div>}
-                  </button>
-                );
-              })}
-            </div></ScrollArea>
-            <p className="text-[11px] text-muted-foreground text-center">{selectedUsers.length} selected</p>
-            <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={createGroup} disabled={selectedUsers.length < 2} data-testid="confirm-group">Create group</Button></DialogFooter>
-          </TabsContent>
-
-          <TabsContent value="channel" className="space-y-3 mt-3">
-            <Input placeholder="Channel name (e.g. ops, dev, general)" value={channelName} onChange={e => setChannelName(e.target.value.replace(/\s+/g, "-").toLowerCase())} className="rounded-full bg-muted/40 border-0 px-4" data-testid="channel-name-new" />
-            <label className="flex items-center gap-2 text-sm cursor-pointer p-2 rounded-lg hover:bg-muted/30">
-              <input type="checkbox" checked={channelPrivate} onChange={e => setChannelPrivate(e.target.checked)} className="w-4 h-4" />
-              <Lock className="w-3.5 h-3.5" />Private channel (invite-only)
-            </label>
-            {channelPrivate && (
-              <ScrollArea className="h-48 -mx-1 px-1"><div className="space-y-1">
-                {filteredUsers.map(u => {
-                  const checked = selectedUsers.includes(u.id);
-                  return (
-                    <button key={u.id} onClick={() => toggleUser(u.id)} className={`w-full flex items-center gap-3 p-2 rounded-lg ${checked ? "bg-violet-500/15" : "hover:bg-muted/40"}`}>
-                      <Avatar className="w-7 h-7"><AvatarFallback style={{ backgroundColor: `hsl(${avatarHue(u.name)}, 55%, 40%)`, color: "white", fontSize: 9 }}>{initials(u.name)}</AvatarFallback></Avatar>
-                      <span className="text-sm">{u.name}</span>
-                      {checked && <CheckCheck className="ml-auto w-4 h-4 text-violet-400" />}
-                    </button>
-                  );
-                })}
-              </div></ScrollArea>
-            )}
-            <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={createChannel} disabled={!channelName.trim()} data-testid="confirm-channel">Create channel</Button></DialogFooter>
-          </TabsContent>
+      <DialogContent className="max-w-lg border-white/10 bg-[#1d1f26]">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><MessageSquarePlus className="h-5 w-5 text-violet-400" />Start collaborating</DialogTitle><DialogDescription>Start a private message, bring a group together, or create an operational channel.</DialogDescription></DialogHeader>
+        <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }}>
+          <TabsList className="grid w-full grid-cols-3"><TabsTrigger value="dm">Direct</TabsTrigger><TabsTrigger value="group">Group chat</TabsTrigger><TabsTrigger value="channel">Channel</TabsTrigger></TabsList>
+          <TabsContent value="dm" className="space-y-3"><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={id => setSelected([id])} /></TabsContent>
+          <TabsContent value="group" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.slice(0, 80))} placeholder="Group name (optional)" className="border-white/10 bg-black/20" /><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></TabsContent>
+          <TabsContent value="channel" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="What is this channel for?" className="min-h-20 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/5 p-3"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-violet-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can find and read it.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
         </Tabs>
+        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="bg-violet-600 hover:bg-violet-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function UserSearch({ value, onChange }) {
+  return <div className="relative mt-3"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" /><Input value={value} onChange={event => onChange(event.target.value)} placeholder="Find teammates" className="border-white/10 bg-black/20 pl-9" /></div>;
+}
+
+function UserPicker({ candidates, selected, onToggle }) {
+  return <ScrollArea className="h-64 rounded-lg border border-white/5"><div className="p-1">{candidates.map(candidate => { const checked = selected.includes(candidate.id); return <button key={candidate.id} onClick={() => onToggle(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${checked ? "bg-violet-500/15" : "hover:bg-white/[0.04]"}`}><Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(candidate.name)}>{initials(candidate.name)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{candidate.name}</p><p className="truncate text-xs text-zinc-600">{candidate.email}</p></div>{checked && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-500"><Check className="h-3 w-3" /></span>}</button>; })}{candidates.length === 0 && <p className="p-8 text-center text-sm text-zinc-600">No teammates found</p>}</div></ScrollArea>;
+}
+
+function ConversationWelcome({ channel }) {
+  return <div className="flex h-full min-h-[360px] flex-col items-center justify-center px-6 text-center"><ChannelAvatar channel={channel} presence={null} size="md" /><h3 className="mt-4 text-xl font-semibold">Welcome to {channelDisplayName(channel)}</h3><p className="mt-2 max-w-md text-sm text-zinc-500">{channel.description || (channel.kind === "team" ? "Share the operational context that keeps everyone aligned." : "This private conversation is ready when you are.")}</p></div>;
+}
+
+function EmptyWorkspace({ onNew }) {
+  return <div className="flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-violet-500/15"><MessageCircle className="h-9 w-9 text-violet-400" /></div><h2 className="mt-5 text-2xl font-semibold">Nexus Chat, built for the work</h2><p className="mt-2 max-w-md text-sm text-zinc-500">Keep private conversations, operational channels, files, and ticket context in one secure workspace.</p><Button onClick={onNew} className="mt-5 bg-violet-600 hover:bg-violet-500"><Plus className="mr-2 h-4 w-4" />Start collaborating</Button></div>;
+}
+
+function EmptyContent({ icon: Icon, title, body }) {
+  return <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><Icon className="mx-auto h-8 w-8 text-zinc-700" /><h4 className="mt-3 font-medium">{title}</h4><p className="mt-1 text-sm text-zinc-600">{body}</p></div>;
+}
+
+function ConversationSkeleton() {
+  return <div className="space-y-2 p-2">{[1, 2, 3, 4, 5].map(item => <div key={item} className="flex animate-pulse gap-3 p-2"><div className="h-10 w-10 rounded-full bg-white/5" /><div className="flex-1 space-y-2"><div className="h-3 w-2/3 rounded bg-white/5" /><div className="h-2.5 w-full rounded bg-white/[0.03]" /></div></div>)}</div>;
+}
+
+function DayDivider({ label }) {
+  return <div className="my-5 flex items-center gap-3"><div className="h-px flex-1 bg-white/5" /><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">{label}</span><div className="h-px flex-1 bg-white/5" /></div>;
+}
+
+function TypingIndicator({ names }) {
+  return <div className="ml-12 mt-2 flex items-center gap-2 text-xs text-zinc-500"><span className="flex gap-1 rounded-full bg-white/5 px-3 py-2"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:240ms]" /></span>{names.join(", ")} typing</div>;
+}
+
+function ComposerButton({ icon: Icon, label, onClick }) {
+  return <button type="button" onClick={onClick} title={label} className="rounded-md p-2 text-zinc-500 hover:bg-white/5 hover:text-zinc-200"><Icon className="h-4 w-4" /></button>;
+}
+
+function SuggestionPanel({ children, title, className = "" }) {
+  return <div className={`absolute left-0 z-30 mb-2 max-h-72 w-full overflow-y-auto rounded-xl border border-white/10 bg-[#252832] py-1 shadow-2xl ${className}`}><p className="border-b border-white/5 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{title}</p>{children}</div>;
+}
+
+function avatarStyle(value) {
+  return { backgroundColor: `hsl(${avatarHue(value)}, 48%, 38%)`, color: "white", fontSize: 11 };
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

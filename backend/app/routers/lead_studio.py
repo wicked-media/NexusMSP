@@ -403,6 +403,65 @@ Best,
     return {"subject": subject, "body": body, "intent": intent}
 
 
+@router.post("/leads/{lead_id}/send-email")
+async def send_lead_email(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Send a lead response through the Microsoft 365 mailbox selected for lead responses."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+
+    data = data or {}
+    recipient = (data.get("to") or lead.get("email") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
+    if not recipient:
+        raise HTTPException(400, "This lead does not have an email address")
+    if not subject or not body:
+        raise HTTPException(400, "Subject and message are required")
+
+    cc_addresses = data.get("cc") or []
+    if isinstance(cc_addresses, str):
+        cc_addresses = [address.strip() for address in cc_addresses.split(",") if address.strip()]
+
+    from app.routers.email_signatures import append_default_signature
+    html_body, _, signature_id = await append_default_signature(
+        body=body,
+        body_type=data.get("body_type") or "plain",
+        current_user=current_user,
+        subject=subject,
+    )
+    from app.routers.email_utils import send_email
+    delivery = await send_email(
+        recipient,
+        subject,
+        html_body,
+        category="lead_responses",
+        cc_addresses=cc_addresses,
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    activity = {
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "lead_name": lead.get("company_name"),
+        "type": "email",
+        "title": f"Email response: {subject}",
+        "description": body,
+        "to_email": recipient,
+        "cc_addresses": cc_addresses,
+        "delivery_status": delivery.get("status", "failed"),
+        "delivery_message": delivery.get("message", ""),
+        "sender_mailbox": delivery.get("sender"),
+        "signature_id": signature_id,
+        "created_at": now,
+        "created_by_name": current_user.get("name") or current_user.get("email"),
+    }
+    await db.lead_activities.insert_one(activity)
+    await db.leads.update_one({"id": lead_id}, {"$set": {"last_contact": now, "last_activity_at": now}})
+    activity.pop("_id", None)
+    return {"delivery": delivery, "activity": activity}
+
+
 @router.post("/lead-studio/quick-parse")
 async def quick_parse(data: dict, current_user: dict = Depends(get_current_user)):
     """Parse a pasted email signature / about-page / URL into lead fields."""

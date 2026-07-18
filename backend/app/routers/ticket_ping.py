@@ -5,6 +5,7 @@ import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import ticket_audit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ async def manually_trigger_ping(ticket_id: str, current_user: dict = Depends(get
     team = await get_team_for_ticket(ticket)
     if team:
         await send_ping_notification(team, ticket, "reminder")
+    await ticket_audit(ticket_id, current_user, "team_pinged", f"Sent reminder to {len(team)} technician{'s' if len(team) != 1 else ''}")
     
     return {"message": f"Ping sent to {len(team)} team members", "pinged": len(team)}
 
@@ -177,6 +179,7 @@ async def pick_up_ticket(ticket_id: str, current_user: dict = Depends(get_curren
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     
+    await ticket_audit(ticket_id, current_user, "picked_up", f"Assigned to {current_user['name']}")
     return {"message": f"Ticket picked up by {current_user['name']}"}
 
 # ============== BACKGROUND PING CHECKER ==============

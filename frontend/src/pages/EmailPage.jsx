@@ -146,11 +146,12 @@ export default function EmailPage() {
     <div className="space-y-6" data-testid="email-page">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Email</h1>
-          <p className="text-muted-foreground">Office 365 email integration</p>
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><Mail className="w-4 h-4 text-sky-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Email</h1><p className="text-sm text-muted-foreground">Technician mail, client communication, and delivery tracking.</p></div>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => { window.location.href = "/o365-setup"; }} data-testid="email-intake-link"><Inbox className="w-4 h-4 mr-2" />Email Intake</Button>
           <Button variant="outline" onClick={fetchData}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh

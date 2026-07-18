@@ -22,6 +22,9 @@ app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads
 # Priority ordering ensures specific routes are matched before dynamic ones
 ROUTER_PRIORITY = [
     "auth",
+    # The client portal also exposes /tickets. Register the technician-facing
+    # ticket router first so the main application does not match portal routes.
+    "tickets",
     "ticket_attachments", "ticket_email_notifications",
     "device_discovery", "device_viewers", "device_chat",
     "invoice_pdf",
@@ -122,11 +125,17 @@ async def startup_event():
     asyncio.create_task(_standup_digest_scheduler())
     asyncio.create_task(_warroom_escalation_loop())
     asyncio.create_task(_chain_reactions_loop())
+    asyncio.create_task(_microsoft365_mail_sync_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
 async def _boot_warmup():
     """Run seed + ticket-number backfill without blocking app startup."""
+    try:
+        from app.services.chat_access import initialize_chat_storage
+        await initialize_chat_storage()
+    except Exception as e:
+        logger.error(f"Chat index initialization failed: {e}")
     try:
         await seed_data()
     except Exception as e:
@@ -248,6 +257,31 @@ async def _chain_reactions_loop():
             await asyncio.sleep(60)
 
 
+async def _microsoft365_mail_sync_loop():
+    """Poll verified Microsoft 365 inboxes so email intake does not rely on a manual refresh."""
+    import asyncio
+    await asyncio.sleep(60)
+    while True:
+        interval_minutes = 5
+        try:
+            mailbox_settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+            interval_minutes = max(1, min(30, int(mailbox_settings.get("mail_sync_interval_minutes") or 5)))
+            if (
+                mailbox_settings.get("connected")
+                and mailbox_settings.get("live_sync_enabled")
+                and mailbox_settings.get("mail_sync_enabled", True)
+            ):
+                from app.routers.o365_mailbox import sync_o365_emails
+                result = await sync_o365_emails({"id": "system-microsoft365-sync", "name": "Microsoft 365 Sync", "role": "system"})
+                logger.info(
+                    "Microsoft 365 mailbox sync: %s fetched, %s errors",
+                    result.get("emails_fetched", 0), result.get("errors", 0),
+                )
+        except Exception as exc:
+            logger.debug("Microsoft 365 mailbox sync error: %s", exc)
+        await asyncio.sleep(interval_minutes * 60)
+
+
 async def _recurring_invoice_scheduler():
     """Background loop that checks for due recurring invoices and auto-generates them."""
     import asyncio
@@ -312,93 +346,20 @@ async def _recurring_invoice_scheduler():
             except Exception as _ie:
                 logger.debug(f"Indexation tick error: {_ie}")
 
-            # Find active recurring invoices that are due today or overdue
-            due_invoices = await db.recurring_invoices.find({
-                "status": "active",
-                "next_generation": {"$lte": today_str},
-            }, {"_id": 0}).to_list(100)
-
-            if not due_invoices:
-                continue
-
-            generated_count = 0
-            for ri in due_invoices:
-                try:
-                    import uuid as _uuid
-                    inv_number = f"INV-{now.strftime('%Y%m')}-{_uuid.uuid4().hex[:4].upper()}"
-                    # Calculate due date from payment terms
-                    days_map = {"due_on_receipt": 0, "net_7": 7, "net_14": 14, "net_30": 30, "net_45": 45, "net_60": 60, "net_90": 90}
-                    days = days_map.get(ri.get("payment_terms", "net_30"), 30)
-                    from datetime import timedelta as _td
-                    due_date = (now + _td(days=days)).strftime("%Y-%m-%d")
-
-                    invoice = {
-                        "id": f"inv-{_uuid.uuid4().hex[:8]}",
-                        "invoice_number": inv_number,
-                        "client_id": ri.get("client_id", ""),
-                        "client_name": ri.get("client_name", ""),
-                        "description": ri.get("description", ""),
-                        "line_items": ri.get("line_items", []),
-                        "subtotal": ri.get("subtotal", ri.get("amount", 0)),
-                        "tax_rate": ri.get("tax_rate", 0),
-                        "tax_amount": ri.get("tax_amount", 0),
-                        "total": ri.get("amount", 0),
-                        "amount_due": ri.get("amount", 0),
-                        "amount_paid": 0,
-                        "currency": ri.get("currency", "AUD"),
-                        "status": "sent",
-                        "payment_status": "unpaid",
-                        "due_date": due_date,
-                        "recurring_invoice_id": ri["id"],
-                        "notes": ri.get("notes", ""),
-                        "auto_generated": True,
-                        "created_at": now.isoformat(),
-                        "created_by": "Auto-Scheduler",
-                    }
-                    await db.invoices.insert_one(invoice)
-
-                    # Calculate next generation date
-                    from app.routers.recurring_invoices import _calc_next_date
-                    next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
-                    gen_entry = {
-                        "invoice_id": invoice["id"],
-                        "invoice_number": inv_number,
-                        "amount": ri.get("amount", 0),
-                        "generated_at": now.isoformat(),
-                        "generated_by": "Auto-Scheduler",
-                    }
-                    await db.recurring_invoices.update_one({"id": ri["id"]}, {
-                        "$inc": {"invoices_generated": 1, "total_billed": ri.get("amount", 0)},
-                        "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
-                        "$push": {"generation_history": gen_entry},
-                    })
-                    generated_count += 1
-
-                    # Log the auto-generation
-                    await db.scheduler_logs.insert_one({
-                        "id": f"slog-{_uuid.uuid4().hex[:8]}",
-                        "type": "recurring_invoice",
-                        "recurring_invoice_id": ri["id"],
-                        "invoice_id": invoice["id"],
-                        "invoice_number": inv_number,
-                        "client_name": ri.get("client_name", ""),
-                        "amount": ri.get("amount", 0),
-                        "auto_send": ri.get("auto_send", False),
-                        "status": "generated",
-                        "timestamp": now.isoformat(),
-                    })
-
-                except Exception as e:
-                    logger.error(f"Failed to auto-generate invoice for {ri.get('id')}: {e}")
-                    await db.scheduler_logs.insert_one({
-                        "type": "recurring_invoice_error",
-                        "recurring_invoice_id": ri.get("id"),
-                        "error": str(e),
-                        "timestamp": now.isoformat(),
-                    })
-
-            if generated_count > 0:
-                logger.info(f"Recurring invoice scheduler: auto-generated {generated_count} invoices")
+            # Use the same guarded generation path as the operator-triggered run.
+            # This prevents duplicate billing periods and records delivery results.
+            from app.routers.recurring_invoices import run_scheduler_now
+            summary = await run_scheduler_now({
+                "id": "system-recurring-scheduler",
+                "name": "Automatic Scheduler",
+                "role": "system",
+            })
+            if summary.get("processed"):
+                logger.info(
+                    "Recurring invoice scheduler: generated %s invoice(s), skipped %s duplicate period(s)",
+                    summary.get("generated", 0),
+                    summary.get("skipped_duplicates", 0),
+                )
 
         except Exception as e:
             logger.debug(f"Recurring invoice scheduler error: {e}")

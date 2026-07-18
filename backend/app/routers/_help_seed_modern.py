@@ -1,4 +1,4 @@
-"""Modern help center seed (Feb 2026).
+"""Modern help center seed.
 
 This is the canonical seed for help articles after the great dedup audit.
 The `STALE_SLUGS` list contains old article slugs that should be removed from
@@ -12,6 +12,8 @@ The reseed endpoint in `chat_help.py` will:
 """
 
 # Stale slugs that referenced merged / deleted modules. Safe to remove.
+HELP_CATALOG_VERSION = "2026-07-17-email-intake-multi-inbox"
+
 STALE_SLUGS = [
     # The "*-audit" articles were one-off audits, not user docs
     "qbr-page-audit",
@@ -37,7 +39,7 @@ MODERN_ARTICLES = [
     # ── What's New (auto-updated mirror of /api/changelog) ──
     {
         "slug": "whats-new",
-        "title": "What's New in NexusOps",
+        "title": "What's New in NexusMSP",
         "category": "Release Notes",
         "icon": "🆕",
         "order": -1,
@@ -85,13 +87,13 @@ MODERN_ARTICLES = [
     # ── Getting Started (refreshed) ──
     {
         "slug": "getting-started",
-        "title": "Getting Started with NexusOps",
+        "title": "Getting Started with NexusMSP",
         "category": "Basics",
         "icon": "🚀",
         "order": 0,
         "summary": "Your first 10 minutes inside the platform.",
         "body_md": """## Welcome
-NexusOps is your MSP command-and-control hub. Here's what to do in your first session:
+NexusMSP is your MSP command-and-control hub. Here's what to do in your first session:
 
 1. **Sign in** at the login screen with the credentials your admin provided.
 2. **Open the Dashboard** — your default landing page. The **What's New** tile (top-right) keeps you in the loop as features land.
@@ -209,7 +211,7 @@ Deep-link: `/team-hub?tab=utilization`.
 | Service Tiers | Bronze/Silver/Gold/Platinum/Diamond SLA tiers |
 | Authentication | Microsoft SSO, JWT settings |
 | Mailbox & Email | O365 inbox, email signatures |
-| Integrations | Xero, Stripe, Resend, SMS, Acronis, Pax8, Huntress, SupED, CIPP, UniFi, TRMM, Splynx, Hudu, Syncro |
+| Integrations | Xero, Stripe, Microsoft 365 Email, SMS, Acronis, Pax8, Huntress, SupED, CIPP, UniFi, TRMM, Splynx, Hudu, Syncro |
 | AI & Automation | Provider, model, Emergent LLM key |
 | Notifications | Email/SMS alert preferences |
 | Ticket Defaults | Numbering, SLA, workflows |
@@ -354,6 +356,205 @@ Hit **+ New Article**. Markdown is supported; screenshots can be uploaded inline
 
 ## Reseed
 Admins can hit **Reseed** to refresh the default articles. This also prunes stale articles (e.g. `*-audit` slugs from the old documentation pass).
+""",
+    },
+    {
+        "slug": "device-operations",
+        "title": "Device Operations: inventory, health and assignment",
+        "category": "Infrastructure",
+        "icon": "Device",
+        "order": 35,
+        "summary": "Use the device workspace to verify agent data, ownership, health and recent activity.",
+        "body_md": """## Start with the device header
+Open **Devices**, then select a device. The header shows its name, online ping state, operating system, client and compliance posture. Use the edit action to correct the device name or assign it to the right client or contact.
+
+## What to check
+- **Overview**: CPU, memory, disk, uptime and recent health signals.
+- **Software**: the inventory reported by the Nexus agent.
+- **Network**: adapters, IP addresses and recent connectivity data.
+- **Security**: Defender and compliance evidence reported by the device.
+- **Patching**: available, approved and installed updates.
+- **Audit log**: enrolment, commands, patch activity and device changes.
+
+## If data is missing
+Confirm the agent is online, then wait for its next inventory heartbeat or request a refresh. The audit log records the enrolment and collection activity so you can distinguish an agent issue from an empty data set.
+""",
+    },
+    {
+        "slug": "patching-with-winget",
+        "title": "Patching and Winget",
+        "category": "Infrastructure",
+        "icon": "Patch",
+        "order": 36,
+        "summary": "Review, approve and schedule Windows and application updates safely.",
+        "body_md": """## Patch workflow
+1. Open a device and select **Patching**.
+2. Review outstanding Windows and application updates.
+3. Approve the updates that are safe for the device and its service window.
+4. Schedule the approved patch action from the device or linked ticket.
+5. Review the execution result and reboot state in the device audit log.
+
+## Winget
+For supported Windows endpoints, NexusMSP can use Winget to discover and update installed applications. Treat Winget packages as application patches: approve them first, schedule them in a maintenance window, then review the result. Do not use a forced update for line-of-business software without a tested rollback plan.
+
+## Ticket-led patching
+When a ticket identifies an update, link the affected device, approve the required patch and schedule it from the ticket workflow. The resulting device activity provides the evidence for the ticket resolution.
+""",
+    },
+    {
+        "slug": "ticket-workspace-and-email",
+        "title": "Tickets: triage, service tiers and customer email",
+        "category": "Service Desk",
+        "icon": "Ticket",
+        "order": 37,
+        "summary": "A practical guide to creating, working and communicating from a ticket.",
+        "body_md": """## Create and triage
+Choose the client before saving a new ticket. NexusMSP applies that client's service tier and SLA rules automatically. Set the contact, impact, urgency, owner and linked device as needed.
+
+## Work the ticket
+Use the workspace tabs for conversation, tasks, files, time, related devices and audit history. Keep customer-facing replies in the conversation and use internal notes for technician-only context.
+
+## Email signatures
+Emails sent from a ticket use the rich signature set in **My Settings > Signature** for the signed-in technician. The composer shows the signature as a preview, while the server applies it when the email is sent so it remains consistent across ticket, workshop, field, purchase-order and invoice emails.
+
+## Service tier changes
+The service tier comes from the client account. Update the client's tier if the agreement changes; do not override it ticket-by-ticket unless an authorised exception is required.
+""",
+    },
+    {
+        "slug": "consolidated-workspaces",
+        "title": "Finding consolidated workspaces",
+        "category": "Basics",
+        "icon": "Guide",
+        "order": 38,
+        "summary": "Where related tools now live after the sidebar simplification.",
+        "body_md": """## One capability, one home
+NexusMSP reduces duplicate navigation by grouping related views into a single page with tabs. Use the page tabs instead of looking for separate sidebar links.
+
+| Need | Open |
+|---|---|
+| Technician roster, utilisation or skills | **Team Hub** |
+| Connected services and their setup | **Integrations** |
+| Client health, risk, sentiment or timeline | **Client Insights** |
+| Triage, routing and self-healing | **Auto-Ops** |
+| Vault, password rotation and MFA | **Credentials** |
+| Dispatch board, calendar and availability | **Dispatch** |
+| SLA timers, penalties and reports | **SLA Manager** |
+
+The command palette is the quickest way to open a workspace when you know its name.
+""",
+    },
+    {
+        "slug": "nexus-agent-enrolment",
+        "title": "Nexus Agent enrolment and remote access",
+        "category": "Infrastructure",
+        "icon": "Agent",
+        "order": 39,
+        "summary": "Generate a client-specific installer and validate the first device check-in.",
+        "body_md": """## Generate an installer
+Open **Nexus Agent**, select the target client and generate the installer or deployment command. The generated enrolment token links the endpoint to that client when the agent first checks in.
+
+## Validate enrolment
+After installation, find the device in **Devices**. Confirm its online ping, inventory, network information and audit entry. If it appears without details, allow the next inventory heartbeat and then refresh the device page.
+
+## Remote access
+Configure your approved provider in **Integrations** or **Remote Access**. NexusMSP keeps the remote action in the device control bar; credentials and server configuration remain in the integration settings. Never place server API tokens in ticket notes or customer-facing emails.
+""",
+    },
+    {
+        "slug": "products-inventory-and-ticket-billing",
+        "title": "Products & Inventory: catalogue to ticket billing",
+        "category": "Business",
+        "icon": "Package",
+        "order": 40,
+        "summary": "Create products, track stock and instances, use quantity pricing, and bill the right amount from tickets.",
+        "body_md": """## What this module manages
+Use **Products & Inventory** for catalogue items, stock, asset-level instances, labels, bundles and quantity-break pricing. Products can then be added to tickets and invoiced with the price locked at the time of sale.
+
+## Create a product
+1. Open **Products & Inventory** and choose **Add Product**.
+2. Enter a clear name, SKU, category, vendor, cost, retail price, tax rate and reorder level.
+3. Set the opening quantity only when you are recording stock already on hand.
+4. Leave **Active** enabled for items technicians can add to tickets.
+5. Save the product. A SKU is also used as the default barcode when one is available.
+
+## Quantity-break pricing
+Use **Add Tier** to set a minimum quantity and unit price, for example `1+ = $100`, `10+ = $90`.
+
+- The product detail page shows every saved tier under **Pricing**.
+- When a technician adds the product to a ticket, NexusMSP applies the best eligible tier automatically.
+- The resulting ticket and invoice line retain that price even if the catalogue price changes later.
+
+## Stock and tracked instances
+- Use **Stock Movement** for receiving, issuing or correcting quantity. Enter a reason so Stock History remains useful at audit time.
+- Use **Inventory > Add Instances** for individually tracked assets such as laptops, switches or serialised hardware. NexusMSP generates a unique serial and barcode when none is supplied.
+- Creating instances also creates a matching Stock History entry. Review **Stock History** to see before/after quantities, source and technician.
+- Use **Barcodes & Labels** to print the master product label or an instance label.
+
+## Bundles
+Open a product, select **Bundle**, and add its component products with quantities. The bundle tab shows the component stock, cost and retail total. Remove components from the same tab when the package changes.
+
+## Ticket and invoice workflow
+1. Open the ticket for the approved work.
+2. Add the product and quantity from the ticket items area. Physical inventory items cannot exceed the available on-hand stock; services, software, licences and cloud items remain billable without stock allocation.
+3. Confirm the applied unit price and quantity before billing.
+4. Use the ticket's invoice action to create a draft invoice or add items to an existing invoice.
+
+The ticket keeps the sale price as an audit record; the invoice inherits that same captured price.
+
+## Safe deletion
+Deleting a product requires confirmation. It removes the catalogue product, tracked instances, stock movements and bundle references. Existing ticket and invoice line items remain as historical financial records. Prefer setting a product inactive when you want to stop new use but preserve the catalogue history.
+
+## Quick troubleshooting
+- **No product in a picker:** confirm it is active, then refresh the ticket or product page.
+- **Stock does not look right:** review Stock History before making an adjustment; use a reason for every correction.
+- **Tier price did not save:** reopen the product and review the tier values. Each minimum quantity must be at least 1 and prices cannot be negative.
+- **Missing barcode:** open the product and choose **Generate Barcode** or use the SKU as the barcode value.
+""",
+    },
+    {
+        "slug": "email-intake-and-leads",
+        "title": "Email Intake: multiple inboxes and new leads",
+        "category": "Sales & CRM",
+        "icon": "Mail",
+        "order": 41,
+        "summary": "Connect lead inboxes, test the email-to-lead workflow, and know how each enquiry is handled.",
+        "body_md": """## What Email Intake does
+Email Intake turns a new enquiry into a lead in **Lead Studio**. It also records the original email as lead activity and creates a team notification, so a new request is visible without manually re-keying it.
+
+## Add one or more inboxes
+1. Open **Lead Studio** and select **Email Intake**, or open **Settings > Office 365 Mailbox**.
+2. Enter the Azure app details and mailbox address for the inbox you want to connect.
+3. Select **Connect Mailbox**. The inbox appears under **Connected Inboxes**.
+4. Use **Add Inbox** to connect another sales, web-enquiries or regional mailbox. Each inbox remains listed separately and can be removed without affecting the others.
+
+Keep routing consistent: enable **Email to lead** for enquiry mailboxes. Enable **Email to ticket** only where known customer support email should create tickets instead of leads.
+
+## Test the workflow safely
+Before using a live mailbox, select **Create demo email lead** on the Email Intake page. NexusMSP creates a unique test enquiry and opens it in **Lead Studio**. Confirm that:
+
+- a new lead is visible with **Email** as its source;
+- the initial email is present in the lead activity history; and
+- the notification bell shows the new enquiry.
+
+Use the test lead to validate assignment, pipeline movement and follow-up rules, then archive or delete it when your test is complete.
+
+## Incoming-email behaviour
+| Sender and routing | Result |
+|---|---|
+| New sender with Email to lead enabled | Creates a new lead and initial email activity. |
+| Existing lead | Adds the email as activity and refreshes the last-contact time. |
+| Known client contact with Email to ticket enabled | Creates a support ticket for that client. |
+| Email to lead disabled | Records no lead from the incoming message. |
+
+## Current connection status
+The current Email Intake page stores and manages mailbox configuration, supports multiple inboxes, and provides a safe demo lead. Live Microsoft Graph mailbox synchronisation requires the Microsoft OAuth/Graph connection to be completed for your Azure app before production mail is pulled automatically. Do not treat a successful configuration test as proof that live mailbox polling is enabled.
+
+## Troubleshooting
+- **No new lead:** confirm Email to lead is enabled, then run the demo lead test to verify the Lead Studio path.
+- **Wrong result for a customer email:** check the known contact email and whether Email to ticket is enabled.
+- **Cannot add or remove inboxes:** Email Intake settings require an administrator.
+- **Duplicate inbox:** connect the same mailbox only once; reconnecting it refreshes its saved configuration.
 """,
     },
 ]

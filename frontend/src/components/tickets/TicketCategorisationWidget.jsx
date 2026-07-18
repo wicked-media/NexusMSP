@@ -46,8 +46,13 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
 
   useEffect(() => {
     if (!ticket?.id) return;
-    axios.get(`${API}/ticket-categories`, { headers }).then(r => setCategories(r.data)).catch(() => {});
-    axios.get(`${API}/ticket-priority-matrix`, { headers }).then(r => setMatrix(r.data)).catch(() => {});
+    axios.get(`${API}/ticket-categories`, { headers }).then(r => {
+      const rows = Array.isArray(r.data) ? r.data : (r.data?.categories || r.data?.items || []);
+      setCategories(rows);
+    }).catch(() => {});
+    axios.get(`${API}/ticket-priority-matrix`, { headers }).then(r => {
+      setMatrix(Array.isArray(r.data?.matrix) ? r.data : null);
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket?.id]);
 
@@ -64,9 +69,8 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
   const selectedCategory = categories.find(c => c.id === state.category_id);
   const issueTypes = selectedCategory?.issue_types || [];
 
-  const computedPriority = matrix
-    ? matrix.matrix[state.urgency - 1]?.[state.impact - 1]?.priority
-    : null;
+  const matrixRows = Array.isArray(matrix?.matrix) ? matrix.matrix : [];
+  const computedPriority = matrixRows[state.urgency - 1]?.[state.impact - 1]?.priority || null;
 
   const persist = async (patch) => {
     setSaving(true);
@@ -207,7 +211,7 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
         )}
 
         {/* 5×5 mini heatmap */}
-        {matrix && (
+        {matrixRows.length > 0 && (
           <details className="group">
             <summary className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 cursor-pointer hover:text-zinc-300 select-none">
               Priority matrix
@@ -219,15 +223,15 @@ export default function TicketCategorisationWidget({ ticket, token, onUpdated })
                 <>
                   <div key={`u-${u.v}`} className="text-[8px] text-zinc-500 font-mono pr-1 leading-[14px]">U{u.v}</div>
                   {IMPACT.map(i => {
-                    const p = matrix.matrix[u.v - 1][i.v - 1].priority;
+                    const p = matrixRows[u.v - 1]?.[i.v - 1]?.priority;
                     const isMe = u.v === state.urgency && i.v === state.impact;
                     return (
                       <div
                         key={`m-${u.v}-${i.v}`}
-                        className={`text-[8px] font-bold uppercase w-5 h-3.5 leading-[14px] text-center rounded ${PRIORITY_TONE[p]} ${isMe ? "ring-1 ring-white/60" : "opacity-70"}`}
+                        className={`text-[8px] font-bold uppercase w-5 h-3.5 leading-[14px] text-center rounded ${PRIORITY_TONE[p] || "text-zinc-500 bg-zinc-500/10"} ${isMe ? "ring-1 ring-white/60" : "opacity-70"}`}
                         title={`U${u.v} × I${i.v} = ${p}`}
                       >
-                        {p[0]}
+                        {p?.[0] || "·"}
                       </div>
                     );
                   })}

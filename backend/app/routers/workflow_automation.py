@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timezone
 import uuid
 from app.database import db
@@ -47,6 +47,8 @@ CONDITION_OPERATORS = ["equals", "not_equals", "contains", "greater_than", "less
 @router.get("/workflows")
 async def get_workflows(current_user: dict = Depends(get_current_user)):
     workflows = await db.workflows.find({}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    if not workflows:
+        workflows = await _seed_monitoring_workflow()
     return workflows
 
 
@@ -158,7 +160,94 @@ async def get_workflow_logs(workflow_id: str, current_user: dict = Depends(get_c
 @router.get("/workflows/stats/overview")
 async def get_workflow_stats(current_user: dict = Depends(get_current_user)):
     all_wf = await db.workflows.find({}, {"_id": 0}).to_list(500)
+    if not all_wf:
+        all_wf = await _seed_monitoring_workflow()
     total = len(all_wf)
     active = len([w for w in all_wf if w.get("enabled")])
     total_executions = sum(w.get("execution_count", 0) for w in all_wf)
     return {"total": total, "active": active, "inactive": total - active, "total_executions": total_executions}
+
+
+def _condition_matches(condition: dict, event: dict) -> bool:
+    field = condition.get("field")
+    if not field:
+        return True
+    value = event.get(field)
+    expected = condition.get("value")
+    operator = condition.get("operator", "equals")
+    if operator == "equals": return str(value).lower() == str(expected).lower()
+    if operator == "not_equals": return str(value).lower() != str(expected).lower()
+    if operator == "contains": return str(expected).lower() in str(value).lower()
+    if operator == "is_empty": return value in (None, "", [], {})
+    if operator == "is_not_empty": return value not in (None, "", [], {})
+    try:
+        if operator == "greater_than": return float(value) > float(expected)
+        if operator == "less_than": return float(value) < float(expected)
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+async def dispatch_workflow_event(trigger_type: str, event: dict[str, Any]) -> list[dict]:
+    """Run enabled workflows for an internal event and persist an auditable log.
+
+    Actions that need an unconfigured external service are explicitly recorded as
+    skipped; they are never silently treated as delivered.
+    """
+    workflows = await db.workflows.find({"enabled": True, "trigger.type": trigger_type}, {"_id": 0}).to_list(200)
+    dispatched: list[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+    for workflow in workflows:
+        if not all(_condition_matches(c, event) for c in workflow.get("conditions", [])):
+            continue
+        results = []
+        for action in workflow.get("actions", []):
+            action_type, config = action.get("type", ""), action.get("config") or {}
+            result = {"action": action_type, "status": "skipped", "message": "No action taken"}
+            ticket_id, device_id = event.get("ticket_id"), event.get("device_id")
+            if action_type == "change_priority" and ticket_id:
+                priority = config.get("new_priority") or config.get("priority")
+                if priority:
+                    await db.tickets.update_one({"id": ticket_id}, {"$set": {"priority": priority, "updated_at": now}})
+                    result = {"action": action_type, "status": "completed", "message": f"Ticket priority set to {priority}"}
+            elif action_type == "assign_ticket" and ticket_id and config.get("assign_to"):
+                await db.tickets.update_one({"id": ticket_id}, {"$set": {"assigned_to": config["assign_to"], "updated_at": now}})
+                result = {"action": action_type, "status": "completed", "message": "Ticket assigned"}
+            elif action_type == "add_note" and ticket_id and config.get("note_text"):
+                await db.ticket_notes.insert_one({"id": uuid.uuid4().hex, "ticket_id": ticket_id, "body": config["note_text"], "author": "Automation", "author_type": "system", "is_internal": True, "created_at": now})
+                result = {"action": action_type, "status": "completed", "message": "Internal ticket note added"}
+            elif action_type == "tag_device" and device_id and config.get("tags"):
+                tags = config["tags"] if isinstance(config["tags"], list) else [t.strip() for t in str(config["tags"]).split(",") if t.strip()]
+                await db.devices.update_one({"id": device_id}, {"$addToSet": {"tags": {"$each": tags}}})
+                result = {"action": action_type, "status": "completed", "message": f"Added {len(tags)} device tag(s)"}
+            elif action_type in {"run_script", "reboot_device"}:
+                result = {"action": action_type, "status": "skipped", "message": "Requires a connected Nexus Agent; command dispatch will be enabled per enrolled device."}
+            elif action_type in {"send_email", "send_slack", "send_teams", "webhook"}:
+                result = {"action": action_type, "status": "skipped", "message": "Integration is not configured; nothing was sent."}
+            elif action_type == "create_ticket":
+                result = {"action": action_type, "status": "skipped", "message": "Event already owns ticket creation; avoid duplicate monitoring tickets."}
+            results.append(result)
+        log = {"id": f"wflog-{uuid.uuid4().hex[:8]}", "workflow_id": workflow["id"], "status": "completed", "trigger_data": event, "results": results, "executed_at": now, "executed_by": "system", "is_test": False}
+        await db.workflow_logs.insert_one(log)
+        await db.workflows.update_one({"id": workflow["id"]}, {"$inc": {"execution_count": 1}, "$set": {"last_executed": now}})
+        dispatched.append({"workflow_id": workflow["id"], "results": results})
+    return dispatched
+
+
+async def _seed_monitoring_workflow() -> list[dict]:
+    """Provide one conservative, enabled policy that is safe before integrations exist."""
+    now = datetime.now(timezone.utc).isoformat()
+    workflow = {
+        "id": "wf-monitoring-critical", "name": "Critical monitoring escalation",
+        "description": "Tag the device and leave an internal note when a critical monitoring alert creates a ticket.",
+        "enabled": True, "trigger": {"type": "alert_triggered"},
+        "conditions": [{"field": "severity", "operator": "equals", "value": "critical"}],
+        "actions": [
+            {"id": "act-critical-note", "type": "add_note", "config": {"note_text": "Critical monitoring alert automatically escalated by NexusMSP."}},
+            {"id": "act-critical-tag", "type": "tag_device", "config": {"tags": "monitoring-critical"}},
+        ],
+        "nodes": [], "edges": [], "execution_count": 0, "last_executed": None,
+        "created_by": "System", "created_at": now, "updated_at": now,
+    }
+    await db.workflows.update_one({"id": workflow["id"]}, {"$setOnInsert": workflow}, upsert=True)
+    return [workflow]

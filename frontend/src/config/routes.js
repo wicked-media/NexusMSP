@@ -17,7 +17,8 @@ export const routeConfig = [
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
   { path: "/warroom/:id", component: page("WarRoomPage"), auth: true, layout: false },
   { path: "/warroom/public/:slug", component: page("WarRoomPublicPage"), auth: false, layout: false },
-  { path: "/tech-roster", component: page("TechRosterPage"), auth: true, layout: true },
+  // Roster is managed inside Team Hub; keep legacy links functional.
+  { path: "/tech-roster", component: page("TechRosterRedirectPage"), auth: true, layout: true },
   { path: "/blueprints", component: page("BlueprintsPage"), auth: true, layout: true },
   { path: "/qbr", component: page("QBRPage"), auth: true, layout: true },
   { path: "/invoice-templates", component: page("InvoiceTemplatesPage"), auth: true, layout: true },
@@ -62,24 +63,23 @@ export const routeConfig = [
 
   // Reports & Analytics
   { path: "/reports", component: page("ReportsHubPage"), auth: true, layout: true },
-  { path: "/financial-reports", component: page("ReportsHubPage"), auth: true, layout: true },
-  { path: "/roi-reports", component: page("ReportsHubPage"), auth: true, layout: true },
+  { path: "/financial-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=financial" },
+  { path: "/roi-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=roi" },
   { path: "/benchmarking", component: page("BenchmarkingPage"), auth: true, layout: true },
   { path: "/profitability-heatmap", component: page("ProfitabilityHeatmapPage"), auth: true, layout: true },
   { path: "/incident-heatmap", component: page("IncidentHeatmapPage"), auth: true, layout: true },
   { path: "/cost-per-ticket", component: page("CostPerTicketPage"), auth: true, layout: true },
   { path: "/revenue-forecast", component: page("RevenueCommandCenterPage"), auth: true, layout: true },
   { path: "/rpe-dashboard", component: page("RpeDashboardPage"), auth: true, layout: true },
-  { path: "/client-reports", component: page("ReportsHubPage"), auth: true, layout: true },
+  { path: "/client-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=client" },
 
   // Service Management
   { path: "/sla-timer", component: page("SlaManagerPage"), auth: true, layout: true },
-  { path: "/sla-penalties", component: page("SlaManagerPage"), auth: true, layout: true },
+  { path: "/sla-penalties", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer?tab=penalties" },
   { path: "/dispatch-board", component: page("DispatchCenterPage"), auth: true, layout: true },
   { path: "/escalation-matrix", component: page("EscalationMatrixPage"), auth: true, layout: true },
   { path: "/change-management", component: page("ChangeManagementPage"), auth: true, layout: true },
   { path: "/postmortem", component: page("PostmortemPage"), auth: true, layout: true },
-  { path: "/approvals", component: page("ApprovalWorkflowsPage"), auth: true, layout: true },
   { path: "/live-chat", component: page("LiveChatPage"), auth: true, layout: true },
   { path: "/bulk-actions", component: page("BulkActionsPage"), auth: true, layout: true },
 
@@ -91,11 +91,11 @@ export const routeConfig = [
   { path: "/asset-lifecycle", component: page("AssetLifecyclePage"), auth: true, layout: true },
   { path: "/asset-depreciation", component: page("AssetDepreciationPage"), auth: true, layout: true },
   { path: "/warranty-tracker", component: page("WarrantyTrackerPage"), auth: true, layout: true },
-  { path: "/backup-compliance", component: page("BackupCenterPage"), auth: true, layout: true },
+  { path: "/backup-compliance", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
   { path: "/procurement-planner", component: page("ProcurementPlannerPage"), auth: true, layout: true },
-  { path: "/predictive-maintenance", component: page("PredictiveIntelPage"), auth: true, layout: true },
+  { path: "/predictive-maintenance", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/predictive-failure" },
   { path: "/doc-scanner", component: page("DocScannerPage"), auth: true, layout: true },
-  { path: "/vault", component: page("VaultPage"), auth: true, layout: true },
+  { path: "/vault", component: page("CredentialsTabRedirectPage"), auth: true, layout: true, redirectTab: "vault" },
   { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
 
@@ -105,19 +105,20 @@ export const routeConfig = [
   { path: "/skills-matrix", component: page("SkillsMatrixPage"), auth: true, layout: true },
   { path: "/tech-utilization", component: page("TechUtilizationPage"), auth: true, layout: true },
   { path: "/leaderboard", component: page("LeaderboardPage"), auth: true, layout: true },
-  { path: "/scheduling", component: page("DispatchCenterPage"), auth: true, layout: true },
-  { path: "/smart-scheduling", component: page("DispatchCenterPage"), auth: true, layout: true },
+  { path: "/scheduling", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/dispatch-board?tab=calendar" },
+  { path: "/smart-scheduling", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/dispatch-board?tab=availability" },
 
   // Client Management
-  { path: "/client-health", component: page("ClientHealthPage"), auth: true, layout: true },
-  { path: "/client-timeline", component: page("ClientTimelinePage"), auth: true, layout: true },
+  { path: "/client-health", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "client-health" },
+  { path: "/client-timeline", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "client-timeline" },
   { path: "/client-compare", component: page("ClientComparePage"), auth: true, layout: true },
-  { path: "/client-risk", component: page("ClientRiskPage"), auth: true, layout: true },
+  { path: "/client-risk", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "client-risk" },
   { path: "/csat-surveys", component: page("CsatSurveysPage"), auth: true, layout: true },
   { path: "/onboarding", component: page("OnboardingWizardPage"), auth: true, layout: true },
-  { path: "/sentiment", component: page("SentimentDashboardPage"), auth: true, layout: true },
+  { path: "/sentiment", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "sentiment" },
   { path: "/it-roadmap", component: page("ItRoadmapPage"), auth: true, layout: true },
-  { path: "/upsell", component: page("UpsellPage"), auth: true, layout: true },
+  // Legacy Upsell Detector links now resolve to the richer Revenue Growth pipeline.
+  { path: "/upsell", component: page("UpsellRedirectPage"), auth: true, layout: true },
   { path: "/contract-profit", component: page("ContractProfitPage"), auth: true, layout: true },
   { path: "/vendor-scorecard", component: page("VendorScorecardPage"), auth: true, layout: true },
   { path: "/compliance", component: page("ComplianceHubPage"), auth: true, layout: true },
@@ -149,8 +150,9 @@ export const routeConfig = [
   { path: "/dns-monitor", component: page("DnsMonitorPage"), auth: true, layout: true },
   { path: "/patch-compliance", component: page("PatchCompliancePage"), auth: true, layout: true },
   { path: "/client-portal-admin", component: page("ClientPortalAdminPage"), auth: true, layout: true },
-  { path: "/backup-dashboard", component: page("BackupCenterPage"), auth: true, layout: true },
-  { path: "/mfa-management", component: page("MfaManagementPage"), auth: true, layout: true },
+  { path: "/backup-dashboard", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
+  // MFA management lives in the Credentials Hub alongside vault and rotation controls.
+  { path: "/mfa-management", component: page("MfaManagementRedirectPage"), auth: true, layout: true },
   { path: "/alert-suppression", component: page("AlertSuppressionPage"), auth: true, layout: true },
   { path: "/license-management", component: page("LicenseManagementPage"), auth: true, layout: true },
   { path: "/maintenance-scheduler", component: page("MaintenanceSchedulerPage"), auth: true, layout: true },
@@ -166,16 +168,15 @@ export const routeConfig = [
   { path: "/soc-feed", component: page("SocFeedPage"), auth: true, layout: true },
   { path: "/vulnerability-scanner", component: page("VulnerabilityScannerPage"), auth: true, layout: true },
   { path: "/third-party-patching", component: page("ThirdPartyPatchingPage"), auth: true, layout: true },
-  { path: "/compliance-report-gen", component: page("ComplianceHubPage"), auth: true, layout: true },
+  { path: "/compliance-report-gen", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/compliance?tab=reports" },
   { path: "/audit-trail", component: page("AuditTrailPage"), auth: true, layout: true },
 
   // Phase D: Operations & Business
   { path: "/script-ticket", component: page("ScriptTicketPage"), auth: true, layout: true },
   { path: "/custom-monitors", component: page("CustomMonitorsPage"), auth: true, layout: true },
   { path: "/recurring-invoices", component: page("RecurringInvoicesPage"), auth: true, layout: true },
-  { path: "/kanban-tickets", component: page("KanbanTicketsPage"), auth: true, layout: true },
-  { path: "/password-rotation", component: page("PasswordRotationPage"), auth: true, layout: true },
-  { path: "/sla-report-gen", component: page("SlaManagerPage"), auth: true, layout: true },
+  { path: "/password-rotation", component: page("CredentialsTabRedirectPage"), auth: true, layout: true, redirectTab: "password-rotation" },
+  { path: "/sla-report-gen", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer?tab=reports" },
   { path: "/capacity-planner", component: page("CapacityPlannerPage"), auth: true, layout: true },
   { path: "/auto-documentation", component: page("AutoDocumentationPage"), auth: true, layout: true },
 
@@ -183,7 +184,8 @@ export const routeConfig = [
   { path: "/patch-hub", component: page("PatchHubPage"), auth: true, layout: true },
 
   // Phase E: AI & Autonomous
-  { path: "/nlp-query", component: page("NLPQueryPage"), auth: true, layout: true },
+  // Conversational AI is available globally from the sidebar; retain old deep links for operations.
+  { path: "/nlp-query", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/auto-ops" },
   { path: "/ai-resolution", component: page("AIResolutionPage"), auth: true, layout: true },
 
   // Phase F: AI Self-Healing + Advanced Ops
@@ -192,7 +194,8 @@ export const routeConfig = [
   { path: "/usage-billing", component: page("UsageBillingPage"), auth: true, layout: true },
   { path: "/pricing-calc", component: page("PricingCalcPage"), auth: true, layout: true },
   { path: "/comms-timeline", component: page("CommsTimelinePage"), auth: true, layout: true },
-  { path: "/qbr-generator", component: page("QBRGeneratorPage"), auth: true, layout: true },
+  // Legacy QBR generator bookmarks resolve to the unified QBR workspace.
+  { path: "/qbr-generator", component: page("QBRRedirectPage"), auth: true, layout: true },
   { path: "/zero-trust", component: page("ZeroTrustPage"), auth: true, layout: true },
   { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
@@ -202,22 +205,21 @@ export const routeConfig = [
   // Phase G: Dashboard Builder + Channel Mode + Real-time SOC + Revenue
   { path: "/dashboard-builder", component: page("DashboardBuilderPage"), auth: true, layout: true },
   { path: "/channel-mode", component: page("ChannelModePage"), auth: true, layout: true },
-  { path: "/mobile-tech", component: page("MobileTechPage"), auth: true, layout: true },
   { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
-  { path: "/revenue-tracker", component: page("RevenueCommandCenterPage"), auth: true, layout: true },
+  { path: "/revenue-tracker", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/revenue-forecast" },
 
   { path: "/billing-dashboard", component: page("BillingDashboardPage"), auth: true, layout: true },
 
   // Phase E: Revenue & Billing
   { path: "/client-budget", component: page("ClientBudgetPage"), auth: true, layout: true },
-  { path: "/executive-reports", component: page("ReportsHubPage"), auth: true, layout: true },
+  { path: "/executive-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=executive" },
   { path: "/nps-tracker", component: page("NPSTrackerPage"), auth: true, layout: true },
 
   // Phase E: Security
   { path: "/dark-web-monitor", component: page("DarkWebMonitorPage"), auth: true, layout: true },
   { path: "/phishing-sim", component: page("PhishingSimPage"), auth: true, layout: true },
   { path: "/backup-center", component: page("BackupCenterPage"), auth: true, layout: true },
-  { path: "/backup-verify", component: page("BackupCenterPage"), auth: true, layout: true },
+  { path: "/backup-verify", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
   { path: "/compliance-frameworks", component: page("ComplianceCenterPage"), auth: true, layout: true },
 
   // Phase E: Operations
@@ -236,8 +238,9 @@ export const routeConfig = [
   { path: "/portal/:token", component: page("ClientPortalViewPage"), auth: false, layout: false },
   { path: "/portal-login", component: page("PortalLoginPage"), auth: false, layout: false },
   { path: "/portal-dashboard", component: page("PortalDashboardPage"), auth: false, layout: false },
-  { path: "/revenue-tracking", component: page("RevenueCommandCenterPage"), auth: true, layout: true },
-  { path: "/voice-ticket", component: page("VoiceTicketPage"), auth: true, layout: true },
+  { path: "/revenue-tracking", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/revenue-forecast" },
+  // Voice Ticket is retired; preserve direct bookmarks without exposing a second intake workflow.
+  { path: "/voice-ticket", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/tickets" },
 
   // P1/P2 New Features
   { path: "/workflow-automation", component: page("WorkflowAutomationPage"), auth: true, layout: true },
@@ -250,7 +253,7 @@ export const routeConfig = [
   // Pro-Pack pages (P0 + P1 + P2 from IA audit)
   { path: "/triage-queue", component: page("TriageQueuePage"), auth: true, layout: true },
   { path: "/service-catalog", component: page("ServiceCatalogPage"), auth: true, layout: true },
-  { path: "/customer-health", component: page("CustomerHealthPage"), auth: true, layout: true },
+  { path: "/customer-health", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "customer-health" },
   { path: "/quote-to-cash", component: page("QuoteToCashPage"), auth: true, layout: true },
   { path: "/notify-channels", component: page("NotifyChannelsPage"), auth: true, layout: true },
   { path: "/patch-tuesday", component: page("PatchTuesdayPage"), auth: true, layout: true },
@@ -258,7 +261,8 @@ export const routeConfig = [
   { path: "/settings-api-tokens", component: page("ApiTokensPage"), auth: true, layout: true },
   { path: "/security-2fa", component: page("Security2FAPage"), auth: true, layout: true },
   { path: "/saas-spend", component: page("SaasSpendPage"), auth: true, layout: true },
-  { path: "/defender-health", component: page("DefenderHealthPage"), auth: true, layout: true },
+  // Defender posture is represented in the unified Endpoint Security workspace.
+  { path: "/defender-health", component: page("DefenderHealthRedirectPage"), auth: true, layout: true },
   { path: "/stocktake-mobile", component: page("StocktakeMobilePage"), auth: true, layout: true },
   { path: "/crm-pipeline", component: page("CrmPipelinePage"), auth: true, layout: true },
   { path: "/dr-plans", component: page("DRPlansPage"), auth: true, layout: true },
@@ -267,7 +271,7 @@ export const routeConfig = [
   { path: "/automation-hub", component: page("AutomationHubPage"), auth: true, layout: true },
   { path: "/documentation-hub", component: page("DocumentationHubPage"), auth: true, layout: true },
   { path: "/financial-analytics", component: page("FinancialAnalyticsHubPage"), auth: true, layout: true },
-  { path: "/sla-hub", component: page("SlaHubPage"), auth: true, layout: true },
+  { path: "/sla-hub", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer" },
   { path: "/phone-integration", component: page("PhoneIntegrationPage"), auth: true, layout: true },
 
   // Auth callback (no auth, no layout)

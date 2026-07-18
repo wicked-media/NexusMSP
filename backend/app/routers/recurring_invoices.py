@@ -2,10 +2,42 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
+from pymongo.errors import DuplicateKeyError
 from app.database import db
 from app.auth import get_current_user
 
 router = APIRouter()
+
+
+async def _ensure_recurring_period_guard():
+    """One invoice per recurring template and billing period.
+
+    Sparse keeps legacy/manual invoices (which have no billing_period) out of the
+    unique constraint while protecting every generated recurring invoice.
+    """
+    await db.invoices.create_index(
+        [("recurring_invoice_id", 1), ("billing_period", 1)],
+        unique=True,
+        sparse=True,
+        name="recurring_invoice_billing_period_unique",
+    )
+
+
+async def _deliver_recurring_invoice(invoice: dict, recurring: dict, current_user: dict) -> dict:
+    """Use the normal invoice email pipeline and persist an auditable outcome."""
+    if not recurring.get("auto_send"):
+        return {"requested": False, "status": "not_requested"}
+    recipient = str(recurring.get("auto_send_email") or "").strip()
+    if not recipient:
+        return {"requested": True, "status": "not_configured", "message": "No auto-send recipient configured"}
+    try:
+        from app.routers.invoice_enhanced import email_invoice_to_client
+        result = await email_invoice_to_client(invoice["id"], {"email": recipient}, current_user)
+        return {"requested": True, "status": result.get("delivery_status", "failed"), "recipient": recipient, "message": result.get("message", "")}
+    except HTTPException as exc:
+        return {"requested": True, "status": "failed", "recipient": recipient, "message": str(exc.detail)}
+    except Exception as exc:
+        return {"requested": True, "status": "failed", "recipient": recipient, "message": str(exc)}
 
 # ============== RECURRING INVOICE TEMPLATES ==============
 
@@ -60,8 +92,20 @@ async def get_recurring_invoice(ri_id: str, current_user: dict = Depends(get_cur
 @router.post("/recurring-invoices/create")
 async def create_recurring(data: dict, current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
-    # Calculate amount from line items
     line_items = data.get("line_items", [])
+    if not data.get("client_id") or not str(data.get("description", "")).strip():
+        raise HTTPException(status_code=400, detail="Client and description are required")
+    if not line_items:
+        raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
+    for line in line_items:
+        if not str(line.get("description", "")).strip():
+            raise HTTPException(status_code=400, detail="Each recurring invoice line needs a description")
+        if float(line.get("quantity", 0)) <= 0 or float(line.get("rate", 0)) < 0:
+            raise HTTPException(status_code=400, detail="Each recurring invoice line needs a positive quantity and valid rate")
+    if data.get("auto_send") and not str(data.get("auto_send_email", "")).strip():
+        raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
+
+    # Calculate amount from line items
     subtotal = sum(float(li.get("amount", 0)) for li in line_items)
     tax_rate = float(data.get("tax_rate", 0))
     tax_amount = round(subtotal * tax_rate / 100, 2)
@@ -115,11 +159,20 @@ async def update_recurring(ri_id: str, data: dict, current_user: dict = Depends(
     update = {k: v for k, v in data.items() if k not in ("id", "_id", "created_at", "created_by")}
     # Recalculate amount if line_items changed
     if "line_items" in update:
+        if not update["line_items"]:
+            raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
+        for line in update["line_items"]:
+            if not str(line.get("description", "")).strip():
+                raise HTTPException(status_code=400, detail="Each recurring invoice line needs a description")
+            if float(line.get("quantity", 0)) <= 0 or float(line.get("rate", 0)) < 0:
+                raise HTTPException(status_code=400, detail="Each recurring invoice line needs a positive quantity and valid rate")
         subtotal = sum(float(li.get("amount", 0)) for li in update["line_items"])
         tax_rate = float(update.get("tax_rate", ri.get("tax_rate", 0)))
         update["subtotal"] = subtotal
         update["tax_amount"] = round(subtotal * tax_rate / 100, 2)
         update["amount"] = round(subtotal + update["tax_amount"], 2)
+    if update.get("auto_send", ri.get("auto_send", False)) and not str(update.get("auto_send_email", ri.get("auto_send_email", ""))).strip():
+        raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.recurring_invoices.update_one({"id": ri_id}, {"$set": update})
     return {"message": "Updated"}
@@ -127,9 +180,12 @@ async def update_recurring(ri_id: str, data: dict, current_user: dict = Depends(
 
 @router.delete("/recurring-invoices/{ri_id}")
 async def delete_recurring(ri_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.recurring_invoices.delete_one({"id": ri_id})
-    if result.deleted_count == 0:
+    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0, "invoices_generated": 1, "generation_history": 1})
+    if not ri:
         raise HTTPException(status_code=404, detail="Not found")
+    if ri.get("invoices_generated", 0) > 0 or ri.get("generation_history"):
+        raise HTTPException(status_code=400, detail="Recurring invoices with generated invoice history are retained for financial traceability")
+    result = await db.recurring_invoices.delete_one({"id": ri_id})
     return {"message": "Deleted"}
 
 
@@ -167,6 +223,8 @@ async def toggle_recurring(ri_id: str, current_user: dict = Depends(get_current_
     ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
     if not ri:
         raise HTTPException(status_code=404, detail="Not found")
+    if ri.get("status") not in ("active", "paused"):
+        raise HTTPException(status_code=400, detail="Only active or paused recurring invoices can be toggled")
     new_status = "paused" if ri.get("status") == "active" else "active"
     await db.recurring_invoices.update_one({"id": ri_id}, {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"status": new_status}
@@ -180,8 +238,20 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
     if not ri:
         raise HTTPException(status_code=404, detail="Not found")
+    if ri.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Activate the recurring invoice before generating an invoice")
 
     now = datetime.now(timezone.utc)
+    billing_period = ri.get("next_generation") or now.strftime("%Y-%m-%d")
+    await _ensure_recurring_period_guard()
+    existing = await db.invoices.find_one(
+        {"recurring_invoice_id": ri_id, "billing_period": billing_period}, {"_id": 0, "id": 1, "invoice_number": 1}
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"An invoice ({existing.get('invoice_number', existing.get('id'))}) already exists for the {billing_period} billing period",
+        )
     inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
     due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
@@ -252,23 +322,30 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         "amount_due": total,
         "amount_paid": 0,
         "currency": ri.get("currency", "AUD"),
-        "status": "sent",
+        # A generated invoice is a draft until the verified email pipeline confirms delivery.
+        "status": "draft",
         "payment_status": "unpaid",
         "due_date": due_date,
         "recurring_invoice_id": ri_id,
+        "billing_period": billing_period,
         "notes": ri.get("notes", ""),
         "acronis_auto_attached": len(acronis_attached),
         "pax8_auto_attached": len(pax8_attached),
         "created_at": now.isoformat(),
         "created_by": current_user.get("name", ""),
     }
-    await db.invoices.insert_one(invoice)
+    try:
+        await db.invoices.insert_one(invoice)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=f"An invoice already exists for the {billing_period} billing period")
+    delivery = await _deliver_recurring_invoice(invoice, ri, current_user)
+    await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"recurring_delivery": delivery}})
 
     # Update recurring invoice stats
     gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total,
                  "generated_at": now.isoformat(), "generated_by": current_user.get("name", ""),
                  "acronis_items": len(acronis_attached),
-                 "pax8_items": len(pax8_attached)}
+                 "pax8_items": len(pax8_attached), "delivery": delivery}
     next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
     await db.recurring_invoices.update_one({"id": ri_id}, {
         "$inc": {"invoices_generated": 1, "total_billed": total},
@@ -285,7 +362,8 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     if extras:
         msg += f" (+{' + '.join(extras)} auto-attached line items)"
     return {"message": msg, "invoice_id": invoice["id"], "invoice_number": inv_number,
-            "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached)}
+            "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached),
+            "delivery": delivery}
 
 
 @router.post("/recurring-invoices/{ri_id}/duplicate")
@@ -388,6 +466,7 @@ async def apply_template_to_recurring(template_id: str, data: dict, current_user
         "frequency": data.get("frequency", "monthly"),
         "start_date": data.get("start_date"),
         "auto_send": data.get("auto_send", False),
+        "auto_send_email": data.get("auto_send_email", ""),
     }
     return await create_recurring(create_data, current_user)
 
@@ -412,6 +491,7 @@ async def get_scheduler_status(current_user: dict = Depends(get_current_user)):
         {"type": {"$in": ["recurring_invoice", "recurring_invoice_error"]}},
         {"_id": 0}
     ).sort("timestamp", -1).to_list(20)
+    latest_log = logs[0] if logs else None
 
     # Stats
     total_auto_generated = await db.scheduler_logs.count_documents({"type": "recurring_invoice"})
@@ -423,6 +503,8 @@ async def get_scheduler_status(current_user: dict = Depends(get_current_user)):
         "due_now": due_count,
         "total_auto_generated": total_auto_generated,
         "total_errors": errors,
+        "last_activity_at": latest_log.get("timestamp") if latest_log else None,
+        "last_activity_status": latest_log.get("status") if latest_log else None,
         "recent_logs": logs,
     }
 
@@ -432,15 +514,18 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
     """Manually trigger the scheduler to process all due recurring invoices."""
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
+    actor_name = current_user.get("name") or "Manual Scheduler Run"
 
     due_invoices = await db.recurring_invoices.find({
         "status": "active",
         "next_generation": {"$lte": today_str},
     }, {"_id": 0}).to_list(100)
+    await _ensure_recurring_period_guard()
 
     results = []
     for ri in due_invoices:
         try:
+            billing_period = ri.get("next_generation") or today_str
             inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
             due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
@@ -510,21 +595,29 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "amount_due": total,
                 "amount_paid": 0,
                 "currency": ri.get("currency", "AUD"),
-                "status": "sent",
+                # Do not represent a generated invoice as sent before delivery succeeds.
+                "status": "draft",
                 "payment_status": "unpaid",
                 "due_date": due_date,
                 "recurring_invoice_id": ri["id"],
+                "billing_period": billing_period,
                 "notes": ri.get("notes", ""),
                 "auto_generated": True,
                 "acronis_auto_attached": len(acronis_attached),
                 "pax8_auto_attached": len(pax8_attached),
                 "created_at": now.isoformat(),
-                "created_by": "Manual Scheduler Run",
+                "created_by": actor_name,
             }
-            await db.invoices.insert_one(invoice)
+            try:
+                await db.invoices.insert_one(invoice)
+            except DuplicateKeyError:
+                results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "skipped", "reason": f"Invoice already exists for {billing_period}"})
+                continue
+            delivery = await _deliver_recurring_invoice(invoice, ri, current_user)
+            await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"recurring_delivery": delivery}})
 
             next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
-            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": "Manual Scheduler Run", "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached)}
+            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": actor_name, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "delivery": delivery}
             await db.recurring_invoices.update_one({"id": ri["id"]}, {
                 "$inc": {"invoices_generated": 1, "total_billed": total},
                 "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
@@ -538,13 +631,21 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "amount": total, "status": "generated",
                 "acronis_items": len(acronis_attached),
                 "pax8_items": len(pax8_attached),
-                "triggered_by": current_user.get("name", ""), "timestamp": now.isoformat(),
+                "delivery": delivery,
+                "triggered_by": actor_name, "timestamp": now.isoformat(),
             })
-            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "status": "generated"})
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "delivery": delivery, "status": "generated"})
         except Exception as e:
             results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": str(e)})
 
-    return {"processed": len(results), "results": results}
+    generated_count = sum(1 for result in results if result.get("status") == "generated")
+    skipped_duplicates = sum(1 for result in results if result.get("status") == "skipped")
+    return {
+        "processed": len(results),
+        "generated": generated_count,
+        "skipped_duplicates": skipped_duplicates,
+        "results": results,
+    }
 
 
 # ============== HELPERS ==============

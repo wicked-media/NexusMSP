@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { priorityConfig, statusConfig } from "@/config/ticketConfig";
@@ -27,7 +28,7 @@ import {
   Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
   Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
   Radio, Cable, ServerCrash, Siren, Settings, Archive, ArchiveRestore, Trash2,
-  Users, UserX, Tags, ChevronDown, SquareCheckBig, Send
+  Users, UserX, Tags, ChevronDown, SquareCheckBig, Send, Terminal
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];
@@ -177,10 +178,10 @@ export default function TechniciansPage() {
     setInviteSending(true);
     try {
       const res = await axios.post(`${API}/technicians/invite`, inviteForm, { headers });
-      if (res.data.resend_configured) {
+      if (res.data.email_configured) {
         toast.success(`Invitation sent to ${inviteForm.email}`);
       } else {
-        toast.success(`Invite created for ${inviteForm.email} (configure Resend for live email delivery)`);
+        toast.success(`Invite created for ${inviteForm.email} (connect Microsoft 365 for live delivery)`);
       }
       setInviteDialog(false);
       setInviteForm({ name: "", email: "", role: "technician", job_title: "", categories: [], message: "" });
@@ -197,7 +198,7 @@ export default function TechniciansPage() {
   const handleResendInvite = async (inviteId) => {
     try {
       const r = await axios.post(`${API}/technicians/invites/${inviteId}/resend`, {}, { headers });
-      toast.success(r.data.resend_configured ? "Invite resent" : "Invite resent (Resend not configured)");
+      toast.success(r.data.email_configured ? "Invite resent" : "Invite resent (Microsoft 365 not connected)");
     } catch { toast.error("Failed to resend"); }
   };
 
@@ -1028,13 +1029,13 @@ export default function TechniciansPage() {
   return (
     <div className="space-y-4" data-testid="technicians-page">
       {/* Quick Stats Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="border-blue-500/20 bg-blue-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Users className="w-8 h-8 text-blue-400 opacity-60" /><div><p className="text-2xl font-bold">{activeTechs.length}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Active Techs</p></div></CardContent></Card>
-        <Card className="border-emerald-500/20 bg-emerald-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><PhoneCall className="w-8 h-8 text-emerald-400 opacity-60" /><div><p className="text-2xl font-bold">{activeOnCall.length}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">On Call Now</p></div></CardContent></Card>
-        <Card className="border-orange-500/20 bg-orange-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><AlertTriangle className="w-8 h-8 text-orange-400 opacity-60" /><div><p className="text-2xl font-bold text-orange-500">{totalOverdue}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Overdue Tickets</p></div></CardContent></Card>
-        <Card className="border-cyan-500/20 bg-cyan-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Ticket className="w-8 h-8 text-cyan-400 opacity-60" /><div><p className="text-2xl font-bold">{totalOpen}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Open Tickets</p></div></CardContent></Card>
-        <Card className="border-purple-500/20 bg-purple-500/5"><CardContent className="py-3 px-4 flex items-center gap-3"><Clock className="w-8 h-8 text-purple-400 opacity-60" /><div><p className="text-2xl font-bold">{avgHours}h</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Avg Hours/Week</p></div></CardContent></Card>
-      </div>
+      <MetricStrip columns={5}>
+        <MetricTile label="Active techs" value={activeTechs.length} accent="sky" icon={<Users className="w-2.5 h-2.5 text-sky-400" />} testid="tech-metric-active" />
+        <MetricTile label="On call now" value={activeOnCall.length} accent="emerald" icon={<PhoneCall className="w-2.5 h-2.5 text-emerald-400" />} testid="tech-metric-oncall" />
+        <MetricTile label="Overdue tickets" value={totalOverdue} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="tech-metric-overdue" />
+        <MetricTile label="Open tickets" value={totalOpen} accent="cyan" icon={<Ticket className="w-2.5 h-2.5 text-cyan-400" />} testid="tech-metric-open" />
+        <MetricTile label="Avg hours/week" value={`${avgHours}h`} accent="violet" icon={<Clock className="w-2.5 h-2.5 text-violet-400" />} testid="tech-metric-hours" />
+      </MetricStrip>
 
       <div className="flex items-center justify-between">
         <div><h1 className="text-3xl font-bold tracking-tight">Technicians</h1><p className="text-muted-foreground">{activeTechs.length} active, {archivedTechs.length} archived</p></div>
@@ -1324,6 +1325,21 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
               <div><p className="font-medium text-sm">Admin Rights</p><p className="text-xs text-muted-foreground">Full access to all modules and settings</p></div>
             </div>
             <Switch checked={isAdminToggle} onCheckedChange={setIsAdminToggle} data-testid="admin-toggle" />
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-lg border border-rose-500/30 bg-rose-500/5">
+            <div className="flex items-center gap-3">
+              <Terminal className="w-5 h-5 text-rose-400" />
+              <div>
+                <p className="font-medium text-sm">Execute Agent Commands</p>
+                <p className="text-xs text-muted-foreground">Run scripts, generate installers, change agent settings, and view command output.</p>
+              </div>
+            </div>
+            <Switch
+              checked={isAdminToggle || permData.agent_commands?.execute || false}
+              onCheckedChange={() => togglePerm("agent_commands", "execute")}
+              disabled={isAdminToggle}
+              data-testid="agent-command-permission-toggle"
+            />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Apply preset:</span>

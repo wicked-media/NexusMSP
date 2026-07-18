@@ -167,10 +167,19 @@ async def create_email(email_data: EmailMessageCreate, current_user: dict = Depe
         client = await db.clients.find_one({"id": email_data.client_id}, {"_id": 0})
         client_name = client['name'] if client else None
     
-    email = EmailMessage(
-        subject=email_data.subject,
+    from app.routers.email_signatures import append_default_signature
+    body, body_type, _signature_id = await append_default_signature(
         body=email_data.body,
         body_type=email_data.body_type,
+        current_user=current_user,
+        subject=email_data.subject,
+        ticket_id=email_data.ticket_id,
+    )
+
+    email = EmailMessage(
+        subject=email_data.subject,
+        body=body,
+        body_type=body_type,
         from_address=current_user.get('email', ''),
         from_name=current_user.get('name'),
         to_addresses=email_data.to_addresses,
@@ -193,6 +202,20 @@ async def send_email(email_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Email not found")
     
     try:
+        # Drafts created before signature support (or imported drafts) receive
+        # the active sender's signature when they are actually dispatched.
+        from app.routers.email_signatures import append_default_signature
+        body, body_type, _signature_id = await append_default_signature(
+            body=email.get("body", ""),
+            body_type=email.get("body_type", "html"),
+            current_user=current_user,
+            subject=email.get("subject", ""),
+            ticket_id=email.get("ticket_id"),
+        )
+        email["body"] = body
+        email["body_type"] = body_type
+        await db.emails.update_one({"id": email_id}, {"$set": {"body": body, "body_type": body_type}})
+
         # Try to send via Office 365 if configured
         status = await get_office365_status(current_user)
         if status['configured']:

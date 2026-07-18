@@ -12,10 +12,11 @@ import {
   Loader2, DollarSign, TrendingUp, AlertTriangle, CheckCircle,
   Clock, CreditCard, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
   BarChart3, Users, FileText, Receipt, ShoppingCart, Target, Banknote,
-  Trophy, ChevronRight, Activity
+  Trophy, ChevronRight, Activity, RefreshCw
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import HeroTile from "@/components/HeroTile";
 
 const STREAK_CONFIG = {
   starter: { label: "Getting Started", color: "text-gray-400", bg: "bg-gray-500/10", ring: "" },
@@ -108,14 +109,17 @@ export default function BillingDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="billing-dashboard">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Billing Command Center</h1>
-          <p className="text-muted-foreground">Real-time financial pulse of your MSP</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center"><Banknote className="w-4 h-4 text-emerald-300" /></span>
+          <div><h1 className="text-2xl font-bold tracking-tight">Billing Command</h1><p className="text-sm text-muted-foreground">Revenue, collections, cash flow, and financial follow-through.</p></div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="go-to-invoices">
             <Receipt className="w-4 h-4 mr-1" />Invoices
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")} data-testid="go-to-recurring">
+            <RefreshCw className="w-4 h-4 mr-1" />Recurring
           </Button>
           <Button variant="outline" size="sm" onClick={() => navigate("/purchase-orders")} data-testid="go-to-pos">
             <ShoppingCart className="w-4 h-4 mr-1" />Purchase Orders
@@ -189,56 +193,12 @@ export default function BillingDashboardPage() {
 
       {/* Row 2: Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => navigate("/invoices")} data-testid="stat-total-invoiced">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center"><DollarSign className="w-4 h-4 text-blue-400" /></div>
-              <div><p className="text-[10px] text-muted-foreground">Total Invoiced</p><p className="text-lg font-bold font-mono">${m.total_invoiced.toLocaleString()}</p></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => navigate("/invoices")} data-testid="stat-collected">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-4 h-4 text-green-400" /></div>
-              <div><p className="text-[10px] text-muted-foreground">Collected</p><p className="text-lg font-bold font-mono text-green-400">${m.total_collected.toLocaleString()}</p></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:bg-muted/30 transition-colors" data-testid="stat-outstanding">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center"><AlertTriangle className="w-4 h-4 text-red-400" /></div>
-              <div><p className="text-[10px] text-muted-foreground">Outstanding</p><p className="text-lg font-bold font-mono text-red-400">${m.total_outstanding.toLocaleString()}</p></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card data-testid="stat-collection-rate">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><Target className="w-4 h-4 text-emerald-400" /></div>
-              <div><p className="text-[10px] text-muted-foreground">Collection Rate</p><p className="text-lg font-bold font-mono text-emerald-400">{m.collection_rate}%</p></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => navigate("/purchase-orders")} data-testid="stat-po-spend">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><ShoppingCart className="w-4 h-4 text-purple-400" /></div>
-              <div><p className="text-[10px] text-muted-foreground">PO Spend</p><p className="text-lg font-bold font-mono">${m.total_po_spend.toLocaleString()}</p></div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card data-testid="stat-overdue">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${m.overdue_count > 0 ? "bg-red-500/10" : "bg-green-500/10"}`}>
-                {m.overdue_count > 0 ? <Clock className="w-4 h-4 text-red-400 animate-pulse" /> : <CheckCircle className="w-4 h-4 text-green-400" />}
-              </div>
-              <div><p className="text-[10px] text-muted-foreground">Overdue</p><p className={`text-lg font-bold font-mono ${m.overdue_count > 0 ? "text-red-400" : "text-green-400"}`}>{m.overdue_count}</p></div>
-            </div>
-          </CardContent>
-        </Card>
+        <HeroTile label="Total invoiced" value={`$${m.total_invoiced.toLocaleString()}`} icon={DollarSign} glow="cyan" animated={false} onClick={() => navigate("/invoices")} testId="stat-total-invoiced" />
+        <HeroTile label="Collected" value={`$${m.total_collected.toLocaleString()}`} icon={CheckCircle} glow="emerald" animated={false} onClick={() => navigate("/invoices")} testId="stat-collected" />
+        <HeroTile label="Outstanding" value={`$${m.total_outstanding.toLocaleString()}`} icon={AlertTriangle} glow={m.total_outstanding > 0 ? "rose" : "emerald"} animated={false} onClick={() => navigate("/invoices")} testId="stat-outstanding" />
+        <HeroTile label="Collection rate" value={m.collection_rate} suffix="%" icon={Target} glow="emerald" testId="stat-collection-rate" />
+        <HeroTile label="Purchase order spend" value={`$${m.total_po_spend.toLocaleString()}`} icon={ShoppingCart} glow="violet" animated={false} onClick={() => navigate("/purchase-orders")} testId="stat-po-spend" />
+        <HeroTile label="Overdue" value={m.overdue_count} icon={Clock} glow={m.overdue_count > 0 ? "rose" : "emerald"} onClick={() => navigate("/invoices")} testId="stat-overdue" />
       </div>
 
       {/* Row 3: Cash Flow Forecast */}

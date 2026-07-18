@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
   UserCog, Clock, DollarSign, Ticket, TrendingUp, BarChart3,
@@ -16,13 +17,11 @@ export default function TechUtilizationPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/tech-utilization/dashboard`, { headers })
+    axios.get(`${API}/tech-utilization/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setData(r.data)).catch(() => toast.error("Failed to load"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   if (!data) return null;
@@ -43,23 +42,18 @@ export default function TechUtilizationPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-6 gap-3">
+      <MetricStrip columns={6}>
         {[
-          { label: "Technicians", value: s.total_techs, icon: Users, color: "text-foreground" },
-          { label: "Total Hours", value: `${s.total_hours_logged}h`, icon: Clock, color: "text-blue-400" },
-          { label: "Billable Hours", value: `${s.total_billable_hours}h`, icon: DollarSign, color: "text-emerald-400" },
-          { label: "Avg Utilization", value: `${s.avg_utilization}%`, icon: Target, color: s.avg_utilization >= 70 ? "text-emerald-400" : "text-amber-400" },
-          { label: "Total Revenue", value: `$${s.total_revenue.toLocaleString()}`, icon: TrendingUp, color: "text-cyan-400" },
-          { label: "Under-Utilized", value: underUtilized.length, icon: AlertTriangle, color: underUtilized.length > 0 ? "text-red-400" : "text-emerald-400" },
+          { label: "Technicians", value: s.total_techs, icon: Users, color: "text-violet-400", accent: "violet" },
+          { label: "Total Hours", value: `${s.total_hours_logged}h`, icon: Clock, color: "text-sky-400", accent: "sky" },
+          { label: "Billable Hours", value: `${s.total_billable_hours}h`, icon: DollarSign, color: "text-emerald-400", accent: "emerald" },
+          { label: "Avg Utilization", value: `${s.avg_utilization}%`, icon: Target, color: s.avg_utilization >= 70 ? "text-emerald-400" : "text-amber-400", accent: s.avg_utilization >= 70 ? "emerald" : "amber" },
+          { label: "Total Revenue", value: `$${s.total_revenue.toLocaleString()}`, icon: TrendingUp, color: "text-cyan-400", accent: "cyan" },
+          { label: "Under-Utilized", value: underUtilized.length, icon: AlertTriangle, color: underUtilized.length > 0 ? "text-rose-400" : "text-emerald-400", accent: underUtilized.length > 0 ? "rose" : "emerald" },
         ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`text-2xl font-bold ${st.color}`}>{st.value}</p>
-            </CardContent>
-          </Card>
+          <MetricTile key={st.label} label={st.label} value={st.value} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`util-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
-      </div>
+      </MetricStrip>
 
       {/* Utilization Gauge */}
       <Card className="border-border/40">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import HeroTile from "@/components/HeroTile";
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
   pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
@@ -42,9 +45,11 @@ const ITEM_STATUS_CONFIG = {
 
 export default function PurchaseOrdersPage() {
   const { token } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [pos, setPos] = useState([]);
   const [products, setProducts] = useState([]);
   const [clients, setClients] = useState([]);
+  const [tickets, setTickets] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState({});
@@ -62,18 +67,26 @@ export default function PurchaseOrdersPage() {
   const [receiveItems, setReceiveItems] = useState([]);
   const [scannerInput, setScannerInput] = useState("");
   const scanRef = useRef(null);
+  const handledVendorPreset = useRef(false);
+  const handledPODetailPreset = useRef(false);
   const [approvalDialog, setApprovalDialog] = useState(null);
   const [approvalNotes, setApprovalNotes] = useState("");
+  const [approvalApprover, setApprovalApprover] = useState("");
+  const [destructiveAction, setDestructiveAction] = useState(null);
   const [emailVendorDialog, setEmailVendorDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
   const [spendAnalytics, setSpendAnalytics] = useState(null);
   const [analyticsTab, setAnalyticsTab] = useState("list");
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "" });
+  const [vendorInvoiceDialog, setVendorInvoiceDialog] = useState(false);
+  const [vendorInvoiceForm, setVendorInvoiceForm] = useState({ invoice_number: "", invoice_date: "", supplier_total: "", notes: "" });
+  const [vendorInvoiceReviewDialog, setVendorInvoiceReviewDialog] = useState(false);
+  const [vendorInvoiceReview, setVendorInvoiceReview] = useState({ decision: "accepted", notes: "" });
   const [form, setForm] = useState({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", shipping: "0", assigned_to: "", assigned_to_name: ""
+    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
   });
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -81,13 +94,14 @@ export default function PurchaseOrdersPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [posRes, prodRes, clientRes, statsRes, vendorRes, userRes] = await Promise.all([
+      const [posRes, prodRes, clientRes, statsRes, vendorRes, userRes, ticketRes] = await Promise.all([
         axios.get(`${API}/purchase-orders`, { headers }),
         axios.get(`${API}/products`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/purchase-orders/stats`, { headers }),
         axios.get(`${API}/vendors`, { headers }),
         axios.get(`${API}/users`, { headers }),
+        axios.get(`${API}/tickets`, { headers }),
       ]);
       setPos(posRes.data);
       setProducts(prodRes.data);
@@ -95,6 +109,7 @@ export default function PurchaseOrdersPage() {
       setStats(statsRes.data);
       setVendors(vendorRes.data);
       setUsers(userRes.data);
+      setTickets(ticketRes.data);
     } catch { toast.error("Failed to load data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -124,7 +139,7 @@ export default function PurchaseOrdersPage() {
   const resetForm = () => setForm({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", shipping: "0", assigned_to: "", assigned_to_name: ""
+    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
   });
 
   const openCreate = (vendorPreset) => {
@@ -134,6 +149,28 @@ export default function PurchaseOrdersPage() {
     } else { resetForm(); }
     setIsFormOpen(true);
   };
+
+  useEffect(() => {
+    const poId = searchParams.get("po");
+    if (!poId || handledPODetailPreset.current) return;
+    handledPODetailPreset.current = true;
+    fetchPODetail(poId);
+    setSearchParams({});
+  }, [searchParams, setSearchParams]); // handles deep links from billing reconciliation
+
+  useEffect(() => {
+    const vendorId = searchParams.get("vendor");
+    if (!vendorId || handledVendorPreset.current || vendors.length === 0) return;
+    const vendor = vendors.find(v => v.id === vendorId);
+    handledVendorPreset.current = true;
+    if (!vendor) {
+      toast.error("That vendor could not be found");
+      setSearchParams({});
+      return;
+    }
+    openCreate(vendor);
+    setSearchParams({});
+  }, [vendors, searchParams, setSearchParams]); // handles the explicit Vendor → Create PO hand-off once
 
   const resetFormObj = () => ({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
@@ -149,6 +186,7 @@ export default function PurchaseOrdersPage() {
       line_items: po.line_items || [], notes: po.notes || "",
       ship_to: po.ship_to || "", expected_delivery: po.expected_delivery || "",
       client_id: po.client_id || "", client_name: po.client_name || "",
+      ticket_id: po.ticket_id || "", ticket_number: po.ticket_number || "", ticket_title: po.ticket_title || "",
       shipping: String(po.shipping || 0),
       assigned_to: po.assigned_to || "", assigned_to_name: po.assigned_to_name || "",
     });
@@ -180,6 +218,10 @@ export default function PurchaseOrdersPage() {
 
   const handleSave = async () => {
     if (!form.vendor) { toast.error("Vendor is required"); return; }
+    if (form.line_items.length === 0) { toast.error("Add at least one line item before saving"); return; }
+    if (form.line_items.some(item => !item.product_name?.trim() || Number(item.quantity) < 1)) {
+      toast.error("Each line needs an item name and a quantity of at least one"); return;
+    }
     const subtotal = calcSubtotal();
     const tax = calcTax();
     const shipping = parseFloat(form.shipping) || 0;
@@ -218,6 +260,7 @@ export default function PurchaseOrdersPage() {
   const handleSubmitForApproval = async (po) => {
     setApprovalDialog("submit");
     setApprovalNotes("");
+    setApprovalApprover("");
   };
 
   const handleApprove = async () => {
@@ -240,10 +283,11 @@ export default function PurchaseOrdersPage() {
 
   const handleSubmitApproval = async () => {
     try {
+      const approver = users.find(user => user.id === approvalApprover);
       await axios.post(`${API}/purchase-orders/${viewPO.id}/submit-for-approval`, {
-        approver_id: approvalNotes ? "" : "", approver_name: ""
+        approver_id: approver?.id || "", approver_name: approver?.name || ""
       }, { headers });
-      toast.success("Submitted for approval");
+      toast.success(approver ? `Sent to ${approver.name} for approval` : "Submitted for approval");
       setApprovalDialog(null);
       fetchPODetail(viewPO.id); fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
@@ -273,6 +317,7 @@ export default function PurchaseOrdersPage() {
 
   // --- Email Vendor ---
   const handleEmailVendor = async () => {
+    if (!emailForm.email.trim()) { toast.error("Enter a vendor email address"); return; }
     try {
       await axios.post(`${API}/purchase-orders/${viewPO.id}/email-vendor`, emailForm, { headers });
       toast.success("PO emailed to vendor");
@@ -343,9 +388,67 @@ export default function PurchaseOrdersPage() {
     } catch { toast.error("Escalation check failed"); }
   };
 
+  const isDeliveryOverdue = (po) => Boolean(po.expected_delivery && new Date(po.expected_delivery) < new Date() && !["received", "cancelled"].includes(po.status));
+  const requiresSupplierInvoice = (po) => ["submitted", "partial", "received"].includes(po.status);
+  const hasActiveSupplierVariance = (po) => po.vendor_invoice_match?.status === "variance" && po.vendor_invoice_match?.review?.status !== "accepted";
   const filtered = pos
-    .filter(p => statusFilter === "all" || p.status === statusFilter)
+    .filter(p => statusFilter === "all" ||
+      (statusFilter === "overdue" ? isDeliveryOverdue(p) :
+        statusFilter === "invoice_variance" ? hasActiveSupplierVariance(p) :
+          statusFilter === "invoice_unmatched" ? requiresSupplierInvoice(p) && !p.vendor_invoice_match : p.status === statusFilter))
     .filter(p => !search || p.po_number?.toLowerCase().includes(search.toLowerCase()) || p.vendor?.toLowerCase().includes(search.toLowerCase()));
+  const overdueCount = pos.filter(isDeliveryOverdue).length;
+  const supplierInvoiceVarianceCount = pos.filter(hasActiveSupplierVariance).length;
+  const hasFilters = search || statusFilter !== "all";
+  const applyStatusFilter = (status) => setStatusFilter(status);
+  const requestDestructiveAction = (type, po) => setDestructiveAction({ type, po });
+  const confirmDestructiveAction = async () => {
+    if (!destructiveAction) return;
+    const { type, po } = destructiveAction;
+    setDestructiveAction(null);
+    if (type === "cancel") await handleStatusChange(po, "cancelled");
+    if (type === "delete") await handleDelete(po.id);
+  };
+
+  const openVendorInvoiceMatch = (po) => {
+    const existing = po.vendor_invoice_match;
+    setVendorInvoiceForm({
+      invoice_number: existing?.invoice_number || "",
+      invoice_date: existing?.invoice_date || new Date().toISOString().slice(0, 10),
+      supplier_total: existing?.supplier_total?.toString() || po.total?.toString() || "0",
+      notes: existing?.notes || "",
+    });
+    setVendorInvoiceDialog(true);
+  };
+
+  const handleVendorInvoiceMatch = async () => {
+    if (!vendorInvoiceForm.invoice_number.trim()) { toast.error("Enter the supplier invoice number"); return; }
+    if (vendorInvoiceForm.supplier_total === "" || Number.isNaN(Number(vendorInvoiceForm.supplier_total))) { toast.error("Enter a valid supplier invoice total"); return; }
+    try {
+      const res = await axios.post(`${API}/purchase-orders/${viewPO.id}/vendor-invoice-match`, {
+        ...vendorInvoiceForm,
+        supplier_total: Number(vendorInvoiceForm.supplier_total),
+      }, { headers });
+      toast.success(res.data.vendor_invoice_match.status === "matched" ? "Supplier invoice matched" : "Supplier invoice saved with a variance");
+      setVendorInvoiceDialog(false);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to record supplier invoice"); }
+  };
+
+  const openVendorInvoiceReview = (po) => {
+    const review = po.vendor_invoice_match?.review;
+    setVendorInvoiceReview({ decision: review?.status || "accepted", notes: review?.notes || "" });
+    setVendorInvoiceReviewDialog(true);
+  };
+
+  const handleVendorInvoiceReview = async () => {
+    try {
+      const res = await axios.post(`${API}/purchase-orders/${viewPO.id}/vendor-invoice-match/review`, vendorInvoiceReview, { headers });
+      toast.success(res.data.vendor_invoice_match.review.status === "accepted" ? "Variance accepted and logged" : "Variance marked for supplier follow-up");
+      setVendorInvoiceReviewDialog(false);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save variance review"); }
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
@@ -385,9 +488,24 @@ export default function PurchaseOrdersPage() {
                 <SelectContent><SelectItem value="none">No client</SelectItem>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            <div><Label>Related Ticket</Label>
+              <Select value={form.ticket_id || "none"} onValueChange={v => {
+                const ticket = tickets.find(t => t.id === v);
+                setForm(f => ({ ...f,
+                  ticket_id: v === "none" ? "" : v,
+                  ticket_number: ticket?.ticket_number || "",
+                  ticket_title: ticket?.title || "",
+                  client_id: v === "none" ? f.client_id : (ticket?.client_id || f.client_id),
+                  client_name: v === "none" ? f.client_name : (ticket?.client_name || f.client_name),
+                }));
+              }}>
+                <SelectTrigger data-testid="po-ticket-select"><SelectValue placeholder="No related ticket" /></SelectTrigger>
+                <SelectContent><SelectItem value="none">No related ticket</SelectItem>{tickets.map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number || "Ticket"} · {t.title || "Untitled"}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
             <div><Label>Ship To</Label><Input value={form.ship_to} onChange={e => setForm({ ...form, ship_to: e.target.value })} placeholder="Shipping address" /></div>
-            <div><Label>Vendor Email</Label><Input value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} /></div>
           </div>
+          <div><Label>Vendor Email</Label><Input value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} /></div>
           <Separator />
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -438,8 +556,16 @@ export default function PurchaseOrdersPage() {
   const receiveStockDialog = (
     <Dialog open={receiveDialog} onOpenChange={setReceiveDialog}>
       <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Box className="w-5 h-5 text-green-400" />Receive Stock - {viewPO?.po_number}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Box className="w-5 h-5 text-green-400" />Receive Stock - {viewPO?.po_number}</DialogTitle>
+          <p className="text-sm text-muted-foreground">Enter only what arrived today. The remaining balance stays open on this PO.</p>
+        </DialogHeader>
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border bg-muted/20 px-3 py-2"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Lines open</p><p className="font-mono text-lg font-semibold">{receiveItems.length}</p></div>
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Outstanding</p><p className="font-mono text-lg font-semibold text-amber-400">{receiveItems.reduce((sum, ri) => sum + Math.max(0, ri.quantity - (ri.received_qty || 0)), 0)}</p></div>
+            <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Receiving now</p><p className="font-mono text-lg font-semibold text-green-400">{receiveItems.reduce((sum, ri) => sum + (Number(ri.receive_now) || 0), 0)}</p></div>
+          </div>
           <Card className="border-cyan-500/30 bg-cyan-500/5">
             <CardContent className="py-3">
               <form onSubmit={handleScanReceive} className="flex items-center gap-3">
@@ -452,16 +578,19 @@ export default function PurchaseOrdersPage() {
           </Card>
           <Table>
             <TableHeader>
-              <TableRow><TableHead>Product</TableHead><TableHead className="text-right">Ordered</TableHead><TableHead className="text-right">Already Rcvd</TableHead><TableHead className="text-right">Receive Now</TableHead></TableRow>
+              <TableRow><TableHead>Product</TableHead><TableHead className="text-right">Ordered</TableHead><TableHead className="text-right">Already Rcvd</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead className="text-right">Receive Now</TableHead></TableRow>
             </TableHeader>
             <TableBody>
               {receiveItems.map((ri, idx) => {
                 const remaining = ri.quantity - (ri.received_qty || 0);
+                const product = products.find(p => p.id === ri.product_id);
+                const tracksStock = product?.track_inventory ?? ["hardware", "accessories", "networking", "security"].includes(String(product?.category || "").toLowerCase());
                 return (
                   <TableRow key={`k-${idx}`}>
-                    <TableCell className="font-medium">{ri.product_name || "Item"}</TableCell>
+                    <TableCell className="font-medium"><div className="flex items-center gap-2"><span>{ri.product_name || "Item"}</span>{product && <Badge variant="outline" className={tracksStock ? "border-green-500/30 text-green-400 text-[10px]" : "text-muted-foreground text-[10px]"}>{tracksStock ? "Stock tracked" : "No stock change"}</Badge>}</div></TableCell>
                     <TableCell className="text-right font-mono">{ri.quantity}</TableCell>
                     <TableCell className="text-right font-mono">{ri.received_qty || 0}</TableCell>
+                    <TableCell className="text-right font-mono text-amber-400">{remaining}</TableCell>
                     <TableCell className="text-right">
                       <Input type="number" min="0" max={remaining} className="w-20 h-8 text-sm font-mono text-right ml-auto"
                         value={ri.receive_now} onChange={e => {
@@ -501,6 +630,19 @@ export default function PurchaseOrdersPage() {
               <p className="text-muted-foreground">Vendor: {viewPO.vendor} | Total: ${(viewPO.total || 0).toFixed(2)}</p>
             </div>
           )}
+          {approvalDialog === "submit" && (
+            <div>
+              <Label>Route to approver</Label>
+              <Select value={approvalApprover || "management"} onValueChange={value => setApprovalApprover(value === "management" ? "" : value)}>
+                <SelectTrigger data-testid="po-approver-select"><SelectValue placeholder="Management queue" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="management">Management queue (unassigned)</SelectItem>
+                  {users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">Choosing a person sends them an in-app approval notification.</p>
+            </div>
+          )}
           <div>
             <Label>{approvalDialog === "reject" ? "Rejection Reason" : "Notes (optional)"}</Label>
             <Textarea value={approvalNotes} onChange={e => setApprovalNotes(e.target.value)} rows={3} placeholder={approvalDialog === "reject" ? "Reason for rejection..." : "Additional notes..."} />
@@ -534,6 +676,27 @@ export default function PurchaseOrdersPage() {
     </Dialog>
   );
 
+  const destructiveActionDialog = (
+    <AlertDialog open={Boolean(destructiveAction)} onOpenChange={open => !open && setDestructiveAction(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{destructiveAction?.type === "delete" ? `Delete ${destructiveAction?.po?.po_number}?` : `Cancel ${destructiveAction?.po?.po_number}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {destructiveAction?.type === "delete"
+              ? "This permanently removes the draft purchase order and its audit history. Ordered or received purchase orders cannot be deleted."
+              : "This stops further ordering and receiving on this purchase order. The order stays in the audit trail as cancelled."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Purchase Order</AlertDialogCancel>
+          <AlertDialogAction className={destructiveAction?.type === "delete" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : "bg-amber-600 text-white hover:bg-amber-700"} onClick={confirmDestructiveAction} data-testid="confirm-po-destructive-action">
+            {destructiveAction?.type === "delete" ? "Delete Draft" : "Cancel Purchase Order"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewPO) {
     const po = viewPO;
@@ -542,6 +705,7 @@ export default function PurchaseOrdersPage() {
     const totalReceived = (po.line_items || []).reduce((s, li) => s + (li.received_qty || 0), 0);
     const receivePct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
     const isOverdue = po.expected_delivery && new Date(po.expected_delivery) < new Date() && po.status !== "received" && po.status !== "cancelled";
+    const vendorInvoiceMatch = po.vendor_invoice_match;
 
     return (
       <div className="space-y-6" data-testid="po-detail">
@@ -554,6 +718,9 @@ export default function PurchaseOrdersPage() {
           </Badge>
           {isOverdue && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>}
           {po.escalated && <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30"><BellRing className="w-3 h-3 mr-1" />Escalated</Badge>}
+          {vendorInvoiceMatch && <Badge className={vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}>
+            <DollarSign className="w-3 h-3 mr-1" />{vendorInvoiceMatch.status === "matched" ? "Invoice matched" : vendorInvoiceMatch.review?.status === "accepted" ? "Variance accepted" : "Invoice variance"}
+          </Badge>}
         </div>
 
         {/* Approval Pipeline */}
@@ -751,10 +918,32 @@ export default function PurchaseOrdersPage() {
                 <Separator />
                 <div><span className="text-muted-foreground block">Expected Delivery</span><span className={`font-medium ${isOverdue ? "text-red-400" : ""}`}>{po.expected_delivery || "N/A"}</span></div>
                 {po.client_name && <><Separator /><div><span className="text-muted-foreground block">Client</span><span className="font-medium">{po.client_name}</span></div></>}
+                {po.ticket_id && <><Separator /><div><span className="text-muted-foreground block">Related Ticket</span><Link className="font-medium text-primary hover:underline" to={`/tickets?ticket=${encodeURIComponent(po.ticket_id)}`}>{po.ticket_number || "Open ticket"}{po.ticket_title ? ` · ${po.ticket_title}` : ""}</Link></div></>}
                 <Separator />
                 <div><span className="text-muted-foreground block">Created By</span><span className="font-medium">{po.created_by_name || "System"}</span></div>
                 <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{po.created_at ? format(new Date(po.created_at), "MMM d, yyyy HH:mm") : "N/A"}</span></div>
                 {po.emailed_to && <><Separator /><div><span className="text-muted-foreground block">Emailed To</span><span className="font-medium text-blue-400">{po.emailed_to}</span><span className="block text-xs text-muted-foreground">{po.emailed_at ? format(new Date(po.emailed_at), "MMM d, HH:mm") : ""}</span></div></>}
+              </CardContent>
+            </Card>
+            <Card className={vendorInvoiceMatch?.status === "variance" ? "border-amber-500/30" : vendorInvoiceMatch ? "border-emerald-500/25" : ""}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4" />Supplier invoice match</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {vendorInvoiceMatch ? <>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Invoice</span><span className="font-mono font-medium">{vendorInvoiceMatch.invoice_number}</span></div>
+                  {vendorInvoiceMatch.invoice_date && <div className="flex justify-between gap-3"><span className="text-muted-foreground">Invoice date</span><span>{vendorInvoiceMatch.invoice_date}</span></div>}
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Supplier total</span><span className="font-mono">${(vendorInvoiceMatch.supplier_total || 0).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">PO total</span><span className="font-mono">${(vendorInvoiceMatch.expected_total || 0).toFixed(2)}</span></div>
+                  <Separator />
+                  <div className={`flex justify-between gap-3 font-medium ${vendorInvoiceMatch.status === "matched" ? "text-emerald-400" : "text-amber-400"}`}><span>{vendorInvoiceMatch.status === "matched" ? "Matched" : "Variance"}</span><span className="font-mono">{vendorInvoiceMatch.status === "matched" ? "$0.00" : `${vendorInvoiceMatch.variance > 0 ? "+" : "-"}$${Math.abs(vendorInvoiceMatch.variance || 0).toFixed(2)}`}</span></div>
+                  {vendorInvoiceMatch.notes && <p className="text-xs text-muted-foreground pt-1">{vendorInvoiceMatch.notes}</p>}
+                  {vendorInvoiceMatch.status === "variance" && <>
+                    <Separator />
+                    {vendorInvoiceMatch.review ? <div className={`rounded-md px-2.5 py-2 text-xs ${vendorInvoiceMatch.review.status === "accepted" ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300"}`}>
+                      <p className="font-medium">{vendorInvoiceMatch.review.status === "accepted" ? "Variance accepted" : "Supplier follow-up required"}</p>
+                      <p className="mt-0.5 opacity-80">{vendorInvoiceMatch.review.reviewed_by_name || "System"}{vendorInvoiceMatch.review.notes ? ` · ${vendorInvoiceMatch.review.notes}` : ""}</p>
+                    </div> : <p className="text-xs text-amber-300">Review required before this variance is considered closed.</p>}
+                  </>}
+                </> : <p className="text-sm text-muted-foreground">No supplier invoice has been matched to this PO yet.</p>}
               </CardContent>
             </Card>
             <Card>
@@ -776,9 +965,25 @@ export default function PurchaseOrdersPage() {
                     </Button>
                   </>
                 )}
-                {(po.status === "approved" || po.status === "draft") && (
-                  <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleStatusChange(po, "submitted")} data-testid="submit-po">
-                    <Send className="w-4 h-4 mr-1" />Submit to Vendor
+                {po.status === "approved" && (
+                  <>
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => {
+                      setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
+                      setEmailVendorDialog(true);
+                    }} data-testid="email-and-submit-po">
+                      <Mail className="w-4 h-4 mr-1" />Email PO & Mark Ordered
+                    </Button>
+                    <Button variant="outline" className="w-full" onClick={() => handleStatusChange(po, "submitted")} data-testid="submit-po">
+                      <Send className="w-4 h-4 mr-1" />Mark as Ordered (no email)
+                    </Button>
+                  </>
+                )}
+                {(po.status === "submitted" || po.status === "partial") && (
+                  <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => {
+                    setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
+                    setEmailVendorDialog(true);
+                  }} data-testid="email-po-vendor">
+                    <Mail className="w-4 h-4 mr-1" />Email PO to Vendor
                   </Button>
                 )}
                 {(po.status === "submitted" || po.status === "partial") && (
@@ -786,6 +991,12 @@ export default function PurchaseOrdersPage() {
                     <PackageCheck className="w-4 h-4 mr-1" />Receive Stock
                   </Button>
                 )}
+                <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => openVendorInvoiceMatch(po)} data-testid="match-vendor-invoice-btn">
+                  <DollarSign className="w-4 h-4 mr-1" />{vendorInvoiceMatch ? "Review Supplier Invoice" : "Match Supplier Invoice"}
+                </Button>
+                {vendorInvoiceMatch?.status === "variance" && <Button variant="outline" className="w-full" onClick={() => openVendorInvoiceReview(po)} data-testid="review-supplier-invoice-variance">
+                  <CheckCircle className="w-4 h-4 mr-1" />{vendorInvoiceMatch.review ? "Update Variance Review" : "Review Invoice Variance"}
+                </Button>}
                 <Separator />
                 {/* PDF & Email */}
                 <Button variant="outline" className="w-full text-violet-400 border-violet-500/30 hover:bg-violet-500/10" onClick={() => handlePreviewPdf(po)} data-testid="preview-po-pdf">
@@ -793,12 +1004,6 @@ export default function PurchaseOrdersPage() {
                 </Button>
                 <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handleDownloadPdf(po)} disabled={pdfLoading} data-testid="download-po-pdf">
                   {pdfLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}Download PDF
-                </Button>
-                <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => {
-                  setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
-                  setEmailVendorDialog(true);
-                }} data-testid="email-vendor-btn">
-                  <Mail className="w-4 h-4 mr-1" />Email to Vendor
                 </Button>
                 <Separator />
                 {/* Utility Actions */}
@@ -809,18 +1014,42 @@ export default function PurchaseOrdersPage() {
                   <Edit className="w-4 h-4 mr-1" />Edit
                 </Button>
                 {(po.status === "draft" || po.status === "submitted") && (
-                  <Button variant="outline" className="w-full text-amber-400" onClick={() => handleStatusChange(po, "cancelled")}>
+                  <Button variant="outline" className="w-full text-amber-400" onClick={() => requestDestructiveAction("cancel", po)} data-testid="cancel-po-btn">
                     <XCircle className="w-4 h-4 mr-1" />Cancel PO
                   </Button>
                 )}
-                <Button variant="destructive" className="w-full" onClick={() => handleDelete(po.id)} data-testid="delete-po-btn">
+                {po.status === "draft" && <Button variant="destructive" className="w-full" onClick={() => requestDestructiveAction("delete", po)} data-testid="delete-po-btn">
                   <Trash2 className="w-4 h-4 mr-1" />Delete
-                </Button>
+                </Button>}
               </CardContent>
             </Card>
           </div>
         </div>
-        {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}
+        {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}{destructiveActionDialog}
+        <Dialog open={vendorInvoiceDialog} onOpenChange={setVendorInvoiceDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Match supplier invoice</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Record the supplier invoice against {po.po_number}. This does not alter the PO total or create a customer invoice.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><Label>Supplier invoice number *</Label><Input value={vendorInvoiceForm.invoice_number} onChange={e => setVendorInvoiceForm({ ...vendorInvoiceForm, invoice_number: e.target.value })} placeholder="e.g. INV-10482" data-testid="supplier-invoice-number" /></div>
+              <div><Label>Invoice date</Label><Input type="date" value={vendorInvoiceForm.invoice_date} onChange={e => setVendorInvoiceForm({ ...vendorInvoiceForm, invoice_date: e.target.value })} /></div>
+              <div><Label>Supplier total *</Label><Input type="number" min="0" step="0.01" value={vendorInvoiceForm.supplier_total} onChange={e => setVendorInvoiceForm({ ...vendorInvoiceForm, supplier_total: e.target.value })} data-testid="supplier-invoice-total" /></div>
+              <div className="col-span-2"><Label>Internal notes</Label><Textarea rows={3} value={vendorInvoiceForm.notes} onChange={e => setVendorInvoiceForm({ ...vendorInvoiceForm, notes: e.target.value })} placeholder="Reason for a variance, receiving note, or approval reference..." /></div>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setVendorInvoiceDialog(false)}>Cancel</Button><Button onClick={handleVendorInvoiceMatch} data-testid="save-supplier-invoice-match">Save match</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={vendorInvoiceReviewDialog} onOpenChange={setVendorInvoiceReviewDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Review supplier invoice variance</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Record the internal decision for the variance on {po.po_number}. This remains an audit record and does not change billing automatically.</p>
+            <div className="space-y-3">
+              <div><Label>Decision</Label><Select value={vendorInvoiceReview.decision} onValueChange={value => setVendorInvoiceReview({ ...vendorInvoiceReview, decision: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="accepted">Accept variance</SelectItem><SelectItem value="follow_up">Supplier follow-up required</SelectItem></SelectContent></Select></div>
+              <div><Label>Review notes</Label><Textarea rows={3} value={vendorInvoiceReview.notes} onChange={e => setVendorInvoiceReview({ ...vendorInvoiceReview, notes: e.target.value })} placeholder="Approval rationale, supplier contact, or next step..." /></div>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setVendorInvoiceReviewDialog(false)}>Cancel</Button><Button onClick={handleVendorInvoiceReview} data-testid="save-supplier-invoice-review">Save review</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -910,10 +1139,12 @@ export default function PurchaseOrdersPage() {
   // ========== LIST VIEW ==========
   return (
     <div className="space-y-6" data-testid="purchase-orders-page">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Purchase Orders</h1>
-          <p className="text-muted-foreground">{pos.length} purchase orders</p>
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><ShoppingCart className="w-4 h-4 text-violet-300" /></span>
+            <div><h1 className="text-2xl font-bold tracking-tight">Purchase Orders</h1><p className="text-sm text-muted-foreground">Procurement command centre · {pos.length} purchase orders</p></div>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} data-testid="po-analytics-btn">
@@ -926,18 +1157,19 @@ export default function PurchaseOrdersPage() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Shared ticket-style metric strip */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><FileText className="w-5 h-5 text-blue-500" /></div><div><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold">{stats.total || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-gray-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-gray-400" /></div><div><p className="text-xs text-muted-foreground">Draft</p><p className="text-xl font-bold">{stats.draft || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Send className="w-5 h-5 text-cyan-400" /></div><div><p className="text-xs text-muted-foreground">Ordered</p><p className="text-xl font-bold">{stats.submitted || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><PackageCheck className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Partial</p><p className="text-xl font-bold">{stats.partial || 0}</p></div></div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-400" /></div><div><p className="text-xs text-muted-foreground">Total Value</p><p className="text-xl font-bold">${(stats.total_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div></div></CardContent></Card>
-        {(stats.overdue || 0) > 0 && <Card className="border-red-500/30"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-red-400 animate-pulse" /></div><div><p className="text-xs text-muted-foreground">Overdue</p><p className="text-xl font-bold text-red-400">{stats.overdue}</p></div></div></CardContent></Card>}
+        <HeroTile label="All purchase orders" value={stats.total || 0} icon={FileText} glow="cyan" active={statusFilter === "all" && !search} onClick={() => { setSearch(""); applyStatusFilter("all"); }} testId="po-stat-total" />
+        <HeroTile label="Awaiting approval" value={stats.pending_approval || 0} icon={Clock} glow="violet" active={statusFilter === "pending_approval"} onClick={() => applyStatusFilter("pending_approval")} testId="po-stat-pending-approval" />
+        <HeroTile label="Ordered" value={stats.submitted || 0} icon={Send} glow="cyan" active={statusFilter === "submitted"} onClick={() => applyStatusFilter("submitted")} testId="po-stat-ordered" />
+        <HeroTile label="Receiving" value={stats.partial || 0} icon={PackageCheck} glow="amber" active={statusFilter === "partial"} onClick={() => applyStatusFilter("partial")} testId="po-stat-receiving" />
+        <HeroTile label="Overdue delivery" value={overdueCount} icon={AlertTriangle} glow={overdueCount > 0 ? "rose" : "emerald"} active={search === "" && statusFilter === "overdue"} onClick={() => { setSearch(""); setStatusFilter("overdue"); }} testId="po-stat-overdue" />
+        <HeroTile label="Invoice variances" value={supplierInvoiceVarianceCount} icon={AlertTriangle} glow={supplierInvoiceVarianceCount > 0 ? "amber" : "emerald"} active={statusFilter === "invoice_variance"} onClick={() => { setSearch(""); setStatusFilter("invoice_variance"); }} testId="po-stat-invoice-variance" />
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Procurement queue controls */}
+      <Card className="border-border/60">
+      <CardContent className="py-3 flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input className="pl-9" placeholder="Search PO#, vendor..." value={search} onChange={e => setSearch(e.target.value)} data-testid="po-search" />
@@ -946,6 +1178,9 @@ export default function PurchaseOrdersPage() {
           <SelectTrigger className="w-[170px]" data-testid="po-status-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="overdue">Overdue Delivery</SelectItem>
+            <SelectItem value="invoice_variance">Supplier Invoice Variance</SelectItem>
+            <SelectItem value="invoice_unmatched">Supplier Invoice Unmatched</SelectItem>
             <SelectItem value="draft">Draft</SelectItem>
             <SelectItem value="pending_approval">Pending Approval</SelectItem>
             <SelectItem value="approved">Approved</SelectItem>
@@ -955,22 +1190,29 @@ export default function PurchaseOrdersPage() {
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+        <span className="text-xs text-muted-foreground ml-auto">Showing <span className="font-semibold text-foreground">{filtered.length}</span> of {pos.length}</span>
+        {hasFilters && <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setSearch(""); setStatusFilter("all"); }}>Clear filters</Button>}
+      </CardContent>
+      </Card>
 
       {/* PO Table */}
-      <Card>
+      <Card className="overflow-hidden border-border/60">
+        <CardHeader className="pb-3 border-b border-border/50 flex flex-row items-center justify-between">
+          <div><CardTitle className="text-sm flex items-center gap-2"><Layers className="w-4 h-4 text-violet-400" />Purchase queue</CardTitle><p className="text-xs text-muted-foreground mt-1">Open an order to approve, email, receive, or audit its history.</p></div>
+          <Badge variant="outline" className="font-mono text-[10px]">{filtered.length} visible</Badge>
+        </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>PO #</TableHead><TableHead>Vendor</TableHead><TableHead>Assigned</TableHead>
-                <TableHead>Items</TableHead><TableHead className="text-right">Total</TableHead>
+                <TableHead>Items</TableHead><TableHead className="text-right">Total</TableHead><TableHead>Supplier invoice</TableHead>
                 <TableHead>Status</TableHead><TableHead>Delivery</TableHead><TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-12 text-muted-foreground">{search || statusFilter !== "all" ? "No POs match filters" : "No purchase orders yet."}</TableCell></TableRow>
+                <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">{search || statusFilter !== "all" ? "No POs match filters" : "No purchase orders yet."}</TableCell></TableRow>
               ) : filtered.map(po => {
                 const StatusIcon = STATUS_CONFIG[po.status]?.icon || Clock;
                 const isOverdue = po.expected_delivery && new Date(po.expected_delivery) < new Date() && !["received", "cancelled"].includes(po.status);
@@ -989,6 +1231,13 @@ export default function PurchaseOrdersPage() {
                     </TableCell>
                     <TableCell className="text-right font-mono font-medium">${(po.total || 0).toFixed(2)}</TableCell>
                     <TableCell>
+                      {po.vendor_invoice_match ? (
+                        <Badge className={po.vendor_invoice_match.status === "matched" || po.vendor_invoice_match.review?.status === "accepted" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs" : "bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs"}>
+                          <DollarSign className="w-3 h-3 mr-1" />{po.vendor_invoice_match.status === "matched" ? "Matched" : po.vendor_invoice_match.review?.status === "accepted" ? "Accepted" : `${po.vendor_invoice_match.variance > 0 ? "+" : "-"}$${Math.abs(po.vendor_invoice_match.variance || 0).toFixed(2)}`}
+                        </Badge>
+                      ) : requiresSupplierInvoice(po) ? <Badge variant="outline" className="text-xs text-amber-400 border-amber-500/30">Unmatched</Badge> : <span className="text-xs text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell>
                       <Badge className={STATUS_CONFIG[po.status]?.class + " text-xs " + (STATUS_CONFIG[po.status]?.glow || "")}>
                         <StatusIcon className="w-3 h-3 mr-1" />{STATUS_CONFIG[po.status]?.label}
                       </Badge>
@@ -1004,7 +1253,7 @@ export default function PurchaseOrdersPage() {
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Preview PDF" onClick={() => handlePreviewPdf(po)}><Eye className="w-3 h-3 text-violet-400" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Download PDF" onClick={() => handleDownloadPdf(po)}><Download className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Duplicate" onClick={() => handleDuplicate(po)}><Copy className="w-3 h-3" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(po.id)}><Trash2 className="w-3 h-3" /></Button>
+                        {po.status === "draft" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => requestDestructiveAction("delete", po)}><Trash2 className="w-3 h-3" /></Button>}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1015,7 +1264,7 @@ export default function PurchaseOrdersPage() {
         </CardContent>
       </Card>
 
-      {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}
+      {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}{destructiveActionDialog}
       <PdfViewerDialog
         open={pdfViewer.open}
         onOpenChange={v => setPdfViewer(p => ({ ...p, open: v }))}

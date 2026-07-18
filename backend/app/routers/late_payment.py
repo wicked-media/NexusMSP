@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
-from app.routers.email_utils import send_email, is_resend_configured
+from app.routers.email_utils import send_email
 import random
 import uuid
 
@@ -180,7 +180,7 @@ async def send_late_payment_reminder(data: dict, current_user: dict = Depends(ge
     portal_url = data.get("portal_url", "")
 
     html = _late_reminder_html(client_name, invoice_number, amount, due_date, days_late, msp_name, primary_color, portal_url)
-    result = await send_email(to_email, f"{msp_name} - Payment Reminder: {invoice_number}", html)
+    result = await send_email(to_email, f"{msp_name} - Payment Reminder: {invoice_number}", html, category="billing")
 
     # Log the reminder
     await db.late_payment_reminders.insert_one({
@@ -217,13 +217,13 @@ async def send_payment_confirmation(data: dict, current_user: dict = Depends(get
 
     results = []
     if to_email:
-        r = await send_email(to_email, f"{msp_name} - Payment Confirmation: {invoice_number}", html)
+        r = await send_email(to_email, f"{msp_name} - Payment Confirmation: {invoice_number}", html, category="billing")
         results.append({"to": to_email, **r})
 
     if cc_team:
         team_email = current_user.get("email", "")
         if team_email:
-            r = await send_email(team_email, f"Payment Received: {invoice_number} - ${amount:,.2f}", html)
+            r = await send_email(team_email, f"Payment Received: {invoice_number} - ${amount:,.2f}", html, category="notifications")
             results.append({"to": team_email, **r})
 
     return {"results": results, "message": f"Confirmation sent for {invoice_number}"}

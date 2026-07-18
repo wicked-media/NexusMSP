@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
   Flame, BarChart3, Clock, RefreshCw, Loader2, AlertTriangle,
@@ -69,22 +70,17 @@ export default function IncidentHeatmapPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-3">
+      <MetricStrip columns={5}>
         {[
-          { label: "Total Incidents", value: data.insights.total_incidents, icon: Flame, color: "text-red-400" },
-          { label: "Peak Hour", value: data.insights.peak_hour, icon: Clock, color: "text-amber-400" },
-          { label: "Busiest Day", value: data.insights.peak_day, icon: Target, color: "text-blue-400" },
-          { label: "Top Category", value: data.insights.busiest_category, icon: Activity, color: "text-purple-400", small: true },
-          { label: "Critical", value: bp.critical || 0, icon: AlertTriangle, color: "text-red-400" },
+          { label: "Total Incidents", value: data.insights.total_incidents, icon: Flame, color: "text-rose-400", accent: "rose" },
+          { label: "Peak Hour", value: data.insights.peak_hour, icon: Clock, color: "text-amber-400", accent: "amber" },
+          { label: "Busiest Day", value: data.insights.peak_day, icon: Target, color: "text-sky-400", accent: "sky" },
+          { label: "Top Category", value: data.insights.busiest_category, icon: Activity, color: "text-violet-400", accent: "violet" },
+          { label: "Critical", value: bp.critical || 0, icon: AlertTriangle, color: "text-rose-400", accent: "rose" },
         ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`${st.small ? "text-lg" : "text-2xl"} font-bold ${st.color}`}>{st.value}</p>
-            </CardContent>
-          </Card>
+          <MetricTile key={st.label} label={st.label} value={st.value || "—"} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`incident-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
-      </div>
+      </MetricStrip>
 
       {/* Priority Breakdown */}
       {totalByPriority > 0 && (
