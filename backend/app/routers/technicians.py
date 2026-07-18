@@ -143,7 +143,31 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
         update["hourly_rate"] = float(update["hourly_rate"])
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields")
+
+    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    sensitive_fields = {"role", "is_admin", "permissions", "enabled_modules"}
+    sensitive_changes = {
+        field: {"from": target.get(field), "to": update.get(field)}
+        for field in sensitive_fields
+        if field in update and target.get(field) != update.get(field)
+    }
     await db.users.update_one({"id": tech_id}, {"$set": update})
+
+    if sensitive_changes:
+        from app.routers.tech_intel import _log_audit
+        caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0}) or current_user
+        old_admin = bool(target.get("is_admin") or target.get("role") == "admin")
+        new_admin = bool(update.get("is_admin", target.get("is_admin")) or update.get("role", target.get("role")) == "admin")
+        if old_admin != new_admin:
+            action = "administrator_access_granted" if new_admin else "administrator_access_removed"
+        elif "role" in sensitive_changes:
+            action = "access_role_updated"
+        else:
+            action = "permissions_updated"
+        await _log_audit(caller, action, tech_id, target.get("name", "Technician"), {"changes": sensitive_changes})
     return {"message": "Technician updated"}
 
 @router.post("/technicians/{tech_id}/archive")

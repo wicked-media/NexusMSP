@@ -376,6 +376,10 @@ function InviteDialog({ open, onClose, onSent, headers, presets }) {
 function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [adminConfirmOpen, setAdminConfirmOpen] = useState(false);
+  const [adminAcknowledged, setAdminAcknowledged] = useState(false);
+  const [adminAction, setAdminAction] = useState(null);
+  const [pendingRole, setPendingRole] = useState(null);
 
   useEffect(() => {
     if (tech) setForm({
@@ -385,11 +389,16 @@ function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
       categories: tech.categories || [], specialties: tech.specialties || [],
     });
     else setForm(null);
+    setAdminConfirmOpen(false);
+    setAdminAcknowledged(false);
+    setAdminAction(null);
+    setPendingRole(null);
   }, [tech]);
 
   if (!tech || !form) return null;
 
   const save = async () => {
+    if (!form.name.trim() || !form.email.trim()) { toast.error("Name and email are required"); return; }
     setBusy(true);
     try {
       const payload = { ...form, permissions: presets[form.job_title] || undefined };
@@ -401,24 +410,47 @@ function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
     finally { setBusy(false); }
   };
 
+  const hasAdministratorAccess = form.is_admin || form.role === "admin";
+  const requestAdministratorChange = (action, nextRole = null) => {
+    setAdminAction(action); setPendingRole(nextRole); setAdminAcknowledged(false); setAdminConfirmOpen(true);
+  };
+  const confirmAdministratorChange = () => {
+    if (adminAction === "grant") setForm({ ...form, role: "admin", is_admin: true });
+    else setForm({ ...form, role: pendingRole || (form.role === "admin" ? "technician" : form.role), is_admin: false });
+    setAdminConfirmOpen(false); setAdminAcknowledged(false); setAdminAction(null); setPendingRole(null);
+  };
+  const changeAccessRole = value => {
+    if (value === "admin" && !hasAdministratorAccess) return requestAdministratorChange("grant");
+    if (value !== "admin" && hasAdministratorAccess) return requestAdministratorChange("revoke", value);
+    setForm({ ...form, role: value });
+  };
+  const workload = tech.workload || {};
+  const statusLabel = workload.state ? `${workload.state} · ${workload.utilisation ?? workload.utilization ?? 0}% utilised` : "No live workload signal";
+
   return (
     <Dialog open={!!tech} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg" data-testid="edit-tech-dialog">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="edit-tech-dialog">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5 text-violet-400" />Edit {tech.name}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5 text-violet-400" />Manage {tech.name}</DialogTitle>
+          <DialogDescription>Update team profile and work access. Personal preferences, signatures and notifications stay in My Workspace.</DialogDescription>
         </DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs">
+          <div><p className="text-zinc-500">Live workload</p><p className="mt-1 font-medium text-zinc-200 capitalize">{statusLabel}</p></div>
+          <div><p className="text-zinc-500">Open tickets</p><p className="mt-1 font-medium text-zinc-200">{workload.open_tickets ?? workload.open ?? 0}</p></div>
+          <div><p className="text-zinc-500">On-call</p><p className="mt-1 font-medium text-zinc-200">{workload.on_call ? "Currently rostered" : "Not rostered"}</p></div>
+        </div>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div><Label className="text-xs">Full name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
-            <div><Label className="text-xs">Email</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+            <div><Label className="text-xs">Full name <span className="text-rose-300">*</span></Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+            <div><Label className="text-xs">Email <span className="text-rose-300">*</span></Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label className="text-xs">Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+            <div><Label className="text-xs">Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="Optional contact number" /></div>
             <div>
-              <Label className="text-xs">Role</Label>
-              <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
+              <Label className="text-xs">Access role</Label>
+              <Select value={form.role} onValueChange={changeAccessRole}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? "Administrator (protected)" : o.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
@@ -430,12 +462,18 @@ function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
                 <SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div><Label className="text-xs">Hourly rate</Label><Input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} /></div>
+            <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} /></div>
           </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={form.is_admin} onChange={e => setForm({ ...form, is_admin: e.target.checked })} />
-            Grant Admin (full access)
-          </label>
+          <div className="rounded-lg border border-violet-500/20 bg-violet-500/[0.05] p-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-violet-300" /><p className="text-xs font-semibold text-zinc-100">Administrator access</p><Badge variant="outline" className={hasAdministratorAccess ? "border-rose-500/40 text-rose-300" : "border-zinc-700 text-zinc-400"}>{hasAdministratorAccess ? "Enabled" : "Standard"}</Badge></div>
+                <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Administrators can change team access and platform settings. Use JIT for temporary elevated access instead.</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => requestAdministratorChange(hasAdministratorAccess ? "revoke" : "grant")} className={hasAdministratorAccess ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10" : "border-violet-500/40 text-violet-200 hover:bg-violet-500/10"}>{hasAdministratorAccess ? "Remove" : "Grant"}</Button>
+            </div>
+            <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-[11px] text-zinc-400">Effective permission preset: <span className="font-medium text-zinc-200">{form.job_title}</span>. Fine-grained permissions are managed from the Permissions tab.</div>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -444,6 +482,19 @@ function EditTechDialog({ tech, onClose, headers, presets, onChanged }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+      <Dialog open={adminConfirmOpen} onOpenChange={setAdminConfirmOpen}>
+        <DialogContent className="max-w-md" data-testid="confirm-admin-access-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ShieldAlert className="h-5 w-5 text-rose-400" />{adminAction === "grant" ? "Grant administrator access?" : "Remove administrator access?"}</DialogTitle>
+            <DialogDescription>{adminAction === "grant" ? `${tech.name} will be able to manage platform and team access. This permanent change will be recorded in the Team audit log.` : `${tech.name} will lose administrator access immediately. Use JIT instead when elevated access only needs to be temporary.`}</DialogDescription>
+          </DialogHeader>
+          <label className="flex items-start gap-2 rounded-md border border-zinc-800 p-3 text-xs text-zinc-300"><input className="mt-0.5" type="checkbox" checked={adminAcknowledged} onChange={e => setAdminAcknowledged(e.target.checked)} /><span>I understand the impact of this access change.</span></label>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAdminConfirmOpen(false)}>Cancel</Button>
+            <Button disabled={!adminAcknowledged} onClick={confirmAdministratorChange} variant="outline" className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">{adminAction === "grant" ? "Grant access" : "Remove access"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
