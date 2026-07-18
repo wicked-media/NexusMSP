@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X, AlertTriangle, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,6 +17,7 @@ function NotificationBell({ token, collapsed }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const [panelView, setPanelView] = useState("attention");
   const ref = useRef(null);
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -80,9 +81,11 @@ function NotificationBell({ token, collapsed }) {
     } catch {}
   };
 
-  const severityColor = { critical: "bg-rose-500", warning: "bg-amber-500", info: "bg-sky-500" };
   const typeIcon = { sla_breach: "SLA", sla_warning: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT", ticket_updated: "TKT", new_lead: "LEAD", supplier_invoice_follow_up: "PO", chat_mention: "CHAT", chat_broadcast: "CHAT", thread_reply: "CHAT" };
   const attentionCount = notifications.filter(n => !n.read && ["critical", "warning"].includes(n.severity)).length;
+  const visibleNotifications = panelView === "attention"
+    ? notifications.filter(n => !n.read && ["critical", "warning"].includes(n.severity))
+    : notifications;
 
   return (
     <div className={`relative px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
@@ -105,24 +108,26 @@ function NotificationBell({ token, collapsed }) {
         {collapsed && <TooltipContent side="right">Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
       </Tooltip>
       {isOpen && (
-        <div className="absolute left-full top-0 z-50 ml-3 w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border bg-card shadow-2xl" data-testid="notification-panel">
-          <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="absolute left-full top-0 z-50 ml-3 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-violet-500/20 bg-card shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)]" data-testid="notification-panel">
+          <div className="border-b border-border bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.18),transparent_45%)] px-4 py-3">
+            <div className="flex items-center justify-between">
             <div><span className="text-sm font-semibold">Notification inbox</span><p className="mt-0.5 text-[11px] text-muted-foreground">{attentionCount > 0 ? `${attentionCount} needs attention` : unreadCount > 0 ? `${unreadCount} unread updates` : "You’re up to date"}</p></div>
             <div className="flex items-center gap-2">
-              {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>}
+              {unreadCount > 0 && <button onClick={markAllRead} className="rounded-md px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"><CheckCheck className="mr-1 inline h-3 w-3" />Read all</button>}
             </div>
+            </div>
+            <div className="mt-3 flex items-center gap-1 rounded-lg bg-muted/50 p-1"><button onClick={() => setPanelView("attention")} className={`flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${panelView === "attention" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}><AlertTriangle className="h-3 w-3" />Attention {attentionCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[9px] text-rose-400">{attentionCount}</span>}</button><button onClick={() => setPanelView("all")} className={`flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${panelView === "all" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>All updates <span className="ml-1 text-[9px] text-muted-foreground">{notifications.length}</span></button></div>
           </div>
           <div className="max-h-[390px] overflow-y-auto p-1.5">
-            {notifications.length === 0 ? (
+            {visibleNotifications.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">No notifications</p>
-            ) : notifications.map(n => (
+            ) : visibleNotifications.map(n => (
               <div key={n.id} onClick={() => handleNotificationClick(n)}
-                className={`rounded-xl px-3 py-3 cursor-pointer hover:bg-muted/70 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
+                className={`group rounded-xl border border-transparent px-3 py-3 cursor-pointer transition-colors ${!n.read ? 'bg-primary/[0.045]' : ''} ${n.severity === "critical" ? "hover:border-rose-500/30 hover:bg-rose-500/[0.04]" : n.severity === "warning" ? "hover:border-amber-500/30 hover:bg-amber-500/[0.04]" : "hover:border-border hover:bg-muted/60"}`}>
                 <div className="flex items-start gap-3">
-                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${severityColor[n.severity] || 'bg-blue-500'}`} />
+                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${n.severity === "critical" ? "bg-rose-500/10 text-rose-400" : n.severity === "warning" ? "bg-amber-500/10 text-amber-400" : "bg-sky-500/10 text-sky-400"}`}><span className="text-[9px] font-bold">{typeIcon[n.type] || 'SYS'}</span></div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded">{typeIcon[n.type] || 'SYS'}</span>
                       {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
                       <p className="text-xs font-semibold truncate">{n.title || n.message}</p>
                     </div>
@@ -134,8 +139,8 @@ function NotificationBell({ token, collapsed }) {
             ))}
           </div>
           <button onClick={() => { setIsOpen(false); navigate('/notifications'); }}
-            className="w-full px-4 py-2.5 text-xs text-primary font-medium hover:bg-muted/50 border-t transition-colors" data-testid="view-all-notifications">
-            View All Notifications
+            className="w-full px-4 py-3 text-xs text-primary font-medium hover:bg-primary/5 border-t transition-colors" data-testid="view-all-notifications">
+            Open notification centre →
           </button>
         </div>
       )}
