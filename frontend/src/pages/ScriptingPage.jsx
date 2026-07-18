@@ -655,8 +655,10 @@ export default function ScriptingPage() {
             })}
           </div>
           <div className="space-y-4">
-            {scriptLibrary.map((template, i) => (
-              <Card key={`k-${i}`} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
+            {scriptLibrary.map((template, i) => {
+              const installedScript = scripts.find((script) => script.name.toLowerCase() === template.name.toLowerCase() && script.content === template.content);
+              return (
+              <Card key={`k-${i}`} className={`hover:border-primary/30 transition-all ${installedScript ? "border-emerald-500/25 bg-emerald-500/[0.02]" : ""}`} data-testid={`library-template-${i}`}>
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
@@ -668,15 +670,16 @@ export default function ScriptingPage() {
                           <Badge variant="outline" className="text-[10px]">{scriptTypes[template.script_type]?.label}</Badge>
                           <Badge variant="outline" className="text-[10px]">{template.os_target}</Badge>
                           <Badge variant="outline" className="text-[10px]">{categories[template.category]}</Badge>
+                          {installedScript && <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-300"><Check className="mr-1 h-3 w-3" />Installed</Badge>}
                         </div>
                       </div>
                     </div>
-                    <Button size="sm" onClick={() => importFromLibrary(template)} data-testid={`import-template-${i}`}><Download className="w-4 h-4 mr-1" />Import</Button>
+                    {installedScript ? <Button size="sm" variant="outline" onClick={() => openEditDialog(installedScript)} data-testid={`open-installed-template-${i}`}><Settings className="mr-1 h-4 w-4" />Open</Button> : <Button size="sm" onClick={() => importFromLibrary(template)} data-testid={`import-template-${i}`}><Download className="w-4 h-4 mr-1" />Import</Button>}
                   </div>
                   <CodeBlock content={template.content} language={template.script_type} />
                 </CardContent>
               </Card>
-            ))}
+            );})}
           </div>
         </TabsContent>
 
