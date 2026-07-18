@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import {
   Terminal, Plus, Search, Play, Clock, RefreshCw, Loader2, Code, Cpu,
@@ -54,6 +55,40 @@ const categories = {
   general: "General", maintenance: "Maintenance", security: "Security",
   monitoring: "Monitoring", remediation: "Remediation"
 };
+
+function ScriptAutocomplete({ scripts, selectedScript, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const matches = scripts.filter(script => {
+    const haystack = `${script.name} ${script.description || ""} ${script.category || ""} ${script.os_target || ""}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  }).slice(0, 20);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="min-w-0 flex-1 justify-start gap-2 text-left font-normal" data-testid="live-script-search-picker">
+          <Code className="h-4 w-4 shrink-0 text-violet-400" />
+          <span className="truncate">{selectedScript?.name || "Search and select a script…"}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(420px,calc(100vw-2rem))] p-2">
+        <div className="relative mb-2"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={e => setQuery(e.target.value)} className="h-9 pl-8 text-sm" placeholder="Search scripts, category, or operating system…" /></div>
+        <ScrollArea className="max-h-64">
+          <div className="space-y-1 pr-1">
+            {matches.map(script => (
+              <button key={script.id} type="button" onClick={() => { onSelect(script); setQuery(""); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted ${selectedScript?.id === script.id ? "bg-violet-500/10" : ""}`} data-testid={`live-script-result-${script.id}`}>
+                <Code className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{script.name}</span><span className="block truncate text-[10px] text-muted-foreground">{script.description || categories[script.category] || "Script"}</span></span>
+                <Badge variant="outline" className="shrink-0 text-[9px]">{script.os_target || "any"}</Badge>
+              </button>
+            ))}
+            {!matches.length && <p className="py-6 text-center text-xs text-muted-foreground">No scripts match that search.</p>}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // Built-in script library templates
 const scriptLibrary = [
@@ -377,16 +412,19 @@ export default function ScriptingPage() {
 
         {/* Live Terminal Tab */}
         <TabsContent value="terminal" className="space-y-4" data-testid="live-terminal-tab">
-          <div className="grid grid-cols-2 gap-4 h-[550px]">
+          <div className="rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.07] via-transparent to-cyan-500/[0.05] p-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-violet-200">Live execution console</span><span className="text-muted-foreground">Select a saved script, choose an online endpoint, then review its output in real time.</span>
+              {liveScript && <Badge variant="outline" className="ml-auto border-violet-500/30 text-[10px] text-violet-200">{liveScript.os_target || "cross-platform"} · {categories[liveScript.category] || "General"}</Badge>}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:h-[550px]">
             {/* Left: Script Selector + Code Preview */}
             <div className="space-y-3 flex flex-col">
-              <div className="flex items-center gap-2">
-                <Select value={liveScript?.id || ""} onValueChange={v => setLiveScript(scripts.find(s => s.id === v))}>
-                  <SelectTrigger data-testid="live-script-select"><SelectValue placeholder="Select script..." /></SelectTrigger>
-                  <SelectContent>{scripts.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({scriptTypes[s.script_type]?.label})</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <ScriptAutocomplete scripts={scripts} selectedScript={liveScript} onSelect={setLiveScript} />
                 <Select value={liveDevice} onValueChange={setLiveDevice}>
-                  <SelectTrigger className="w-[200px]" data-testid="live-device-select"><SelectValue placeholder="Target device..." /></SelectTrigger>
+                  <SelectTrigger className="sm:w-[220px]" data-testid="live-device-select"><SelectValue placeholder="Target device..." /></SelectTrigger>
                   <SelectContent><SelectItem value="localhost">localhost</SelectItem>{devices.filter(d => d.status === "online").slice(0, 30).map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.hostname}</SelectItem>)}</SelectContent>
                 </Select>
                 <Button onClick={handleLiveRun} disabled={liveRunning || !liveScript} className="flex-shrink-0" data-testid="live-run-btn">
@@ -399,8 +437,8 @@ export default function ScriptingPage() {
                   <CodeBlock content={liveScript.content} language={liveScript.script_type} />
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center bg-[#1a1b26] rounded-lg border border-[#2f3348]">
-                  <div className="text-center"><Terminal className="w-10 h-10 text-[#565f89] mx-auto mb-2" /><p className="text-sm text-[#565f89]">Select a script to preview</p></div>
+                <div className="flex min-h-[260px] flex-1 items-center justify-center rounded-lg border border-dashed border-violet-500/20 bg-violet-500/[0.03]">
+                  <div className="text-center"><Search className="mx-auto mb-2 h-10 w-10 text-violet-400/50" /><p className="text-sm font-medium text-violet-100">Find a script to begin</p><p className="mt-1 text-xs text-muted-foreground">Search by name, category, or operating system.</p></div>
                 </div>
               )}
               {/* Recent Runs */}
