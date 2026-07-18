@@ -25,7 +25,7 @@ import {
   Inbox, Loader2, Plus, Trash2, AlertTriangle, CheckCircle, Save, Webhook, Send,
   Heart, Calendar, ShoppingCart, Phone, KeySquare, Briefcase, BookOpen,
   ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet, Activity, MapPin,
-  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt
+  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt, ChevronRight
 } from "lucide-react";
 
 const useApi = () => {
