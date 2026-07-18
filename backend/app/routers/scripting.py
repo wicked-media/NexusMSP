@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
+from zoneinfo import ZoneInfo
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
@@ -8,6 +9,96 @@ from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINI
 from app.models import *
 
 router = APIRouter()
+
+
+def _schedule_timezone(value: str | None):
+    try:
+        return ZoneInfo(value or "UTC")
+    except Exception:
+        return timezone.utc
+
+
+def next_scheduled_run(task: dict, now: datetime | None = None) -> str:
+    """Return the next due time in UTC for a saved script schedule."""
+    now = now or datetime.now(timezone.utc)
+    tz = _schedule_timezone(task.get("timezone"))
+    local_now = now.astimezone(tz)
+    try:
+        hour, minute = [int(part) for part in str(task.get("schedule_time") or "09:00").split(":")[:2]]
+        run_time = time(hour=max(0, min(23, hour)), minute=max(0, min(59, minute)))
+    except Exception:
+        run_time = time(9, 0)
+
+    schedule_type = task.get("schedule_type", "once")
+    if schedule_type in {"once", "daily"}:
+        candidate = datetime.combine(local_now.date(), run_time, tzinfo=tz)
+        if candidate <= local_now:
+            candidate += timedelta(days=1)
+        return candidate.astimezone(timezone.utc).isoformat()
+
+    if schedule_type == "weekly":
+        days = {int(day) for day in task.get("schedule_days", []) if str(day).isdigit() and 0 <= int(day) <= 6}
+        days = days or {local_now.weekday()}
+        for offset in range(8):
+            candidate = datetime.combine(local_now.date() + timedelta(days=offset), run_time, tzinfo=tz)
+            if candidate.weekday() in days and candidate > local_now:
+                return candidate.astimezone(timezone.utc).isoformat()
+
+    if schedule_type == "monthly":
+        days = {int(day) for day in task.get("schedule_days", []) if str(day).isdigit() and 1 <= int(day) <= 31}
+        days = days or {local_now.day}
+        for month_offset in range(0, 14):
+            month = (local_now.month - 1 + month_offset) % 12 + 1
+            year = local_now.year + (local_now.month - 1 + month_offset) // 12
+            for day in sorted(days):
+                try:
+                    candidate = datetime(year, month, day, run_time.hour, run_time.minute, tzinfo=tz)
+                except ValueError:
+                    continue
+                if candidate > local_now:
+                    return candidate.astimezone(timezone.utc).isoformat()
+
+    return (now + timedelta(days=1)).isoformat()
+
+
+async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
+    """Queue due saved-script runs for the agent, recording a durable run audit."""
+    now = now or datetime.now(timezone.utc)
+    due_tasks = await db.scheduled_tasks.find({"enabled": True, "next_run": {"$lte": now.isoformat()}} , {"_id": 0}).to_list(200)
+    queued = 0
+    processed = 0
+    for task in due_tasks:
+        script = await db.scripts.find_one({"id": task.get("script_id")}, {"_id": 0})
+        if not script:
+            await db.scheduled_tasks.update_one({"id": task["id"]}, {"$set": {"enabled": False, "last_error": "Script no longer exists", "updated_at": now.isoformat()}})
+            continue
+        is_once = task.get("schedule_type") == "once"
+        next_run = None if is_once else next_scheduled_run(task, now)
+        claim = await db.scheduled_tasks.update_one(
+            {"id": task["id"], "enabled": True, "next_run": task.get("next_run")},
+            {"$set": {"last_run": now.isoformat(), "next_run": next_run, "enabled": not is_once, "updated_at": now.isoformat()}, "$inc": {"run_count": 1}}
+        )
+        if not claim.modified_count:
+            continue
+        processed += 1
+        executions = []
+        for device_id in task.get("target_ids", []):
+            device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+            if not device:
+                continue
+            execution = ScriptExecution(
+                script_id=script["id"], script_name=script.get("name"), device_id=device_id,
+                device_name=device.get("name") or device.get("hostname"), client_id=device.get("client_id"),
+                user_id=task.get("created_by", "scheduler"), user_name="Scheduler", status="pending"
+            ).model_dump()
+            execution.update({"created_at": now.isoformat(), "scheduled_task_id": task["id"]})
+            executions.append(execution)
+        if executions:
+            await db.script_executions.insert_many(executions)
+            await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
+            queued += len(executions)
+        await db.scheduled_task_runs.insert_one({"id": str(uuid.uuid4()), "task_id": task["id"], "script_id": script["id"], "queued_count": len(executions), "status": "queued", "ran_at": now.isoformat()})
+    return {"processed": processed, "queued": queued}
 
 # ============== SCRIPTING ENDPOINTS ==============
 
@@ -222,8 +313,10 @@ async def create_scheduled_task(task_data: dict, current_user: dict = Depends(ge
     )
     doc = task.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc['next_run'] = next_scheduled_run(doc)
     await db.scheduled_tasks.insert_one(doc)
-    return task
+    doc.pop('_id', None)
+    return doc
 
 @router.put("/scheduled-tasks/{task_id}")
 async def update_scheduled_task(task_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):

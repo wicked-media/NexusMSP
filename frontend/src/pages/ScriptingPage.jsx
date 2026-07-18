@@ -161,6 +161,9 @@ const SCRIPT_PACKS = [
   { id: "macos-ops", name: "macOS Operations", description: "Apple endpoint health and compliance checks", icon: Terminal, include: script => script.os_target === "macos" },
 ];
 
+const SCHEDULE_TIMEZONES = ["Australia/Sydney", "UTC", "America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Singapore", "Asia/Tokyo"];
+const WEEKDAY_OPTIONS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 export default function ScriptingPage() {
   const { token } = useAuth();
   const [scripts, setScripts] = useState([]);
@@ -179,7 +182,7 @@ export default function ScriptingPage() {
   const [selectedDevices, setSelectedDevices] = useState([]);
   const [scheduleForm, setScheduleForm] = useState({
     name: "", script_id: "", schedule_type: "daily", schedule_time: "09:00",
-    schedule_days: [], target_ids: [], enabled: true
+    schedule_days: [], target_ids: [], timezone: "Australia/Sydney", enabled: true
   });
   const [formData, setFormData] = useState({
     name: "", description: "", script_type: "powershell", content: "",
@@ -247,11 +250,12 @@ export default function ScriptingPage() {
 
   const handleCreateSchedule = async () => {
     if (!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0) { toast.error("Name, script, and at least one target device are required"); return; }
+    if (scheduleForm.schedule_type === "weekly" && scheduleForm.schedule_days.length === 0) { toast.error("Choose at least one weekday for a weekly schedule"); return; }
     try {
       await axios.post(`${API}/scheduled-tasks`, scheduleForm, { headers });
       toast.success("Scheduled task created");
       setIsScheduleDialogOpen(false);
-      setScheduleForm({ name: "", script_id: "", schedule_type: "daily", schedule_time: "09:00", schedule_days: [], target_ids: [], enabled: true });
+      setScheduleForm({ name: "", script_id: "", schedule_type: "daily", schedule_time: "09:00", schedule_days: [], target_ids: [], timezone: "Australia/Sydney", enabled: true });
       fetchData();
     } catch { toast.error("Failed to create schedule"); }
   };
@@ -661,8 +665,9 @@ export default function ScriptingPage() {
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">Script: {task.script_name}</p>
-                    <p className="text-xs text-muted-foreground">Schedule: {task.schedule_type} at {task.schedule_time}</p>
+                    <p className="text-xs text-muted-foreground">Schedule: {task.schedule_type}{task.schedule_type === "weekly" && task.schedule_days?.length ? ` · ${task.schedule_days.map(day => WEEKDAY_OPTIONS[day]).join(", ")}` : ""} at {task.schedule_time} ({task.timezone || "UTC"})</p>
                     <p className={`text-xs mt-1 ${task.target_ids?.length ? "text-muted-foreground" : "text-amber-400"}`}>{task.target_ids?.length ? `${task.target_ids.length} target device${task.target_ids.length === 1 ? "" : "s"}` : "No target devices configured"}</p>
+                    {task.next_run && <p className="text-xs text-muted-foreground">Next run: {new Date(task.next_run).toLocaleString()}</p>}
                     {task.last_run && <p className="text-xs text-muted-foreground">Last run: {formatDistanceToNow(new Date(task.last_run), { addSuffix: true })}</p>}
                   </CardContent>
                 </Card>
@@ -735,7 +740,7 @@ export default function ScriptingPage() {
                 <SelectContent>{scripts.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="space-y-2"><Label>Frequency</Label>
                 <Select value={scheduleForm.schedule_type} onValueChange={v => setScheduleForm({ ...scheduleForm, schedule_type: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -746,7 +751,9 @@ export default function ScriptingPage() {
                 </Select>
               </div>
               <div className="space-y-2"><Label>Time</Label><Input type="time" value={scheduleForm.schedule_time} onChange={e => setScheduleForm({ ...scheduleForm, schedule_time: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Timezone</Label><Select value={scheduleForm.timezone} onValueChange={v => setScheduleForm({ ...scheduleForm, timezone: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SCHEDULE_TIMEZONES.map(zone => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}</SelectContent></Select></div>
             </div>
+            {scheduleForm.schedule_type === "weekly" && <div className="space-y-2"><Label>Run on *</Label><div className="grid grid-cols-7 gap-1.5">{WEEKDAY_OPTIONS.map((day, index) => <Button key={day} type="button" variant={scheduleForm.schedule_days.includes(index) ? "default" : "outline"} className="h-8 px-1 text-[10px]" onClick={() => setScheduleForm(f => ({ ...f, schedule_days: f.schedule_days.includes(index) ? f.schedule_days.filter(value => value !== index) : [...f.schedule_days, index] }))}>{day}</Button>)}</div><p className="text-xs text-muted-foreground">Choose one or more weekdays for this recurring schedule.</p></div>}
             <div className="space-y-2">
               <div className="flex items-center justify-between"><Label>Target Devices *</Label><div className="flex gap-1"><Button type="button" variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setScheduleForm(f => ({ ...f, target_ids: devices.filter(d => d.status === "online").map(d => d.id) }))}>All online</Button><Button type="button" variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setScheduleForm(f => ({ ...f, target_ids: [] }))}>Clear</Button></div></div>
               <ScrollArea className="h-[150px] rounded-lg border p-2">
@@ -762,7 +769,7 @@ export default function ScriptingPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0} data-testid="submit-schedule-btn">Create Schedule</Button>
+              <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0 || (scheduleForm.schedule_type === "weekly" && scheduleForm.schedule_days.length === 0)} data-testid="submit-schedule-btn">Create Schedule</Button>
             </DialogFooter>
           </div>
         </DialogContent>

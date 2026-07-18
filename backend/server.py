@@ -126,6 +126,7 @@ async def startup_event():
     asyncio.create_task(_warroom_escalation_loop())
     asyncio.create_task(_chain_reactions_loop())
     asyncio.create_task(_microsoft365_mail_sync_loop())
+    asyncio.create_task(_scheduled_script_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
@@ -255,6 +256,21 @@ async def _chain_reactions_loop():
         except Exception as e:
             logger.debug(f"Chain-reactions loop error: {e}")
             await asyncio.sleep(60)
+
+
+async def _scheduled_script_loop():
+    """Queue due saved-script schedules for execution by the Nexus agent."""
+    import asyncio
+    await asyncio.sleep(20)
+    while True:
+        try:
+            from app.routers.scripting import process_due_scheduled_tasks
+            summary = await process_due_scheduled_tasks()
+            if summary.get("processed"):
+                logger.info("Scheduled scripts: processed %s schedules, queued %s executions", summary["processed"], summary["queued"])
+        except Exception as exc:
+            logger.debug("Scheduled script loop error: %s", exc)
+        await asyncio.sleep(30)
 
 
 async def _microsoft365_mail_sync_loop():
