@@ -137,6 +137,10 @@ export default function TechSettingsPage() {
       setNotifPrefs(notificationData);
       setWorkHours(hoursData);
       setDisplayPrefs(displayData);
+      if (displayData.theme && displayData.theme !== theme) toggleTheme();
+      if (displayData.preset && THEME_PRESETS?.[displayData.preset]) setPreset(displayData.preset);
+      if (displayData.accent && ACCENT_COLORS?.[displayData.accent]) setAccent(displayData.accent);
+      if (displayData.font && FONTS?.[displayData.font]) setFont(displayData.font);
       localStorage.setItem("nexus-toast-preferences", JSON.stringify({
         toast_position: displayData.toast_position || "top-right",
         toast_style: displayData.toast_style || "nexus",
@@ -228,7 +232,9 @@ export default function TechSettingsPage() {
 
   const saveDisplay = async () => {
     try {
-      await axios.put(`${API}/user-settings/display`, displayPrefs, { headers });
+      const next = { ...displayPrefs, theme, preset, accent, font };
+      await axios.put(`${API}/user-settings/display`, next, { headers });
+      setDisplayPrefs(next);
       toast.success("Display preferences saved");
     } catch { toast.error("Failed"); }
   };
@@ -745,6 +751,11 @@ export default function TechSettingsPage() {
                       />
                     </div>
                   )}
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+                  <div><p className="text-sm font-semibold">Save workspace appearance</p><p className="mt-1 text-xs text-muted-foreground">Keep this theme, accent, and font when you sign in on another browser.</p></div>
+                  <Button onClick={saveDisplay} data-testid="save-display-preferences"><CheckCircle className="mr-1.5 h-4 w-4" />Save appearance</Button>
                 </div>
 
               </CardContent>
