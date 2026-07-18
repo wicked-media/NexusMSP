@@ -599,7 +599,13 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         chat = LlmChat(api_key=api_key, session_id=f"slash-{uuid.uuid4().hex[:8]}",
                        system_message="You are a chat assistant. Summarize the conversation into 3-5 concise bullet points. Plain text. No preamble.").with_model(MODEL_PROVIDER, MODEL_NAME)
         text = "\n".join([f"{m.get('user_name')}: {m.get('body')}" for m in msgs])
-        summary = await chat.send_message(UserMessage(text=text))
+        try:
+            summary = await chat.send_message(UserMessage(text=text))
+        except Exception:
+            return await _post_system_msg(
+                channel_id,
+                "Nexus AI could not create a summary right now. Check the OpenAI connection and try again.",
+            )
         return await _post_system_msg(channel_id, f"ðŸ“ *Thread summary:*\n{summary}")
 
     if cmd == "page" and args:
