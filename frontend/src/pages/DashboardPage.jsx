@@ -864,10 +864,10 @@ export default function DashboardPage() {
           <CardContent className="p-0 px-3">
             <ScrollArea className="h-[240px]">
               {alerts.length > 0 ? alerts.slice(0, 6).map(a => (
-                <div key={a.id} className="flex items-start gap-2.5 py-2.5 border-b border-border/20 last:border-0">
+                <button key={a.id} onClick={() => navigate(a.device_id ? `/devices/${a.device_id}` : "/security")} className="group flex w-full items-start gap-2.5 rounded px-1 py-2.5 text-left border-b border-border/20 last:border-0 hover:bg-muted/40 transition-colors" data-testid={`dashboard-alert-${a.id}`}>
                   <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.severity === "critical" ? "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]" : "bg-amber-500 shadow-[0_0_6px_rgba(234,179,8,0.4)]"}`} />
-                  <div className="min-w-0"><p className="text-xs font-medium leading-tight truncate">{a.message}</p><span className="text-[10px] text-muted-foreground">{a.device_name}</span></div>
-                </div>
+                  <div className="min-w-0 flex-1"><p className="text-xs font-medium leading-tight truncate">{a.message || a.title || "Active alert"}</p><span className="text-[10px] text-muted-foreground">{a.device_name || a.source || "Security queue"}</span></div><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/60 group-hover:translate-x-0.5 transition-transform" />
+                </button>
               )) : (
                 <div className="text-center py-12 text-muted-foreground"><CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">No alerts</p></div>
               )}
