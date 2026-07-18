@@ -14,6 +14,7 @@ import { Shield, AlertTriangle, CheckCircle, XCircle, Clock, RotateCcw, Play, Pa
 import { toast } from "sonner";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { formatDistanceToNow } from "date-fns";
+import HeroTile from "@/components/HeroTile";
 
 export default function PatchHubPage() {
   const { token } = useAuth();
@@ -107,8 +108,8 @@ export default function PatchHubPage() {
     <div className="space-y-6" data-testid="patch-hub-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Patch Hub</h1>
-          <p className="text-muted-foreground text-sm">Nexus Agent Windows Update posture and approved patch scheduling</p>
+          <h1 className="text-3xl font-bold tracking-tight">Patch Manager</h1>
+          <p className="text-muted-foreground text-sm">One control plane for update posture, approvals, rings, reboots, and evidence.</p>
         </div>
         <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">Agent-reported updates</Badge>
       </div>
@@ -128,29 +129,11 @@ export default function PatchHubPage() {
 
         {/* ─── DASHBOARD TAB ─── */}
         <TabsContent value="dashboard" className="space-y-6">
-          <div className="grid grid-cols-4 gap-4">
-            <Card><CardContent className="pt-4">
-              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">OS Compliance</div><Shield className="w-5 h-5 text-blue-500" /></div>
-              <div className="text-3xl font-bold mt-1">{os.compliance_pct || 0}%</div>
-              <Progress value={os.compliance_pct || 0} className="mt-2 h-2" />
-              <div className="text-xs text-muted-foreground mt-1">{os.compliant || 0}/{os.total_devices || 0} devices current</div>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4">
-              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">3rd-party apps</div><Layers className="w-5 h-5 text-muted-foreground" /></div>
-              <div className="text-2xl font-bold mt-2 text-muted-foreground">Not assessed</div>
-              <Progress value={0} className="mt-3 h-2" />
-              <div className="text-xs text-muted-foreground mt-1">Connect a patch provider to assess applications</div>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4">
-              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">Pending Patches</div><Clock className="w-5 h-5 text-yellow-500" /></div>
-              <div className="text-3xl font-bold mt-1">{os.total_pending_patches || 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">Across {os.total_devices || 0} assessed devices</div>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4">
-              <div className="flex items-center justify-between"><div className="text-sm text-muted-foreground">Critical Devices</div><AlertTriangle className="w-5 h-5 text-red-500" /></div>
-              <div className="text-3xl font-bold mt-1 text-red-500">{os.critical || 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">{os.needs_attention || 0} need attention</div>
-            </CardContent></Card>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <HeroTile label="OS compliance" value={os.compliance_pct || 0} suffix="%" subtitle={`${os.compliant || 0}/${os.total_devices || 0} endpoints current`} icon={Shield} glow="emerald" onClick={() => setTab("dashboard")} testId="patch-compliance-tile" />
+            <HeroTile label="Third-party apps" value="Not assessed" subtitle="Connect a provider to assess apps" icon={Layers} glow="zinc" animated={false} onClick={() => setTab("intelligence")} testId="patch-apps-tile" />
+            <HeroTile label="Pending patches" value={os.total_pending_patches || 0} subtitle={`Across ${os.total_devices || 0} assessed endpoints`} icon={Clock} glow="amber" onClick={() => setTab("intelligence")} testId="patch-pending-tile" />
+            <HeroTile label="Critical endpoints" value={os.critical || 0} subtitle={`${os.needs_attention || 0} need attention`} icon={AlertTriangle} glow="rose" onClick={() => setTab("intelligence")} testId="patch-critical-tile" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

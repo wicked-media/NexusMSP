@@ -170,8 +170,6 @@ export default function ScriptingPage() {
   const [executions, setExecutions] = useState([]);
   const [devices, setDevices] = useState([]);
   const [scheduledTasks, setScheduledTasks] = useState([]);
-  const [patchStats, setPatchStats] = useState(null);
-  const [patches, setPatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("scripts");
   const [searchQuery, setSearchQuery] = useState("");
@@ -196,18 +194,16 @@ export default function ScriptingPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [scriptsRes, executionsRes, devicesRes, tasksRes, patchRes] = await Promise.all([
+      const [scriptsRes, executionsRes, devicesRes, tasksRes] = await Promise.all([
         axios.get(`${API}/scripts`, { headers }),
         axios.get(`${API}/script-executions?limit=50`, { headers }),
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/scheduled-tasks`, { headers }),
-        axios.get(`${API}/patches/dashboard`, { headers }).catch(() => ({ data: null })),
       ]);
       setScripts(scriptsRes.data);
       setExecutions(executionsRes.data);
       setDevices(devicesRes.data);
       setScheduledTasks(tasksRes.data);
-      if (patchRes.data) setPatchStats(patchRes.data);
     } catch { toast.error("Failed to fetch data"); }
     finally { setLoading(false); }
   };
@@ -396,7 +392,7 @@ export default function ScriptingPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Scripting & Automation</h1>
-          <p className="text-muted-foreground">Script library, execution, scheduling & patch management</p>
+          <p className="text-muted-foreground">Script library, agent execution, and scheduled automation</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
@@ -451,7 +447,6 @@ export default function ScriptingPage() {
         <HeroTile label="Successful runs" value={executions.filter(e => e.status === "completed").length} icon={CheckCircle} glow="emerald" animated={false} onClick={() => setActiveTab("history")} testId="scripts-metric-success" />
         <HeroTile label="Failed runs" value={executions.filter(e => e.status === "failed").length} icon={XCircle} glow="rose" animated={false} onClick={() => setActiveTab("history")} testId="scripts-metric-failed" />
         <HeroTile label="Active schedules" value={scheduledTasks.filter(t => t.enabled).length} icon={Clock} glow="amber" animated={false} onClick={() => setActiveTab("scheduling")} testId="scripts-metric-schedules" />
-        <HeroTile label="Critical patches" value={patchStats?.pending_critical || 0} icon={Shield} glow="amber" animated={false} onClick={() => setActiveTab("patches")} testId="scripts-metric-patches" />
       </div>
 
       {/* Tabs */}
@@ -462,7 +457,6 @@ export default function ScriptingPage() {
           <TabsTrigger value="library" className="gap-2"><BookOpen className="w-4 h-4" />Library</TabsTrigger>
           <TabsTrigger value="history" className="gap-2"><Clock className="w-4 h-4" />History</TabsTrigger>
           <TabsTrigger value="scheduling" className="gap-2"><Calendar className="w-4 h-4" />Scheduling</TabsTrigger>
-          <TabsTrigger value="patches" className="gap-2"><Shield className="w-4 h-4" />Patches</TabsTrigger>
         </TabsList>
 
         {/* Scripts Tab */}
@@ -724,23 +718,6 @@ export default function ScriptingPage() {
           )}
         </TabsContent>
 
-        {/* Patches Tab */}
-        <TabsContent value="patches" className="space-y-4">
-          <div className="flex items-center gap-2 mb-2"><Shield className="w-5 h-5 text-primary" /><h2 className="text-lg font-semibold">Patch Management</h2></div>
-          {patchStats ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{patchStats.total}</p><p className="text-xs text-muted-foreground">Total Patches</p></CardContent></Card>
-              <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-green-500">{patchStats.installed}</p><p className="text-xs text-muted-foreground">Installed</p></CardContent></Card>
-              <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-yellow-500">{patchStats.available}</p><p className="text-xs text-muted-foreground">Available</p></CardContent></Card>
-              <Card className="border-red-500/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-red-500">{patchStats.pending_critical}</p><p className="text-xs text-muted-foreground">Critical Pending</p></CardContent></Card>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-              <Shield className="w-10 h-10 opacity-50 mb-3" /><p>No patch data available</p>
-              <p className="text-sm">Patches will appear when devices report their update status</p>
-            </div>
-          )}
-        </TabsContent>
       </Tabs>
 
       <Dialog open={Boolean(executionDetail)} onOpenChange={(open) => { if (!open) setExecutionDetail(null); }}>
