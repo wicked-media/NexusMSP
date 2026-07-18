@@ -12,7 +12,7 @@ The reseed endpoint in `chat_help.py` will:
 """
 
 # Stale slugs that referenced merged / deleted modules. Safe to remove.
-HELP_CATALOG_VERSION = "2026-07-17-email-intake-multi-inbox"
+HELP_CATALOG_VERSION = "2026-07-18-team-chat-work-item-links"
 
 STALE_SLUGS = [
     # The "*-audit" articles were one-off audits, not user docs
@@ -510,6 +510,40 @@ Deleting a product requires confirmation. It removes the catalogue product, trac
 - **Stock does not look right:** review Stock History before making an adjustment; use a reason for every correction.
 - **Tier price did not save:** reopen the product and review the tier values. Each minimum quantity must be at least 1 and prices cannot be negative.
 - **Missing barcode:** open the product and choose **Generate Barcode** or use the SKU as the barcode value.
+""",
+    },
+    {
+        "slug": "chat-presence",
+        "title": "Chat & Presence",
+        "category": "Collaboration",
+        "icon": "💬",
+        "order": 4,
+        "summary": "Internal chat, live presence and linked service work.",
+        "body_md": """## Opening Team Chat
+Open **Team Chat** from the sidebar to work in channels or direct messages. Presence lights show whether a technician is active, away, busy in service work or offline.
+
+## Link service work in a conversation
+Start a message with a slash command to add a structured work-item card to the channel. The reference must already exist in NexusMSP.
+
+| Command | Result |
+|---|---|
+| `/ticket TKT-###` | Links the ticket into the conversation. |
+| `/invoice INV-###` | Links the invoice into the conversation. |
+| `/po PO-####` | Links the purchase order into the conversation. |
+| `/ticket TKT-### status <value>` | Updates a ticket status. |
+| `/ticket TKT-### priority <value>` | Updates a ticket priority. |
+
+The linked card gives the channel shared context without pasting sensitive detail into chat. It also makes the ticket, invoice or purchase order easy to open from the conversation.
+
+## Other useful commands
+- `/assign @user TKT-###` assigns a ticket.
+- `/close TKT-###` closes a ticket.
+- `/sla TKT-###` displays SLA timing.
+- `/page <severity>` alerts the team.
+- `/help` lists the available commands in chat.
+
+## Mentions and audit trail
+Use `@name` or `@email-prefix` to notify a technician. Channel messages, linked work items and command results remain in the channel history so the service team can see the context behind a decision.
 """,
     },
     {
