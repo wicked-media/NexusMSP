@@ -119,6 +119,12 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     user_dict["password_hash"] = hash_password(password)
     user_dict["created_at"] = user_dict["created_at"].isoformat()
     await db.users.insert_one(user_dict)
+    if user_dict.get("is_admin") or user_dict.get("role") == "admin":
+        from app.routers.tech_intel import _log_audit
+        caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0}) or current_user
+        await _log_audit(caller, "administrator_created", user_dict["id"], user_dict["name"], {
+            "role": user_dict.get("role"), "job_title": user_dict.get("job_title"),
+        })
     user_dict.pop("_id", None)
     user_dict.pop("password_hash", None)
     return user_dict

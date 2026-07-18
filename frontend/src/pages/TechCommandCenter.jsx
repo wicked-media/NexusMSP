@@ -228,10 +228,26 @@ function TechCard({ tech, onEdit, headers, onChanged }) {
 function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "", job_title: "L1 Technician", role: "technician", hourly_rate: 75, password: "", is_admin: false });
   const [busy, setBusy] = useState(false);
+  const [adminConfirmOpen, setAdminConfirmOpen] = useState(false);
+  const [adminAcknowledged, setAdminAcknowledged] = useState(false);
 
   useEffect(() => {
-    if (open) setForm({ name: "", email: "", phone: "", job_title: "L1 Technician", role: "technician", hourly_rate: 75, password: "", is_admin: false });
+    if (open) {
+      setForm({ name: "", email: "", phone: "", job_title: "L1 Technician", role: "technician", hourly_rate: 75, password: "", is_admin: false });
+      setAdminConfirmOpen(false);
+      setAdminAcknowledged(false);
+    }
   }, [open]);
+
+  const grantAdministratorAccess = () => {
+    setForm({ ...form, role: "admin", is_admin: true });
+    setAdminConfirmOpen(false);
+    setAdminAcknowledged(false);
+  };
+  const changeAccessRole = value => {
+    if (value === "admin") { setAdminAcknowledged(false); setAdminConfirmOpen(true); return; }
+    setForm({ ...form, role: value, is_admin: false });
+  };
 
   const submit = async () => {
     if (!form.name.trim() || !form.email.trim() || form.password.length < 12) {
@@ -267,11 +283,11 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
           <div className="grid grid-cols-2 gap-3">
             <div><Label className="text-xs">Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+64 21 …" data-testid="add-user-phone" /></div>
             <div>
-              <Label className="text-xs">Role</Label>
-              <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
+              <Label className="text-xs">Access role</Label>
+              <Select value={form.role} onValueChange={changeAccessRole}>
                 <SelectTrigger data-testid="add-user-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                  {ROLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.value === "admin" ? "Administrator (protected)" : o.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -286,17 +302,17 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label className="text-xs">Hourly rate ($)</Label><Input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} data-testid="add-user-rate" /></div>
+            <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} data-testid="add-user-rate" /></div>
           </div>
           <div>
             <Label className="text-xs">Initial password *</Label>
             <Input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 12 characters" data-testid="add-user-password" />
             <p className="mt-1 text-[10px] text-zinc-500">Set a unique temporary password, then have the technician change it after their first sign-in.</p>
           </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={form.is_admin} onChange={e => setForm({ ...form, is_admin: e.target.checked })} data-testid="add-user-admin-cb" />
-            Grant Admin (full access — overrides job title preset)
-          </label>
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-violet-500/20 bg-violet-500/[0.05] p-3">
+            <div><p className="text-xs font-semibold text-zinc-100">Administrator access</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Create standard technician accounts by default. Administrator access is permanent and should only be granted deliberately.</p></div>
+            <Button size="sm" variant="outline" onClick={() => { setAdminAcknowledged(false); setAdminConfirmOpen(true); }} className={form.is_admin ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10" : "border-violet-500/40 text-violet-200 hover:bg-violet-500/10"}>{form.is_admin ? "Enabled" : "Grant"}</Button>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -305,6 +321,19 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+      <Dialog open={adminConfirmOpen} onOpenChange={setAdminConfirmOpen}>
+        <DialogContent className="max-w-md" data-testid="confirm-new-admin-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ShieldAlert className="h-5 w-5 text-rose-400" />Grant administrator access?</DialogTitle>
+            <DialogDescription>This new user will be able to manage platform and team access. The account will be recorded as an administrator when created.</DialogDescription>
+          </DialogHeader>
+          <label className="flex items-start gap-2 rounded-md border border-zinc-800 p-3 text-xs text-zinc-300"><input className="mt-0.5" type="checkbox" checked={adminAcknowledged} onChange={e => setAdminAcknowledged(e.target.checked)} /><span>I understand this account will receive permanent administrator access.</span></label>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAdminConfirmOpen(false)}>Cancel</Button>
+            <Button disabled={!adminAcknowledged} onClick={grantAdministratorAccess} variant="outline" className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">Grant access</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
