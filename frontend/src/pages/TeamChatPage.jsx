@@ -64,7 +64,7 @@ const PO_REGEX = /\/po\s+([\w-]+)/gi;
 const SLASH_COMMANDS = [
   { cmd: "po", args: "PO-####", description: "Link a purchase order" },
   { cmd: "invoice", args: "INV-###", description: "Link an invoice" },
-  { cmd: "ticket", args: "TKT-### status|priority <value>", description: "Update a ticket" },
+  { cmd: "ticket", args: "TKT-### [status|priority <value>]", description: "Link or update a ticket" },
   { cmd: "close", args: "TKT-###", description: "Close a ticket" },
   { cmd: "assign", args: "@user TKT-###", description: "Assign a ticket" },
   { cmd: "sla", args: "TKT-###", description: "Show SLA timers" },
