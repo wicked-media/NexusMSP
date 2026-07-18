@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Loader2, UserCog, Users, CalendarDays, Activity, Target, Trophy } from "lucide-react";
 
 const TABS = [
@@ -14,18 +15,19 @@ const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
 
 export default function TeamHubPage() {
   const [activeTab, setActiveTab] = useState("command");
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("tab");
-    if (t && TABS.some(x => x.id === t)) setActiveTab(t);
-  }, []);
+    const tab = searchParams.get("tab");
+    if (tab && TABS.some(item => item.id === tab) && tab !== activeTab) setActiveTab(tab);
+  }, [activeTab, searchParams]);
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", activeTab);
-    window.history.replaceState({}, "", url);
-  }, [activeTab]);
+  const selectTab = tab => {
+    setActiveTab(tab);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("tab", tab);
+    setSearchParams(nextParams);
+  };
 
   const Active = lazyMap[activeTab];
 
@@ -43,7 +45,7 @@ export default function TeamHubPage() {
             return (
               <button
                 key={t.id}
-                onClick={() => setActiveTab(t.id)}
+                onClick={() => selectTab(t.id)}
                 data-testid={`team-hub-tab-${t.id}`}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${
                   active ? "bg-violet-500/12 text-violet-200 border border-violet-500/25 shadow-sm" : "text-muted-foreground border border-transparent hover:text-foreground hover:bg-muted/50 hover:border-border"
