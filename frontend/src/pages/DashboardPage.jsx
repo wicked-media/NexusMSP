@@ -59,6 +59,17 @@ const WIDGET_META = {
   "activity":     { label: "Activity Feed",          icon: Zap },
 };
 
+const DASHBOARD_QUICK_ACTIONS = [
+  { icon: Ticket, label: "Open ticket queue", path: "/tickets", color: "text-blue-500" },
+  { icon: FileText, label: "Invoices", path: "/invoices", color: "text-emerald-500" },
+  { icon: ShoppingCart, label: "Purchase orders", path: "/purchase-orders", color: "text-violet-500" },
+  { icon: Users, label: "Clients", path: "/clients", color: "text-emerald-500" },
+  { icon: Monitor, label: "Devices", path: "/devices", color: "text-purple-500" },
+  { icon: Terminal, label: "Run script", path: "/scripting", color: "text-orange-500" },
+  { icon: CalendarDays, label: "Dispatch calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
+  { icon: UserCog, label: "Team command", path: "/team-hub?tab=command&view=directory", color: "text-pink-500" },
+];
+
 // Technician-first default (lg breakpoint = 12 cols).  The dashboard starts
 // with one predictable visual rhythm: full-width status strips, then paired
 // work cards.  Less frequent executive/AI widgets remain available through
@@ -274,6 +285,7 @@ export default function DashboardPage() {
   };
 
   const quickSearchResults = searchQuery ? [
+    ...DASHBOARD_QUICK_ACTIONS.filter(action => action.label.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(action => ({ type: "action", ...action, sub: "Quick action" })),
     ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: "/tickets" })),
     ...devices.filter(d => d.name?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(d => ({ type: "device", label: d.name, sub: d.client_name, path: `/devices/${d.id}` })),
   ] : [];
@@ -319,7 +331,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSearchOpen(true)} data-testid="bridge-search-btn">
-            <Search className="w-3 h-3 mr-1" />Quick Search <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">⌘K</kbd>
+            <Search className="w-3 h-3 mr-1" />Quick Search <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">Ctrl K</kbd>
           </Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn"><Ticket className="w-3 h-3 mr-1" />Tickets</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn"><Users className="w-3 h-3 mr-1" />Leads</Button>
@@ -344,7 +356,7 @@ export default function DashboardPage() {
               <div className="p-2 max-h-64 overflow-y-auto">
                 {quickSearchResults.length > 0 ? quickSearchResults.map((r, i) => (
                   <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(r.path); setSearchOpen(false); }}>
-                    {r.type === "ticket" ? <Ticket className="w-4 h-4 text-blue-500" /> : <Monitor className="w-4 h-4 text-emerald-500" />}
+                    {r.type === "action" ? <r.icon className={`w-4 h-4 ${r.color}`} /> : r.type === "ticket" ? <Ticket className="w-4 h-4 text-blue-500" /> : <Monitor className="w-4 h-4 text-emerald-500" />}
                     <div><p className="text-sm font-medium">{r.label}</p><p className="text-[10px] text-muted-foreground">{r.sub}</p></div>
                   </div>
                 )) : <p className="text-sm text-muted-foreground text-center py-4">No results</p>}
@@ -352,16 +364,7 @@ export default function DashboardPage() {
             ) : (
               <div className="p-3 space-y-1">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider px-2 mb-2">Quick Actions</p>
-                {[
-                  { icon: Ticket, label: "New Ticket", path: "/tickets", color: "text-blue-500" },
-                  { icon: FileText, label: "Invoices", path: "/invoices", color: "text-emerald-500" },
-                  { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders", color: "text-violet-500" },
-                  { icon: Users, label: "New Client", path: "/clients", color: "text-emerald-500" },
-                  { icon: Monitor, label: "Add Device", path: "/devices", color: "text-purple-500" },
-                  { icon: Terminal, label: "Run Script", path: "/scripting", color: "text-orange-500" },
-                  { icon: CalendarDays, label: "Dispatch Calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
-                  { icon: UserCog, label: "Team Hub", path: "/team-hub?tab=command&view=directory", color: "text-pink-500" },
-                ].map((item, i) => (
+                {DASHBOARD_QUICK_ACTIONS.map((item, i) => (
                   <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
                     <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>
                   </div>
