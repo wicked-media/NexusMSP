@@ -283,10 +283,12 @@ export default function DashboardPage() {
     } catch { /* the Tickets page can still open normally */ }
     navigate("/tickets");
   };
+  const ticketPath = (ticket) => `/tickets?ticket=${encodeURIComponent(ticket.ticket_number || ticket.id)}`;
+  const alertPath = (alert) => alert.device_id ? `/devices/${alert.device_id}` : "/security";
 
   const quickSearchResults = searchQuery ? [
     ...DASHBOARD_QUICK_ACTIONS.filter(action => action.label.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(action => ({ type: "action", ...action, sub: "Quick action" })),
-    ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: "/tickets" })),
+    ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: ticketPath(t) })),
     ...devices.filter(d => d.name?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(d => ({ type: "device", label: d.name, sub: d.client_name, path: `/devices/${d.id}` })),
   ] : [];
 
@@ -301,14 +303,14 @@ export default function DashboardPage() {
   const tickerItems = [
     ...offlineDevices.slice(0, 4).map(device => ({ tone: "critical", icon: Monitor, label: `${device.name || device.hostname} is offline`, detail: device.client_name || "Endpoint", path: `/devices/${device.id}` })),
     ...needsPatching.slice(0, 4).map(device => ({ tone: "warning", icon: Shield, label: `${device.name || device.hostname} has ${device.pending_patches} pending patch${Number(device.pending_patches) === 1 ? "" : "es"}`, detail: device.client_name || "Patch management", path: `/devices/${device.id}` })),
-    ...criticalTickets.slice(0, 4).map(ticket => ({ tone: "critical", icon: Ticket, label: `${ticket.ticket_number || "Ticket"}: ${ticket.title}`, detail: ticket.client_name || "Critical ticket", path: "/tickets" })),
-    ...(alerts || []).filter(alert => alert.severity === "critical" || alert.severity === "warning").slice(0, 4).map(alert => ({ tone: alert.severity === "critical" ? "critical" : "warning", icon: AlertTriangle, label: alert.title || alert.message || "Active alert", detail: alert.device_name || alert.source || "Monitoring", path: "/devices" })),
+    ...criticalTickets.slice(0, 4).map(ticket => ({ tone: "critical", icon: Ticket, label: `${ticket.ticket_number || "Ticket"}: ${ticket.title}`, detail: ticket.client_name || "Critical ticket", path: ticketPath(ticket) })),
+    ...(alerts || []).filter(alert => alert.severity === "critical" || alert.severity === "warning").slice(0, 4).map(alert => ({ tone: alert.severity === "critical" ? "critical" : "warning", icon: AlertTriangle, label: alert.title || alert.message || "Active alert", detail: alert.device_name || alert.source || "Monitoring", path: alertPath(alert) })),
   ];
   if (!tickerItems.length) tickerItems.push({ tone: "healthy", icon: CheckCircle, label: "All monitored services are nominal", detail: `${onlineDevices.length} endpoints reporting online`, path: "/devices" });
 
   const focusActions = [
-    ...(enhancedStats?.sla_breaches ? [{ id: "sla", label: "Protect SLA commitments", detail: `${enhancedStats.sla_breaches} breach${enhancedStats.sla_breaches === 1 ? "" : "es"} need attention`, tone: "critical", icon: Clock, onClick: () => openTicketQueue({}) }] : []),
-    ...criticalTickets.slice(0, 1).map(ticket => ({ id: `critical-${ticket.id}`, label: ticket.title || "Critical ticket", detail: `${ticket.ticket_number || "Ticket"} · ${ticket.client_name || "Unassigned client"}`, tone: "critical", icon: Ticket, onClick: () => openTicketQueue({ priority: "critical" }) })),
+    ...(enhancedStats?.sla_breaches ? [{ id: "sla", label: "Protect SLA commitments", detail: `${enhancedStats.sla_breaches} breach${enhancedStats.sla_breaches === 1 ? "" : "es"} need attention`, tone: "critical", icon: Clock, onClick: () => navigate("/tickets?attention=sla_breach") }] : []),
+    ...criticalTickets.slice(0, 1).map(ticket => ({ id: `critical-${ticket.id}`, label: ticket.title || "Critical ticket", detail: `${ticket.ticket_number || "Ticket"} · ${ticket.client_name || "Unassigned client"}`, tone: "critical", icon: Ticket, onClick: () => navigate(ticketPath(ticket)) })),
     ...offlineDevices.slice(0, 1).map(device => ({ id: `offline-${device.id}`, label: `${device.name || device.hostname} is offline`, detail: device.client_name || "Endpoint requires a check-in", tone: "critical", icon: Monitor, onClick: () => navigate(`/devices/${device.id}`) })),
     ...needsPatching.slice(0, 1).map(device => ({ id: `patch-${device.id}`, label: "Review pending patching", detail: `${device.name || device.hostname} · ${device.pending_patches} pending`, tone: "warning", icon: Shield, onClick: () => navigate(`/devices/${device.id}`) })),
   ].slice(0, 4);
