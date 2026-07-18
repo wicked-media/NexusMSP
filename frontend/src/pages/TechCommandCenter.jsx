@@ -77,7 +77,7 @@ function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
 }
 
 // ---------- DIRECTORY TAB ----------
-function DirectoryTab({ headers, capacity, presets, onChanged, onAddClick, onInviteClick }) {
+function DirectoryTab({ headers, capacity, presets, onChanged }) {
   const [search, setSearch] = useState("");
   const [filterTitle, setFilterTitle] = useState("all");
   const [filterStatus, setFilterStatus] = useState("active");
@@ -122,14 +122,6 @@ function DirectoryTab({ headers, capacity, presets, onChanged, onAddClick, onInv
             <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="outline" className="text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10" onClick={onInviteClick} data-testid="directory-invite-btn">
-            <Mail className="w-3.5 h-3.5 mr-1" />Invite via Email
-          </Button>
-          <Button size="sm" variant="outline" className="text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" onClick={onAddClick} data-testid="directory-add-btn">
-            <UserPlus className="w-3.5 h-3.5 mr-1" />Add User Now
-          </Button>
-        </div>
       </div>
 
       {/* Tech grid — same style as Devices grid */}
@@ -1018,7 +1010,7 @@ export default function TechCommandCenter() {
           ))}
         </TabsList>
 
-        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} onAddClick={() => setAddOpen(true)} onInviteClick={() => setInviteOpen(true)} /></TabsContent>
+        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
         <TabsContent value="invites" className="mt-4"><InvitesTab headers={headers} /></TabsContent>
         <TabsContent value="find" className="mt-4"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
         <TabsContent value="capacity" className="mt-4"><CapacityTab capacity={capacity} /></TabsContent>
