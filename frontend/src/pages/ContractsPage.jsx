@@ -82,6 +82,7 @@ export default function ContractsPage() {
   const [lineItems, setLineItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [contractFilter, setContractFilter] = useState("all");
   const [renewalAlerts, setRenewalAlerts] = useState([]);
   const [contractSummary, setContractSummary] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -204,6 +205,7 @@ export default function ContractsPage() {
       end_date: "",
       value: "",
       auto_renew: true,
+      sla_tier: "standard",
       notes: ""
     });
     setSelectedContract(null);
@@ -220,6 +222,7 @@ export default function ContractsPage() {
       end_date: contract.end_date || "",
       value: contract.value?.toString() || "",
       auto_renew: contract.auto_renew,
+      sla_tier: contract.sla_tier || "standard",
       notes: contract.notes || ""
     });
     setIsDialogOpen(true);
@@ -273,8 +276,12 @@ export default function ContractsPage() {
   };
 
   const filteredContracts = contracts.filter(contract => {
-    return contract.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           contract.client_name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = contract.name.toLowerCase().includes(searchQuery.toLowerCase()) || contract.client_name?.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (contractFilter === "active") return contract.status === "active";
+    if (contractFilter === "renewing") return renewalAlerts.some((alert) => alert.contract_id === contract.id);
+    if (contractFilter === "line-items") return lineItems.some((item) => item.contract_id === contract.id);
+    return true;
   });
 
   const totalValue = contracts.filter(c => c.status === 'active').reduce((sum, c) => sum + (c.value || 0), 0);
@@ -348,11 +355,11 @@ export default function ContractsPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <HeroTile label="All contracts" value={contracts.length} icon={FileText} glow="cyan" testId="contracts-metric-total" />
-        <HeroTile label="Monthly value" value={`$${totalValue.toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} testId="contracts-metric-value" />
-        <HeroTile label="Active" value={contracts.filter(c => c.status === 'active').length} icon={Calendar} glow="sky" testId="contracts-metric-active" />
-        <HeroTile label="Expiring in 90 days" value={renewalAlerts.length} icon={Calendar} glow={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} testId="contracts-metric-expiring" />
-        <HeroTile label="Line items" value={lineItems.length} icon={FileText} glow="violet" testId="contracts-metric-lineitems" />
+        <HeroTile label="All contracts" value={contracts.length} subtitle="View full register" icon={FileText} glow="cyan" active={contractFilter === "all"} onClick={() => setContractFilter("all")} testId="contracts-metric-total" />
+        <HeroTile label="Monthly value" value={`$${totalValue.toLocaleString()}`} subtitle="Active agreements" icon={DollarSign} glow="emerald" animated={false} active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-value" />
+        <HeroTile label="Active" value={contracts.filter(c => c.status === 'active').length} subtitle="Current coverage" icon={Calendar} glow="sky" active={contractFilter === "active"} onClick={() => setContractFilter("active")} testId="contracts-metric-active" />
+        <HeroTile label="Expiring in 90 days" value={renewalAlerts.length} subtitle="Renewal worklist" icon={Calendar} glow={renewalAlerts.filter(a => a.urgency === "critical").length > 0 ? "rose" : "amber"} active={contractFilter === "renewing"} onClick={() => setContractFilter("renewing")} testId="contracts-metric-expiring" />
+        <HeroTile label="Line items" value={lineItems.length} subtitle="Billable inclusions" icon={FileText} glow="violet" active={contractFilter === "line-items"} onClick={() => setContractFilter("line-items")} testId="contracts-metric-lineitems" />
       </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -473,7 +480,8 @@ export default function ContractsPage() {
       {/* Search */}
       <Card>
         <CardContent className="p-4">
-          <div className="relative">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search contracts..."
@@ -482,6 +490,11 @@ export default function ContractsPage() {
               className="pl-9"
               data-testid="contracts-search-input"
             />
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Showing {filteredContracts.length} of {contracts.length}</span>
+            {contractFilter !== "all" && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setContractFilter("all")}>Clear filter</Button>}
+          </div>
           </div>
         </CardContent>
       </Card>
