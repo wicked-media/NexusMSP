@@ -6,6 +6,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import TechRosterPage from "./TechRosterPage";
+import SkillsMatrixPage from "./SkillsMatrixPage";
+import LeaderboardPage from "./LeaderboardPage";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -51,7 +54,8 @@ const ROLE_OPTIONS = [
   { value: "dispatcher", label: "Dispatcher" },
   { value: "admin", label: "Admin" },
 ];
-const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
+const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit", "roster", "skills", "leaderboard"]);
+const OPERATIONAL_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
 
 // ---------- Skill radar (CSS-only) ----------
 function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
@@ -956,10 +960,13 @@ export default function TechCommandCenter() {
     setSearchParams(nextParams);
   };
 
+  const isOperationalView = OPERATIONAL_TAB_IDS.has(tab);
+
   const summary = capacity?.summary || { total: 0, idle: 0, active: 0, busy: 0, overloaded: 0, on_call: 0, avg_util: 0 };
 
   return (
     <div className="space-y-5 p-6" data-testid="tech-command-center">
+      {isOperationalView && <>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -988,6 +995,7 @@ export default function TechCommandCenter() {
         <MetricTile label="Overloaded" value={summary.overloaded || 0} accent={summary.overloaded ? "rose" : "zinc"} icon={<AlertTriangle className={`w-2.5 h-2.5 ${summary.overloaded ? "text-rose-400" : "text-zinc-400"}`} />} testid="tcc-tile-overloaded" />
         <MetricTile label="Avg utilisation" value={`${summary.avg_util}%`} accent="violet" icon={<TrendingUp className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-util" />
       </MetricStrip>
+      </>}
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={selectTab}>
@@ -1001,6 +1009,9 @@ export default function TechCommandCenter() {
             { v: "drift",     l: "Role Drift",  Icon: Target },
             { v: "jit",       l: "JIT",         Icon: Zap },
             { v: "audit",     l: "Audit",       Icon: History },
+            { v: "roster",    l: "On-call Roster", Icon: Calendar },
+            { v: "skills",    l: "Skills",      Icon: Target },
+            { v: "leaderboard", l: "Leaderboard", Icon: Trophy },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
               className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
@@ -1018,6 +1029,9 @@ export default function TechCommandCenter() {
         <TabsContent value="drift" className="mt-4"><RoleDriftTab headers={headers} /></TabsContent>
         <TabsContent value="jit" className="mt-4"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
         <TabsContent value="audit" className="mt-4"><AuditTab headers={headers} /></TabsContent>
+        <TabsContent value="roster" className="mt-4"><TechRosterPage /></TabsContent>
+        <TabsContent value="skills" className="mt-4"><SkillsMatrixPage /></TabsContent>
+        <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
       </Tabs>
 
       {/* Deep links to legacy pages — preserved for power users */}

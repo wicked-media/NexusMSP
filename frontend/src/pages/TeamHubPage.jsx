@@ -1,16 +1,16 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Loader2, UserCog, CalendarDays, Target, Trophy } from "lucide-react";
+import { Loader2, UserCog } from "lucide-react";
 
 const TABS = [
   { id: "command", label: "Team Command", icon: UserCog, page: () => import("./TechCommandCenter") },
-  { id: "roster", label: "Roster", icon: CalendarDays, page: () => import("./TechRosterPage") },
-  { id: "skills", label: "Skills Matrix", icon: Target, page: () => import("./SkillsMatrixPage") },
-  { id: "leaderboard", label: "Leaderboard", icon: Trophy, page: () => import("./LeaderboardPage") },
 ];
 const LEGACY_TAB_DESTINATIONS = {
   technicians: { tab: "command", view: "directory" },
   utilization: { tab: "command", view: "capacity" },
+  roster: { tab: "command", view: "roster" },
+  skills: { tab: "command", view: "skills" },
+  leaderboard: { tab: "command", view: "leaderboard" },
 };
 
 const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
@@ -48,7 +48,7 @@ export default function TeamHubPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Team Hub</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Command center, roster, utilization, skills and leaderboard — all the team views.</p>
         </div>
-        <nav className="flex items-center gap-1.5 overflow-x-auto px-6 pt-3" aria-label="Team Hub sections">
+        <nav className="hidden" aria-label="Team Hub sections">
           {TABS.map(t => {
             const Icon = t.icon;
             const active = activeTab === t.id;
