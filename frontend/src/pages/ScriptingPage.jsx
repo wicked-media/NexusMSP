@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import {
   Terminal, Plus, Search, Play, Clock, RefreshCw, Loader2, Code, Cpu,
   CheckCircle, XCircle, MoreVertical, Copy, Trash2, BookOpen, Calendar,
-  Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard
+  Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard, Wrench
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
@@ -129,6 +129,36 @@ const scriptLibrary = [
     content: "Write-Output \"=== Network Adapter Inventory ===\"\nGet-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | ForEach-Object {\n  [PSCustomObject]@{ Adapter = $_.InterfaceAlias; IPv4 = $_.IPv4Address.IPAddress; Gateway = $_.IPv4DefaultGateway.NextHop; DNS = ($_.DNSServer.ServerAddresses -join ', ') }\n} | Format-Table -AutoSize" },
   { name: "Local Administrators Report", description: "Exports the local Administrators group membership for review", script_type: "powershell", category: "security", os_target: "windows",
     content: "Write-Output \"=== Local Administrators ===\"\nGet-LocalGroupMember -Group 'Administrators' | Select-Object Name, ObjectClass, PrincipalSource | Format-Table -AutoSize" },
+  { name: "Top CPU and Memory Processes", description: "Lists the highest CPU and memory consumers for performance triage", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "Write-Output \"=== Top CPU Consumers ===\"\nGet-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, Id, CPU, @{N='MemoryMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize\nWrite-Output \"`n=== Top Memory Consumers ===\"\nGet-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name, Id, @{N='MemoryMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize" },
+  { name: "Physical Disk Health", description: "Reports SMART predictive failure indicators and physical disk status", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "Write-Output \"=== Physical Disk Health ===\"\nGet-PhysicalDisk | Select-Object FriendlyName, MediaType, HealthStatus, OperationalStatus, Size | Format-Table -AutoSize\nGet-StorageReliabilityCounter -PhysicalDisk (Get-PhysicalDisk) -ErrorAction SilentlyContinue | Select-Object DeviceId, Temperature, ReadErrorsTotal, WriteErrorsTotal, PowerOnHours | Format-Table -AutoSize" },
+  { name: "Battery Health Report", description: "Creates a Windows battery health report and shows recent battery capacity", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "$path = Join-Path $env:PUBLIC 'battery-report.html'\npowercfg /batteryreport /output $path\nWrite-Output \"Battery report created: $path\"\nGet-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object Name, BatteryStatus, EstimatedChargeRemaining, EstimatedRunTime | Format-Table -AutoSize" },
+  { name: "Windows Update Services Check", description: "Checks Windows Update services and recent update history", script_type: "powershell", category: "maintenance", os_target: "windows",
+    content: "Write-Output \"=== Windows Update Service Health ===\"\nGet-Service wuauserv, bits, cryptsvc, usosvc | Select-Object Name, Status, StartType | Format-Table -AutoSize\nWrite-Output \"`n=== Recent Updates ===\"\nGet-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 15 HotFixID, Description, InstalledBy, InstalledOn | Format-Table -AutoSize" },
+  { name: "Windows Firewall Profile Report", description: "Reports firewall status and default action for all Windows profiles", script_type: "powershell", category: "security", os_target: "windows",
+    content: "Write-Output \"=== Windows Firewall Profiles ===\"\nGet-NetFirewallProfile | Select-Object Name, Enabled, DefaultInboundAction, DefaultOutboundAction, NotifyOnListen | Format-Table -AutoSize" },
+  { name: "Defender Signature Update", description: "Updates Microsoft Defender definitions and reports signature age", script_type: "powershell", category: "security", os_target: "windows",
+    content: "Write-Output \"=== Updating Microsoft Defender Signatures ===\"\nUpdate-MpSignature\nGet-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureVersion, AntivirusSignatureLastUpdated | Format-List" },
+  { name: "Linux Failed Services", description: "Lists failed systemd services and recent system errors", script_type: "bash", category: "monitoring", os_target: "linux",
+    content: "#!/bin/bash\necho '=== Failed Services ==='\nsystemctl --failed --no-pager\necho '\n=== Recent Errors ==='\njournalctl -p err -b --no-pager -n 50" },
+  { name: "Linux Package Update Check", description: "Lists available package updates without installing anything", script_type: "bash", category: "maintenance", os_target: "linux",
+    content: "#!/bin/bash\nset -e\nif command -v apt >/dev/null; then\n  apt-get update -qq\n  apt list --upgradable 2>/dev/null\nelif command -v dnf >/dev/null; then\n  dnf check-update || true\nelif command -v yum >/dev/null; then\n  yum check-update || true\nelse\n  echo 'No supported package manager found.'\nfi" },
+  { name: "macOS System Health", description: "Reports macOS version, uptime, disk, memory, and active network details", script_type: "bash", category: "monitoring", os_target: "macos",
+    content: "#!/bin/bash\necho '=== macOS System Health ==='\nsw_vers\necho \"Uptime: $(uptime)\"\necho '\nDisk:'\ndf -h /\necho '\nMemory pressure:'\nmemory_pressure | head -20\necho '\nNetwork:'\nscutil --get ComputerName\nnetworksetup -getinfo Wi-Fi" },
+  { name: "macOS FileVault Status", description: "Checks FileVault encryption status and Secure Token users", script_type: "bash", category: "security", os_target: "macos",
+    content: "#!/bin/bash\necho '=== FileVault Status ==='\nfdesetup status\necho '\n=== Secure Token Users ==='\nfdesetup list" },
+  { name: "macOS Software Update Check", description: "Lists available macOS software updates without installing them", script_type: "bash", category: "maintenance", os_target: "macos",
+    content: "#!/bin/bash\necho '=== Available macOS Updates ==='\nsoftwareupdate --list" },
+];
+
+const SCRIPT_PACKS = [
+  { id: "windows-ops", name: "Windows Operations", description: "Diagnostics, inventory, and health checks", icon: Cpu, include: script => script.os_target === "windows" && ["general", "monitoring"].includes(script.category) },
+  { id: "endpoint-maintenance", name: "Endpoint Maintenance", description: "Cleanup, patch, and repair tools", icon: Wrench, include: script => script.os_target === "windows" && ["maintenance", "remediation"].includes(script.category) },
+  { id: "security-baseline", name: "Security Baseline", description: "Defender, firewall, encryption, and access checks", icon: Shield, include: script => script.category === "security" },
+  { id: "linux-ops", name: "Linux Operations", description: "Health, services, and package checks", icon: Server, include: script => script.os_target === "linux" },
+  { id: "macos-ops", name: "macOS Operations", description: "Apple endpoint health and compliance checks", icon: Terminal, include: script => script.os_target === "macos" },
 ];
 
 export default function ScriptingPage() {
@@ -247,13 +277,13 @@ export default function ScriptingPage() {
     setIsDialogOpen(true);
   };
 
-  const installTechnicianPack = async () => {
+  const installTemplates = async (templates, label) => {
     const existing = new Set(scripts.map(script => script.name.toLowerCase()));
-    const missing = scriptLibrary.filter(template => !existing.has(template.name.toLowerCase()));
-    if (!missing.length) { toast.info("The full technician pack is already installed"); return; }
+    const missing = templates.filter(template => !existing.has(template.name.toLowerCase()));
+    if (!missing.length) { toast.info(`${label} is already installed`); return; }
     try {
       await Promise.all(missing.map(template => axios.post(`${API}/scripts`, { ...template, run_as_admin: true, timeout_seconds: 300 }, { headers })));
-      toast.success(`${missing.length} technician scripts installed`);
+      toast.success(`${missing.length} scripts installed from ${label}`);
       await fetchData();
       setActiveTab("scripts");
     } catch {
@@ -261,6 +291,9 @@ export default function ScriptingPage() {
       fetchData();
     }
   };
+
+  const installTechnicianPack = () => installTemplates(scriptLibrary, "the technician pack");
+  const installScriptPack = (pack) => installTemplates(scriptLibrary.filter(pack.include), pack.name);
 
   const installLibraryScriptForTerminal = async (template) => {
     const existing = scripts.find(script => script.name.toLowerCase() === template.name.toLowerCase());
@@ -544,6 +577,13 @@ export default function ScriptingPage() {
             <Button size="sm" variant="outline" className="ml-auto" onClick={installTechnicianPack} data-testid="install-technician-pack"><Download className="mr-1.5 h-3.5 w-3.5" />Install technician pack</Button>
           </div>
           <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Install the full pack for direct terminal use, or import individual scripts to review and customise them first.</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5 mb-5">
+            {SCRIPT_PACKS.map(pack => {
+              const Icon = pack.icon;
+              const count = scriptLibrary.filter(pack.include).length;
+              return <Card key={pack.id} className="border-border/50 bg-muted/[0.02] transition-all hover:border-violet-500/35"><CardContent className="p-3"><div className="mb-2 flex items-center justify-between"><Icon className="h-4 w-4 text-violet-400" /><Badge variant="outline" className="text-[9px]">{count} scripts</Badge></div><p className="text-xs font-semibold">{pack.name}</p><p className="mt-1 min-h-[30px] text-[10px] text-muted-foreground">{pack.description}</p><Button variant="outline" size="sm" className="mt-3 h-7 w-full text-[10px]" onClick={() => installScriptPack(pack)} data-testid={`install-script-pack-${pack.id}`}><Download className="mr-1 h-3 w-3" />Install pack</Button></CardContent></Card>;
+            })}
+          </div>
           <div className="space-y-4">
             {scriptLibrary.map((template, i) => (
               <Card key={`k-${i}`} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
