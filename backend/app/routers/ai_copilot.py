@@ -12,7 +12,7 @@ async def _get_ai_chat(session_id: str, system_msg: str):
     if not api_key:
         return None
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
-    chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+    chat.with_model("openai", os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"))
     return chat
 
 

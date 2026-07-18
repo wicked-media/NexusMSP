@@ -16,8 +16,8 @@ from app.auth import get_current_user
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini")
 
 
 async def _llm_complete(system_msg: str, user_msg: str, session_prefix: str = "wave-a") -> str:

@@ -1316,7 +1316,7 @@ async def reseed(current_user: dict = Depends(get_current_user)):
 
 @router.post("/help/copilot")
 async def help_copilot(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    """Ask anything â€” Claude answers using the article corpus as context."""
+    """Ask anything using the article corpus as context."""
     import os
     question = (payload.get("question") or "").strip()
     if not question:
@@ -1367,7 +1367,7 @@ async def help_copilot(payload: dict = Body(...), current_user: dict = Depends(g
                 "If the corpus doesn't contain the answer, say so honestly. Keep answers under 250 words. "
                 "Use markdown for formatting. Use bullet lists when listing steps."
             ),
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        ).with_model("openai", os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"))
         msg = await chat.send_message(UserMessage(text=f"Question: {question}\n\nCorpus:\n{corpus}"))
         return {
             "answer": msg or "No response.",

@@ -91,7 +91,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
   // AI
-  { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai anthropic gemini claude gpt model provider openai api key" },
+  { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai gpt model provider api key" },
   // Notifications
   { tab: "notifications", anchor: "notifications-prefs-card", label: "Email Alerts & Preferences", keywords: "notification email alerts preferences sla warnings device offline" },
 ];
