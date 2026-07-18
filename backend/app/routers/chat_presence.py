@@ -71,6 +71,24 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
     # the app shell. Chat sends an empty heartbeat while it is open.
     if "busy_state" in payload:
         next_busy_state = payload.get("busy_state")
+        # Detail pages use database IDs in their URLs, whereas chat cards use
+        # human-readable ticket, invoice and PO references. Canonicalise the
+        # heartbeat once so technician counters and activity history agree.
+        if next_busy_state and ":" in next_busy_state:
+            kind, reference = next_busy_state.split(":", 1)
+            work_item_config = {
+                "ticket": (db.tickets, "ticket_number"),
+                "invoice": (db.invoices, "invoice_number"),
+                "po": (db.purchase_orders, "po_number"),
+            }.get(kind)
+            if work_item_config:
+                collection, reference_field = work_item_config
+                item = await collection.find_one(
+                    {"$or": [{"id": reference}, {reference_field: reference}]},
+                    {"_id": 0, "id": 1, reference_field: 1},
+                )
+                if item:
+                    next_busy_state = f"{kind}:{item.get(reference_field) or item.get('id')}"
         previous = await db.presence_state.find_one({"user_id": doc["user_id"]}, {"_id": 0, "busy_state": 1})
         previous_busy_state = (previous or {}).get("busy_state")
         doc["busy_state"] = next_busy_state

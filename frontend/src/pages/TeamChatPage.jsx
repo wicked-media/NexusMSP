@@ -994,16 +994,17 @@ function PurchaseOrderCard({ poNumber, headers, presence }) {
   return <Link to={`/purchase-orders?po=${encodeURIComponent(purchaseOrder.id)}`} className="mt-2 block max-w-lg rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] p-3 transition hover:border-cyan-400/50"><div className="mb-1 flex items-center gap-2"><code className="text-xs text-cyan-300">{purchaseOrder.po_number}</code><Badge variant="outline" className="text-[9px] capitalize">{purchaseOrder.status}</Badge></div><p className="text-sm font-medium text-zinc-200">{purchaseOrder.vendor || "Purchase order"}</p><p className="mt-1 text-xs text-zinc-400">Total ${Number(purchaseOrder.total || 0).toFixed(2)}{purchaseOrder.expected_delivery ? ` · Expected ${purchaseOrder.expected_delivery}` : ""}</p></Link>;
 }
 
-function WorkPresence({ kind, reference, presence, headers }) {
+function WorkPresence({ kind, reference, workItemId, presence, headers }) {
   const [events, setEvents] = useState([]);
+  const workItem = `${kind}:${workItemId || reference}`;
   useEffect(() => {
     let active = true;
-    axios.get(`${API}/presence/work-activity`, { params: { work_item: `${kind}:${reference}`, limit: 2 }, headers })
+    axios.get(`${API}/presence/work-activity`, { params: { work_item: workItem, limit: 2 }, headers })
       .then(response => active && setEvents(response.data?.events || []))
       .catch(() => active && setEvents([]));
     return () => { active = false; };
-  }, [headers, kind, reference]);
-  const people = Object.values(presence || {}).filter(person => person.busy_state === `${kind}:${reference}` && person.led !== "offline");
+  }, [headers, workItem]);
+  const people = Object.values(presence || {}).filter(person => person.busy_state === workItem && person.led !== "offline");
   if (!people.length && !events.length) return null;
   const latest = events[0];
   return <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/5 pt-2"><div className="flex -space-x-1.5">{people.slice(0, 4).map(person => <Avatar key={person.user_id} className="h-5 w-5 border border-[#1d1f26]"><AvatarFallback className="text-[8px]" style={avatarStyle(person.user_name)}>{initials(person.user_name)}</AvatarFallback></Avatar>)}</div>{people.length > 0 && <><p className="text-[10px] text-emerald-300">{people.length === 1 ? `${people[0].user_name} is active here` : `${people.length} technicians active here`}</p><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /></>}{latest && <p className="basis-full text-[10px] text-zinc-500">{latest.user_name || "Technician"} {latest.event === "left" ? "last left" : "opened"} {formatRelative(latest.created_at)}</p>}</div>;
