@@ -14,7 +14,7 @@ import {
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
   Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
   ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles,
-  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, ListChecks, FileText, ShoppingCart
+  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, ListChecks, FileText, ShoppingCart, Mail
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -888,21 +888,22 @@ export default function DashboardPage() {
           <CardContent className="p-0 px-3">
             <ScrollArea className="h-[240px]">
               {activityFeed.length > 0 ? activityFeed.map((item, i) => {
-                const iconMap = { ticket_note: MessageSquare, ticket_created: Ticket, alert: AlertTriangle };
-                const colorMap = { ticket_note: "text-indigo-400", ticket_created: "text-cyan-400", alert: "text-amber-400" };
-                const bgMap = { ticket_note: "bg-indigo-500/10", ticket_created: "bg-cyan-500/10", alert: "bg-amber-500/10" };
+                const iconMap = { ticket_note: MessageSquare, ticket_created: Ticket, ticket_email: Mail, alert: AlertTriangle };
+                const colorMap = { ticket_note: "text-indigo-400", ticket_created: "text-cyan-400", ticket_email: "text-sky-400", alert: "text-amber-400" };
+                const bgMap = { ticket_note: "bg-indigo-500/10", ticket_created: "bg-cyan-500/10", ticket_email: "bg-sky-500/10", alert: "bg-amber-500/10" };
                 const IconComp = iconMap[item.type] || Activity;
+                const activityPath = item.ref_id ? item.ref_type === "device" ? `/devices/${item.ref_id}` : item.ref_type === "ticket" ? `/tickets?ticket=${encodeURIComponent(item.ref_id)}` : null : null;
                 return (
-                  <div key={item.id} className="flex items-start gap-3 py-2.5 border-b border-border/20 last:border-0 group/feed hover:bg-muted/20 transition-colors rounded px-1 -mx-1">
+                  <button key={item.id} disabled={!activityPath} onClick={() => activityPath && navigate(activityPath)} className={`flex w-full items-start gap-3 border-b border-border/20 py-2.5 text-left last:border-0 rounded px-1 -mx-1 transition-colors ${activityPath ? "group/feed hover:bg-muted/40 cursor-pointer" : "cursor-default"}`} aria-label={activityPath ? `Open ${item.title}` : undefined}>
                     <div className={`w-7 h-7 rounded-lg ${bgMap[item.type] || "bg-zinc-500/10"} flex items-center justify-center flex-shrink-0 mt-0.5`}>
                       <IconComp className={`w-3.5 h-3.5 ${colorMap[item.type] || "text-gray-400"}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium truncate">{item.title}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{item.description}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{item.description}</p><p className="mt-0.5 text-[9px] text-muted-foreground/70">{item.timestamp ? formatDistanceToNow(new Date(item.timestamp), { addSuffix: true }) : "Recent"}</p>
                     </div>
-                    <span className="text-[9px] text-muted-foreground/60 shrink-0 pt-0.5">{item.user}</span>
-                  </div>
+                    <span className="text-[9px] text-muted-foreground/60 shrink-0 pt-0.5">{activityPath ? <ChevronRight className="h-3.5 w-3.5" /> : item.user}</span>
+                  </button>
                 );
               }) : (
                 <div className="text-center py-12 text-muted-foreground"><Activity className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">No recent activity</p></div>

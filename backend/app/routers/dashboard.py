@@ -104,7 +104,8 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "title": f"Note on {ticket.get('ticket_number', '')} - {ticket.get('title', 'Ticket')}" if ticket else "Note added",
             "description": (c.get("content", "")[:120] + "...") if len(c.get("content", "")) > 120 else c.get("content", ""),
             "user": c.get("user_name", "System"), "timestamp": c.get("created_at"),
-            "meta": {"internal": c.get("is_internal", False)}
+            "meta": {"internal": c.get("is_internal", False)},
+            "ref_type": "ticket", "ref_id": c.get("ticket_id"),
         })
 
     # Recent ticket emails
@@ -115,7 +116,8 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "title": f"Email: {e.get('subject', 'No subject')}",
             "description": f"To: {', '.join(e.get('to_addresses', []))}",
             "user": e.get("user_name", "System"), "timestamp": e.get("created_at"),
-            "meta": {"direction": e.get("direction", "outbound")}
+            "meta": {"direction": e.get("direction", "outbound")},
+            "ref_type": "ticket", "ref_id": e.get("ticket_id"),
         })
 
     # Recent tickets created
@@ -129,7 +131,8 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "title": f"Ticket created: {t.get('ticket_number', '')} - {t.get('title', '')}",
             "description": f"Client: {t.get('client_name', 'Unknown')} | Priority: {t.get('priority', 'medium')}",
             "user": t.get("assigned_name", "Unassigned"), "timestamp": ts,
-            "meta": {"priority": t.get("priority"), "status": t.get("status")}
+            "meta": {"priority": t.get("priority"), "status": t.get("status")},
+            "ref_type": "ticket", "ref_id": t.get("id"),
         })
 
     # Active alerts
@@ -143,7 +146,8 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "title": f"Alert: {a.get('message', 'System alert')}",
             "description": f"{a.get('device_name', '')} - {a.get('client_name', '')}",
             "user": "System", "timestamp": ts,
-            "meta": {"severity": a.get("severity")}
+            "meta": {"severity": a.get("severity")},
+            "ref_type": "device", "ref_id": a.get("device_id"),
         })
 
     # Yeastar call log entries (live from PBX if configured)
