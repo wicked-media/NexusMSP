@@ -27,7 +27,8 @@ import {
   Shield,
   Eye,
   Download,
-  Repeat
+  Repeat,
+  TrendingUp
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -295,6 +296,7 @@ export default function ContractsPage() {
           <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><Shield className="w-4 h-4 text-violet-300" /></span>
           <div><h1 className="text-2xl font-bold tracking-tight">Contracts</h1><p className="text-sm text-muted-foreground">Service agreements, renewals, and recurring billing.</p></div>
         </div>
+        <Button variant="outline" onClick={() => window.location.assign("/contract-profit")}><TrendingUp className="mr-2 h-4 w-4 text-emerald-400" />Profitability</Button>
         <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
           <DialogTrigger asChild>
             <Button data-testid="create-contract-button">
