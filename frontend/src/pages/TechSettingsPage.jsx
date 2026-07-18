@@ -137,6 +137,13 @@ export default function TechSettingsPage() {
       setNotifPrefs(notificationData);
       setWorkHours(hoursData);
       setDisplayPrefs(displayData);
+      localStorage.setItem("nexus-toast-preferences", JSON.stringify({
+        toast_position: displayData.toast_position || "top-right",
+        toast_style: displayData.toast_style || "nexus",
+        toast_duration: displayData.toast_duration || 4500,
+        toast_density: displayData.toast_density || "comfortable",
+      }));
+      window.dispatchEvent(new Event("nexus-toast-preferences"));
       if (results.some(result => result.status === "rejected")) toast.warning("Some settings could not be loaded. You can still use the available sections.");
       // Fetch wallpaper settings
       try {
@@ -224,6 +231,23 @@ export default function TechSettingsPage() {
       await axios.put(`${API}/user-settings/display`, displayPrefs, { headers });
       toast.success("Display preferences saved");
     } catch { toast.error("Failed"); }
+  };
+
+  const saveToastAppearance = async () => {
+    const next = {
+      ...displayPrefs,
+      toast_position: displayPrefs.toast_position || "top-right",
+      toast_style: displayPrefs.toast_style || "nexus",
+      toast_duration: Number(displayPrefs.toast_duration) || 4500,
+      toast_density: displayPrefs.toast_density || "comfortable",
+    };
+    try {
+      await axios.put(`${API}/user-settings/display`, next, { headers });
+      setDisplayPrefs(next);
+      localStorage.setItem("nexus-toast-preferences", JSON.stringify(next));
+      window.dispatchEvent(new Event("nexus-toast-preferences"));
+      toast.success("Notification style applied", { description: "This is your live preview." });
+    } catch { toast.error("Could not save notification appearance"); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -452,6 +476,20 @@ export default function TechSettingsPage() {
                     </div>
                   </div>
                 ))}
+                <Separator />
+                <div className="rounded-xl border border-violet-500/20 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.14),transparent_42%),hsl(var(--card)/0.5)] p-4" data-testid="toast-appearance-settings">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h4 className="flex items-center gap-2 text-sm font-semibold"><Bell className="h-4 w-4 text-violet-300" />In-app notification appearance</h4><p className="mt-1 max-w-2xl text-xs text-muted-foreground">Set how confirmation, warning, and error messages appear while you work. The preview applies immediately after saving.</p></div>
+                    <Badge variant="outline" className="border-violet-500/30 text-[10px] text-violet-200">Personal workspace</Badge>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div><Label className="text-xs">Screen position</Label><Select value={displayPrefs.toast_position || "top-right"} onValueChange={value => setDisplayPrefs({ ...displayPrefs, toast_position: value })}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="top-right">Top right</SelectItem><SelectItem value="top-left">Top left</SelectItem><SelectItem value="bottom-right">Bottom right</SelectItem><SelectItem value="bottom-left">Bottom left</SelectItem></SelectContent></Select></div>
+                    <div><Label className="text-xs">Visual treatment</Label><Select value={displayPrefs.toast_style || "nexus"} onValueChange={value => setDisplayPrefs({ ...displayPrefs, toast_style: value })}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="nexus">Nexus glass</SelectItem><SelectItem value="minimal">Minimal</SelectItem><SelectItem value="compact">Compact ops</SelectItem></SelectContent></Select></div>
+                    <div><Label className="text-xs">Visibility</Label><Select value={String(displayPrefs.toast_duration || 4500)} onValueChange={value => setDisplayPrefs({ ...displayPrefs, toast_duration: Number(value) })}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="3000">3 seconds</SelectItem><SelectItem value="4500">4.5 seconds</SelectItem><SelectItem value="6500">6.5 seconds</SelectItem><SelectItem value="9000">9 seconds</SelectItem></SelectContent></Select></div>
+                    <div><Label className="text-xs">Density</Label><Select value={displayPrefs.toast_density || "comfortable"} onValueChange={value => setDisplayPrefs({ ...displayPrefs, toast_density: value })}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="comfortable">Comfortable</SelectItem><SelectItem value="compact">Compact</SelectItem></SelectContent></Select></div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2"><Button size="sm" onClick={saveToastAppearance} data-testid="save-toast-appearance"><CheckCircle className="mr-1.5 h-3.5 w-3.5" />Apply and preview</Button><Button size="sm" variant="outline" onClick={() => toast.info("NexusMSP notifications", { description: "A cleaner, clearer acknowledgement for routine work." })}>Test notification</Button></div>
+                </div>
                 <div className="rounded-lg border border-muted bg-muted/20 p-3 text-xs text-muted-foreground">Email and SMS are sent by the relevant ticket, billing, lead, and monitoring workflows through their configured Microsoft 365 or SMS channel. They are not presented as personal toggles until individual delivery routing is available.</div>
                 <Button onClick={saveNotifications} data-testid="save-notif-btn">Save Preferences</Button>
               </CardContent>

@@ -245,11 +245,27 @@ async def get_display_prefs(current_user: dict = Depends(get_current_user)):
         "table_density": "normal",
         "sidebar_collapsed": False,
         "show_ticket_previews": True,
+        "toast_position": "top-right",
+        "toast_style": "nexus",
+        "toast_duration": 4500,
+        "toast_density": "comfortable",
     }
     return {**defaults, **(settings or {}).get("display_prefs", {})}
 
 @router.put("/user-settings/display")
 async def update_display_prefs(data: dict, current_user: dict = Depends(get_current_user)):
+    allowed_positions = {"top-right", "top-left", "bottom-right", "bottom-left"}
+    allowed_styles = {"nexus", "minimal", "compact"}
+    allowed_durations = {3000, 4500, 6500, 9000}
+    allowed_densities = {"comfortable", "compact"}
+    if "toast_position" in data and data["toast_position"] not in allowed_positions:
+        raise HTTPException(status_code=400, detail="Unsupported notification position")
+    if "toast_style" in data and data["toast_style"] not in allowed_styles:
+        raise HTTPException(status_code=400, detail="Unsupported notification style")
+    if "toast_duration" in data and int(data["toast_duration"]) not in allowed_durations:
+        raise HTTPException(status_code=400, detail="Unsupported notification duration")
+    if "toast_density" in data and data["toast_density"] not in allowed_densities:
+        raise HTTPException(status_code=400, detail="Unsupported notification density")
     await db.user_settings.update_one(
         {"user_id": current_user["id"]},
         {"$set": {"display_prefs": data, "user_id": current_user["id"]}},

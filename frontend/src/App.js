@@ -318,7 +318,7 @@ function App() {
         </Routes>
       </BrowserRouter>
       </NavCountsProvider>
-      <Toaster position="top-right" richColors />
+      <Toaster />
     </AuthProvider>
     </ThemeProvider>
   );
