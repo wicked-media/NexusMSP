@@ -286,13 +286,13 @@ export function ContractWatchCard({ clientId }) {
           const days = c.days_to_renewal;
           const urgent = days !== null && days <= 60;
           return (
-            <div key={c.id} className="flex items-center justify-between text-[11px] p-1.5 rounded hover:bg-zinc-800/40">
+            <button type="button" key={c.id} onClick={() => { window.location.assign(`/contracts?contract=${encodeURIComponent(c.id)}`); }} className="flex w-full items-center justify-between rounded p-1.5 text-left text-[11px] transition-colors hover:bg-zinc-800/40">
               <div className="min-w-0">
                 <p className="text-zinc-100 truncate">{c.name || c.title || "Contract"}</p>
                 <p className="text-[10px] text-zinc-500">{c.type || "—"} · {moneyShort(c.value || 0)}/mo</p>
               </div>
               <span className={`text-[10px] font-mono ml-2 ${urgent ? "text-red-300" : "text-zinc-400"}`}>{days != null ? `${days}d` : "—"}</span>
-            </div>
+            </button>
           );
         })}
         {!(data.contracts || []).length && <p className="text-[11px] text-zinc-500">No contracts on file.</p>}

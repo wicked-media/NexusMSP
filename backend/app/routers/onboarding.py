@@ -127,14 +127,41 @@ async def complete_step(session_id: str, step_num: int, data: dict, current_user
     elif step_num == 4:
         client_id = session.get("client_id")
         if step_data.get("create_contract"):
+            client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+            contract_type = {
+                "managed": "managed_services",
+                "co_managed": "managed_services",
+                "vcio": "retainer",
+            }.get(step_data.get("contract_type"), step_data.get("contract_type", "managed_services"))
+            billing_frequency = {
+                "annual": "annually",
+                "semi_annual": "annually",
+            }.get(step_data.get("billing_cycle"), step_data.get("billing_cycle", "monthly"))
+            sla_tier = {
+                "critical_24x7": "platinum",
+                "priority": "gold",
+                "business_hours": "silver",
+                "best_effort": "standard",
+            }.get(step_data.get("sla_tier"), step_data.get("sla_tier", "standard"))
             contract = {
                 "id": str(uuid.uuid4())[:8],
                 "client_id": client_id,
+                "client_name": (client or {}).get("name", ""),
                 "name": step_data.get("contract_name", "Service Agreement"),
-                "type": step_data.get("contract_type", "managed"),
+                "contract_type": contract_type,
+                "type": contract_type,  # compatibility with existing client widgets
+                "onboarding_contract_type": step_data.get("contract_type", "managed"),
                 "value": step_data.get("monthly_value", 0),
-                "billing_cycle": step_data.get("billing_cycle", "monthly"),
+                "mrr": step_data.get("monthly_value", 0),
+                "billing_frequency": billing_frequency,
                 "start_date": step_data.get("start_date", datetime.now(timezone.utc).date().isoformat()),
+                "auto_renew": step_data.get("auto_renew", True),
+                "sla_tier": sla_tier,
+                "onboarding_sla_tier": step_data.get("sla_tier", "standard"),
+                "sla_response_hours": step_data.get("sla_response_hours") or None,
+                "sla_resolution_hours": step_data.get("sla_resolution_hours") or None,
+                "payment_terms": step_data.get("payment_terms", "net_30"),
+                "onboarding_id": session_id,
                 "status": "active",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
