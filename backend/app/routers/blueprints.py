@@ -277,7 +277,7 @@ async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict
 
 @router.post("/blueprints/suggest-from-history")
 async def suggest_blueprint_from_history(data: dict, current_user: dict = Depends(get_current_user)):
-    """Use Claude Sonnet 4.5 to draft a blueprint from this client's resolved tickets.
+    """Use Nexus AI to draft a blueprint from this client's resolved tickets.
 
     body: { ticket_id?: "...", client_id?: "...", title_hint?: "..." }
     Returns a draft blueprint JSON (NOT saved) for the user to review + save.
@@ -363,7 +363,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
             api_key=api_key,
             session_id=f"bp-suggest-{_uuid.uuid4().hex[:8]}",
             system_message=system_msg,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        ).with_model("openai", os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"))
         raw = await chat.send_message(UserMessage(text=user_msg))
         text = raw.strip() if isinstance(raw, str) else str(raw)
     except Exception as e:
@@ -398,7 +398,7 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     return {
         "draft": safe,
         "source_tickets": [{"id": t.get("id"), "ticket_number": t.get("ticket_number"), "title": t.get("title")} for t in matched[:12]],
-        "ai_model": "claude-sonnet-4-5-20250929",
+        "ai_model": os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"),
     }
 
 
@@ -556,7 +556,7 @@ async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_curr
             api_key=api_key,
             session_id=f"bp-pattern-{_uuid.uuid4().hex[:8]}",
             system_message=system_msg,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        ).with_model("openai", os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"))
         raw = await chat.send_message(UserMessage(text=user_msg))
         text = raw.strip() if isinstance(raw, str) else str(raw)
     except Exception as e:
@@ -589,7 +589,7 @@ async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_curr
     return {
         "draft": safe,
         "source_tickets": [{"id": t["id"], "ticket_number": t.get("ticket_number"), "title": t.get("title"), "client_name": t.get("client_name")} for t in tix[:15]],
-        "ai_model": "claude-sonnet-4-5-20250929",
+        "ai_model": os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"),
     }
 
 
