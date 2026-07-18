@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card } from "@/components/ui/card";
@@ -41,6 +41,7 @@ const EMPTY_FORM = {
 
 export default function LeadsPage() {
   const { token, user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState("pipeline");
   const [leads, setLeads] = useState([]);
@@ -92,6 +93,7 @@ export default function LeadsPage() {
     return leads.filter(l => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if (filters.status && l.status !== filters.status) return false;
+      if (filters.pipelineOnly && ["won", "lost"].includes(l.status)) return false;
       if (filters.hotOnly) {
         const sc = scores[l.id]?.overall || 0;
         if (sc < 80) return false;
@@ -169,7 +171,7 @@ export default function LeadsPage() {
           <p className="text-xs text-muted-foreground">Pipeline · scoring · forecasts · proposals · tickets.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => { window.location.href = "/o365-setup"; }} data-testid="leads-email-intake">
+          <Button variant="outline" size="sm" onClick={() => navigate("/o365-setup")} data-testid="leads-email-intake">
             <Funnel className="w-3.5 h-3.5 mr-1" />Email Intake
           </Button>
           <Button variant="outline" size="sm" onClick={() => setPasteOpen(true)} data-testid="leads-quick-add">
@@ -186,10 +188,10 @@ export default function LeadsPage() {
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <HeroTile label="All leads" value={leads.length} icon={Sparkles} glow="violet" testId="stat-total" />
-        <HeroTile label="Open pipeline" value={summary.open} icon={Funnel} glow="sky" testId="stat-open" />
-        <HeroTile label="Pipeline value" value={money(summary.pipelineValue)} icon={BarChart3} glow="emerald" animated={false} testId="stat-pipeline-value" />
-        <HeroTile label="Hot leads" value={summary.hot} icon={Flame} glow="amber" testId="stat-hot" />
+        <HeroTile label="All leads" value={leads.length} icon={Sparkles} glow="violet" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({}); setTab("directory"); }} testId="stat-total" />
+        <HeroTile label="Open pipeline" value={summary.open} icon={Funnel} glow="sky" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({ pipelineOnly: true }); setTab("directory"); }} testId="stat-open" />
+        <HeroTile label="Pipeline value" value={money(summary.pipelineValue)} icon={BarChart3} glow="emerald" animated={false} onClick={() => setTab("insights")} testId="stat-pipeline-value" />
+        <HeroTile label="Hot leads" value={summary.hot} icon={Flame} glow="amber" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({ hotOnly: true }); setTab("directory"); }} testId="stat-hot" />
       </div>
 
       <LeadActivityTicker />
@@ -214,7 +216,7 @@ export default function LeadsPage() {
         </TabsList>
 
         <TabsContent value="pipeline" className="mt-4 space-y-4">
-          <PipelineFunnelCanvas onStageClick={(s) => { setStatusFilter(s); setTab("directory"); }} />
+          <PipelineFunnelCanvas onStageClick={(s) => { setSearch(""); setFilters({}); setStatusFilter(s); setTab("directory"); }} />
           <ForecastWidget />
         </TabsContent>
 
