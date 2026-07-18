@@ -125,6 +125,24 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      response => response,
+      error => {
+        // A token can expire while a technician is working. Clear it globally
+        // so every protected page returns to sign-in instead of showing a
+        // misleading module-specific loading error.
+        if (error.response?.status === 401) {
+          secureStorage.removeItem("nexusops_token");
+          setToken(null);
+          setUser(null);
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
+
+  useEffect(() => {
     const initAuth = async () => {
       if (token) {
         try {
