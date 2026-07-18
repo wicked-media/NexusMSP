@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
+import HeroTile from "@/components/HeroTile";
 
 function CodeBlock({ content, language }) {
   const [copied, setCopied] = useState(false);
@@ -72,6 +73,22 @@ const scriptLibrary = [
     content: "Write-Output \"=== Security Audit ===\"\n# Firewall\nGet-NetFirewallProfile | Select-Object Name, Enabled | Format-Table\n# Antivirus\nGet-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated\n# Local Admins\nWrite-Output \"`nLocal Administrators:\"\nGet-LocalGroupMember -Group \"Administrators\" | Select-Object Name, ObjectClass" },
   { name: "Linux System Health", description: "Checks CPU, memory, disk and uptime on Linux", script_type: "bash", category: "monitoring", os_target: "linux",
     content: "#!/bin/bash\necho \"=== System Health ===\"\necho \"Hostname: $(hostname)\"\necho \"Uptime: $(uptime -p)\"\necho \"CPU Load: $(cat /proc/loadavg | awk '{print $1, $2, $3}')\"\necho \"Memory:\"\nfree -h | grep -E \"Mem|Swap\"\necho \"Disk Usage:\"\ndf -h | grep -E \"^/dev\"" },
+  { name: "Flush DNS Cache", description: "Clears Windows DNS resolver cache and shows current DNS servers", script_type: "powershell", category: "remediation", os_target: "windows",
+    content: "Write-Output \"=== DNS Cache Refresh ===\"\nClear-DnsClientCache\nWrite-Output \"DNS cache cleared. Active DNS servers:\"\nGet-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object InterfaceAlias, ServerAddresses | Format-Table -AutoSize" },
+  { name: "Restart Print Spooler", description: "Safely restarts the Windows print spooler and clears stalled jobs", script_type: "powershell", category: "remediation", os_target: "windows",
+    content: "Write-Output \"=== Print Spooler Recovery ===\"\nStop-Service Spooler -Force\nRemove-Item \"$env:WINDIR\\System32\\spool\\PRINTERS\\*\" -Force -ErrorAction SilentlyContinue\nStart-Service Spooler\nGet-Service Spooler | Select-Object Status, Name, DisplayName\nWrite-Output \"Print spooler restarted and queued jobs cleared.\"" },
+  { name: "Microsoft Defender Quick Scan", description: "Starts a Defender quick scan and returns current protection status", script_type: "powershell", category: "security", os_target: "windows",
+    content: "Write-Output \"=== Microsoft Defender Quick Scan ===\"\n$status = Get-MpComputerStatus\n$status | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated\nStart-MpScan -ScanType QuickScan\nWrite-Output \"Quick scan started. Review Defender history for final findings.\"" },
+  { name: "BitLocker Status", description: "Reports encryption and protection state for all fixed disks", script_type: "powershell", category: "security", os_target: "windows",
+    content: "Write-Output \"=== BitLocker Status ===\"\nGet-BitLockerVolume | Select-Object MountPoint, VolumeStatus, ProtectionStatus, EncryptionPercentage, EncryptionMethod | Format-Table -AutoSize" },
+  { name: "Pending Reboot Check", description: "Checks common Windows signals that indicate a restart is pending", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "Write-Output \"=== Pending Restart Check ===\"\n$checks = @(\n  @{ Name = 'Component Based Servicing'; Path = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending' },\n  @{ Name = 'Windows Update'; Path = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired' }\n)\n$pending = $false\nforeach ($check in $checks) {\n  $exists = Test-Path $check.Path\n  Write-Output \"$($check.Name): $(if ($exists) { 'Pending' } else { 'Clear' })\"\n  if ($exists) { $pending = $true }\n}\nWrite-Output \"Restart required: $pending\"" },
+  { name: "Critical Event Log Summary", description: "Collects recent critical and error events from System and Application logs", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "Write-Output \"=== Recent Critical and Error Events (7 days) ===\"\n$since = (Get-Date).AddDays(-7)\nGet-WinEvent -FilterHashtable @{ LogName = @('System','Application'); Level = @(1,2); StartTime = $since } -ErrorAction SilentlyContinue |\n  Select-Object -First 50 TimeCreated, LogName, ProviderName, Id, LevelDisplayName, Message |\n  Format-List" },
+  { name: "Network Adapter Inventory", description: "Reports connected adapters, IP addresses, gateways and Wi-Fi details", script_type: "powershell", category: "monitoring", os_target: "windows",
+    content: "Write-Output \"=== Network Adapter Inventory ===\"\nGet-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | ForEach-Object {\n  [PSCustomObject]@{ Adapter = $_.InterfaceAlias; IPv4 = $_.IPv4Address.IPAddress; Gateway = $_.IPv4DefaultGateway.NextHop; DNS = ($_.DNSServer.ServerAddresses -join ', ') }\n} | Format-Table -AutoSize" },
+  { name: "Local Administrators Report", description: "Exports the local Administrators group membership for review", script_type: "powershell", category: "security", os_target: "windows",
+    content: "Write-Output \"=== Local Administrators ===\"\nGet-LocalGroupMember -Group 'Administrators' | Select-Object Name, ObjectClass, PrincipalSource | Format-Table -AutoSize" },
 ];
 
 export default function ScriptingPage() {
@@ -285,12 +302,12 @@ export default function ScriptingPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><Code className="w-5 h-5 text-primary" /></div><div><p className="text-2xl font-bold">{scripts.length}</p><p className="text-xs text-muted-foreground">Total Scripts</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-500" /></div><div><p className="text-2xl font-bold">{executions.filter(e => e.status === 'completed').length}</p><p className="text-xs text-muted-foreground">Successful Runs</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><XCircle className="w-5 h-5 text-red-500" /></div><div><p className="text-2xl font-bold">{executions.filter(e => e.status === 'failed').length}</p><p className="text-xs text-muted-foreground">Failed Runs</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Clock className="w-5 h-5 text-yellow-500" /></div><div><p className="text-2xl font-bold">{scheduledTasks.filter(t => t.enabled).length}</p><p className="text-xs text-muted-foreground">Active Schedules</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><Shield className="w-5 h-5 text-orange-500" /></div><div><p className="text-2xl font-bold">{patchStats?.pending_critical || 0}</p><p className="text-xs text-muted-foreground">Critical Patches</p></div></CardContent></Card>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <HeroTile label="Total scripts" value={scripts.length} icon={Code} glow="violet" animated={false} onClick={() => setActiveTab("scripts")} testId="scripts-metric-total" />
+        <HeroTile label="Successful runs" value={executions.filter(e => e.status === "completed").length} icon={CheckCircle} glow="emerald" animated={false} onClick={() => setActiveTab("history")} testId="scripts-metric-success" />
+        <HeroTile label="Failed runs" value={executions.filter(e => e.status === "failed").length} icon={XCircle} glow="rose" animated={false} onClick={() => setActiveTab("history")} testId="scripts-metric-failed" />
+        <HeroTile label="Active schedules" value={scheduledTasks.filter(t => t.enabled).length} icon={Clock} glow="amber" animated={false} onClick={() => setActiveTab("scheduling")} testId="scripts-metric-schedules" />
+        <HeroTile label="Critical patches" value={patchStats?.pending_critical || 0} icon={Shield} glow="amber" animated={false} onClick={() => setActiveTab("patches")} testId="scripts-metric-patches" />
       </div>
 
       {/* Tabs */}
