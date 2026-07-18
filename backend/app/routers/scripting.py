@@ -61,6 +61,60 @@ def next_scheduled_run(task: dict, now: datetime | None = None) -> str:
     return (now + timedelta(days=1)).isoformat()
 
 
+def _agent_shell(script: dict) -> str | None:
+    """Translate a saved-script type into a shell understood by Nexus Agent."""
+    script_type = str(script.get("script_type") or "powershell").lower()
+    if script_type in {"powershell", "ps1", "pwsh"}:
+        return "powershell"
+    if script_type in {"cmd", "batch", "bat"}:
+        return "cmd"
+    if script_type in {"bash", "shell", "sh"}:
+        return "bash"
+    return None
+
+
+async def _dispatch_execution_to_agent(execution: dict, script: dict, device: dict, queued_by: str) -> bool:
+    """Attach a ScriptExecution to the durable Nexus Agent command queue.
+
+    Script history remains the technician-facing record while the agent command is
+    the delivery mechanism.  A device without a live Nexus Agent is recorded as a
+    failed run rather than left looking like work is still pending forever.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    shell = _agent_shell(script)
+    if not shell:
+        await db.script_executions.update_one({"id": execution["id"]}, {"$set": {
+            "status": "failed", "completed_at": now,
+            "error_output": f"Unsupported script type: {script.get('script_type') or 'unknown'}",
+        }})
+        return False
+    try:
+        # Kept local so the scheduled-task worker does not create an import cycle
+        # while the application registers router modules at startup.
+        from app.routers.nexus_agent import queue_command_for_device
+        command_id = await queue_command_for_device(device, "run_script", {
+            "script": script.get("content") or "",
+            "shell": shell,
+            "timeout_sec": int(script.get("timeout_seconds") or 300),
+        }, queued_by=queued_by)
+        if not command_id:
+            raise HTTPException(409, "No active NexusOps Agent is linked to this device")
+        await db.nexus_agent_commands.update_one({"id": command_id}, {"$set": {
+            "script_execution_id": execution["id"],
+            "script_id": script.get("id"),
+            "scheduled_task_id": execution.get("scheduled_task_id"),
+        }})
+        await db.script_executions.update_one({"id": execution["id"]}, {"$set": {
+            "command_id": command_id, "queued_at": now, "delivery": "nexus-agent",
+        }})
+        return True
+    except HTTPException as exc:
+        await db.script_executions.update_one({"id": execution["id"]}, {"$set": {
+            "status": "failed", "completed_at": now, "error_output": str(exc.detail),
+        }})
+        return False
+
+
 async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
     """Queue due saved-script runs for the agent, recording a durable run audit."""
     now = now or datetime.now(timezone.utc)
@@ -95,6 +149,10 @@ async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
             executions.append(execution)
         if executions:
             await db.script_executions.insert_many(executions)
+            for execution in executions:
+                device = await db.devices.find_one({"id": execution["device_id"]}, {"_id": 0})
+                if device:
+                    await _dispatch_execution_to_agent(execution, script, device, "scheduler")
             await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
             queued += len(executions)
         await db.scheduled_task_runs.insert_one({"id": str(uuid.uuid4()), "task_id": task["id"], "script_id": script["id"], "queued_count": len(executions), "status": "queued", "ran_at": now.isoformat()})
@@ -183,7 +241,8 @@ async def execute_script(script_id: str, device_ids: List[str], parameters: Dict
         doc = execution.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
         await db.script_executions.insert_one(doc)
-        executions.append(execution)
+        await _dispatch_execution_to_agent(doc, script, device, current_user.get("email") or current_user["id"])
+        executions.append(doc)
     
     # Update script run count
     await db.scripts.update_one(
@@ -351,10 +410,15 @@ async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(get_
     if not executions:
         raise HTTPException(status_code=400, detail="No valid target devices are configured")
     await db.script_executions.insert_many(executions)
+    delivered = 0
+    for execution in executions:
+        device = await db.devices.find_one({"id": execution["device_id"]}, {"_id": 0})
+        if device and await _dispatch_execution_to_agent(execution, script, device, current_user.get("email") or current_user["id"]):
+            delivered += 1
     await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
     await db.scheduled_tasks.update_one({"id": task_id}, {"$set": {"last_run": now.isoformat(), "updated_at": now.isoformat()}, "$inc": {"run_count": 1}})
     await db.scheduled_task_runs.insert_one({"id": str(uuid.uuid4()), "task_id": task_id, "script_id": script["id"], "queued_count": len(executions), "status": "queued", "trigger": "manual", "ran_at": now.isoformat(), "actor": current_user.get("name")})
-    return {"message": f"Queued {len(executions)} executions", "queued": len(executions)}
+    return {"message": f"Queued {delivered} of {len(executions)} executions for Nexus Agent", "queued": delivered, "total": len(executions)}
 
 @router.delete("/scheduled-tasks/{task_id}")
 async def delete_scheduled_task(task_id: str, current_user: dict = Depends(get_current_user)):

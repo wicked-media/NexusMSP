@@ -214,6 +214,15 @@ export default function ScriptingPage() {
 
   useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Agent-delivered scripts transition from queued → running → completed on
+  // the endpoint. Refresh only while there is active work, rather than making
+  // technicians reload the history table to see the result return.
+  useEffect(() => {
+    if (!executions.some((execution) => ["pending", "running", "dispatched"].includes(execution.status))) return undefined;
+    const refresh = window.setInterval(fetchData, 10000);
+    return () => window.clearInterval(refresh);
+  }, [executions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -657,8 +666,8 @@ export default function ScriptingPage() {
                         <TableRow key={exec.id}>
                           <TableCell className="font-medium">{exec.script_name}</TableCell>
                           <TableCell>{exec.device_name}</TableCell>
-                          <TableCell><Badge variant={exec.status === 'completed' ? 'default' : exec.status === 'failed' ? 'destructive' : 'secondary'}>{exec.status}</Badge></TableCell>
-                          <TableCell>{exec.duration_seconds ? `${exec.duration_seconds}s` : '-'}</TableCell>
+                          <TableCell><Badge variant={exec.status === 'completed' ? 'default' : ['failed', 'timeout'].includes(exec.status) ? 'destructive' : 'secondary'} className={exec.status === 'running' ? 'border-sky-400/40 bg-sky-500/10 text-sky-300' : exec.status === 'pending' ? 'border-amber-400/40 bg-amber-500/10 text-amber-200' : ''}>{exec.status === 'pending' ? 'queued' : exec.status}</Badge></TableCell>
+                          <TableCell>{exec.duration_ms ? `${Math.round(exec.duration_ms / 1000)}s` : exec.duration_seconds ? `${exec.duration_seconds}s` : '-'}</TableCell>
                           <TableCell>{exec.user_name}</TableCell>
                           <TableCell className="text-muted-foreground">{formatDistanceToNow(new Date(exec.created_at), { addSuffix: true })}</TableCell>
                           <TableCell><Button variant="ghost" size="sm" className="h-7 text-[10px]" onClick={() => openExecutionDetail(exec)} data-testid={`open-execution-${exec.id}`}><Eye className="mr-1 h-3 w-3" />Inspect</Button></TableCell>

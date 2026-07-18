@@ -654,6 +654,10 @@ async def commands_poll(x_agent_token: str | None = Header(None)):
             {"$set": {"status": "dispatched", "dispatched_at": _now()}},
         )
         if claimed.modified_count == 1:
+            if c.get("script_execution_id"):
+                await db.script_executions.update_one({"id": c["script_execution_id"], "status": "pending"}, {"$set": {
+                    "status": "running", "started_at": _now(),
+                }})
             out.append({"id": c["id"], "kind": c["kind"], "payload": c.get("payload") or {}})
     return {"commands": out}
 
@@ -1186,6 +1190,32 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
             "cancelled_by": user.get("email") or user.get("id"),
         }},
     )
+    # Scripts queued from the Scripting workspace are delivered through this
+    # same agent channel. Mirror the real agent result back into the execution
+    # history so technicians see completion, exit code and captured output.
+    try:
+        command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"]},
+            {"_id": 0, "script_execution_id": 1, "dispatched_at": 1},
+        )
+        execution_id = (command or {}).get("script_execution_id")
+        if execution_id:
+            now = _now()
+            final_status = "completed" if res.status == "ok" else ("timeout" if res.status == "timeout" else "failed")
+            output = res.stdout or ""
+            error_output = res.stderr or ""
+            await db.script_executions.update_one({"id": execution_id}, {"$set": {
+                "status": final_status,
+                "exit_code": res.exit_code,
+                "output": output,
+                "error_output": error_output,
+                "duration_ms": res.duration_ms,
+                "duration_seconds": round(res.duration_ms / 1000, 3),
+                "started_at": (command or {}).get("dispatched_at") or now,
+                "completed_at": now,
+            }})
+    except Exception:
+        logger.exception("[nexus-agent] failed to mirror script execution result")
     await _audit(db, "fleet_script_cancel", {
         "batch_id": batch_id,
         "cancelled_count": result.modified_count,
