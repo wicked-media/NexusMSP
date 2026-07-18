@@ -178,6 +178,7 @@ export default function ScriptingPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isRunDialogOpen, setIsRunDialogOpen] = useState(false);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+  const [executionDetail, setExecutionDetail] = useState(null);
   const [runningScheduleId, setRunningScheduleId] = useState(null);
   const [selectedScript, setSelectedScript] = useState(null);
   const [selectedDevices, setSelectedDevices] = useState([]);
@@ -291,6 +292,16 @@ export default function ScriptingPage() {
     }
   };
 
+  const openExecutionDetail = async (execution) => {
+    try {
+      const response = await axios.get(`${API}/script-executions/${execution.id}`, { headers });
+      setExecutionDetail(response.data);
+    } catch {
+      setExecutionDetail(execution);
+      toast.error("Could not load the full execution detail");
+    }
+  };
+
   const importFromLibrary = (template) => {
     setFormData({ ...template, run_as_admin: true, timeout_seconds: 300 });
     setSelectedScript(null);
@@ -367,6 +378,9 @@ export default function ScriptingPage() {
   };
 
   const filteredScripts = scripts.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.description?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const executionOutput = executionDetail?.output
+    ? (Array.isArray(executionDetail.output) ? executionDetail.output.map(line => `${line.time ? `[${new Date(line.time).toLocaleTimeString()}] ` : ""}${line.text || JSON.stringify(line)}`).join("\n") : String(executionDetail.output))
+    : "No captured output yet. Pending runs will appear here after an agent reports back.";
 
   return (
     <div className="space-y-6" data-testid="scripting-page">
@@ -637,7 +651,7 @@ export default function ScriptingPage() {
               {executions.length > 0 ? (
                 <ScrollArea className="h-[500px]">
                   <Table>
-                    <TableHeader><TableRow><TableHead>Script</TableHead><TableHead>Device</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead><TableHead>Run By</TableHead><TableHead>Time</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>Script</TableHead><TableHead>Device</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead><TableHead>Run By</TableHead><TableHead>Time</TableHead><TableHead></TableHead></TableRow></TableHeader>
                     <TableBody>
                       {executions.map(exec => (
                         <TableRow key={exec.id}>
@@ -647,6 +661,7 @@ export default function ScriptingPage() {
                           <TableCell>{exec.duration_seconds ? `${exec.duration_seconds}s` : '-'}</TableCell>
                           <TableCell>{exec.user_name}</TableCell>
                           <TableCell className="text-muted-foreground">{formatDistanceToNow(new Date(exec.created_at), { addSuffix: true })}</TableCell>
+                          <TableCell><Button variant="ghost" size="sm" className="h-7 text-[10px]" onClick={() => openExecutionDetail(exec)} data-testid={`open-execution-${exec.id}`}><Eye className="mr-1 h-3 w-3" />Inspect</Button></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -718,6 +733,25 @@ export default function ScriptingPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(executionDetail)} onOpenChange={(open) => { if (!open) setExecutionDetail(null); }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Execution audit</DialogTitle></DialogHeader>
+          {executionDetail && <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 text-xs sm:grid-cols-4">
+              <div><p className="text-muted-foreground">Script</p><p className="mt-0.5 font-medium">{executionDetail.script_name || "Unknown script"}</p></div>
+              <div><p className="text-muted-foreground">Target</p><p className="mt-0.5 font-medium">{executionDetail.device_name || executionDetail.device_id || "Not assigned"}</p></div>
+              <div><p className="text-muted-foreground">Status</p><Badge variant={executionDetail.status === "completed" ? "default" : executionDetail.status === "failed" ? "destructive" : "secondary"} className="mt-1 text-[10px]">{executionDetail.status || "pending"}</Badge></div>
+              <div><p className="text-muted-foreground">Triggered by</p><p className="mt-0.5 font-medium">{executionDetail.user_name || "Scheduler"}</p></div>
+              <div><p className="text-muted-foreground">Started</p><p className="mt-0.5">{executionDetail.created_at ? new Date(executionDetail.created_at).toLocaleString() : "—"}</p></div>
+              <div><p className="text-muted-foreground">Duration</p><p className="mt-0.5">{executionDetail.duration_ms ? `${executionDetail.duration_ms}ms` : executionDetail.duration_seconds ? `${executionDetail.duration_seconds}s` : "—"}</p></div>
+              <div><p className="text-muted-foreground">Schedule</p><p className="mt-0.5 font-mono">{executionDetail.scheduled_task_id || "Manual"}</p></div>
+              <div><p className="text-muted-foreground">Execution ID</p><p className="mt-0.5 truncate font-mono">{executionDetail.id}</p></div>
+            </div>
+            <div><Label className="mb-2 block">Captured output</Label><CodeBlock content={executionOutput} language="execution log" /></div>
+          </div>}
+        </DialogContent>
+      </Dialog>
 
       {/* Run Script Dialog */}
       <Dialog open={isRunDialogOpen} onOpenChange={setIsRunDialogOpen}>
