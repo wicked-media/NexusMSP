@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Shield, AlertTriangle, CheckCircle, XCircle, Clock, RotateCcw, Play, Pause, ChevronRight, Search, Filter, Download, ArrowUpDown, Layers, Zap, TestTube, FileCode, Ban, Terminal, Settings, Copy, Monitor, Server, Wifi, WifiOff, Cpu, HardDrive } from "lucide-react";
 import { toast } from "sonner";
@@ -33,6 +34,8 @@ export default function PatchHubPage() {
   const [agentScript, setAgentScript] = useState(null);
   const [agentReports, setAgentReports] = useState(null);
   const [agentSettings, setAgentSettings] = useState({ api_url: "", agent_api_key: "", report_interval: 3600 });
+  const [exclusionOpen, setExclusionOpen] = useState(false);
+  const [exclusionForm, setExclusionForm] = useState({ kb_id: "", app_name: "", reason: "", scope: "global" });
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -94,8 +97,45 @@ export default function PatchHubPage() {
   };
 
   const promoteRing = async (ringId) => {
-    await axios.post(`${API}/patch-hub/rings/${ringId}/promote`, {}, { headers });
-    fetchData();
+    try {
+      const { data } = await axios.post(`${API}/patch-hub/rings/${ringId}/promote`, {}, { headers });
+      toast.success(`${data.patches_promoted || 0} patches promoted to ${data.next_ring || "the next ring"}`);
+      fetchData();
+    } catch { toast.error("Could not promote this deployment ring"); }
+  };
+
+  const addExclusion = async () => {
+    if (!exclusionForm.kb_id.trim() && !exclusionForm.app_name.trim()) { toast.error("Enter a KB ID or application name"); return; }
+    if (!exclusionForm.reason.trim()) { toast.error("Add a reason so the exclusion is auditable"); return; }
+    try {
+      await axios.post(`${API}/patch-hub/exclusions`, exclusionForm, { headers });
+      toast.success("Patch exclusion saved");
+      setExclusionOpen(false);
+      setExclusionForm({ kb_id: "", app_name: "", reason: "", scope: "global" });
+      fetchData();
+    } catch { toast.error("Could not save the exclusion"); }
+  };
+
+  const removeExclusion = async (id) => {
+    if (!window.confirm("Remove this patch exclusion?")) return;
+    try {
+      await axios.delete(`${API}/patch-hub/exclusions/${id}`, { headers });
+      toast.success("Patch exclusion removed");
+      fetchData();
+    } catch { toast.error("Could not remove the exclusion"); }
+  };
+
+  const requestRollback = async (patch) => {
+    if (!window.confirm(`Create a rollback request for ${patch.kb_id || patch.title || "this update"}?`)) return;
+    try {
+      await axios.post(`${API}/patch-hub/rollback`, {
+        patch_id: patch.id,
+        device_ids: patch.device_id ? [patch.device_id] : [],
+        reason: "Requested from Patch Manager",
+      }, { headers });
+      toast.success("Rollback request recorded for approval and execution");
+      fetchData();
+    } catch { toast.error("Could not create the rollback request"); }
   };
 
   if (loading && !dashboard) return <div className="p-6 text-muted-foreground">Loading Patch Hub...</div>;
@@ -283,7 +323,7 @@ export default function PatchHubPage() {
         <TabsContent value="exclusions" className="space-y-4">
           <div className="flex justify-between items-center">
             <p className="text-sm text-muted-foreground">Manage patches and apps excluded from automatic deployment</p>
-            <Button size="sm"><Ban className="w-4 h-4 mr-1" />Add Exclusion</Button>
+            <Button size="sm" onClick={() => setExclusionOpen(true)}><Ban className="w-4 h-4 mr-1" />Add Exclusion</Button>
           </div>
           {exclusions.filter(e => e.active).map(e => (
             <Card key={e.id}><CardContent className="pt-4">
@@ -297,7 +337,7 @@ export default function PatchHubPage() {
                   <p className="text-sm mt-1">{e.reason}</p>
                   <div className="text-xs text-muted-foreground mt-1">Added by {e.created_by} {e.expires_at ? `| Expires: ${new Date(e.expires_at).toLocaleDateString()}` : "| No expiry"}</div>
                 </div>
-                <Button size="sm" variant="ghost" className="text-red-500">Remove</Button>
+                <Button size="sm" variant="ghost" className="text-red-500" onClick={() => removeExclusion(e.id)}>Remove</Button>
               </div>
             </CardContent></Card>
           ))}
@@ -351,7 +391,7 @@ export default function PatchHubPage() {
                     {rollbacks.available_rollbacks.slice(0, 10).map(r => (
                       <div key={r.id} className="flex items-center gap-4 p-2 rounded hover:bg-muted/50">
                         <div className="flex-1 text-sm"><span className="font-medium">{r.kb_id}</span> on {r.device_name} <span className="text-muted-foreground">({r.client_name})</span></div>
-                        <Button size="sm" variant="outline"><RotateCcw className="w-3 h-3 mr-1" />Rollback</Button>
+                        <Button size="sm" variant="outline" onClick={() => requestRollback(r)}><RotateCcw className="w-3 h-3 mr-1" />Request rollback</Button>
                       </div>
                     ))}
                   </div>
@@ -562,6 +602,22 @@ export default function PatchHubPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={exclusionOpen} onOpenChange={setExclusionOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add patch exclusion</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Exclude one Windows update or third-party application from automatic deployment. A reason is retained in the audit trail.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label>KB ID</Label><Input value={exclusionForm.kb_id} placeholder="KB5030219" onChange={(event) => setExclusionForm({ ...exclusionForm, kb_id: event.target.value })} /></div>
+              <div className="space-y-1.5"><Label>Application</Label><Input value={exclusionForm.app_name} placeholder="Optional app name" onChange={(event) => setExclusionForm({ ...exclusionForm, app_name: event.target.value })} /></div>
+            </div>
+            <div className="space-y-1.5"><Label>Reason</Label><Textarea value={exclusionForm.reason} placeholder="Known issue, change window, compatibility requirement…" onChange={(event) => setExclusionForm({ ...exclusionForm, reason: event.target.value })} /></div>
+            <div className="space-y-1.5"><Label>Scope</Label><Input value={exclusionForm.scope} onChange={(event) => setExclusionForm({ ...exclusionForm, scope: event.target.value })} placeholder="global or client name" /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setExclusionOpen(false)}>Cancel</Button><Button onClick={addExclusion}>Save exclusion</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
