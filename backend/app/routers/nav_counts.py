@@ -73,7 +73,7 @@ async def nav_counts(current_user: dict = Depends(get_current_user)):
 
     # Pending technician invites
     try:
-        invites = await db.technician_invites.count_documents({"status": "pending"})
+        invites = await db.tech_invites.count_documents({"status": "pending"})
     except Exception:
         invites = 0
 

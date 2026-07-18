@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
-from app.auth import get_current_user
+from app.auth import get_current_user, hash_password, password_policy_error
 from app.routers.email_utils import send_email, is_microsoft365_configured
 import uuid
 import os
@@ -10,6 +10,11 @@ import os
 router = APIRouter()
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
+
+
+def _require_admin(current_user: dict):
+    if current_user.get("role") != "admin" and not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Administrator access required")
 
 
 def _build_invite_email_html(invite: dict, company_name: str = "NexusOps") -> str:
@@ -64,13 +69,14 @@ def _build_invite_email_html(invite: dict, company_name: str = "NexusOps") -> st
 @router.post("/technicians/invite")
 async def invite_technician(data: dict, current_user: dict = Depends(get_current_user)):
     """Send an email invite to a new technician"""
-    email = data.get("email", "").strip()
+    _require_admin(current_user)
+    email = data.get("email", "").strip().lower()
     name = data.get("name", "").strip()
     if not email or not name:
         raise HTTPException(status_code=400, detail="Name and email are required")
 
     # Check for existing tech with this email
-    existing = await db.technicians.find_one({"email": email}, {"_id": 0, "id": 1})
+    existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
     if existing:
         raise HTTPException(status_code=409, detail="A technician with this email already exists")
 
@@ -122,6 +128,7 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
 @router.get("/technicians/invites")
 async def list_invites(current_user: dict = Depends(get_current_user)):
     """List all technician invites"""
+    _require_admin(current_user)
     invites = await db.tech_invites.find({}, {"_id": 0, "token": 0}).sort("created_at", -1).to_list(100)
     return invites
 
@@ -129,6 +136,7 @@ async def list_invites(current_user: dict = Depends(get_current_user)):
 @router.delete("/technicians/invites/{invite_id}")
 async def revoke_invite(invite_id: str, current_user: dict = Depends(get_current_user)):
     """Revoke a pending invite"""
+    _require_admin(current_user)
     result = await db.tech_invites.update_one(
         {"id": invite_id, "status": "pending"},
         {"$set": {"status": "revoked", "revoked_at": datetime.now(timezone.utc).isoformat(), "revoked_by": current_user.get("name", "Admin")}}
@@ -141,6 +149,7 @@ async def revoke_invite(invite_id: str, current_user: dict = Depends(get_current
 @router.post("/technicians/invites/{invite_id}/resend")
 async def resend_invite(invite_id: str, current_user: dict = Depends(get_current_user)):
     """Resend an invite email"""
+    _require_admin(current_user)
     invite = await db.tech_invites.find_one({"id": invite_id, "status": "pending"}, {"_id": 0})
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or not pending")
@@ -174,17 +183,22 @@ async def accept_invite(data: dict):
         await db.tech_invites.update_one({"token": token}, {"$set": {"status": "expired"}})
         raise HTTPException(status_code=410, detail="This invite has expired")
 
+    policy_error = password_policy_error(password, invite.get("email", ""))
+    if policy_error:
+        raise HTTPException(status_code=400, detail=policy_error)
+    if await db.users.find_one({"email": invite["email"]}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
     # Create the technician
     now = datetime.now(timezone.utc).isoformat()
-    import hashlib
-    hashed = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = hash_password(password)
 
     tech_id = f"TECH-{uuid.uuid4().hex[:6].upper()}"
     technician = {
         "id": tech_id,
         "name": invite["name"],
         "email": invite["email"],
-        "password": hashed,
+        "password_hash": password_hash,
         "role": invite.get("role", "technician"),
         "job_title": invite.get("job_title", ""),
         "categories": invite.get("categories", []),
@@ -203,7 +217,7 @@ async def accept_invite(data: dict):
         "id": tech_id,
         "name": invite["name"],
         "email": invite["email"],
-        "password": hashed,
+        "password_hash": password_hash,
         "role": invite.get("role", "technician"),
         "is_active": True,
         "created_at": now,
