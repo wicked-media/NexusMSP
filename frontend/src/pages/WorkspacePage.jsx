@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Bookmark, Eye, Activity, Save, Loader2, Pin, X, Wifi, WifiOff,
-  Ticket as TicketIcon, Monitor, Flame, Clock, History,
+  Ticket as TicketIcon, Monitor, Flame, Clock, History, RefreshCw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -41,6 +41,11 @@ export default function WorkspacePage() {
   }, [token]);
 
   useEffect(() => { fetchWorkspace(); }, [fetchWorkspace]);
+
+  const handleRefresh = () => {
+    setLoading(true);
+    fetchWorkspace();
+  };
 
   const handleUnpin = async (ticketId) => {
     try {
@@ -94,6 +99,10 @@ export default function WorkspacePage() {
               Your personal cockpit — pinned tickets, watched devices, and scratchpad notes.
             </p>
           </div>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} data-testid="workspace-refresh">
+            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
 
         {/* Metric strip */}
