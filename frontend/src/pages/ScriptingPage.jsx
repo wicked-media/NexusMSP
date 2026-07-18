@@ -56,10 +56,15 @@ const categories = {
   monitoring: "Monitoring", remediation: "Remediation"
 };
 
-function ScriptAutocomplete({ scripts, selectedScript, onSelect }) {
+function ScriptAutocomplete({ scripts, selectedScript, onSelect, onImport }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const matches = scripts.filter(script => {
+  const savedNames = new Set(scripts.map(script => script.name.toLowerCase()));
+  const choices = [
+    ...scripts.map(script => ({ ...script, source: "saved" })),
+    ...scriptLibrary.filter(script => !savedNames.has(script.name.toLowerCase())).map(script => ({ ...script, source: "library" })),
+  ];
+  const matches = choices.filter(script => {
     const haystack = `${script.name} ${script.description || ""} ${script.category || ""} ${script.os_target || ""}`.toLowerCase();
     return haystack.includes(query.toLowerCase());
   }).slice(0, 20);
@@ -75,11 +80,11 @@ function ScriptAutocomplete({ scripts, selectedScript, onSelect }) {
         <div className="relative mb-2"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={e => setQuery(e.target.value)} className="h-9 pl-8 text-sm" placeholder="Search scripts, category, or operating system…" /></div>
         <ScrollArea className="max-h-64">
           <div className="space-y-1 pr-1">
-            {matches.map(script => (
-              <button key={script.id} type="button" onClick={() => { onSelect(script); setQuery(""); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted ${selectedScript?.id === script.id ? "bg-violet-500/10" : ""}`} data-testid={`live-script-result-${script.id}`}>
+            {matches.map((script, index) => (
+              <button key={script.id || `library-${script.name}`} type="button" onClick={() => { if (script.source === "library") onImport(script); else onSelect(script); setQuery(""); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-muted ${selectedScript?.id === script.id ? "bg-violet-500/10" : ""}`} data-testid={`live-script-result-${script.id || index}`}>
                 <Code className="h-3.5 w-3.5 shrink-0 text-violet-400" />
                 <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{script.name}</span><span className="block truncate text-[10px] text-muted-foreground">{script.description || categories[script.category] || "Script"}</span></span>
-                <Badge variant="outline" className="shrink-0 text-[9px]">{script.os_target || "any"}</Badge>
+                <span className="flex shrink-0 flex-col items-end gap-1"><Badge variant="outline" className="text-[9px]">{script.os_target || "any"}</Badge>{script.source === "library" && <span className="text-[9px] text-violet-300">Install & select</span>}</span>
               </button>
             ))}
             {!matches.length && <p className="py-6 text-center text-xs text-muted-foreground">No scripts match that search.</p>}
@@ -240,6 +245,34 @@ export default function ScriptingPage() {
     setFormData({ ...template, run_as_admin: true, timeout_seconds: 300 });
     setSelectedScript(null);
     setIsDialogOpen(true);
+  };
+
+  const installTechnicianPack = async () => {
+    const existing = new Set(scripts.map(script => script.name.toLowerCase()));
+    const missing = scriptLibrary.filter(template => !existing.has(template.name.toLowerCase()));
+    if (!missing.length) { toast.info("The full technician pack is already installed"); return; }
+    try {
+      await Promise.all(missing.map(template => axios.post(`${API}/scripts`, { ...template, run_as_admin: true, timeout_seconds: 300 }, { headers })));
+      toast.success(`${missing.length} technician scripts installed`);
+      await fetchData();
+      setActiveTab("scripts");
+    } catch {
+      toast.error("Some technician scripts could not be installed");
+      fetchData();
+    }
+  };
+
+  const installLibraryScriptForTerminal = async (template) => {
+    const existing = scripts.find(script => script.name.toLowerCase() === template.name.toLowerCase());
+    if (existing) { setLiveScript(existing); return; }
+    try {
+      const response = await axios.post(`${API}/scripts`, { ...template, run_as_admin: true, timeout_seconds: 300 }, { headers });
+      setLiveScript(response.data);
+      toast.success(`${template.name} installed and selected`);
+      fetchData();
+    } catch {
+      toast.error("Could not install the selected library script");
+    }
   };
 
   const resetForm = () => {
@@ -422,7 +455,7 @@ export default function ScriptingPage() {
             {/* Left: Script Selector + Code Preview */}
             <div className="space-y-3 flex flex-col">
               <div className="flex flex-col gap-2 sm:flex-row">
-                <ScriptAutocomplete scripts={scripts} selectedScript={liveScript} onSelect={setLiveScript} />
+                <ScriptAutocomplete scripts={scripts} selectedScript={liveScript} onSelect={setLiveScript} onImport={installLibraryScriptForTerminal} />
                 <Select value={liveDevice} onValueChange={setLiveDevice}>
                   <SelectTrigger className="sm:w-[220px]" data-testid="live-device-select"><SelectValue placeholder="Target device..." /></SelectTrigger>
                   <SelectContent><SelectItem value="localhost">localhost</SelectItem>{devices.filter(d => d.status === "online").slice(0, 30).map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.hostname}</SelectItem>)}</SelectContent>
@@ -508,8 +541,9 @@ export default function ScriptingPage() {
             <BookOpen className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Script Library</h2>
             <Badge variant="secondary">{scriptLibrary.length} templates</Badge>
+            <Button size="sm" variant="outline" className="ml-auto" onClick={installTechnicianPack} data-testid="install-technician-pack"><Download className="mr-1.5 h-3.5 w-3.5" />Install technician pack</Button>
           </div>
-          <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Click "Import" to add to your scripts.</p>
+          <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Install the full pack for direct terminal use, or import individual scripts to review and customise them first.</p>
           <div className="space-y-4">
             {scriptLibrary.map((template, i) => (
               <Card key={`k-${i}`} className="hover:border-primary/30 transition-all" data-testid={`library-template-${i}`}>
