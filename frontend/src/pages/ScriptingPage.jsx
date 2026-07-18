@@ -159,7 +159,7 @@ export default function ScriptingPage() {
   };
 
   const handleCreateSchedule = async () => {
-    if (!scheduleForm.name || !scheduleForm.script_id) { toast.error("Name and script required"); return; }
+    if (!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0) { toast.error("Name, script, and at least one target device are required"); return; }
     try {
       await axios.post(`${API}/scheduled-tasks`, scheduleForm, { headers });
       toast.success("Scheduled task created");
@@ -533,6 +533,7 @@ export default function ScriptingPage() {
                     </div>
                     <p className="text-xs text-muted-foreground">Script: {task.script_name}</p>
                     <p className="text-xs text-muted-foreground">Schedule: {task.schedule_type} at {task.schedule_time}</p>
+                    <p className={`text-xs mt-1 ${task.target_ids?.length ? "text-muted-foreground" : "text-amber-400"}`}>{task.target_ids?.length ? `${task.target_ids.length} target device${task.target_ids.length === 1 ? "" : "s"}` : "No target devices configured"}</p>
                     {task.last_run && <p className="text-xs text-muted-foreground">Last run: {formatDistanceToNow(new Date(task.last_run), { addSuffix: true })}</p>}
                   </CardContent>
                 </Card>
@@ -617,9 +618,22 @@ export default function ScriptingPage() {
               </div>
               <div className="space-y-2"><Label>Time</Label><Input type="time" value={scheduleForm.schedule_time} onChange={e => setScheduleForm({ ...scheduleForm, schedule_time: e.target.value })} /></div>
             </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between"><Label>Target Devices *</Label><div className="flex gap-1"><Button type="button" variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setScheduleForm(f => ({ ...f, target_ids: devices.filter(d => d.status === "online").map(d => d.id) }))}>All online</Button><Button type="button" variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setScheduleForm(f => ({ ...f, target_ids: [] }))}>Clear</Button></div></div>
+              <ScrollArea className="h-[150px] rounded-lg border p-2">
+                {devices.filter(d => d.status === "online").map(device => (
+                  <label key={device.id} className="flex cursor-pointer items-center gap-2 rounded p-2 hover:bg-muted/50">
+                    <input type="checkbox" checked={scheduleForm.target_ids.includes(device.id)} onChange={(e) => setScheduleForm(f => ({ ...f, target_ids: e.target.checked ? [...f.target_ids, device.id] : f.target_ids.filter(id => id !== device.id) }))} className="rounded" />
+                    <span className="flex-1 text-sm">{device.name || device.hostname}</span><span className="text-xs text-muted-foreground">{device.client_name}</span>
+                  </label>
+                ))}
+                {devices.filter(d => d.status === "online").length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No online devices are available</p>}
+              </ScrollArea>
+              <p className="text-xs text-muted-foreground">{scheduleForm.target_ids.length} online device{scheduleForm.target_ids.length === 1 ? "" : "s"} selected</p>
+            </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id} data-testid="submit-schedule-btn">Create Schedule</Button>
+              <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0} data-testid="submit-schedule-btn">Create Schedule</Button>
             </DialogFooter>
           </div>
         </DialogContent>
