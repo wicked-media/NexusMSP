@@ -42,6 +42,7 @@ async def contract_profitability(current_user: dict = Depends(get_current_user))
         client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
 
         results.append({
+            "contract_id": c.get("id", ""),
             "client_id": cid, "client_name": (client or {}).get("name", ""),
             "contract_name": c.get("name", ""),
             "monthly_value": monthly_value, "included_hours": included_hours,

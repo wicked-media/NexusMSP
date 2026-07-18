@@ -62,7 +62,7 @@ export default function ContractProfitPage() {
             <TableBody>
               {filteredContracts.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No contracts match this view</TableCell></TableRow>}
               {filteredContracts.map((c, i) => (
-                <TableRow key={`c-${i}`} className={c.status === "unprofitable" ? "bg-red-500/5" : ""}>
+                <TableRow key={`c-${i}`} className={`${c.status === "unprofitable" ? "bg-red-500/5" : ""} cursor-pointer transition-colors hover:bg-muted/50`} onClick={() => c.contract_id && navigate(`/contracts?contract=${encodeURIComponent(c.contract_id)}`)} title="Open contract">
                   <TableCell className="font-medium">{c.client_name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{c.contract_name}</TableCell>
                   <TableCell className="font-mono">${c.monthly_value?.toLocaleString()}</TableCell>
