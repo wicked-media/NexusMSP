@@ -17,9 +17,11 @@ class LlmChat:
         self.system_message = system_message
         self.model = os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini")
 
-    def with_model(self, _provider: str, _model: str):
-        # The configured model is deliberately authoritative so the application
-        # never depends on another platform's model identifiers.
+    def with_model(self, provider: str, model: str):
+        # Only OpenAI models are accepted by the direct SDK integration. Old
+        # provider settings fall back safely to the configured local default.
+        if provider == "openai" and model.startswith("gpt-"):
+            self.model = model
         return self
 
     async def send_message(self, message: UserMessage) -> str:

@@ -11,12 +11,22 @@ load_dotenv()
 router = APIRouter()
 
 # AI Model config
-DEFAULT_PROVIDER = "anthropic"
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL = "gpt-4o-mini"
+
+
+def _normalise_config(config: dict | None) -> dict:
+    """Migrate legacy provider values in-memory without retaining external dependencies."""
+    configured_model = (config or {}).get("model", DEFAULT_MODEL)
+    return {
+        "type": "ai_config",
+        "provider": DEFAULT_PROVIDER,
+        "model": configured_model if isinstance(configured_model, str) and configured_model.startswith("gpt-") else DEFAULT_MODEL,
+    }
 
 async def get_ai_config():
     doc = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
-    return doc or {"provider": DEFAULT_PROVIDER, "model": DEFAULT_MODEL}
+    return _normalise_config(doc)
 
 async def get_chat(session_id: str, system_message: str):
     from app.services.ai_provider import LlmChat
@@ -35,14 +45,13 @@ async def get_chat(session_id: str, system_message: str):
 @router.get("/ai/config")
 async def get_ai_settings(current_user: dict = Depends(get_current_user)):
     doc = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
-    if not doc:
-        return {"type": "ai_config", "provider": DEFAULT_PROVIDER, "model": DEFAULT_MODEL}
-    return doc
+    return _normalise_config(doc)
 
 @router.put("/ai/config")
 async def update_ai_settings(data: dict, current_user: dict = Depends(get_current_user)):
-    provider = data.get("provider", DEFAULT_PROVIDER)
-    model = data.get("model", DEFAULT_MODEL)
+    provider = "openai"
+    requested_model = data.get("model", DEFAULT_MODEL)
+    model = requested_model if isinstance(requested_model, str) and requested_model.startswith("gpt-") else DEFAULT_MODEL
     await db.settings.update_one({"type": "ai_config"}, {"$set": {
         "type": "ai_config", "provider": provider, "model": model,
         "updated_at": datetime.now(timezone.utc).isoformat(),

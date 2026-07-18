@@ -175,7 +175,7 @@ export default function SettingsPage() {
   const [huduSaving, setHuduSaving] = useState(false);
   const [syncro, setSyncro] = useState({ subdomain: "", api_key: "", enabled: false });
   const [syncroSaving, setSyncroSaving] = useState(false);
-  const [aiConfig, setAiConfig] = useState({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" });
+  const [aiConfig, setAiConfig] = useState({ provider: "openai", model: "gpt-4o-mini" });
   const [aiSaving, setAiSaving] = useState(false);
   const [jobNumbering, setJobNumbering] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
   const [jnSaving, setJnSaving] = useState(false);
@@ -2317,15 +2317,10 @@ export default function SettingsPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Provider</Label>
-              <Select value={aiConfig.provider} onValueChange={v => {
-                const models = { anthropic: "claude-sonnet-4-5-20250929", openai: "gpt-5.2", gemini: "gemini-3-flash-preview" };
-                setAiConfig({ provider: v, model: models[v] || aiConfig.model });
-              }}>
+              <Select value="openai" disabled>
                 <SelectTrigger data-testid="ai-provider-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                  <SelectItem value="openai">OpenAI (GPT)</SelectItem>
-                  <SelectItem value="gemini">Google (Gemini)</SelectItem>
+                  <SelectItem value="openai">OpenAI</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2334,22 +2329,9 @@ export default function SettingsPage() {
               <Select value={aiConfig.model} onValueChange={v => setAiConfig({ ...aiConfig, model: v })}>
                 <SelectTrigger data-testid="ai-model-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {aiConfig.provider === "anthropic" && <>
-                    <SelectItem value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</SelectItem>
-                    <SelectItem value="claude-4-sonnet-20250514">Claude 4 Sonnet</SelectItem>
-                    <SelectItem value="claude-haiku-4-5-20251001">Claude Haiku 4.5</SelectItem>
-                  </>}
-                  {aiConfig.provider === "openai" && <>
-                    <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
-                    <SelectItem value="gpt-5.1">GPT-5.1</SelectItem>
-                    <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                  </>}
-                  {aiConfig.provider === "gemini" && <>
-                    <SelectItem value="gemini-3-flash-preview">Gemini 3 Flash</SelectItem>
-                    <SelectItem value="gemini-3-pro-preview">Gemini 3 Pro</SelectItem>
-                    <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                  </>}
+                  <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
+                  <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                  <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
                 </SelectContent>
               </Select>
             </div>
