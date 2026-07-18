@@ -1252,7 +1252,7 @@ export default function SettingsPage() {
               data-testid="stripe-api-key" 
             />
             <p className="text-xs text-muted-foreground">
-              Get your API key from <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer" className="text-primary underline">Stripe Dashboard â†’ Developers â†’ API keys</a>. 
+              Get your API key from <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer" className="text-primary underline">Stripe Dashboard â†’ Developers â†’ API keys</a>.
               Use your <strong>Secret key</strong> (starts with sk_live_ or sk_test_).
             </p>
           </div>
