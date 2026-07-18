@@ -12,7 +12,7 @@ The reseed endpoint in `chat_help.py` will:
 """
 
 # Stale slugs that referenced merged / deleted modules. Safe to remove.
-HELP_CATALOG_VERSION = "2026-07-18-team-chat-work-item-links"
+HELP_CATALOG_VERSION = "2026-07-18-openai-help-language"
 
 STALE_SLUGS = [
     # The "*-audit" articles were one-off audits, not user docs
@@ -70,7 +70,7 @@ MODERN_ARTICLES = [
 
 ### 2026-06-22 â€” Autonomous Maintenance Windows
 - Schedule cron-style fan-out maintenance: reboot, install patches, run scripts.
-- Per-device success/failure with Claude-generated summary.
+- Per-device success/failure with a Nexus AI-generated summary.
 - Schedule one from the Devices page.
 
 ### 2026-06-21 â€” Syncro-killer Device Smart Bar
@@ -146,7 +146,7 @@ Deep-link directly to a tab: `/client-insights?tab=customer-health`.
 ## Tabs
 - **Triage Queue** â€” unassigned tickets ordered by AI-scored urgency.
 - **Smart Routing** â€” rules that auto-assign tickets based on tech skills, load and availability.
-- **Auto-Resolve** â€” tickets that Claude can close end-to-end (with audit trail).
+- **Auto-Resolve** â€” tickets that Nexus AI can close end-to-end (with audit trail).
 - **Self-Healing** â€” devices that recovered on their own thanks to runbooks.
 
 Deep-link: `/auto-ops?tab=ai-resolution`.
@@ -285,7 +285,7 @@ Mock data. The MOCK badge in the top-right will disappear once Connection creden
 4. Pick the start time, cadence (one-off, weekly, monthly) and the action (reboot, run script, install patch).
 5. Confirm.
 
-The backend scheduler executes the actions at the scheduled time and writes a per-device audit trail. Each run gets a Claude-generated summary (e.g. "23/25 succeeded, 2 timed out â€” both are Windows 7 boxes scheduled for retirement").
+The backend scheduler executes the actions at the scheduled time and writes a per-device audit trail. Each run gets a Nexus AI-generated summary (e.g. "23/25 succeeded, 2 timed out â€” both are Windows 7 boxes scheduled for retirement").
 
 ## Endpoints
 - `POST /api/maintenance/windows` â€” create.
