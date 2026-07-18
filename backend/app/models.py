@@ -925,6 +925,10 @@ class Script(BaseModel):
     timeout_seconds: int = 300
     parameters: List[Dict[str, Any]] = []
     is_built_in: bool = False
+    # Curated library provenance makes pack installation reversible without
+    # touching scripts authored or customised by a technician.
+    library_pack_ids: List[str] = []
+    library_template_name: Optional[str] = None
     created_by: Optional[str] = None
     created_by_name: Optional[str] = None
     run_count: int = 0

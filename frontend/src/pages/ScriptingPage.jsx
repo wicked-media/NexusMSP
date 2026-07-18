@@ -313,13 +313,29 @@ export default function ScriptingPage() {
     setIsDialogOpen(true);
   };
 
-  const installTemplates = async (templates, label) => {
-    const existing = new Set(scripts.map(script => script.name.toLowerCase()));
-    const missing = templates.filter(template => !existing.has(template.name.toLowerCase()));
-    if (!missing.length) { toast.info(`${label} is already installed`); return; }
+  const packIdsForTemplate = (template) => SCRIPT_PACKS.filter((pack) => pack.include(template)).map((pack) => pack.id);
+
+  const installTemplates = async (templates, label, packId = null) => {
+    const byName = new Map(scripts.map(script => [script.name.toLowerCase(), script]));
+    const missing = templates.filter(template => !byName.has(template.name.toLowerCase()));
+    const tagged = templates.filter((template) => {
+      const existing = byName.get(template.name.toLowerCase());
+      return existing && existing.content === template.content && !((existing.library_pack_ids || []).includes(packId));
+    });
+    if (!missing.length && !tagged.length) { toast.info(`${label} is already installed`); return; }
     try {
-      await Promise.all(missing.map(template => axios.post(`${API}/scripts`, { ...template, run_as_admin: true, timeout_seconds: 300 }, { headers })));
-      toast.success(`${missing.length} scripts installed from ${label}`);
+      await Promise.all([
+        ...missing.map(template => axios.post(`${API}/scripts`, {
+          ...template, run_as_admin: true, timeout_seconds: 300,
+          library_pack_ids: packId ? [packId] : packIdsForTemplate(template), library_template_name: template.name,
+        }, { headers })),
+        ...tagged.map(template => {
+          const existing = byName.get(template.name.toLowerCase());
+          const nextPackIds = [...new Set([...(existing.library_pack_ids || []), ...(packId ? [packId] : packIdsForTemplate(template))])];
+          return axios.put(`${API}/scripts/${existing.id}`, { library_pack_ids: nextPackIds, library_template_name: template.name }, { headers });
+        }),
+      ]);
+      toast.success(`${missing.length ? `${missing.length} scripts installed` : "Existing scripts marked"} from ${label}`);
       await fetchData();
       setActiveTab("scripts");
     } catch {
@@ -329,7 +345,22 @@ export default function ScriptingPage() {
   };
 
   const installTechnicianPack = () => installTemplates(scriptLibrary, "the technician pack");
-  const installScriptPack = (pack) => installTemplates(scriptLibrary.filter(pack.include), pack.name);
+  const installScriptPack = (pack) => installTemplates(scriptLibrary.filter(pack.include), pack.name, pack.id);
+
+  const removeScriptPack = async (pack) => {
+    const removable = scripts.filter((script) => (script.library_pack_ids || []).includes(pack.id));
+    if (!removable.length) return;
+    if (!window.confirm(`Remove ${removable.length} script${removable.length === 1 ? "" : "s"} installed from ${pack.name}? Scripts linked to another pack will remain available.`)) return;
+    try {
+      await Promise.all(removable.map(async (script) => {
+        const remainingPacks = (script.library_pack_ids || []).filter((id) => id !== pack.id);
+        if (remainingPacks.length) return axios.put(`${API}/scripts/${script.id}`, { library_pack_ids: remainingPacks }, { headers });
+        return axios.delete(`${API}/scripts/${script.id}`, { headers });
+      }));
+      toast.success(`${pack.name} removed`);
+      await fetchData();
+    } catch { toast.error("Some pack scripts could not be removed"); await fetchData(); }
+  };
 
   const installLibraryScriptForTerminal = async (template) => {
     const existing = scripts.find(script => script.name.toLowerCase() === template.name.toLowerCase());
@@ -618,7 +649,9 @@ export default function ScriptingPage() {
             {SCRIPT_PACKS.map(pack => {
               const Icon = pack.icon;
               const count = scriptLibrary.filter(pack.include).length;
-              return <Card key={pack.id} className="border-border/50 bg-muted/[0.02] transition-all hover:border-violet-500/35"><CardContent className="p-3"><div className="mb-2 flex items-center justify-between"><Icon className="h-4 w-4 text-violet-400" /><Badge variant="outline" className="text-[9px]">{count} scripts</Badge></div><p className="text-xs font-semibold">{pack.name}</p><p className="mt-1 min-h-[30px] text-[10px] text-muted-foreground">{pack.description}</p><Button variant="outline" size="sm" className="mt-3 h-7 w-full text-[10px]" onClick={() => installScriptPack(pack)} data-testid={`install-script-pack-${pack.id}`}><Download className="mr-1 h-3 w-3" />Install pack</Button></CardContent></Card>;
+              const installed = scripts.filter((script) => (script.library_pack_ids || []).includes(pack.id)).length;
+              const complete = installed >= count;
+              return <Card key={pack.id} className={`border-border/50 bg-muted/[0.02] transition-all hover:border-violet-500/35 ${complete ? "border-emerald-500/30 bg-emerald-500/[0.03]" : ""}`}><CardContent className="p-3"><div className="mb-2 flex items-center justify-between"><Icon className={`h-4 w-4 ${complete ? "text-emerald-400" : "text-violet-400"}`} /><Badge variant="outline" className={`text-[9px] ${complete ? "border-emerald-500/40 text-emerald-300" : ""}`}>{complete ? "Installed" : `${installed}/${count} installed`}</Badge></div><p className="text-xs font-semibold">{pack.name}</p><p className="mt-1 min-h-[30px] text-[10px] text-muted-foreground">{pack.description}</p><div className="mt-3 flex gap-1.5">{complete ? <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px]" disabled><Check className="mr-1 h-3 w-3" />Installed</Button> : <Button variant="outline" size="sm" className="h-7 flex-1 text-[10px]" onClick={() => installScriptPack(pack)} data-testid={`install-script-pack-${pack.id}`}><Download className="mr-1 h-3 w-3" />Install pack</Button>}{installed > 0 && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={() => removeScriptPack(pack)} data-testid={`remove-script-pack-${pack.id}`} title="Remove this pack"><Trash2 className="h-3 w-3" /></Button>}</div></CardContent></Card>;
             })}
           </div>
           <div className="space-y-4">
