@@ -56,6 +56,34 @@ const ROLE_OPTIONS = [
 ];
 const COMMAND_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit", "roster", "skills", "leaderboard"]);
 const OPERATIONAL_TAB_IDS = new Set(["directory", "invites", "find", "capacity", "matrix", "drift", "jit", "audit"]);
+const COMMAND_TAB_GROUPS = [
+  {
+    label: "People",
+    tabs: [
+      { v: "directory", l: "Directory", Icon: Users },
+      { v: "invites", l: "Invites", Icon: Mail },
+      { v: "roster", l: "On-call Roster", Icon: Calendar },
+      { v: "skills", l: "Skills", Icon: Target },
+      { v: "leaderboard", l: "Leaderboard", Icon: Trophy },
+    ],
+  },
+  {
+    label: "Operations",
+    tabs: [
+      { v: "find", l: "Smart Finder", Icon: Sparkles },
+      { v: "capacity", l: "Capacity", Icon: Activity },
+      { v: "jit", l: "JIT", Icon: Zap },
+    ],
+  },
+  {
+    label: "Governance",
+    tabs: [
+      { v: "matrix", l: "Permissions", Icon: Shield },
+      { v: "drift", l: "Role Drift", Icon: Target },
+      { v: "audit", l: "Audit", Icon: History },
+    ],
+  },
+];
 
 // ---------- Skill radar (CSS-only) ----------
 function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
@@ -999,25 +1027,18 @@ export default function TechCommandCenter() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
-          {[
-            { v: "directory", l: "Directory",   Icon: Users },
-            { v: "invites",   l: "Invites",     Icon: Mail },
-            { v: "find",      l: "Smart Finder", Icon: Sparkles },
-            { v: "capacity",  l: "Capacity",    Icon: Activity },
-            { v: "matrix",    l: "Permissions", Icon: Shield },
-            { v: "drift",     l: "Role Drift",  Icon: Target },
-            { v: "jit",       l: "JIT",         Icon: Zap },
-            { v: "audit",     l: "Audit",       Icon: History },
-            { v: "roster",    l: "On-call Roster", Icon: Calendar },
-            { v: "skills",    l: "Skills",      Icon: Target },
-            { v: "leaderboard", l: "Leaderboard", Icon: Trophy },
-          ].map(t => (
-            <TabsTrigger key={t.v} value={t.v}
-              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
-              data-testid={`tcc-tab-${t.v}`}>
-              <t.Icon className="w-3 h-3 mr-1" />{t.l}
-            </TabsTrigger>
+        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-4 p-0 h-auto overflow-x-auto">
+          {COMMAND_TAB_GROUPS.map((group, groupIndex) => (
+            <div key={group.label} className={`flex items-center gap-1 shrink-0 ${groupIndex ? "border-l border-zinc-800 pl-4" : ""}`}>
+              <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600 px-1">{group.label}</span>
+              {group.tabs.map(t => (
+                <TabsTrigger key={t.v} value={t.v}
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
+                  data-testid={`tcc-tab-${t.v}`}>
+                  <t.Icon className="w-3 h-3 mr-1" />{t.l}
+                </TabsTrigger>
+              ))}
+            </div>
           ))}
         </TabsList>
 
