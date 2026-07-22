@@ -30,6 +30,10 @@ _HELP_ICON_ALIASES = {
     "Patch": "🩹",
     "Mail": "✉️",
     "Device": "💻",
+    "Key": "🔑",
+    "cloud": "☁️",
+    "Phone": "📞",
+    "ShieldCheck": "🛡️",
 }
 
 

@@ -12,7 +12,7 @@ The reseed endpoint in `chat_help.py` will:
 """
 
 # Stale slugs that referenced merged / deleted modules. Safe to remove.
-HELP_CATALOG_VERSION = "2026-07-21-security-evidence-v4"
+HELP_CATALOG_VERSION = "2026-07-22-nexus-shield-v5"
 
 STALE_SLUGS = [
     # The "*-audit" articles were one-off audits, not user docs
@@ -285,7 +285,7 @@ Mock data. The MOCK badge in the top-right will disappear once Connection creden
         "slug": "m365-command-center",
         "title": "Microsoft 365 evidence workspace",
         "category": "Integrations",
-        "icon": "cloud",
+        "icon": "☁️",
         "order": 31,
         "summary": "Evidence-first Microsoft 365 connection readiness, guardrail planning and verified provider telemetry.",
         "body_md": """## Where
@@ -637,7 +637,7 @@ The current Email Intake page stores and manages mailbox configuration, supports
         "slug": "voice-yeastar-pbx-onboarding",
         "title": "Connect a Yeastar PBX to Voice",
         "category": "Integrations",
-        "icon": "Phone",
+        "icon": "📞",
         "order": 34,
         "summary": "Link a Yeastar P-Series PBX to the right client, validate the API connection, and prepare extension billing safely.",
         "body_md": """# Connect a Yeastar PBX to Voice
@@ -688,10 +688,57 @@ By default, every enabled extension is billable. Switch the billing policy to **
 """,
     },
     {
+        "slug": "nexus-shield-canary",
+        "title": "Nexus Shield and Nexus Canary",
+        "category": "Security",
+        "icon": "🛡️",
+        "order": 35,
+        "summary": "Deploy endpoint posture telemetry and a verified Nexus Canary integrity sensor through the Nexus Agent installer.",
+        "body_md": """# Nexus Shield and Nexus Canary
+
+**Nexus Shield** is the NexusMSP workspace for endpoint posture evidence, Canary integrity signals, security policies, and the response queue. **Nexus Canary** is the agent-managed integrity sensor used to surface unexpected file changes on an enrolled Windows endpoint.
+
+## What the installer includes
+
+New Nexus Agent installers include the Nexus Shield deployment profile:
+
+- endpoint posture telemetry is reported with the normal device heartbeat;
+- Nexus Shield and Nexus Canary capabilities are reported after enrolment; and
+- one default Canary is queued automatically for a newly enrolled Windows endpoint when the installer profile has Canary enabled.
+
+The agent creates the Canary file itself and returns its SHA-256 fingerprint. NexusMSP only marks that Canary active after the verified fingerprint is received. This prevents the console from claiming a sensor is deployed when the endpoint has not confirmed it.
+
+## Deploy and verify
+
+1. Open **Nexus Agent** and generate an installer for the intended client.
+2. Install the package with local administrator rights, then wait for the first agent check-in.
+3. Open **Managed Assets** and confirm the endpoint is online and shows Nexus Shield capability evidence.
+4. Open **Nexus Shield -> Nexus Canary**. The new sensor first appears as **Queued**, then changes to active after the agent creates and fingerprints it.
+5. Review the endpoint, client, file path, fingerprint, last check, and audit entries before treating the device as covered.
+
+If a Windows device is enrolled before Canary is enabled in the deployment profile, use the Canary workspace to queue a sensor deliberately. Do not create duplicate Canary records for the same endpoint unless the prior sensor has been retired through the workspace.
+
+## What a Canary alert means
+
+A missing, changed, or otherwise unexpected Canary result is an integrity signal that needs technician review. Open the signal from **Nexus Shield**, verify the endpoint and client context, check recent ticket/change activity, then follow your incident process if the change is unexplained.
+
+## Important product boundary
+
+Nexus Shield currently provides posture evidence, Canary integrity detection, policies, response workflow, and auditability. It is **not** a replacement for antivirus, EDR, application control, disk encryption, or automatic endpoint isolation. Keep your approved security tooling in place and use Shield signals as an additional, auditable source of evidence.
+
+## Troubleshooting
+
+- **No Canary queued:** confirm the device is a Windows Nexus Agent endpoint and check the installer profile has Nexus Shield and Canary enabled.
+- **Queued for too long:** verify the agent is online and polling. Check the endpoint command/audit history for deployment errors.
+- **Fingerprint mismatch or alert:** investigate the endpoint rather than simply re-queueing; the mismatch is the signal that requires explanation.
+- **No Shield data:** confirm the agent version supports Shield capabilities, then wait for a normal heartbeat and refresh the endpoint record.
+""",
+    },
+    {
         "slug": "secure-integration-setup",
         "title": "Set up integrations safely",
         "category": "Platform Setup",
-        "icon": "Key",
+        "icon": "🔑",
         "order": 18,
         "summary": "A technician checklist for connecting external services, testing access, and protecting credentials in NexusMSP.",
         "body_md": """# Set up integrations safely
@@ -727,6 +774,7 @@ Each callout answers four questions:
 
 ## Provider-specific guides
 
+- [Nexus Shield and Nexus Canary](/help/nexus-shield-canary)
 - [Connect a Yeastar PBX to Voice](/help/voice-yeastar-pbx-onboarding)
 - [Email intake and leads](/help/email-intake-and-leads)
 - [Nexus Elevate: approve endpoint administrator access](/help/nexus-elevate-setup)
@@ -738,7 +786,7 @@ For a provider-specific exception, follow the guide embedded in that provider’
         "slug": "nexus-elevate-setup",
         "title": "Nexus Elevate: approve an exact endpoint service launch",
         "category": "Security",
-        "icon": "ShieldCheck",
+        "icon": "🛡️",
         "order": 36,
         "summary": "Set up universal, agent-backed, hash-pinned service-launch approvals without requiring Keeper EPM for the customer.",
         "body_md": """# Nexus Elevate technician setup
