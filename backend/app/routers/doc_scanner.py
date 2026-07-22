@@ -40,7 +40,7 @@ Fill null for fields not found."""
         if not api_key:
             return {"error": "AI key not configured"}
         chat = LlmChat(api_key=api_key, session_id=f"scan-{uuid.uuid4().hex[:8]}", system_message=system)
-        chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+        chat.with_model("openai", "gpt-5.6-terra")
 
         prompt = f"Scan type: {scan_type}\nDocument/label content:\n{image_data[:2000]}"
         resp = await chat.send_message(UserMessage(text=prompt))

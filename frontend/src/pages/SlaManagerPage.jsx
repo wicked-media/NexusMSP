@@ -8,11 +8,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
-import {
-  LOCAL_PREVIEW_SLA_PENALTIES, LOCAL_PREVIEW_SLA_PREDICTIONS,
-  LOCAL_PREVIEW_SLA_REPORTS, LOCAL_PREVIEW_SLA_TIMERS,
-  localPreviewCollection, localPreviewRecord,
-} from "@/lib/ticketPreviewData";
 import { Loader2, AlertTriangle, FileText, DollarSign, Timer, ShieldCheck } from "lucide-react";
 
 const SLA_TABS = ["timers", "predictions", "penalties", "reports"];
@@ -49,10 +44,10 @@ export default function SlaManagerPage() {
       axios.get(`${API}/sla-penalties/dashboard`, { headers }).catch(() => ({ data: null })),
       axios.get(`${API}/sla-report-gen/reports`, { headers }).catch(() => ({ data: [] })),
     ]).then(([t, p, pen, r]) => {
-      setTimers(localPreviewCollection(Array.isArray(t.data) ? t.data : t.data?.active, LOCAL_PREVIEW_SLA_TIMERS));
-      setPredictions(localPreviewCollection(Array.isArray(p.data) ? p.data : p.data?.predictions, LOCAL_PREVIEW_SLA_PREDICTIONS));
-      setPenalties(localPreviewRecord(pen.data, LOCAL_PREVIEW_SLA_PENALTIES));
-      setReports(localPreviewCollection(Array.isArray(r.data) ? r.data : r.data?.reports, LOCAL_PREVIEW_SLA_REPORTS));
+      setTimers(Array.isArray(t.data) ? t.data : t.data?.active || []);
+      setPredictions(Array.isArray(p.data) ? p.data : p.data?.predictions || []);
+      setPenalties(pen.data || null);
+      setReports(Array.isArray(r.data) ? r.data : r.data?.reports || []);
     }).finally(() => setLoading(false));
   }, [headers]);
 

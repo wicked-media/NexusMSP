@@ -136,7 +136,7 @@ export default function QBRPage() {
         <Card className="border-dashed border-emerald-500/20">
           <CardContent className="p-12 text-center text-sm text-muted-foreground space-y-3">
             <FileBarChart className="w-10 h-10 mx-auto opacity-40 text-emerald-400" />
-            <div>Pick a client and quarter, then hit <strong>Generate QBR</strong>. Claude will draft a 6-section review including cross-client pattern intelligence.</div>
+            <div>Pick a client and quarter, then hit <strong>Generate QBR</strong>. Nexus AI will draft a six-section review including cross-client pattern intelligence.</div>
             {history.length > 0 && (
               <div className="pt-4 border-t border-zinc-800 max-w-md mx-auto">
                 <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Recent QBRs for this client</div>

@@ -11,7 +11,7 @@ import { BookOpen, Sparkles, RefreshCw, Loader2, ExternalLink, Copy, CheckCircle
 /**
  * Compact Hudu KB suggestions panel for the ticket detail view.
  * Runs /hudu/suggest-for-ticket with the ticket content — returns article/procedure hits
- * plus Claude Sonnet 4.5 distilled fix steps.
+ * plus Nexus AI distilled fix steps.
  */
 export function HuduSuggestionsPanel({ ticket }) {
   const { token } = useAuth();

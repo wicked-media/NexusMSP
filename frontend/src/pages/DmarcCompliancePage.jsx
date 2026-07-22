@@ -15,6 +15,8 @@ import {
   Search, Loader2, RefreshCw, ExternalLink, TrendingUp, Users,
   MailCheck, Lock, Globe, Server, ArrowUpRight, Eye
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 const scoreColor = (score) => {
   if (score >= 80) return { text: "text-emerald-400", bg: "bg-emerald-500", ring: "ring-emerald-500/30" };
@@ -52,84 +54,31 @@ export default function DmarcCompliancePage() {
 
   if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
-  const sc = scoreColor(data.overall_score);
   const filteredClients = (data.client_details || []).filter(c =>
     !search || c.client_name?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="space-y-6" data-testid="dmarc-compliance-page">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Email Security Compliance</h1>
-          <p className="text-muted-foreground">DMARC, SPF & MTA-STS posture across all clients</p>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Network workspace · email security"
+        title="Email security compliance"
+        description="DMARC, SPF, MTA-STS and blocklist posture across every client, with direct paths to the affected account."
+        icon={Shield}
+        tone="sky"
+        actions={(
+          <>
           <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings")}><ExternalLink className="w-4 h-4 mr-1" />Suped Settings</Button>
-        </div>
-      </div>
+          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=suped-settings-card")}><ExternalLink className="w-4 h-4 mr-1" />Suped Settings</Button>
+          </>
+        )}
+      />
 
-      {/* Score Hero */}
-      <div className="grid grid-cols-12 gap-4">
-        <Card className={`col-span-4 border-2 ${sc.ring}`} data-testid="overall-score-card">
-          <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
-            <div className={`w-28 h-28 rounded-full flex items-center justify-center border-4 ${sc.ring} mb-3`}>
-              <div>
-                <p className={`text-4xl font-black ${sc.text}`}>{data.overall_score}%</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{scoreLabel(data.overall_score)}</p>
-              </div>
-            </div>
-            <p className="text-sm font-medium">Overall Compliance Score</p>
-            <p className="text-xs text-muted-foreground mt-1">Based on {data.total_clients} client{data.total_clients !== 1 ? "s" : ""} and {data.service_coverage?.length || 6} tracked services</p>
-          </CardContent>
-        </Card>
-
-        <div className="col-span-8 grid grid-cols-3 gap-3">
-          <Card className="border-emerald-500/20" data-testid="fully-protected-card">
-            <CardContent className="pt-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-3xl font-black text-emerald-400">{data.fully_protected}</p>
-                  <p className="text-xs text-muted-foreground">Fully Protected</p>
-                </div>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">All 6 services active</p>
-            </CardContent>
-          </Card>
-          <Card className="border-amber-500/20" data-testid="partial-card">
-            <CardContent className="pt-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
-                  <AlertTriangle className="w-6 h-6 text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-3xl font-black text-amber-400">{data.partially_protected}</p>
-                  <p className="text-xs text-muted-foreground">Partially Protected</p>
-                </div>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">Some services missing</p>
-            </CardContent>
-          </Card>
-          <Card className="border-red-500/20" data-testid="unprotected-card">
-            <CardContent className="pt-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center">
-                  <ShieldX className="w-6 h-6 text-red-400" />
-                </div>
-                <div>
-                  <p className="text-3xl font-black text-red-400">{data.unprotected}</p>
-                  <p className="text-xs text-muted-foreground">Unprotected</p>
-                </div>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">No services configured</p>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <HeroTile label="Compliance score" value={data.overall_score ?? 0} suffix="%" icon={Shield} glow={data.overall_score >= 80 ? "emerald" : data.overall_score >= 50 ? "amber" : "rose"} subtitle={`${scoreLabel(data.overall_score)} · ${data.total_clients || 0} clients`} testId="overall-score-card" />
+        <HeroTile label="Fully protected" value={data.fully_protected ?? 0} icon={ShieldCheck} glow="emerald" subtitle="All monitored services active" testId="fully-protected-card" />
+        <HeroTile label="Partially protected" value={data.partially_protected ?? 0} icon={AlertTriangle} glow="amber" subtitle="One or more controls missing" testId="partial-card" />
+        <HeroTile label="Unprotected" value={data.unprotected ?? 0} icon={ShieldX} glow={(data.unprotected ?? 0) > 0 ? "rose" : "zinc"} subtitle="Requires a protection plan" testId="unprotected-card" />
       </div>
 
       {/* Service Coverage */}
@@ -167,7 +116,7 @@ export default function DmarcCompliancePage() {
                 <div
                   key={c.client_id}
                   className="flex items-center justify-between p-3 rounded-lg border border-red-500/10 bg-red-500/5 hover:bg-red-500/8 cursor-pointer transition-colors"
-                  onClick={() => navigate("/clients")}
+                  onClick={() => navigate(`/clients?client=${c.client_id}`)}
                   data-testid={`risk-client-${c.client_id}`}
                 >
                   <div className="flex items-center gap-3">
@@ -222,7 +171,7 @@ export default function DmarcCompliancePage() {
                     : <XCircle className="w-4 h-4 text-red-400 mx-auto" />
                 );
                 return (
-                  <TableRow key={c.client_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate("/clients")} data-testid={`compliance-row-${c.client_id}`}>
+                  <TableRow key={c.client_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/clients?client=${c.client_id}`)} data-testid={`compliance-row-${c.client_id}`}>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {c.score >= 80 ? <ShieldCheck className="w-4 h-4 text-emerald-400" /> : c.score >= 50 ? <AlertTriangle className="w-4 h-4 text-amber-400" /> : <ShieldX className="w-4 h-4 text-red-400" />}

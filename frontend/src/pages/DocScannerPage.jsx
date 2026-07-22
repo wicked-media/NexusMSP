@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { ScanLine, Loader2, Plus, Camera, FileText, CheckCircle } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function DocScannerPage() {
   const { token } = useAuth();
@@ -51,10 +52,7 @@ export default function DocScannerPage() {
 
   return (
     <div className="space-y-5" data-testid="doc-scanner-page">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><ScanLine className="w-8 h-8 text-teal-400" />Document Scanner</h1>
-        <p className="text-muted-foreground">AI-powered OCR to extract device info from labels, warranties, and stickers</p>
-      </div>
+      <OperationalPageHeader eyebrow="Asset intelligence" title="Document Scanner" description="Extract asset details from labels, warranties, and stickers, then create an assigned device record." icon={ScanLine} tone="sky" />
 
       <div className="grid grid-cols-2 gap-4">
         {/* Input */}

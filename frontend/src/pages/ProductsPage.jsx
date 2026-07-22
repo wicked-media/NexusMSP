@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,12 +23,14 @@ import {
   Plus, Search, Loader2, Package, Edit, Trash2, DollarSign, Tag,
   BarChart3, AlertTriangle, ArrowUpDown, ShoppingCart, RefreshCw,
   Box, Layers, Archive, Printer, QrCode, ArrowDown, ArrowUp,
-  History, Copy, ChevronRight, Link2, Truck, Unlink, Calculator
+  History, Copy, ChevronRight, Link2, Truck, Unlink, Calculator, Upload,
+  MoreHorizontal, ChevronDown, ClipboardList, Boxes, CircleDollarSign, RotateCcw, ShieldCheck
 } from "lucide-react";
 
 const CATEGORIES = ["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"];
 const STOCK_CONTROLLED_CATEGORIES = ["Hardware", "Accessories", "Networking", "Security"];
 const tracksInventory = (product) => product.track_inventory ?? STOCK_CONTROLLED_CATEGORIES.includes(product.category);
+const resolveProductImageUrl = (url) => !url || url.startsWith("data:") || /^https?:\/\//.test(url) ? (url || "") : `${API.replace(/\/api$/, "")}${url}`;
 
 export default function ProductsPage() {
   const { token } = useAuth();
@@ -56,14 +59,19 @@ export default function ProductsPage() {
   const [labelDialog, setLabelDialog] = useState(false);
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importCsv, setImportCsv] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [uploadingProductImage, setUploadingProductImage] = useState(false);
   const [stockForm, setStockForm] = useState({ type: "in", quantity: "1", reason: "" });
   const [instanceForm, setInstanceForm] = useState({ count: "1", serial_number: "", location: "Warehouse" });
   const labelRef = useRef();
+  const productImageInputRef = useRef();
   const [form, setForm] = useState({
     name: "", sku: "", description: "", category: "Hardware", vendor: "",
     cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
     reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
-    is_recurring: false, billing_cycle: "monthly", track_inventory: true
+    is_recurring: false, billing_cycle: "monthly", track_inventory: true, pricing_tiers: [], image_url: ""
   });
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -98,6 +106,20 @@ export default function ProductsPage() {
 
   useEffect(() => { if (token) fetchProducts(); }, [fetchProducts, token]);
 
+  const importProducts = async () => {
+    if (!importCsv.trim()) return;
+    setImporting(true);
+    try {
+      const { data } = await axios.post(`${API}/billing-pro/products/bulk-import`, { csv_text: importCsv }, { headers });
+      toast.success(`Imported ${data.inserted} new products; updated ${data.updated}.`);
+      setImportOpen(false);
+      setImportCsv("");
+      fetchProducts();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Product import failed");
+    } finally { setImporting(false); }
+  };
+
   // The sidebar's Add Product action opens the same canonical catalogue page
   // and immediately presents the product form.
   useEffect(() => {
@@ -107,7 +129,7 @@ export default function ProductsPage() {
       name: "", sku: "", description: "", category: "Hardware", vendor: "",
       cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
       reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
-      is_recurring: false, billing_cycle: "monthly", track_inventory: true
+      is_recurring: false, billing_cycle: "monthly", track_inventory: true, pricing_tiers: [], image_url: ""
     });
     setIsFormOpen(true);
     const next = new URLSearchParams(searchParams);
@@ -123,7 +145,7 @@ export default function ProductsPage() {
     name: "", sku: "", description: "", category: "Hardware", vendor: "",
     cost_price: "", retail_price: "", tax_rate: "0", quantity_in_stock: "0",
     reorder_level: "5", unit: "each", is_active: true, is_taxable: true,
-    is_recurring: false, billing_cycle: "monthly", track_inventory: true
+    is_recurring: false, billing_cycle: "monthly", track_inventory: true, pricing_tiers: [], image_url: ""
   });
 
   const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
@@ -137,7 +159,7 @@ export default function ProductsPage() {
       is_active: p.is_active !== false, is_taxable: p.is_taxable !== false,
       is_recurring: p.is_recurring || false, billing_cycle: p.billing_cycle || "monthly",
       track_inventory: p.track_inventory ?? ["Hardware", "Accessories", "Networking", "Security"].includes(p.category),
-      pricing_tiers: p.pricing_tiers || []
+      pricing_tiers: p.pricing_tiers || [], image_url: p.image_url || ""
     });
     setIsFormOpen(true);
   };
@@ -174,6 +196,24 @@ export default function ProductsPage() {
       if (tierPricingFailed) toast.error(`${successMessage}, but quantity-break pricing could not be saved. Please reopen the product and try again.`);
       else toast.success(successMessage);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
+  };
+
+  const handleProductImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Choose an image file"); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Product image must be 10 MB or smaller"); return; }
+    const upload = new FormData();
+    upload.append("file", file);
+    setUploadingProductImage(true);
+    try {
+      const { data } = await axios.post(`${API}/products/upload-image`, upload, { headers });
+      setForm(current => ({ ...current, image_url: data.image_url }));
+      toast.success("Product image ready to save");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Product image upload failed");
+    } finally { setUploadingProductImage(false); }
   };
 
   const handleDelete = async (id) => {
@@ -309,9 +349,17 @@ export default function ProductsPage() {
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{editing ? "Edit Product" : "Add Product"}</DialogTitle></DialogHeader>
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+      <DialogContent className="flex h-[min(90vh,860px)] max-h-[calc(100vh-2rem)] max-w-6xl flex-col gap-0 overflow-hidden border-cyan-400/20 bg-background p-0 shadow-2xl shadow-cyan-950/30">
+        <DialogHeader className="shrink-0 border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_42%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Catalogue control</p>
+          <DialogTitle className="mt-1 flex items-center gap-3 text-xl text-foreground"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Package className="h-5 w-5 text-cyan-200" /></span>{editing ? "Edit product record" : "Create product record"}</DialogTitle>
+          <DialogDescription className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">{editing ? "Update the catalogue, stock and billing details in one controlled record. Changes remain visible wherever this product is quoted, ordered or invoiced." : "Define the item once for purchasing, stock control, service delivery and billing. Set the commercial model before it is used on a purchase order or invoice."}</DialogDescription>
+        </DialogHeader>
+        <div className="grid min-h-0 flex-1 gap-0 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="space-y-5 px-6 py-5">
+          <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+            <div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.08]"><Tag className="h-4 w-4 text-cyan-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">01 · Identity</p><p className="mt-1 text-sm font-semibold">Catalogue identity</p><p className="mt-1 text-xs text-muted-foreground">The shared name and SKU technicians will select throughout NexusMSP.</p></div></div>
+          <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Product Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dell OptiPlex 7090" data-testid="product-name" /></div>
             <div><Label>SKU</Label><Input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="e.g. DELL-OPT-7090" data-testid="product-sku" /></div>
@@ -326,7 +374,10 @@ export default function ProductsPage() {
             </div>
             <div><Label>Vendor</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="e.g. Dell Technologies" /></div>
           </div>
-          <Separator />
+          </div>
+          </section>
+          <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+            <div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08]"><CircleDollarSign className="h-4 w-4 text-emerald-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">02 · Commercial model</p><p className="mt-1 text-sm font-semibold">Pricing and tax</p><p className="mt-1 text-xs text-muted-foreground">Used as defaults on invoices, purchase orders and contract services.</p></div></div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Cost Price ($)</Label><Input type="number" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} data-testid="product-cost" /></div>
             <div className="flex items-end gap-2">
@@ -350,6 +401,10 @@ export default function ProductsPage() {
             </div>
             <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
           </div>
+          <div className="mt-4 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.045] px-3 py-2.5 text-xs text-muted-foreground"><ShieldCheck className="mr-1.5 inline h-3.5 w-3.5 text-emerald-300" />The saved price remains auditable. Existing purchase-order and invoice lines retain their historical price.</div>
+          </section>
+          <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+            <div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/[0.08]"><Boxes className="h-4 w-4 text-amber-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">03 · Fulfilment and pricing</p><p className="mt-1 text-sm font-semibold">Stock, recurring service and volume tiers</p><p className="mt-1 text-xs text-muted-foreground">Make the operational model clear before this product is selected in a technician workflow.</p></div></div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Quantity in Stock</Label><Input type="number" value={form.quantity_in_stock} onChange={e => setForm({ ...form, quantity_in_stock: e.target.value })} data-testid="product-stock" /></div>
             <div><Label>Reorder Level</Label><Input type="number" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} /></div>
@@ -364,8 +419,6 @@ export default function ProductsPage() {
               </Select>
             </div>
           </div>
-          {/* Quantity-Break Tier Pricing */}
-          <Separator />
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-medium">Quantity-Break Pricing (Tiers)</Label>
@@ -387,13 +440,10 @@ export default function ProductsPage() {
             ))}
           </div>
           <Separator />
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2"><Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} /><Label>Active</Label></div>
-            <div className="flex items-center gap-2"><Switch checked={form.is_taxable} onCheckedChange={v => setForm({ ...form, is_taxable: v })} /><Label>Taxable</Label></div>
-            <div className="flex items-center gap-2"><Switch checked={form.track_inventory} onCheckedChange={v => setForm({ ...form, track_inventory: v })} /><Label>Track Stock</Label></div>
-            <div className="flex items-center gap-2"><Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} /><Label>Recurring</Label></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/65 bg-background/35 p-3"><span><span className="block text-sm font-medium">Track inventory</span><span className="mt-0.5 block text-xs text-muted-foreground">Include in receipts, stock movements and low-stock review.</span></span><Switch checked={form.track_inventory} onCheckedChange={v => setForm({ ...form, track_inventory: v })} /></label>
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/65 bg-background/35 p-3"><span><span className="block text-sm font-medium">Recurring billing</span><span className="mt-0.5 block text-xs text-muted-foreground">Offer as a repeatable service or subscription line.</span></span><Switch checked={form.is_recurring} onCheckedChange={v => setForm({ ...form, is_recurring: v })} /></label>
           </div>
-          <p className="text-[11px] text-muted-foreground">Track Stock defaults on for physical categories. You can override it here for exceptional products.</p>
           {form.is_recurring && (
             <div className="max-w-xs"><Label>Billing Cycle</Label>
               <Select value={form.billing_cycle} onValueChange={v => setForm({ ...form, billing_cycle: v })}>
@@ -405,8 +455,35 @@ export default function ProductsPage() {
               </Select>
             </div>
           )}
+          </section>
         </div>
-        <DialogFooter><Button onClick={handleSave} data-testid="save-product-btn">{editing ? "Update" : "Create"} Product</Button></DialogFooter>
+        <aside className="border-t border-border/60 bg-muted/[0.14] px-5 py-5 lg:border-l lg:border-t-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Record status</p>
+          <div className="mt-3 rounded-xl border border-border/65 bg-background/35 p-3">
+            <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">Product image</p><p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Add a vendor logo or product photo for clear catalogue recognition.</p></div><Package className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /></div>
+            <div className="mt-3 flex items-center gap-3">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06]">
+                {form.image_url ? <img src={resolveProductImageUrl(form.image_url)} alt="Product preview" className="h-full w-full object-cover" onError={event => { event.currentTarget.style.display = "none"; }} /> : <Package className="h-6 w-6 text-cyan-200/70" />}
+              </div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <input ref={productImageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleProductImageUpload} data-testid="product-image-input" />
+                <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => productImageInputRef.current?.click()} disabled={uploadingProductImage} data-testid="upload-product-image">
+                  {uploadingProductImage ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{uploadingProductImage ? "Uploading…" : form.image_url ? "Replace image" : "Upload image"}
+                </Button>
+                {form.image_url && <Button type="button" size="sm" variant="ghost" className="w-full text-muted-foreground hover:text-destructive" onClick={() => setForm(current => ({ ...current, image_url: "" }))} data-testid="remove-product-image"><Trash2 className="mr-1.5 h-3.5 w-3.5" />Remove image</Button>}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 space-y-3">
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/65 bg-background/35 p-3"><span><span className="block text-sm font-medium">Active</span><span className="mt-0.5 block text-xs text-muted-foreground">Available for technician selection.</span></span><Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} /></label>
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/65 bg-background/35 p-3"><span><span className="block text-sm font-medium">Taxable</span><span className="mt-0.5 block text-xs text-muted-foreground">Use the configured tax rate by default.</span></span><Switch checked={form.is_taxable} onCheckedChange={v => setForm({ ...form, is_taxable: v })} /></label>
+          </div>
+          <Separator className="my-5" />
+          <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.045] p-3"><p className="text-xs font-semibold text-cyan-100">Save review</p><ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-muted-foreground"><li>{form.name.trim() ? "Product name ready" : "Product name is required"}</li><li>{form.track_inventory ? "Stock control enabled" : "Not stock controlled"}</li><li>{form.is_recurring ? `${form.billing_cycle} recurring option` : "One-off billing by default"}</li><li>{(form.pricing_tiers || []).length ? `${form.pricing_tiers.length} volume tier${form.pricing_tiers.length === 1 ? "" : "s"} configured` : "Standard price only"}</li></ul></div>
+          <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw className="mr-1 inline h-3.5 w-3.5" />A saved record creates the shared source of truth; each later use retains its own commercial and audit history.</p>
+        </aside>
+        </div>
+        <DialogFooter className="shrink-0 flex-row items-center justify-between border-t border-border/60 bg-background/80 px-6 py-4 sm:justify-between"><p className="hidden text-xs text-muted-foreground md:block">Required: product name. No stock movement is created until the product is receipted or adjusted.</p><div className="ml-auto flex gap-2"><Button variant="outline" onClick={() => { setIsFormOpen(false); setEditing(null); }}>Cancel</Button><Button onClick={handleSave} disabled={!form.name.trim()} data-testid="save-product-btn"><Package className="mr-1.5 h-4 w-4" />{editing ? "Save changes" : "Create product"}</Button></div></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -442,26 +519,44 @@ export default function ProductsPage() {
     const isStockTracked = tracksInventory(p);
     const margin = p.retail_price - p.cost_price;
     const marginPct = p.cost_price > 0 ? ((margin / p.cost_price) * 100).toFixed(1) : "N/A";
+    const stockMovementQuantity = Math.max(0, Number(stockForm.quantity) || 0);
+    const projectedStock = stockForm.type === "in" ? p.quantity_in_stock + stockMovementQuantity : stockForm.type === "out" ? Math.max(0, p.quantity_in_stock - stockMovementQuantity) : stockMovementQuantity;
+    const instanceCount = Math.max(1, Math.min(100, parseInt(instanceForm.count, 10) || 1));
     return (
       <div className="space-y-6" data-testid="product-detail">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setViewProduct(null); setDetailTab("overview"); }} data-testid="back-to-products">
-            <Package className="w-4 h-4 mr-1" />Back to Products
-          </Button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-medium">{p.name}</span>
-        </div>
+        <section className="overflow-hidden rounded-2xl border border-cyan-400/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_38%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] shadow-xl shadow-cyan-950/15">
+          <div className="flex items-center gap-2 border-b border-cyan-400/15 px-4 py-3">
+            <Button variant="ghost" size="sm" onClick={() => { setViewProduct(null); setDetailTab("overview"); }} data-testid="back-to-products">
+              <Package className="mr-1 h-4 w-4" />Products
+            </Button>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <span className="truncate text-sm font-medium text-muted-foreground">Product record</span>
+          </div>
+          <div className="flex flex-col gap-5 px-6 py-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.09] shadow-inner shadow-cyan-300/10">
+                {p.image_url ? <img src={resolveProductImageUrl(p.image_url)} alt="" className="h-full w-full object-cover" onError={event => { event.currentTarget.style.display = "none"; }} /> : <Package className="h-7 w-7 text-cyan-200" />}
+              </div>
+              <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Catalogue record</p><h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{p.name}</h1><p className="mt-1 font-mono text-xs text-muted-foreground">SKU: {p.sku || "Not set"}</p></div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Badge variant={p.is_active ? "default" : "secondary"} className="h-7 px-2.5">{p.is_active ? "Active" : "Inactive"}</Badge>
+              {p.is_recurring && <Badge className="h-7 bg-violet-600 px-2.5">Recurring</Badge>}
+              <Badge variant="outline" className="h-7 px-2.5">{p.category}</Badge>
+              <Button onClick={() => openEdit(p)} data-testid="edit-product-header"><Edit className="mr-1.5 h-4 w-4" />Edit product</Button>
+            </div>
+          </div>
+        </section>
 
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">{p.name}</h2>
-            <p className="text-sm text-muted-foreground font-mono">SKU: {p.sku || "N/A"}</p>
-          </div>
-          <div className="flex gap-2">
-            <Badge variant={p.is_active ? "default" : "secondary"}>{p.is_active ? "Active" : "Inactive"}</Badge>
-            {p.is_recurring && <Badge className="bg-purple-600">Recurring</Badge>}
-            <Badge variant="outline">{p.category}</Badge>
-          </div>
+        <MetricStrip columns={4}>
+          <MetricTile label="Retail Price" value={`$${Number(p.retail_price || 0).toFixed(2)}`} accent="emerald" icon={<DollarSign className="h-3.5 w-3.5" />} />
+          <MetricTile label={isStockTracked ? "In Stock" : "Stock Control"} value={isStockTracked ? p.quantity_in_stock : "Off"} accent={isStockTracked && p.quantity_in_stock <= p.reorder_level ? "amber" : "cyan"} icon={<Boxes className="h-3.5 w-3.5" />} />
+          <MetricTile label="Margin" value={p.cost_price > 0 ? `${marginPct}%` : "—"} accent="violet" icon={<BarChart3 className="h-3.5 w-3.5" />} />
+          <MetricTile label="Product Type" value={p.is_recurring ? "Recurring" : "One-off"} accent="sky" icon={p.is_recurring ? <RefreshCw className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />} />
+        </MetricStrip>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Product workspace</p><p className="mt-1 text-sm text-muted-foreground">Review pricing, inventory, bundle contents and traceable stock history.</p></div>
         </div>
 
         <Tabs value={detailTab} onValueChange={setDetailTab}>
@@ -570,7 +665,6 @@ export default function ProductsPage() {
                   </Card>
                 )}
                 <div className="flex flex-col gap-2">
-                  <Button onClick={() => openEdit(p)} className="w-full" data-testid="edit-product-btn"><Edit className="w-4 h-4 mr-1" />Edit Product</Button>
                   {isStockTracked && <Button variant="outline" onClick={() => { setStockDialog(true); setStockForm({ type: "in", quantity: "1", reason: "" }); }} className="w-full" data-testid="stock-movement-btn"><ArrowUpDown className="w-4 h-4 mr-1" />Stock Movement</Button>}
                   {!p.barcode && <Button variant="outline" onClick={handleGenerateBarcode} className="w-full" data-testid="generate-barcode-btn"><QrCode className="w-4 h-4 mr-1" />Generate Barcode</Button>}
                   <Button variant="destructive" onClick={() => setDeleteTarget(p)} className="w-full" data-testid="delete-product-btn"><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
@@ -785,36 +879,39 @@ export default function ProductsPage() {
 
         {/* Stock Movement Dialog */}
         <Dialog open={stockDialog} onOpenChange={setStockDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Stock Movement</DialogTitle></DialogHeader>
-            <div className="space-y-4">
-              <div><Label>Type</Label>
-                <Select value={stockForm.type} onValueChange={v => setStockForm({ ...stockForm, type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="in">Stock In (Receive)</SelectItem>
-                    <SelectItem value="out">Stock Out (Issue)</SelectItem>
-                    <SelectItem value="adjustment">Adjustment (Set)</SelectItem>
-                  </SelectContent>
-                </Select>
+          <DialogContent className="max-w-2xl overflow-hidden border-cyan-400/20 bg-background p-0 shadow-2xl shadow-cyan-950/30">
+            <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_42%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Inventory control</p>
+              <DialogTitle className="mt-1 flex items-center gap-3 text-xl"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><ArrowUpDown className="h-5 w-5 text-cyan-200" /></span>Record stock movement</DialogTitle>
+              <DialogDescription className="mt-2 text-sm leading-relaxed">Apply a receipting, issue or correction event to <span className="font-medium text-foreground">{p.name}</span>. NexusMSP records the before-and-after quantity in the product audit history.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_15rem]">
+              <div className="space-y-5 px-6 py-5">
+                <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+                  <div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08]"><Archive className="h-4 w-4 text-emerald-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Movement details</p><p className="mt-1 text-sm font-semibold">Quantity and intent</p><p className="mt-1 text-xs text-muted-foreground">Use an adjustment only when setting the physical on-hand count.</p></div></div>
+                  <div className="grid gap-4 sm:grid-cols-2"><div><Label>Movement type</Label><Select value={stockForm.type} onValueChange={v => setStockForm({ ...stockForm, type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="in">Receive stock</SelectItem><SelectItem value="out">Issue stock</SelectItem><SelectItem value="adjustment">Set stock count</SelectItem></SelectContent></Select></div><div><Label>{stockForm.type === "adjustment" ? "New on-hand count" : "Quantity"}</Label><Input type="number" value={stockForm.quantity} onChange={e => setStockForm({ ...stockForm, quantity: e.target.value })} min="0" /></div></div>
+                  <div className="mt-4"><Label>Reason and reference</Label><Textarea value={stockForm.reason} onChange={e => setStockForm({ ...stockForm, reason: e.target.value })} placeholder="e.g. Received against PO-1042, issued to ticket #4421…" rows={3} /></div>
+                </section>
               </div>
-              <div><Label>Quantity</Label><Input type="number" value={stockForm.quantity} onChange={e => setStockForm({ ...stockForm, quantity: e.target.value })} min="1" /></div>
-              <div><Label>Reason</Label><Textarea value={stockForm.reason} onChange={e => setStockForm({ ...stockForm, reason: e.target.value })} placeholder="Reason for stock change..." rows={2} /></div>
+              <aside className="border-t border-border/60 bg-muted/[0.14] px-5 py-5 md:border-l md:border-t-0"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Save review</p><div className="mt-3 space-y-3"><div className="rounded-xl border border-border/65 bg-background/35 p-3"><p className="text-xs text-muted-foreground">Current on-hand</p><p className="mt-1 font-mono text-xl font-semibold">{p.quantity_in_stock}</p></div><div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.045] p-3"><p className="text-xs text-muted-foreground">After this event</p><p className="mt-1 font-mono text-xl font-semibold text-cyan-100">{projectedStock}</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{stockForm.type === "in" ? "Inventory will be received." : stockForm.type === "out" ? "Inventory will be issued." : "Inventory will be set to this count."}</p></div></div><p className="mt-4 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw className="mr-1 inline h-3.5 w-3.5" />The signed-in technician and supplied reason are retained with the movement.</p></aside>
             </div>
-            <DialogFooter><Button onClick={handleStockMovement} data-testid="submit-stock-btn">Submit</Button></DialogFooter>
+            <DialogFooter className="flex-row items-center justify-end gap-2 border-t border-border/60 bg-background/80 px-6 py-4"><Button variant="outline" onClick={() => setStockDialog(false)}>Cancel</Button><Button onClick={handleStockMovement} data-testid="submit-stock-btn"><ArrowUpDown className="mr-1.5 h-4 w-4" />{stockForm.type === "in" ? "Receive stock" : stockForm.type === "out" ? "Issue stock" : "Apply adjustment"}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Create Instances Dialog */}
         <Dialog open={instanceDialog} onOpenChange={setInstanceDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create Product Instances</DialogTitle></DialogHeader>
-            <div className="space-y-4">
-              <div><Label>Number of Instances</Label><Input type="number" value={instanceForm.count} onChange={e => setInstanceForm({ ...instanceForm, count: e.target.value })} min="1" max="100" /></div>
-              <div><Label>Location</Label><Input value={instanceForm.location} onChange={e => setInstanceForm({ ...instanceForm, location: e.target.value })} placeholder="e.g. Warehouse A" /></div>
-              <p className="text-xs text-muted-foreground">Each instance will get a unique barcode based on the product SKU + serial number. This also adds to stock count.</p>
+          <DialogContent className="max-w-2xl overflow-hidden border-cyan-400/20 bg-background p-0 shadow-2xl shadow-cyan-950/30">
+            <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_42%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset traceability</p>
+              <DialogTitle className="mt-1 flex items-center gap-3 text-xl"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><QrCode className="h-5 w-5 text-cyan-200" /></span>Create serialised instances</DialogTitle>
+              <DialogDescription className="mt-2 text-sm leading-relaxed">Create individually traceable instances for <span className="font-medium text-foreground">{p.name}</span>. Each instance receives its own barcode for stock, ticket and client assignment.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_15rem]">
+              <div className="space-y-5 px-6 py-5"><section className="rounded-2xl border border-border/65 bg-card/45 p-4"><div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-400/[0.08]"><Layers className="h-4 w-4 text-violet-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-300">Instance details</p><p className="mt-1 text-sm font-semibold">Serial and location</p><p className="mt-1 text-xs text-muted-foreground">Leave the serial base blank for NexusMSP to generate unique values.</p></div></div><div className="grid gap-4 sm:grid-cols-2"><div><Label>Number of instances</Label><Input type="number" value={instanceForm.count} onChange={e => setInstanceForm({ ...instanceForm, count: e.target.value })} min="1" max="100" /></div><div><Label>Location</Label><Input value={instanceForm.location} onChange={e => setInstanceForm({ ...instanceForm, location: e.target.value })} placeholder="e.g. Warehouse A" /></div></div><div className="mt-4"><Label>Serial number base <span className="text-muted-foreground">(optional)</span></Label><Input value={instanceForm.serial_number} onChange={e => setInstanceForm({ ...instanceForm, serial_number: e.target.value })} placeholder="e.g. DELL-OPT-2026" /><p className="mt-1.5 text-[11px] text-muted-foreground">For multiple instances, NexusMSP appends a sequence such as <span className="font-mono">-01</span>, <span className="font-mono">-02</span>.</p></div></section></div>
+              <aside className="border-t border-border/60 bg-muted/[0.14] px-5 py-5 md:border-l md:border-t-0"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Creation review</p><div className="mt-3 space-y-3"><div className="rounded-xl border border-border/65 bg-background/35 p-3"><p className="text-xs text-muted-foreground">Instances to create</p><p className="mt-1 font-mono text-xl font-semibold">{instanceCount}</p></div><div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.045] p-3"><p className="text-xs text-muted-foreground">Inventory after creation</p><p className="mt-1 font-mono text-xl font-semibold text-violet-100">{p.quantity_in_stock + instanceCount}</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Stock is increased and a traceable inbound movement is written.</p></div></div><p className="mt-4 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw className="mr-1 inline h-3.5 w-3.5" />Instances can later be linked to tickets, invoices and client assets without losing their serial history.</p></aside>
             </div>
-            <DialogFooter><Button onClick={handleCreateInstances} data-testid="submit-instances-btn">Create Instances</Button></DialogFooter>
+            <DialogFooter className="flex-row items-center justify-end gap-2 border-t border-border/60 bg-background/80 px-6 py-4"><Button variant="outline" onClick={() => setInstanceDialog(false)}>Cancel</Button><Button onClick={handleCreateInstances} data-testid="submit-instances-btn"><QrCode className="mr-1.5 h-4 w-4" />Create {instanceCount} {instanceCount === 1 ? "instance" : "instances"}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
@@ -829,8 +926,31 @@ export default function ProductsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Products</h1>
           <p className="text-muted-foreground">{products.length} products in catalog</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10" data-testid="goto-billing-pro"><Calculator className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
+        <div className="flex gap-2 flex-wrap justify-end">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} data-testid="products-import-csv"><Upload className="w-3.5 h-3.5 mr-1" />Import CSV</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="products-workspace-tools">
+                <MoreHorizontal className="w-3.5 h-3.5" />
+                Tools
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => navigate("/stocktake")} className="gap-2" data-testid="products-tools-stocktake">
+                <ClipboardList className="w-4 h-4" />
+                Stocktake
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/stocktake-mobile")} className="gap-2" data-testid="products-tools-mobile-stocktake">
+                <QrCode className="w-4 h-4" />
+                Mobile stocktake
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/rentals")} className="gap-2" data-testid="products-tools-phone-rentals">
+                <Truck className="w-4 h-4" />
+                Phone rentals
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button onClick={openCreate} data-testid="add-product-btn"><Plus className="w-4 h-4 mr-1" />Add Product</Button>
         </div>
       </div>
@@ -880,8 +1000,8 @@ export default function ProductsPage() {
                 <TableRow key={p.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setViewProduct(p); setDetailTab("overview"); }} data-testid={`product-row-${p.id}`}>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        {p.is_recurring ? <RefreshCw className="w-4 h-4 text-purple-500" /> : <Package className="w-4 h-4 text-primary" />}
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/10 bg-primary/10">
+                        {p.image_url ? <img src={resolveProductImageUrl(p.image_url)} alt="" className="h-full w-full object-cover" onError={event => { event.currentTarget.style.display = "none"; }} /> : p.is_recurring ? <RefreshCw className="w-4 h-4 text-purple-500" /> : <Package className="w-4 h-4 text-primary" />}
                       </div>
                       <span className="font-medium">{p.name}</span>
                     </div>
@@ -944,6 +1064,18 @@ export default function ProductsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader><DialogTitle>Import products from CSV</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Required: <code>Name</code>. Optional columns include SKU, Category, Vendor, Cost Price, Retail Price, Stock, Reorder, Tax Rate, Description, and Unit. Matching SKUs are updated.</p>
+          <Textarea rows={12} value={importCsv} onChange={event => setImportCsv(event.target.value)} placeholder="Paste CSV data here…" className="font-mono text-xs" data-testid="products-import-csv-text" />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>
+            <Button disabled={importing || !importCsv.trim()} onClick={importProducts} data-testid="products-run-import">{importing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}Import products</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

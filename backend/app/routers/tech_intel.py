@@ -162,7 +162,7 @@ async def smart_tech_finder(data: dict, current_user: dict = Depends(get_current
                     'Return JSON shape: {"skills":[],"level":null,"needs_available":bool,"categories":[],"keywords":[]}'
                 ),
             )
-            chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+            chat.with_model("openai", "gpt-5.6-terra")
             resp = await chat.send_message(UserMessage(text=f"Query: {query}"))
             import json as _json
             text = resp if isinstance(resp, str) else str(resp)

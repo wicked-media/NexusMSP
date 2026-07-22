@@ -7,16 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Loader2, DollarSign, TrendingUp, AlertTriangle, CheckCircle,
   Clock, CreditCard, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
   BarChart3, Users, FileText, Receipt, ShoppingCart, Target, Banknote,
-  Trophy, ChevronRight, Activity, RefreshCw
+  Trophy, ChevronRight, Activity, RefreshCw, MoreHorizontal, ChevronDown, Calculator
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const STREAK_CONFIG = {
   starter: { label: "Getting Started", color: "text-gray-400", bg: "bg-gray-500/10", ring: "" },
@@ -109,12 +111,16 @@ export default function BillingDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="billing-dashboard">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center"><Banknote className="w-4 h-4 text-emerald-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Billing Command</h1><p className="text-sm text-muted-foreground">Revenue, collections, cash flow, and financial follow-through.</p></div>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Financial operations"
+        title="Billing Command"
+        description="Revenue, collections, cash flow, and financial follow-through across NexusMSP."
+        icon={Banknote}
+        tone="emerald"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={fetchMetrics} disabled={loading} data-testid="refresh-billing-dashboard">
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="go-to-invoices">
             <Receipt className="w-4 h-4 mr-1" />Invoices
           </Button>
@@ -124,8 +130,26 @@ export default function BillingDashboardPage() {
           <Button variant="outline" size="sm" onClick={() => navigate("/purchase-orders")} data-testid="go-to-pos">
             <ShoppingCart className="w-4 h-4 mr-1" />Purchase Orders
           </Button>
-        </div>
-      </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="billing-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => navigate("/estimates")} className="gap-2.5"><FileText className="h-4 w-4 text-sky-300" />Estimates</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/quote-to-cash")} className="gap-2.5"><Target className="h-4 w-4 text-violet-300" />Quote to cash</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/billing-recon")} className="gap-2.5"><CheckCircle className="h-4 w-4 text-emerald-300" />Reconciliation</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/usage-billing")} className="gap-2.5"><Activity className="h-4 w-4 text-cyan-300" />Usage billing</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/billing-portal")} className="gap-2.5"><CreditCard className="h-4 w-4 text-amber-300" />Payment portal</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/proposals")} className="gap-2.5"><FileText className="h-4 w-4 text-indigo-300" />Proposals & quotes</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/invoice-templates")} className="gap-2.5"><Receipt className="h-4 w-4 text-rose-300" />Document templates</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/finance-intel")} className="gap-2.5"><BarChart3 className="h-4 w-4 text-violet-300" />Finance intelligence</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/late-payment")} className="gap-2.5"><AlertTriangle className="h-4 w-4 text-rose-300" />Late-payment assistant</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/pricing-calc")} className="gap-2.5"><Calculator className="h-4 w-4 text-emerald-300" />Pricing calculator</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/xero")} className="gap-2.5"><ArrowUpRight className="h-4 w-4 text-sky-300" />Xero synchronisation</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>}
+      />
 
       {/* Row 1: MRR/ARR + Health + Streak */}
       <div className="grid grid-cols-12 gap-4">

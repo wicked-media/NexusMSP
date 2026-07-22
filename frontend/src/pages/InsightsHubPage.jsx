@@ -356,18 +356,19 @@ function InsuranceVaultView({ api }) {
   if (loading) return <Loader label="Aggregating cyber-insurance evidence…" />;
   const c = data?.controls || {};
   const stats = [
-    { k: "MFA coverage", v: c.mfa_coverage_pct || 0, tone: PCT_TONE(c.mfa_coverage_pct || 0, 95, 80) },
-    { k: "EDR coverage", v: c.edr_coverage_pct || 0, tone: PCT_TONE(c.edr_coverage_pct || 0, 95, 80) },
-    { k: "Encryption", v: c.encryption_pct || 0, tone: PCT_TONE(c.encryption_pct || 0, 90, 70) },
-    { k: "Patched ≤ 30d", v: c.patched_within_30_days_pct || 0, tone: PCT_TONE(c.patched_within_30_days_pct || 0, 85, 60) },
+    { k: "MFA coverage", v: c.mfa_coverage_pct ?? null, tone: PCT_TONE(c.mfa_coverage_pct ?? 0, 95, 80) },
+    { k: "EDR coverage", v: c.edr_coverage_pct ?? null, tone: PCT_TONE(c.edr_coverage_pct ?? 0, 95, 80) },
+    { k: "Encryption", v: c.encryption_pct ?? null, tone: PCT_TONE(c.encryption_pct ?? 0, 90, 70) },
+    { k: "Patched ≤ 30d", v: c.patched_within_30_days_pct ?? null, tone: PCT_TONE(c.patched_within_30_days_pct ?? 0, 85, 60) },
   ];
-  const tierTone = data?.tier === "insurable" ? "emerald" : data?.tier === "needs-improvement" ? "amber" : "rose";
+  const tierTone = data?.readiness_state === "ready_for_review" ? "emerald" : data?.readiness_state === "evidence_gaps" ? "amber" : "rose";
   const tt = TONE_CLASS[tierTone];
+  const readinessLabel = data?.readiness_state === "ready_for_review" ? "Ready for review" : data?.readiness_state === "evidence_gaps" ? "Evidence gaps" : "Not assessed";
   return (
     <div className="space-y-3 mt-3" data-testid="insurance-vault-card">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <Badge variant="outline" className={`${tt.txt} ${tt.bdr} ${tt.bg} text-base px-4 py-1`}>
-          <ShieldCheck className="w-4 h-4 mr-2" />Score {data?.score}/100 · {data?.tier}
+          <ShieldCheck className="w-4 h-4 mr-2" />{data?.readiness_score == null ? "Evidence not assessed" : `Readiness ${data.readiness_score}/100`} · {readinessLabel}
         </Badge>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
@@ -382,7 +383,7 @@ function InsuranceVaultView({ api }) {
         {stats.map((s) => (
           <Card key={s.k}><CardContent className="p-4">
             <div className={`text-[10px] uppercase tracking-widest ${TONE_CLASS[s.tone].txt}`}>{s.k}</div>
-            <div className="text-2xl font-mono font-bold mt-1">{s.v}%</div>
+            <div className="text-2xl font-mono font-bold mt-1">{s.v == null ? "—" : `${s.v}%`}</div>
           </CardContent></Card>
         ))}
       </div>

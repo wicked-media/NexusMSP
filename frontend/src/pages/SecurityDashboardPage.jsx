@@ -9,17 +9,18 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  Shield, ShieldAlert, ShieldCheck, Wifi, WifiOff, Bug, Skull, Radar,
+  Shield, ShieldAlert, ShieldCheck, WifiOff, Bug,
   AlertTriangle, Activity, RefreshCw, Loader2, ExternalLink, ChevronRight,
   Users, Eye, Zap, KeyRound, Flame, Monitor, Link2, CheckCircle, Lock, Unlock,
-  MessageSquare, UserPlus, MoreHorizontal,
+  MessageSquare, UserPlus, MoreHorizontal, ChevronDown, History,
 } from "lucide-react";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { ResponseTimeline } from "@/components/security/ResponseTimeline";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 const SEV_BADGE = {
   critical: "bg-rose-500/20 text-rose-400 border-rose-500/30",
@@ -29,14 +30,12 @@ const SEV_BADGE = {
 };
 
 const QUICK_LINKS = [
-  { to: "/endpoint-security", icon: Monitor, label: "Endpoint Scores" },
+  { to: "/nexus-shield?tab=endpoints", icon: Monitor, label: "Endpoint posture" },
   { to: "/shadow-it", icon: Eye, label: "Shadow IT" },
   { to: "/vulnerability-scanner", icon: Bug, label: "Vuln Scanner" },
-  { to: "/dark-web-monitor", icon: Skull, label: "Dark Web" },
-  { to: "/phishing-sim", icon: Radar, label: "Phishing Sim" },
   { to: "/identity-threats", icon: Users, label: "Identity" },
-  { to: "/ransomware-canary", icon: Flame, label: "Ransomware" },
-  { to: "/mfa-management", icon: KeyRound, label: "MFA" },
+  { to: "/nexus-shield?tab=canary", icon: Flame, label: "Nexus Canary" },
+  { to: "/m365", icon: KeyRound, label: "Microsoft MFA" },
 ];
 
 export default function SecurityDashboardPage() {
@@ -58,14 +57,30 @@ export default function SecurityDashboardPage() {
 
   const runIncidentAction = async () => {
     if (!actionDialog) return;
+    const { incident, action } = actionDialog;
+    const noteRequired = ["acknowledge", "comment", "close", "isolate", "release"].includes(action);
+    if (noteRequired && actionNote.trim().length < 8) {
+      toast.error("Record an audit note of at least 8 characters before continuing.");
+      return;
+    }
+    if (action === "assign" && !actionAssignee.trim()) {
+      toast.error("Choose who owns this incident before continuing.");
+      return;
+    }
     setActionBusy(true);
     try {
-      const { incident, action } = actionDialog;
+      const isAgentAction = action === "isolate" || action === "release";
+      if (isAgentAction && !incident.agent_id) {
+        toast.error("No Huntress agent is linked to this incident, so no endpoint action was sent.");
+        return;
+      }
       const body = { action, note: actionNote };
       if (action === "assign") body.assignee = actionAssignee;
-      const res = await axios.post(`${API}/huntress/incident-reports/${incident.id}/action`, body, { headers });
+      const res = isAgentAction
+        ? await axios.post(`${API}/huntress/agents/${incident.agent_id}/${action}`, { note: actionNote }, { headers })
+        : await axios.post(`${API}/huntress/incident-reports/${incident.id}/action`, body, { headers });
       if (res.data?.success) {
-        toast.success(`Incident ${action} — Huntress accepted`);
+        toast.success(isAgentAction ? `Agent ${action} request accepted by Huntress` : `Incident ${action} accepted by Huntress`);
       } else {
         toast.error(`Huntress rejected: ${res.data?.message || "action not supported by your plan"}`, { duration: 6000 });
       }
@@ -98,11 +113,9 @@ export default function SecurityDashboardPage() {
 
   if (loading && !hunt && !soc) {
     return (
-      <PageShell>
-        <div className="flex items-center justify-center h-96 text-muted-foreground">
-          <Loader2 className="w-6 h-6 animate-spin mr-2" />Loading Security Operations Center…
-        </div>
-      </PageShell>
+      <div className="flex h-96 items-center justify-center text-muted-foreground">
+        <Loader2 className="mr-2 h-6 w-6 animate-spin" />Loading Security Operations Center...
+      </div>
     );
   }
 
@@ -112,65 +125,99 @@ export default function SecurityDashboardPage() {
   const vulns = vulnerabilityData?.summary || {};
   const endpointScores = endpointSecurity?.scores || [];
   const endpointSummary = endpointSecurity?.summary || {};
+  const enrolledAgents = endpointSummary.agent_enrolled || endpointScores.filter((endpoint) => endpoint.agent_enrolled).length;
+  const verifiedAgentEvidence = endpointSummary.assessed || endpointScores.filter((endpoint) => endpoint.evidence_state === "agent_verified").length;
   const liveOnline = endpointScores.filter((endpoint) => endpoint.status === "online").length;
   const liveOffline = endpointScores.filter((endpoint) => endpoint.status === "offline").length;
-  const darkWeb = (soc?.dark_web_alerts || []).length;
-  const identity = soc?.identity_threats || 0;
+  const identity = soc?.identity_threats;
+  const identitySourceConfigured = soc?.identity_source_configured === true;
+  const hasSocEvidence = soc !== null;
+  const hasVulnerabilityEvidence = vulnerabilityData !== null;
 
   // Threat level driven by LIVE Huntress data when configured, else fall back to SOC mock
   const critIncidents = configured ? (s.incidents_critical || 0) : (socH.critical_incidents || 0);
   const openIncidents = configured ? (s.incidents_open || 0) : (socH.open_incidents || 0);
-  const threatLevel = critIncidents > 0 ? "CRITICAL" : openIncidents > 3 ? "HIGH" : openIncidents > 0 ? "MEDIUM" : "LOW";
+  const threatLevel = critIncidents > 0
+    ? "CRITICAL"
+    : openIncidents > 3
+      ? "HIGH"
+      : openIncidents > 0
+        ? "MEDIUM"
+        : configured
+          ? "LOW"
+          : hasSocEvidence
+            ? "LIMITED"
+            : "NOT ASSESSED";
   const levelTone = {
     CRITICAL: { text: "text-rose-400", bg: "bg-rose-500/10 border-rose-500/30", pulse: "animate-pulse" },
     HIGH: { text: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30", pulse: "" },
     MEDIUM: { text: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", pulse: "" },
     LOW: { text: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30", pulse: "" },
+    LIMITED: { text: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", pulse: "" },
+    "NOT ASSESSED": { text: "text-muted-foreground", bg: "bg-muted/40 border-border", pulse: "" },
   }[threatLevel];
 
   const agentHealthPct = configured && (s.agents_total || 0) > 0
     ? Math.round(((s.agents_online || 0) / s.agents_total) * 100)
-    : endpointScores.length > 0 ? Math.round((liveOnline / endpointScores.length) * 100) : 0;
+    : enrolledAgents > 0 ? Math.round((liveOnline / enrolledAgents) * 100) : null;
+  const protectedEndpointValue = configured
+    ? `${s.agents_online || 0}/${s.agents_total || 0}`
+    : enrolledAgents > 0 ? `${verifiedAgentEvidence}/${enrolledAgents}` : "—";
+  const offlineEndpointValue = configured
+    ? (s.agents_offline || 0)
+    : enrolledAgents > 0 ? liveOffline : "—";
+  const vulnerabilityValue = hasVulnerabilityEvidence ? (vulns.total || 0) : "—";
+  const assessmentValue = configured
+    ? (s.organizations_count || 0)
+    : enrolledAgents > 0 ? `${verifiedAgentEvidence}/${enrolledAgents}` : "—";
 
   return (
-    <PageShell data-testid="security-dashboard">
-      {/* Top metric strip — all Huntress-driven when configured */}
-      <MetricStrip columns={6}>
-        <MetricTile label="Endpoints" value={configured ? `${s.agents_online || 0}/${s.agents_total || 0}` : `${liveOnline}/${endpointScores.length}`} accent="sky" icon={<Monitor className="w-2.5 h-2.5 text-sky-400" />} testid="sec-metric-agents" />
-        <MetricTile label="Offline" value={configured ? (s.agents_offline || 0) : liveOffline} accent="rose" icon={<WifiOff className="w-2.5 h-2.5 text-rose-400" />} testid="sec-metric-offline" />
-        <MetricTile label="Critical" value={critIncidents} accent="rose" icon={<ShieldAlert className="w-2.5 h-2.5 text-rose-400" />} testid="sec-metric-critical" />
-        <MetricTile label="Open" value={openIncidents} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="sec-metric-open" />
-        <MetricTile label="Patch exposure" value={vulns.total || 0} accent="violet" icon={<Zap className="w-2.5 h-2.5 text-violet-400" />} testid="sec-metric-signals" />
-        <MetricTile label="Assessed" value={configured ? (s.organizations_count || 0) : `${endpointSummary.assessed || 0}/${endpointScores.length}`} accent="indigo" icon={<Shield className="w-2.5 h-2.5 text-indigo-400" />} testid="sec-metric-orgs" />
-      </MetricStrip>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Shield className="w-6 h-6 text-orange-400" />Security Operations Center
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Unified threat monitoring & response ·
-              {configured ? (
-                <span className="text-emerald-400"> Huntress live {hunt?.last_synced_at ? `(synced ${new Date(hunt.last_synced_at).toLocaleTimeString()})` : ""}</span>
-              ) : (
-                <span className="text-emerald-400"> Nexus Agent posture and persisted security alerts</span>
-              )}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <div className="space-y-6" data-testid="security-dashboard">
+      <OperationalPageHeader
+        eyebrow="Security workspace · verified telemetry and response"
+        title="Security operations center"
+        description={configured
+          ? `Unified threat monitoring and response. Huntress last synced ${hunt?.last_synced_at ? new Date(hunt.last_synced_at).toLocaleTimeString() : "recently"}.`
+          : "Nexus Agent posture and recorded security alerts are shown below. Connect Huntress to add live MDR endpoint and incident telemetry."}
+        icon={Shield}
+        tone="amber"
+        actions={(
+          <>
             {!configured && (
               <Button variant="outline" size="sm" asChild data-testid="sec-configure-huntress">
                 <Link to="/settings?tab=integrations&anchor=huntress-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure Huntress</Link>
               </Button>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5" data-testid="sec-workspace-tools">
+                  <MoreHorizontal className="w-3.5 h-3.5" />
+                  Workspace
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem asChild><Link to="/soc-feed"><Activity className="mr-2 h-4 w-4" />SOC feed</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/soc-realtime"><Zap className="mr-2 h-4 w-4" />Smart automation</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/threat-timeline"><History className="mr-2 h-4 w-4" />Threat timeline</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/identity-threats"><Users className="mr-2 h-4 w-4" />Identity threats</Link></DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button size="sm" onClick={load} disabled={loading} data-testid="sec-refresh-btn">
               {loading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
             </Button>
-          </div>
-        </div>
+          </>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        <HeroTile label={configured ? "Protected endpoints" : "Agent assessments"} value={protectedEndpointValue} animated={false} icon={Monitor} glow="sky" subtitle={configured ? "Live Huntress agents" : "Verified / enrolled Nexus Agents"} testId="sec-metric-agents" />
+        <HeroTile label="Offline endpoints" value={offlineEndpointValue} icon={WifiOff} glow={typeof offlineEndpointValue === "number" && offlineEndpointValue > 0 ? "rose" : "zinc"} subtitle={enrolledAgents > 0 || configured ? "Needs a connectivity check" : "No endpoint evidence yet"} testId="sec-metric-offline" />
+        <HeroTile label="Critical incidents" value={critIncidents} icon={ShieldAlert} glow={critIncidents > 0 ? "rose" : "zinc"} subtitle="Immediate response required" testId="sec-metric-critical" />
+        <HeroTile label="Open incidents" value={openIncidents} icon={AlertTriangle} glow={openIncidents > 0 ? "amber" : "zinc"} subtitle="Awaiting resolution" testId="sec-metric-open" />
+        <HeroTile label="Patch exposure" value={vulnerabilityValue} icon={Zap} glow={typeof vulnerabilityValue === "number" && vulnerabilityValue > 0 ? "violet" : "zinc"} subtitle={hasVulnerabilityEvidence ? "Verified vulnerability findings" : "Not assessed"} testId="sec-metric-signals" />
+        <HeroTile label={configured ? "Assessed organisations" : "Verified posture"} value={assessmentValue} animated={false} icon={Shield} glow="indigo" subtitle={configured ? "Huntress organisations" : "Verified / enrolled endpoints"} testId="sec-metric-orgs" />
+      </div>
 
         {/* Threat Level Banner */}
         <Card className={`${levelTone.bg} overflow-hidden`} data-testid="threat-level-banner">
@@ -180,15 +227,15 @@ export default function SecurityDashboardPage() {
                 <ShieldAlert className={`w-7 h-7 ${levelTone.text}`} />
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Current Threat Level</p>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{configured ? "Current MDR threat level" : "Nexus security signal"}</p>
                 <p className={`text-2xl font-bold ${levelTone.text}`}>{threatLevel}</p>
               </div>
             </div>
             <div className="flex gap-6 text-center">
               <div><p className="text-2xl font-bold text-rose-400">{critIncidents}</p><p className="text-[10px] text-muted-foreground">Critical</p></div>
               <div><p className="text-2xl font-bold text-amber-400">{openIncidents}</p><p className="text-[10px] text-muted-foreground">Open</p></div>
-              <div><p className="text-2xl font-bold">{configured ? (s.incidents_total || 0) : (socH.avg_response_time_min ? `${socH.avg_response_time_min}m` : 0)}</p><p className="text-[10px] text-muted-foreground">{configured ? "Total" : "Avg MTTR"}</p></div>
-              <div><p className="text-2xl font-bold text-emerald-400">{configured ? (s.incidents_resolved || 0) : (socH.threats_blocked_30d || 0)}</p><p className="text-[10px] text-muted-foreground">{configured ? "Resolved" : "Blocked 30d"}</p></div>
+              <div><p className="text-2xl font-bold">{configured ? (s.incidents_total || 0) : (hasSocEvidence ? (socH.total_incidents || 0) : "—")}</p><p className="text-[10px] text-muted-foreground">{configured ? "Total" : "Recorded"}</p></div>
+              <div><p className="text-2xl font-bold text-emerald-400">{configured ? (s.incidents_resolved || 0) : (hasSocEvidence ? (socH.resolved_last_24h || 0) : "—")}</p><p className="text-[10px] text-muted-foreground">{configured ? "Resolved" : "Resolved 24h"}</p></div>
             </div>
           </CardContent>
         </Card>
@@ -198,11 +245,11 @@ export default function SecurityDashboardPage() {
           <CardContent className="py-3 px-5">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Endpoint Health</span>
-              <span className="text-xs font-mono">{agentHealthPct}% ·
-                <span className="text-muted-foreground ml-1">{configured ? `${s.agents_online || 0} online / ${s.agents_offline || 0} offline` : `${liveOnline} online / ${liveOffline} offline`}</span>
+              <span className="text-xs font-mono">{agentHealthPct === null ? "Not assessed" : `${agentHealthPct}%`} |
+                <span className="text-muted-foreground ml-1">{configured ? `${s.agents_online || 0} online / ${s.agents_offline || 0} offline` : enrolledAgents > 0 ? `${liveOnline} online / ${liveOffline} offline` : "No enrolled Nexus Agents"}</span>
               </span>
             </div>
-            <Progress value={agentHealthPct} className="h-2" />
+            <Progress value={agentHealthPct ?? 0} className="h-2" />
           </CardContent>
         </Card>
 
@@ -263,20 +310,10 @@ export default function SecurityDashboardPage() {
                                     <UserPlus className="w-3 h-3 mr-2 text-indigo-400" />Assign
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={async () => {
-                                    if (!i.hostname) { toast.error("No agent linked"); return; }
-                                    const res = await axios.post(`${API}/huntress/agents/${i.hostname}/isolate`, {}, { headers }).catch((err) => ({ data: { success: false, message: err.message } }));
-                                    if (res.data?.success) toast.success("Isolation requested");
-                                    else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
-                                  }} data-testid={`sec-incident-isolate-${i.id}`}>
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "isolate" }); }} data-testid={`sec-incident-isolate-${i.id}`}>
                                     <Lock className="w-3 h-3 mr-2 text-rose-400" />Isolate agent
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={async () => {
-                                    if (!i.hostname) { toast.error("No agent linked"); return; }
-                                    const res = await axios.post(`${API}/huntress/agents/${i.hostname}/release`, {}, { headers }).catch((err) => ({ data: { success: false, message: err.message } }));
-                                    if (res.data?.success) toast.success("Agent released");
-                                    else toast.error(`Huntress rejected: ${res.data?.message || "not supported"}`, { duration: 6000 });
-                                  }}>
+                                  <DropdownMenuItem onClick={() => { setActionDialog({ incident: i, action: "release" }); }} data-testid={`sec-incident-release-${i.id}`}>
                                     <Unlock className="w-3 h-3 mr-2 text-emerald-400" />Release agent
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -294,14 +331,21 @@ export default function SecurityDashboardPage() {
                             <TableCell className="text-xs font-mono">{inc.hostname}</TableCell>
                             <TableCell><Badge className={`${SEV_BADGE[inc.severity] || SEV_BADGE.low} text-[10px]`}>{inc.severity}</Badge></TableCell>
                             <TableCell><Badge variant="outline" className="text-[10px] capitalize">{inc.status}</Badge></TableCell>
-                            <TableCell className="text-[10px] font-mono text-muted-foreground">—</TableCell>
+                            <TableCell className="text-[10px] font-mono text-muted-foreground">{inc.created_at || inc.detected_at ? new Date(inc.created_at || inc.detected_at).toLocaleDateString() : "—"}</TableCell>
                           </TableRow>
                         ))
                     }
                     {configured && (hunt.recent_incidents || []).length === 0 && (
                       <TableRow>
+                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-xs">
+                          No recent incidents. All quiet from Huntress.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {!configured && (soc?.incidents || []).length === 0 && (
+                      <TableRow>
                         <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-xs">
-                          No recent incidents — all quiet from Huntress
+                          No persisted security alerts. Connect Huntress to add managed detection and response telemetry.
                         </TableCell>
                       </TableRow>
                     )}
@@ -426,16 +470,12 @@ export default function SecurityDashboardPage() {
             <Card data-testid="extra-threats">
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs"><Skull className="w-3.5 h-3.5 text-purple-400" />Dark Web findings</div>
-                  <Link to="/dark-web-monitor" className="text-xs font-mono text-purple-400 hover:underline">{darkWeb} →</Link>
-                </div>
-                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs"><Users className="w-3.5 h-3.5 text-cyan-400" />Identity threats</div>
-                  <Link to="/identity-threats" className="text-xs font-mono text-cyan-400 hover:underline">{identity} →</Link>
+                  <Link to="/identity-threats" className="text-xs font-mono text-cyan-400 hover:underline">{identitySourceConfigured ? (identity ?? 0) : "Set up"} →</Link>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />Compliance score</div>
-                  <span className="text-xs font-mono text-emerald-400">{soc?.compliance_score || 0}%</span>
+                  <span className="text-xs font-mono text-emerald-400">{typeof soc?.compliance_score === "number" ? `${soc.compliance_score}%` : "Not assessed"}</span>
                 </div>
               </CardContent>
             </Card>
@@ -460,7 +500,6 @@ export default function SecurityDashboardPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
 
       {/* Incident response dialog */}
       <Dialog open={!!actionDialog} onOpenChange={(v) => { if (!v) { setActionDialog(null); setActionNote(""); setActionAssignee(""); } }}>
@@ -468,11 +507,12 @@ export default function SecurityDashboardPage() {
           <DialogHeader>
             <DialogTitle className="capitalize flex items-center gap-2">
               {actionDialog?.action === "isolate" && <Lock className="w-4 h-4 text-rose-400" />}
+              {actionDialog?.action === "release" && <Unlock className="w-4 h-4 text-emerald-400" />}
               {actionDialog?.action === "close" && <CheckCircle className="w-4 h-4 text-emerald-400" />}
               {actionDialog?.action === "comment" && <MessageSquare className="w-4 h-4 text-violet-400" />}
               {actionDialog?.action === "assign" && <UserPlus className="w-4 h-4 text-indigo-400" />}
               {actionDialog?.action === "acknowledge" && <CheckCircle className="w-4 h-4 text-sky-400" />}
-              {actionDialog?.action} incident
+              {actionDialog?.action} {actionDialog?.action === "isolate" || actionDialog?.action === "release" ? "endpoint" : "incident"}
             </DialogTitle>
           </DialogHeader>
           {actionDialog && (
@@ -487,11 +527,11 @@ export default function SecurityDashboardPage() {
                 </div>
               )}
               <div>
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1">Note (optional)</div>
-                <Textarea rows={3} placeholder="Context for the response log…" value={actionNote} onChange={(e) => setActionNote(e.target.value)} data-testid="sec-action-note" />
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1">Response note {["acknowledge", "comment", "close", "isolate", "release"].includes(actionDialog.action) ? "(required)" : "(optional)"}</div>
+                <Textarea rows={3} placeholder="Record the decision, evidence, or handover context…" value={actionNote} onChange={(e) => setActionNote(e.target.value)} data-testid="sec-action-note" />
               </div>
               <div className="text-[10px] text-muted-foreground border-t border-border pt-2">
-                ⚠ Huntress response APIs are in public beta. If your account plan doesn't expose this action, the attempt is logged locally and a "not supported" toast is shown — no data is lost.
+                Huntress response APIs may vary by plan. Each attempted action is retained in the response timeline and the central audit trail; an unsupported action is never shown as completed.
               </div>
             </div>
           )}
@@ -503,6 +543,6 @@ export default function SecurityDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </div>
   );
 }

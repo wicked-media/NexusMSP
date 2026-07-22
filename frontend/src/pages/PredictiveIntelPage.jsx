@@ -1,275 +1,223 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, HardDrive, Thermometer, Cpu, Database, MemoryStick,
-  RefreshCw, Loader2, Shield, Clock, Target, TrendingUp, Zap, Server,
-  CheckCircle, ChevronRight, Wrench, ArrowLeft
+  Activity, AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, Cpu, HardDrive,
+  Loader2, MemoryStick, RefreshCw, Server, ShieldCheck, Target, Thermometer, TrendingUp, Zap,
 } from "lucide-react";
 
 const RISK_CONFIG = {
-  critical: { color: "text-red-400", bg: "bg-red-500/10 border-red-500/30", icon: AlertTriangle },
-  high: { color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30", icon: TrendingUp },
-  medium: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", icon: Clock },
-  low: { color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/30", icon: Shield },
+  critical: { color: "text-red-400", bg: "bg-red-500/10 border-red-500/30" },
+  high: { color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30" },
+  medium: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30" },
+  low: { color: "text-sky-400", bg: "bg-sky-500/10 border-sky-500/30" },
 };
-const TYPE_ICONS = { disk_failure: HardDrive, hardware_failure: Cpu, battery_failure: Activity, memory_failure: Database, psu_failure: Thermometer, ssd_wear: HardDrive, nic_failure: Activity, cooling_failure: Thermometer };
+
+const TYPE_ICONS = {
+  disk_capacity: HardDrive,
+  disk_failure: HardDrive,
+  cpu_pressure: Cpu,
+  hardware_failure: Cpu,
+  memory_pressure: MemoryStick,
+  memory_failure: MemoryStick,
+  thermal: Thermometer,
+  cooling_failure: Thermometer,
+};
+
+const isNumber = (value) => Number.isFinite(value);
+const metric = (value) => (isNumber(value) ? `${value}%` : "—");
+
+function MetricTile({ icon: Icon, label, value, tone = "sky" }) {
+  const tones = {
+    sky: "bg-sky-500/10 text-sky-300",
+    amber: "bg-amber-500/10 text-amber-300",
+    red: "bg-red-500/10 text-red-300",
+    emerald: "bg-emerald-500/10 text-emerald-300",
+  };
+  return (
+    <Card className="border-border/60 bg-card/80 shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div><p className="text-[11px] font-medium uppercase tracking-[0.13em] text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p></div>
+          <div className={`rounded-xl p-2 ${tones[tone]}`}><Icon className="h-4 w-4" /></div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function HealthGauge({ score }) {
-  const color = score >= 70 ? "text-emerald-400" : score >= 40 ? "text-amber-400" : "text-red-400";
+  const assessed = isNumber(score);
+  const value = assessed ? score : 0;
+  const tone = !assessed ? "text-muted-foreground" : score >= 70 ? "text-emerald-400" : score >= 40 ? "text-amber-400" : "text-red-400";
+  const label = !assessed ? "Not assessed" : score >= 70 ? "Healthy" : score >= 40 ? "Warning" : "Critical";
   return (
     <div className="text-center">
-      <div className="relative w-24 h-24 mx-auto">
-        <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+      <div className="relative mx-auto h-24 w-24">
+        <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
           <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" className="text-muted/20" strokeWidth="8" />
-          <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" className={color} strokeWidth="8" strokeDasharray={`${score * 2.83} ${283 - score * 2.83}`} strokeLinecap="round" />
+          <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" className={tone} strokeWidth="8" strokeDasharray={`${value * 2.83} ${283 - value * 2.83}`} strokeLinecap="round" />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center"><span className={`text-2xl font-black ${color}`}>{score}</span></div>
+        <div className="absolute inset-0 flex items-center justify-center"><span className={`text-2xl font-semibold ${tone}`}>{assessed ? score : "—"}</span></div>
       </div>
-      <Badge className={`mt-2 ${score >= 70 ? "bg-emerald-500/20 text-emerald-400" : score >= 40 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"}`}>
-        {score >= 70 ? "Healthy" : score >= 40 ? "Warning" : "Critical"}
-      </Badge>
+      <Badge className={`mt-2 ${assessed ? "bg-muted text-foreground" : "bg-muted text-muted-foreground"}`}>{label}</Badge>
     </div>
   );
 }
 
-export default function PredictiveIntelPage() {
+export default function PredictiveIntelPage({ embedded = false }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
-  const [tab, setTab] = useState("predictions");
+  const [tab, setTab] = useState("forecasts");
   const [failureData, setFailureData] = useState(null);
-  const [maintDash, setMaintDash] = useState(null);
+  const [monitoring, setMonitoring] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [assessing, setAssessing] = useState(false);
   const [riskFilter, setRiskFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [selected, setSelected] = useState(null);
-  const [selectedDevice, setSelectedDevice] = useState(null);
+  const [selectedForecast, setSelectedForecast] = useState(null);
   const [deviceData, setDeviceData] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (quiet) setRefreshing(true); else setLoading(true);
     try {
-      const [f, m] = await Promise.allSettled([
+      const [forecasts, health] = await Promise.all([
         axios.get(`${API}/predictive-failure/overview`, { headers }),
         axios.get(`${API}/predictive/dashboard`, { headers }),
       ]);
-      if (f.status === "fulfilled") setFailureData(f.value.data);
-      if (m.status === "fulfilled") setMaintDash(m.value.data);
-    } catch { toast.error("Failed to load"); }
-    finally { setLoading(false); }
+      setFailureData(forecasts.data);
+      setMonitoring(health.data);
+    } catch {
+      toast.error("Predictive Intelligence could not be refreshed.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { load(); }, [load]);
 
-  const analyzeDevice = async (deviceId) => {
-    setAnalyzing(true);
+  const assessDevice = async (deviceId) => {
+    setAssessing(true);
     try {
-      const res = await axios.post(`${API}/predictive/analyze/${deviceId}`, {}, { headers });
-      setDeviceData(res.data);
-      setSelectedDevice(deviceId);
-      fetchData();
-    } catch { toast.error("Analysis failed"); }
-    finally { setAnalyzing(false); }
+      const response = await axios.post(`${API}/predictive/analyze/${deviceId}`, {}, { headers });
+      setDeviceData(response.data);
+      if (response.data.evidence_state !== "assessed") toast.message("Assessment is pending an agent telemetry check-in.");
+      await load(true);
+    } catch {
+      toast.error("The device assessment could not be completed.");
+    } finally {
+      setAssessing(false);
+    }
   };
 
-  const analyzeAll = async () => {
-    setAnalyzing(true);
+  const assessAll = async () => {
+    setAssessing(true);
     try {
-      const res = await axios.post(`${API}/predictive/analyze-all`, {}, { headers });
-      toast.success(`Analyzed ${res.data.analyzed} devices`);
-      fetchData();
-    } catch { toast.error("Batch analysis failed"); }
-    finally { setAnalyzing(false); }
+      const response = await axios.post(`${API}/predictive/analyze-all`, {}, { headers });
+      const { analyzed, not_assessed } = response.data;
+      if (analyzed) toast.success(`Assessed ${analyzed} enrolled device${analyzed === 1 ? "" : "s"}.`);
+      else toast.message("No endpoints have enough agent telemetry to assess yet.");
+      if (not_assessed) toast.message(`${not_assessed} endpoint${not_assessed === 1 ? " is" : "s are"} awaiting telemetry.`);
+      await load(true);
+    } catch {
+      toast.error("The batch assessment could not be completed.");
+    } finally {
+      setAssessing(false);
+    }
   };
 
   const resolveAlert = async (alertId) => {
-    try { await axios.put(`${API}/predictive/alert/${alertId}/resolve`, {}, { headers }); toast.success("Alert resolved"); fetchData(); } catch { toast.error("Failed"); }
+    try {
+      await axios.put(`${API}/predictive/alert/${alertId}/resolve`, {}, { headers });
+      toast.success("Condition alert resolved and recorded.");
+      await load(true);
+    } catch {
+      toast.error("The alert could not be resolved.");
+    }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  const predictions = useMemo(() => failureData?.predictions || [], [failureData]);
+  const forecastTypes = useMemo(() => [...new Set(predictions.map((item) => item.failure_type).filter(Boolean))], [predictions]);
+  const filteredForecasts = useMemo(() => predictions.filter((item) => (
+    (riskFilter === "all" || item.risk_level === riskFilter)
+    && (typeFilter === "all" || item.failure_type === typeFilter)
+  )), [predictions, riskFilter, typeFilter]);
+  const urgentForecasts = useMemo(() => predictions.filter((item) => isNumber(item.days_until_failure) && item.days_until_failure <= 7), [predictions]);
+  const summary = failureData?.summary || {};
+  const dash = monitoring || {};
 
-  // Device detail view
-  if (selectedDevice && deviceData) {
-    const t = deviceData.telemetry || {};
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-muted-foreground" /></div>;
+
+  if (deviceData) {
+    const telemetry = deviceData.telemetry || {};
     return (
       <div className="space-y-5" data-testid="device-prediction-detail">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedDevice(null); setDeviceData(null); }}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <Server className="w-5 h-5 text-blue-400" />
-          <div><h2 className="text-xl font-bold">{deviceData.device_name || "Device"}</h2><p className="text-sm text-muted-foreground">{deviceData.client_name}</p></div>
+          <Button variant="outline" size="sm" onClick={() => setDeviceData(null)}><ArrowLeft className="mr-1 h-4 w-4" />Back to Predictive Intelligence</Button>
+          {assessing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
-        <div className="grid grid-cols-4 gap-4">
-          <Card className="col-span-1"><CardContent className="pt-6"><HealthGauge score={deviceData.health_score || 0} /></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><Cpu className="w-6 h-6 mx-auto text-blue-400 mb-1" /><p className="text-2xl font-black">{t.cpu_usage || 0}%</p><p className="text-[10px] text-muted-foreground">CPU</p><Progress value={t.cpu_usage || 0} className="h-1 mt-2" /></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><MemoryStick className="w-6 h-6 mx-auto text-purple-400 mb-1" /><p className="text-2xl font-black">{t.memory_usage || 0}%</p><p className="text-[10px] text-muted-foreground">Memory</p><Progress value={t.memory_usage || 0} className="h-1 mt-2" /></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><HardDrive className="w-6 h-6 mx-auto text-amber-400 mb-1" /><p className="text-2xl font-black">{t.disk_usage || 0}%</p><p className="text-[10px] text-muted-foreground">Disk</p><Progress value={t.disk_usage || 0} className="h-1 mt-2" /></CardContent></Card>
+        <OperationalPageHeader eyebrow="Device condition assessment" title={deviceData.device_name || "Managed endpoint"} description={deviceData.message || "Current observed telemetry condition."} icon={Activity} tone="sky" />
+        <div className="grid gap-3 md:grid-cols-4">
+          <Card className="border-border/60"><CardContent className="p-5"><HealthGauge score={deviceData.health_score} /></CardContent></Card>
+          <MetricTile icon={Cpu} label="Observed CPU" value={metric(telemetry.cpu_usage)} />
+          <MetricTile icon={MemoryStick} label="Observed memory" value={metric(telemetry.memory_usage)} tone="amber" />
+          <MetricTile icon={HardDrive} label="Observed disk" value={metric(telemetry.disk_usage)} tone="red" />
         </div>
-        {(deviceData.predictions || []).length > 0 && (
-          <Card className="border-amber-500/20">
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-amber-400 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />Predicted Issues ({deviceData.predictions.length})</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {deviceData.predictions.map((p, i) => (
-                <div key={`k-${i}`} className={`p-3 rounded-lg border ${p.severity === "critical" ? "bg-red-500/5 border-red-500/20" : p.severity === "high" ? "bg-amber-500/5 border-amber-500/20" : "bg-muted/20 border-border/30"}`}>
-                  <div className="flex items-start justify-between">
-                    <div><p className="font-medium text-sm">{p.component}</p><p className="text-xs text-muted-foreground mt-0.5">{p.description}</p><p className="text-xs mt-1"><span className="text-muted-foreground">Recommendation: </span>{p.recommendation}</p></div>
-                    <Badge className={`${p.severity === "critical" ? "bg-red-500/20 text-red-400" : p.severity === "high" ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400"} text-[10px]`}>{p.severity}</Badge>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+        {deviceData.evidence_state !== "assessed" && <Card className="border-dashed"><CardContent className="p-5 text-sm text-muted-foreground"><span className="font-medium text-foreground">Assessment pending.</span> {deviceData.message || "The endpoint needs a trusted agent check-in with CPU, memory, disk, or temperature telemetry."}</CardContent></Card>}
+        {(deviceData.predictions || []).length > 0 && <Card className="border-amber-500/20"><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-sm"><AlertTriangle className="h-4 w-4 text-amber-400" />Observed threshold conditions</CardTitle></CardHeader><CardContent className="space-y-2">
+          {deviceData.predictions.map((condition, index) => <div key={`${condition.type}-${index}`} className="rounded-xl border border-border/60 bg-muted/20 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{condition.component}</p><p className="mt-1 text-sm text-muted-foreground">{condition.description}</p><p className="mt-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">Recommended next step:</span> {condition.recommendation}</p></div><Badge variant="outline" className="capitalize">{condition.severity}</Badge></div></div>)}
+        </CardContent></Card>}
       </div>
     );
   }
 
-  const fs = failureData?.summary || {};
-  const d = maintDash || {};
-  const failureTypes = failureData ? [...new Set(failureData.predictions.map(p => p.failure_type))] : [];
-  const filtered = failureData ? failureData.predictions.filter(p => (riskFilter === "all" || p.risk_level === riskFilter) && (typeFilter === "all" || p.failure_type === typeFilter)) : [];
-  const urgentPredictions = failureData ? failureData.predictions.filter(p => p.days_until_failure <= 7) : [];
-
   return (
     <div className="space-y-5" data-testid="predictive-intel-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-rose-500 to-red-700 flex items-center justify-center"><Activity className="w-5 h-5 text-white" /></div>
-            Predictive Intelligence
-          </h1>
-          <p className="text-muted-foreground mt-1">ML-powered failure predictions and proactive device health monitoring</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-          <Button onClick={analyzeAll} disabled={analyzing}>{analyzing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}Analyze All</Button>
-        </div>
-      </div>
+      {!embedded && <OperationalPageHeader eyebrow="Managed assets - condition intelligence" title="Predictive Intelligence" description="NexusMSP evaluates current agent-reported thresholds. Failure forecasts, accuracy, and prevention results only appear when a validated provider supplies attributable historical evidence." icon={Activity} tone="sky" actions={<><Button variant="outline" size="sm" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" onClick={assessAll} disabled={assessing}>{assessing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}Assess enrolled devices</Button></>} />}
+      {embedded && <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" onClick={assessAll} disabled={assessing}>{assessing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Zap className="mr-1 h-4 w-4" />}Assess enrolled devices</Button></div>}
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="predictions" data-testid="tab-predictions">Failure Predictions</TabsTrigger>
-          <TabsTrigger value="monitoring" data-testid="tab-monitoring">Device Monitoring</TabsTrigger>
-        </TabsList>
+        <TabsList><TabsTrigger value="forecasts">Provider forecasts</TabsTrigger><TabsTrigger value="monitoring">Device monitoring</TabsTrigger></TabsList>
 
-        <TabsContent value="predictions" className="mt-4 space-y-4">
-          {/* Stats */}
-          <div className="grid grid-cols-5 gap-3">
-            {[
-              { label: "Predictions", value: fs.total_predictions || 0, icon: Target, color: "text-blue-400" },
-              { label: "Critical Alerts", value: fs.critical || 0, icon: AlertTriangle, color: "text-red-400" },
-              { label: "High Risk", value: fs.high || 0, icon: TrendingUp, color: "text-orange-400" },
-              { label: "Prevented", value: fs.prevented_this_month || 0, icon: Shield, color: "text-emerald-400" },
-              { label: "Model Accuracy", value: `${fs.accuracy_pct || 0}%`, icon: Zap, color: "text-purple-400" },
-            ].map(st => (
-              <Card key={st.label} className="border-border/40"><CardContent className="pt-4 pb-3"><div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div><p className={`text-2xl font-bold ${st.color}`}>{st.value}</p></CardContent></Card>
-            ))}
+        <TabsContent value="forecasts" className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <MetricTile icon={Target} label="Provider forecasts" value={summary.total_predictions || 0} />
+            <MetricTile icon={AlertTriangle} label="Critical forecasts" value={summary.critical || 0} tone="red" />
+            <MetricTile icon={TrendingUp} label="High risk" value={summary.high || 0} tone="amber" />
+            <MetricTile icon={ShieldCheck} label="Verified prevention" value={summary.prevented_this_month ?? "—"} tone="emerald" />
+            <MetricTile icon={Zap} label="Validated accuracy" value={isNumber(summary.accuracy_pct) ? `${summary.accuracy_pct}%` : "—"} tone="emerald" />
           </div>
-
-          {urgentPredictions.length > 0 && (
-            <Card className="border-red-500/30 bg-red-500/5"><CardContent className="pt-4 pb-3">
-              <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-red-400 animate-pulse" /><span className="text-sm font-bold text-red-400">URGENT: {urgentPredictions.length} failure{urgentPredictions.length !== 1 ? "s" : ""} predicted within 7 days</span></div>
-              <div className="grid grid-cols-4 gap-2">
-                {urgentPredictions.slice(0, 4).map(p => (
-                  <div key={p.id} className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 cursor-pointer hover:bg-red-500/15" onClick={() => setSelected(p)}><p className="text-sm font-semibold truncate">{p.device_name}</p><p className="text-[10px] text-muted-foreground">{p.prediction}</p><p className="text-xs font-bold text-red-400 mt-1">{p.days_until_failure}d remaining</p></div>
-                ))}
-              </div>
-            </CardContent></Card>
-          )}
-
-          <div className="flex items-center gap-3">
-            <Select value={riskFilter} onValueChange={setRiskFilter}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Risk</SelectItem><SelectItem value="critical">Critical</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem></SelectContent></Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{failureTypes.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}</SelectContent></Select>
-          </div>
-
-          {filtered.length === 0 ? (
-            <Card className="border-dashed"><CardContent className="py-12 text-center"><Shield className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No predictions match filters</p></CardContent></Card>
-          ) : filtered.map(p => {
-            const rc = RISK_CONFIG[p.risk_level] || RISK_CONFIG.medium;
-            const Icon = TYPE_ICONS[p.failure_type] || AlertTriangle;
-            return (
-              <Card key={p.id} className={`${rc.bg} border transition-all hover:shadow-md cursor-pointer`} onClick={() => setSelected(p)}>
-                <CardContent className="pt-4 pb-3">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-background/50 flex items-center justify-center border border-border/30"><Icon className={`w-6 h-6 ${rc.color}`} /></div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1"><span className="font-semibold text-sm">{p.prediction}</span><Badge variant="outline" className={`text-[10px] capitalize ${rc.color}`}>{p.risk_level}</Badge></div>
-                      <p className="text-xs text-muted-foreground">{p.device_name} — {p.client_name}</p>
-                      <div className="flex items-center gap-4 mt-2"><div className="flex items-center gap-1.5"><span className="text-[10px] text-muted-foreground">Confidence:</span><Progress value={p.confidence_pct} className="w-16 h-1.5" /><span className="text-xs font-bold">{p.confidence_pct}%</span></div></div>
-                    </div>
-                    <div className="text-right flex-shrink-0"><div className={`text-2xl font-black ${p.days_until_failure <= 7 ? "text-red-400" : p.days_until_failure <= 14 ? "text-orange-400" : "text-amber-400"}`}>{p.days_until_failure}d</div><p className="text-[10px] text-muted-foreground">until failure</p></div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                </CardContent>
-              </Card>
-            );
+          {urgentForecasts.length > 0 && <Card className="border-red-500/30 bg-red-500/5"><CardContent className="p-4"><div className="flex items-center gap-2 text-sm font-semibold text-red-300"><AlertTriangle className="h-4 w-4" />{urgentForecasts.length} provider forecast{urgentForecasts.length === 1 ? "" : "s"} due within seven days</div></CardContent></Card>}
+          <div className="flex flex-wrap gap-2"><Select value={riskFilter} onValueChange={setRiskFilter}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All risk</SelectItem><SelectItem value="critical">Critical</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem></SelectContent></Select><Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All forecast types</SelectItem>{forecastTypes.map((type) => <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>)}</SelectContent></Select></div>
+          {!filteredForecasts.length ? <Card className="border-dashed"><CardContent className="p-10 text-center"><ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">{failureData?.message || "No provider-backed forecasts match the selected filters."}</p></CardContent></Card> : filteredForecasts.map((forecast) => {
+            const config = RISK_CONFIG[forecast.risk_level] || RISK_CONFIG.medium;
+            const Icon = TYPE_ICONS[forecast.failure_type] || Activity;
+            return <Card key={forecast.id} className={`cursor-pointer border ${config.bg} transition hover:brightness-110`} onClick={() => setSelectedForecast(forecast)}><CardContent className="flex items-center gap-4 p-4"><div className="rounded-xl border border-border/60 bg-background/60 p-3"><Icon className={`h-5 w-5 ${config.color}`} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{forecast.prediction}</p><Badge variant="outline" className={`capitalize ${config.color}`}>{forecast.risk_level}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{forecast.device_name} · {forecast.client_name}</p>{isNumber(forecast.confidence_pct) && <p className="mt-2 text-xs text-muted-foreground">Provider confidence: <span className="font-medium text-foreground">{forecast.confidence_pct}%</span></p>}</div><div className="text-right"><p className={`text-xl font-semibold ${config.color}`}>{isNumber(forecast.days_until_failure) ? `${forecast.days_until_failure}d` : "—"}</p><p className="text-[11px] text-muted-foreground">forecast window</p></div><ChevronRight className="h-4 w-4 text-muted-foreground" /></CardContent></Card>;
           })}
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4 space-y-4">
-          <div className="grid grid-cols-4 gap-3">
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Active Alerts</p><p className="text-xl font-bold text-red-400">{d.active_alerts || 0}</p></div></div></CardContent></Card>
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Shield className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Critical Devices</p><p className="text-xl font-bold text-amber-400">{d.critical_devices || 0}</p></div></div></CardContent></Card>
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><CheckCircle className="w-5 h-5 text-emerald-400" /></div><div><p className="text-xs text-muted-foreground">Resolved</p><p className="text-xl font-bold">{d.resolved_alerts || 0}</p></div></div></CardContent></Card>
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><Server className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Monitored</p><p className="text-xl font-bold">{d.total_monitored || 0}</p></div></div></CardContent></Card>
-          </div>
-
-          <Card className="border-red-500/20">
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-red-400 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />Active Alerts</CardTitle></CardHeader>
-            <CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Issue</TableHead><TableHead>Severity</TableHead><TableHead>Recommendation</TableHead><TableHead></TableHead></TableRow></TableHeader>
-              <TableBody>{(d.alerts || []).length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8"><CheckCircle className="w-8 h-8 mx-auto text-emerald-400 mb-2" /><p className="text-muted-foreground">No active alerts</p></TableCell></TableRow>
-              ) : (d.alerts || []).map(a => (
-                <TableRow key={a.id}><TableCell className="font-medium">{a.device_name}</TableCell><TableCell className="text-sm text-muted-foreground">{a.client_name}</TableCell><TableCell className="text-sm max-w-[200px] truncate">{a.description}</TableCell><TableCell><Badge className={`${a.severity === "critical" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"} text-[10px]`}>{a.severity}</Badge></TableCell><TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">{a.recommendation}</TableCell>
-                  <TableCell><div className="flex gap-1"><Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => analyzeDevice(a.device_id)}>View</Button><Button variant="ghost" size="sm" className="h-7 text-xs text-emerald-400" onClick={() => resolveAlert(a.id)}>Resolve</Button></div></TableCell></TableRow>
-              ))}</TableBody></Table></CardContent>
-          </Card>
-
-          {(d.at_risk_devices || []).length > 0 && (
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-amber-400" />At-Risk Devices</CardTitle></CardHeader>
-              <CardContent className="space-y-2">{d.at_risk_devices.map(dev => (
-                <div key={dev.device_id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border/30 cursor-pointer hover:bg-muted/30" onClick={() => analyzeDevice(dev.device_id)}>
-                  <div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-lg flex items-center justify-center ${dev.health_score < 30 ? "bg-red-500/10" : "bg-amber-500/10"}`}><span className={`text-lg font-black ${dev.health_score < 30 ? "text-red-400" : "text-amber-400"}`}>{dev.health_score}</span></div><div><p className="font-medium text-sm">{dev.device_name}</p><p className="text-xs text-muted-foreground">{dev.client_name}</p></div></div>
-                  <Badge className={dev.health_score < 30 ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}>{dev.status}</Badge>
-                </div>
-              ))}</CardContent></Card>
-          )}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><MetricTile icon={AlertTriangle} label="Active conditions" value={dash.active_alerts || 0} tone="red" /><MetricTile icon={Activity} label="Critical endpoints" value={dash.critical_devices || 0} tone="amber" /><MetricTile icon={CheckCircle2} label="Resolved conditions" value={dash.resolved_alerts || 0} tone="emerald" /><MetricTile icon={Server} label="Agent-assessed endpoints" value={dash.total_monitored || 0} /></div>
+          <Card className="border-border/60"><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-sm"><Activity className="h-4 w-4 text-sky-300" />Active agent-backed conditions</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Observed condition</TableHead><TableHead>Severity</TableHead><TableHead>Next step</TableHead><TableHead /></TableRow></TableHeader><TableBody>{!(dash.alerts || []).length ? <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">No active agent-backed threshold conditions.</TableCell></TableRow> : dash.alerts.map((alert) => <TableRow key={alert.id}><TableCell className="font-medium">{alert.device_name}</TableCell><TableCell>{alert.client_name || "—"}</TableCell><TableCell className="max-w-64 truncate">{alert.description}</TableCell><TableCell><Badge variant="outline" className="capitalize">{alert.severity}</Badge></TableCell><TableCell className="max-w-64 truncate text-muted-foreground">{alert.recommendation}</TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="outline" size="sm" onClick={() => assessDevice(alert.device_id)}>Assess</Button><Button variant="ghost" size="sm" onClick={() => resolveAlert(alert.id)}>Resolve</Button></div></TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
+          {(dash.at_risk_devices || []).length > 0 && <Card className="border-border/60"><CardHeader className="pb-2"><CardTitle className="text-sm">Endpoints requiring attention</CardTitle></CardHeader><CardContent className="space-y-2">{dash.at_risk_devices.map((device) => <button type="button" key={device.device_id} onClick={() => assessDevice(device.device_id)} className="flex w-full items-center justify-between rounded-xl border border-border/60 bg-muted/20 p-3 text-left transition hover:bg-muted/35"><div><p className="font-medium">{device.device_name}</p><p className="text-xs text-muted-foreground">{device.client_name || "Unassigned client"}</p></div><div className="text-right"><p className="font-semibold">{device.health_score}</p><p className="text-[11px] text-muted-foreground">health score</p></div></button>)}</CardContent></Card>}
+          {dash.evidence_state === "not_assessed" && <Card className="border-dashed"><CardContent className="p-5 text-sm text-muted-foreground">{dash.message || "Connect the Nexus Agent and wait for a telemetry check-in to begin device condition assessments."}</CardContent></Card>}
         </TabsContent>
       </Tabs>
 
-      {/* Prediction Detail Dialog */}
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
-        <DialogContent className="max-w-lg" aria-describedby="pred-detail-desc">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="w-5 h-5 text-red-400" />Prediction Detail</DialogTitle><DialogDescription id="pred-detail-desc">ML-powered failure prediction details</DialogDescription></DialogHeader>
-          {selected && (() => {
-            const rc = RISK_CONFIG[selected.risk_level] || RISK_CONFIG.medium;
-            const Icon = TYPE_ICONS[selected.failure_type] || AlertTriangle;
-            return (
-              <div className="space-y-4">
-                <div className={`p-4 rounded-lg ${rc.bg} text-center`}><Icon className={`w-8 h-8 mx-auto ${rc.color} mb-2`} /><p className={`text-3xl font-black ${rc.color}`}>{selected.days_until_failure} days</p><p className="text-xs text-muted-foreground">until predicted failure</p></div>
-                <Separator />
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><span className="text-muted-foreground text-xs">Device</span><p className="font-medium">{selected.device_name}</p></div>
-                  <div><span className="text-muted-foreground text-xs">Client</span><p className="font-medium">{selected.client_name}</p></div>
-                  <div><span className="text-muted-foreground text-xs">Failure Type</span><p className="font-medium capitalize">{selected.failure_type?.replace(/_/g, " ")}</p></div>
-                  <div><span className="text-muted-foreground text-xs">Confidence</span><div className="flex items-center gap-2"><Progress value={selected.confidence_pct} className="w-20 h-2" /><span className="font-bold">{selected.confidence_pct}%</span></div></div>
-                </div>
-                <Separator />
-                <div className="p-3 rounded-lg bg-muted/30 border"><p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1"><Wrench className="w-3 h-3" />Recommended Action</p><p className="text-sm font-medium">{selected.recommended_action}</p></div>
-              </div>
-            );
-          })()}
-        </DialogContent>
+      <Dialog open={!!selectedForecast} onOpenChange={(open) => !open && setSelectedForecast(null)}>
+        <DialogContent className="max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2"><Target className="h-5 w-5 text-sky-300" />Provider forecast detail</DialogTitle><DialogDescription>Forecast data supplied by the recorded provider source.</DialogDescription></DialogHeader>{selectedForecast && <div className="space-y-4 text-sm"><div className="rounded-xl border border-border/60 bg-muted/30 p-4"><p className="font-medium">{selectedForecast.prediction}</p><p className="mt-2 text-muted-foreground">{selectedForecast.device_name} · {selectedForecast.client_name}</p></div><div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-muted-foreground">Forecast window</p><p className="font-medium">{isNumber(selectedForecast.days_until_failure) ? `${selectedForecast.days_until_failure} days` : "Not supplied"}</p></div><div><p className="text-xs text-muted-foreground">Provider confidence</p><p className="font-medium">{isNumber(selectedForecast.confidence_pct) ? `${selectedForecast.confidence_pct}%` : "Not supplied"}</p></div></div><div><p className="text-xs text-muted-foreground">Recommended action</p><p className="mt-1 font-medium">{selectedForecast.recommended_action || "Review the provider evidence and schedule the appropriate technician action."}</p></div></div>}</DialogContent>
       </Dialog>
     </div>
   );

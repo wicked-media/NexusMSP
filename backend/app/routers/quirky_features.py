@@ -38,8 +38,8 @@ from app.auth import get_current_user
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = "gpt-5.6-terra"
 
 
 def _now() -> datetime:

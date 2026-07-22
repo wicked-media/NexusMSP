@@ -67,13 +67,54 @@ async def create_schedule_entry(schedule_data: dict, current_user: dict = Depend
         client = await db.clients.find_one({"id": schedule_data['client_id']}, {"_id": 0})
         client_name = client['name'] if client else None
     
+    date = schedule_data.get('date')
+    start_time = schedule_data.get('start_time')
+    end_time = schedule_data.get('end_time')
+    if not date or not start_time or not end_time:
+        raise HTTPException(status_code=400, detail="Date, start time, and end time are required")
+    if end_time <= start_time:
+        raise HTTPException(status_code=400, detail="End time must be later than start time")
+
+    # A booking is never silently double-booked.  The frontend can show this
+    # response as an approval step; the reason becomes part of the ticket and
+    # organisation audit trail when an authorised user proceeds.
+    occupied_types = ["appointment", "pto", "blocked", "on_call"]
+    overlaps = await db.schedules.find({
+        "user_id": schedule_data.get("user_id"),
+        "date": date,
+        "event_type": {"$in": occupied_types},
+        "start_time": {"$lt": end_time},
+        "end_time": {"$gt": start_time},
+    }, {"_id": 0}).to_list(50)
+    nearby_query = {
+        "date": date,
+        "event_type": "appointment",
+        "start_time": {"$lt": end_time},
+        "end_time": {"$gt": start_time},
+        "user_id": {"$ne": schedule_data.get("user_id")},
+    }
+    if schedule_data.get("location"):
+        nearby_query["location"] = {"$regex": f"^{__import__('re').escape(schedule_data['location'])}$", "$options": "i"}
+    nearby = await db.schedules.find(nearby_query, {"_id": 0}).to_list(50)
+    conflicts = {"overlaps": overlaps, "nearby": nearby}
+    has_conflict = bool(overlaps or nearby)
+    override_reason = (schedule_data.get("override_reason") or "").strip()
+    if has_conflict and not schedule_data.get("approve_conflict"):
+        raise HTTPException(status_code=409, detail={
+            "message": "This booking overlaps an existing commitment or a technician is already at the same location.",
+            "conflicts": conflicts,
+            "requires_approval_note": True,
+        })
+    if has_conflict and not override_reason:
+        raise HTTPException(status_code=400, detail="An approval note is required to proceed with a scheduling conflict")
+
     schedule = TechnicianSchedule(
         user_id=schedule_data.get('user_id'),
         user_name=user_name,
-        date=schedule_data.get('date'),
-        start_time=schedule_data.get('start_time'),
-        end_time=schedule_data.get('end_time'),
-        event_type=schedule_data.get('event_type', 'available'),
+        date=date,
+        start_time=start_time,
+        end_time=end_time,
+        event_type=schedule_data.get('event_type', 'appointment'),
         title=schedule_data.get('title'),
         description=schedule_data.get('description'),
         client_id=schedule_data.get('client_id'),
@@ -83,8 +124,43 @@ async def create_schedule_entry(schedule_data: dict, current_user: dict = Depend
     )
     doc = schedule.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc['calendar_sync_state'] = 'queued' if schedule_data.get('sync_to_calendar', True) else 'not_requested'
+    doc['conflict_approved'] = bool(has_conflict and schedule_data.get('approve_conflict'))
+    doc['approval_note'] = override_reason if doc['conflict_approved'] else None
     await db.schedules.insert_one(doc)
-    return schedule
+
+    # A calendar connection is operational only when the booking reaches Graph.
+    # The helper persists the precise state so dispatch can surface any action
+    # needed rather than implying a queued booking was delivered.
+    if schedule_data.get('sync_to_calendar', True):
+        from app.routers.smart_scheduling import sync_schedule_to_microsoft
+        calendar_result = await sync_schedule_to_microsoft(doc)
+        doc['calendar_sync_state'] = calendar_result.get('state', doc['calendar_sync_state'])
+        doc['calendar_event_id'] = calendar_result.get('event_id')
+        doc['calendar_last_synced_at'] = calendar_result.get('synced_at')
+        doc['calendar_sync_error'] = calendar_result.get('error')
+
+    ticket_id = schedule_data.get('ticket_id')
+    details = f"Appointment booked for {date} {start_time}-{end_time} with {user_name or 'assigned technician'}"
+    if schedule_data.get('location'):
+        details += f" at {schedule_data['location']}"
+    if doc['conflict_approved']:
+        details += f". Scheduling conflict approved: {override_reason}"
+    if doc['calendar_sync_state'] == 'synced':
+        details += ". Microsoft 365 calendar updated"
+    elif doc['calendar_sync_state'] in {'not_connected', 'authentication_failed', 'failed'}:
+        details += f". Microsoft 365 calendar requires attention ({doc['calendar_sync_state'].replace('_', ' ')})"
+    if ticket_id:
+        await db.ticket_comments.insert_one({
+            "id": str(uuid.uuid4()), "ticket_id": ticket_id,
+            "author_id": current_user.get("id", ""), "author_name": current_user.get("name", ""),
+            "content": f"[Scheduling] {details}", "is_internal": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        await ticket_audit(ticket_id, current_user, "appointment_scheduled", details)
+    await log_activity(current_user, "appointment_scheduled", "schedule", doc["id"], doc.get("title") or "Appointment", details, metadata={"ticket_id": ticket_id, "conflict_approved": doc['conflict_approved']})
+    doc.pop('_id', None)
+    return doc
 
 @router.put("/schedule/{schedule_id}")
 async def update_schedule_entry(schedule_id: str, schedule_data: dict, current_user: dict = Depends(get_current_user)):

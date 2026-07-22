@@ -593,20 +593,6 @@ async def _seed_phase11_data():
         if not existing:
             await db.approvals.insert_one(a)
 
-    # Seed Phase 11 data: IT Roadmap items (collection: it_roadmap)
-    roadmap_data = [
-        {"id": "road-001", "client_id": "client-001", "title": "Migrate to Azure AD", "description": "Move from on-prem Active Directory to Azure AD with hybrid join", "category": "migration", "priority": "high", "status": "in_progress", "target_date": "2026-06-30", "quarter": "Q2 2026", "estimated_cost": 15000, "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": "road-002", "client_id": "client-001", "title": "Replace FortiGate 60F with 200F", "description": "Current firewall at capacity. Upgrade to FortiGate 200F for SDWAN", "category": "upgrade", "priority": "medium", "status": "planned", "target_date": "2026-09-01", "quarter": "Q3 2026", "estimated_cost": 8500, "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": "road-003", "client_id": "client-003", "title": "Zero Trust Network Implementation", "description": "Implement zero trust architecture with microsegmentation for PCI compliance", "category": "security", "priority": "high", "status": "planned", "target_date": "2026-12-31", "quarter": "Q4 2026", "estimated_cost": 45000, "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": "road-004", "client_id": "client-004", "title": "HIPAA Compliance Remediation", "description": "Address gaps identified in latest HIPAA audit: encryption, access controls, logging", "category": "security", "priority": "high", "status": "in_progress", "target_date": "2026-04-30", "quarter": "Q2 2026", "estimated_cost": 22000, "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": "road-005", "client_id": "client-007", "title": "1:1 Chromebook Deployment", "description": "Deploy 500 Chromebooks to students with MDM and content filtering", "category": "new_service", "priority": "high", "status": "planned", "target_date": "2026-08-01", "quarter": "Q3 2026", "estimated_cost": 175000, "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": "road-006", "client_id": "client-009", "title": "OT Network Segmentation", "description": "Separate factory floor OT network from corporate IT network", "category": "infrastructure", "priority": "high", "status": "planned", "target_date": "2026-07-15", "quarter": "Q3 2026", "estimated_cost": 35000, "created_at": datetime.now(timezone.utc).isoformat()},
-    ]
-    for r in roadmap_data:
-        existing = await db.it_roadmap.find_one({"id": r["id"]})
-        if not existing:
-            await db.it_roadmap.insert_one(r)
-
     # Seed Phase 11 data: CSAT Surveys (collection: csat_surveys)
     csat_data = []
     now = datetime.now(timezone.utc)

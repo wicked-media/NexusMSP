@@ -13,7 +13,7 @@ import {
   LayoutList, MapPinned, MessageSquare, MoreHorizontal, Paperclip,
   ShieldCheck, ShoppingCart, Sparkles, Wrench,
 } from "lucide-react";
-import { TICKET_MODULES, ticketModuleForPath } from "@/lib/ticketWorkspaceHelpers";
+import { TICKET_MODULES, TICKET_WORKSPACE_TOOLS, ticketModuleForPath, ticketWorkspaceToolForPath } from "@/lib/ticketWorkspaceHelpers";
 
 const MODULE_ICONS = {
   queue: LayoutList,
@@ -25,6 +25,7 @@ const MODULE_ICONS = {
 export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", actions, children }) {
   const location = useLocation();
   const active = ticketModuleForPath(location.pathname);
+  const activeTool = ticketWorkspaceToolForPath(location.pathname);
   return (
     <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-testid="ticket-module-header">
       <div className="flex flex-col gap-4 border-b border-white/[0.06] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
@@ -51,6 +52,18 @@ export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", 
             </Link>
           );
         })}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className={`h-9 shrink-0 gap-1.5 px-3 text-xs ${activeTool ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`} data-testid="ticket-module-more">
+              <MoreHorizontal className="h-3.5 w-3.5" />{activeTool?.label || "More"}<ChevronDown className="h-3 w-3 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            {TICKET_WORKSPACE_TOOLS.map(tool => <DropdownMenuItem key={tool.id} asChild className={activeTool?.id === tool.id ? "bg-violet-500/10 text-violet-200" : ""}>
+              <Link to={tool.path}>{tool.label}</Link>
+            </DropdownMenuItem>)}
+          </DropdownMenuContent>
+        </DropdownMenu>
         {children}
       </nav>
     </section>
@@ -110,12 +123,13 @@ export function TicketToolsCenter({ open, onOpenChange, ticket, sections = [] })
   const hasDevice = Boolean(ticket?.device_id || ticket?.device_ids?.length);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto border-white/[0.08] bg-[#111318] p-0 sm:max-w-3xl" data-testid="ticket-tools-center">
-        <SheetHeader className="sticky top-0 z-10 border-b border-white/[0.07] bg-[#111318]/95 px-6 py-5 pr-12 backdrop-blur-xl">
+      <SheetContent className="w-full overflow-y-auto border-white/[0.08] bg-[#0d1117] p-0 sm:max-w-3xl" data-testid="ticket-tools-center">
+        <SheetHeader className="sticky top-0 z-10 border-b border-cyan-400/[0.12] bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_48%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.11),transparent_38%),rgba(13,17,23,0.97)] px-6 py-5 pr-12 backdrop-blur-xl">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Ticket operations</p>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 ring-1 ring-violet-500/25"><Bot className="h-5 w-5 text-violet-300" /></div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/[0.10]"><Bot className="h-5 w-5 text-cyan-200" /></div>
             <div>
-              <SheetTitle>Tools & integrations</SheetTitle>
+              <SheetTitle className="text-xl text-zinc-100">Tools & integrations</SheetTitle>
               <SheetDescription>{ticket?.ticket_number} · A focused set of safe actions, grouped by technician workflow.</SheetDescription>
             </div>
           </div>
@@ -129,9 +143,9 @@ export function TicketToolsCenter({ open, onOpenChange, ticket, sections = [] })
           {sections.map(section => {
             const Icon = section.icon || Wrench;
             return (
-              <section key={section.id} className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4" data-testid={`ticket-tools-${section.id}`}>
+              <section key={section.id} className="rounded-xl border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] p-4 shadow-[0_10px_26px_rgba(0,0,0,0.12)]" data-testid={`ticket-tools-${section.id}`}>
                 <div className="mb-3 flex items-start gap-3">
-                  <div className="mt-0.5 rounded-lg bg-white/[0.04] p-2"><Icon className="h-4 w-4 text-violet-300" /></div>
+                  <div className="mt-0.5 rounded-lg border border-cyan-400/15 bg-cyan-400/[0.07] p-2"><Icon className="h-4 w-4 text-cyan-200" /></div>
                   <div><h3 className="text-sm font-semibold text-zinc-200">{section.title}</h3>{section.description && <p className="mt-0.5 text-xs leading-5 text-zinc-400/70">{section.description}</p>}</div>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&>button]:min-h-[72px] [&>button]:justify-start [&>button]:whitespace-normal [&>button]:rounded-lg">{section.content}</div>
@@ -169,10 +183,10 @@ export function TicketToolAction({
       type="button"
       onClick={disabled || busy ? undefined : onClick}
       disabled={disabled || busy}
-      className="group flex min-h-[76px] min-w-0 items-start gap-3 rounded-lg border border-white/[0.07] bg-black/10 p-3 text-left transition hover:border-violet-500/25 hover:bg-violet-500/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+      className="group flex min-h-[76px] min-w-0 items-start gap-3 rounded-lg border border-white/[0.07] bg-black/10 p-3 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.045] disabled:cursor-not-allowed disabled:opacity-60"
       data-testid={testId}
     >
-      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/[0.06]"><Icon className="h-4 w-4 text-violet-300" /></span>
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-400/[0.07] ring-1 ring-cyan-400/[0.12]"><Icon className="h-4 w-4 text-cyan-200" /></span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <span className="min-w-0 break-words text-xs font-semibold leading-4 text-zinc-200">{title}</span>

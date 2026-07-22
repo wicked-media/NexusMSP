@@ -26,6 +26,7 @@ router = APIRouter()
 
 CACHE_TTL_MIN = 360  # 6h
 STALE_DAYS = 90
+HYGIENE_SCHEMA_VERSION = 2
 
 
 def _parse_dt(val) -> Optional[datetime]:
@@ -44,16 +45,20 @@ async def _fetch_tenant_data(tenant_id: str) -> dict:
     """Fan out all CIPP calls needed for hygiene. Each call is best-effort."""
     async def safe(coro):
         try:
-            return await coro
+            return True, await coro
         except Exception:
-            return None
+            return False, None
 
-    users, mfa, conditional, guests = await asyncio.gather(
+    users_result, mfa_result, conditional_result, guests_result = await asyncio.gather(
         safe(_cipp_call("GET", "ListUsers", params={"TenantFilter": tenant_id})),
         safe(_cipp_call("GET", "ListMFAUsers", params={"TenantFilter": tenant_id})),
         safe(_cipp_call("GET", "ListConditionalAccessPolicies", params={"TenantFilter": tenant_id})),
         safe(_cipp_call("GET", "ListGuests", params={"TenantFilter": tenant_id})),
     )
+    users_available, users = users_result
+    mfa_available, mfa = mfa_result
+    conditional_available, conditional = conditional_result
+    guests_available, guests = guests_result
 
     def _to_list(x):
         if isinstance(x, list):
@@ -69,10 +74,16 @@ async def _fetch_tenant_data(tenant_id: str) -> dict:
         "mfa": _to_list(mfa),
         "conditional": _to_list(conditional),
         "guests": _to_list(guests),
+        "_sources": {
+            "users": users_available,
+            "mfa": mfa_available,
+            "conditional": conditional_available,
+            "guests": guests_available,
+        },
     }
 
 
-def compute_hygiene(data: dict) -> dict:
+def _compute_hygiene_legacy(data: dict) -> dict:
     users = data.get("users") or []
     mfa_rows = data.get("mfa") or []
     cond = data.get("conditional") or []
@@ -267,6 +278,199 @@ def compute_hygiene(data: dict) -> dict:
 
 
 # ───────────────────────────────────────────────────────────────────────────
+# Evidence-first scoring replacement.  The earlier scoring function remains
+# above only to preserve review history; this implementation is the active
+# function and never awards points for missing CIPP evidence.
+def compute_hygiene(data: dict) -> dict:
+    weights = {
+        "license_efficiency": 20,
+        "mfa_coverage": 25,
+        "stale_users": 15,
+        "license_waste": 15,
+        "admin_sprawl": 10,
+        "guest_posture": 10,
+        "modern_auth": 5,
+    }
+    labels = {
+        "license_efficiency": "License evidence",
+        "mfa_coverage": "MFA evidence",
+        "stale_users": "Sign-in activity evidence",
+        "license_waste": "Disabled-user license evidence",
+        "admin_sprawl": "Administrator role evidence",
+        "guest_posture": "Guest account evidence",
+        "modern_auth": "Conditional Access evidence",
+    }
+    users = data.get("users") or []
+    mfa_rows = data.get("mfa") or []
+    conditional = data.get("conditional") or []
+    guests = data.get("guests") or []
+    supplied_sources = data.get("_sources") or {}
+    sources = {
+        "users": bool(supplied_sources.get("users", "users" in data)),
+        "mfa": bool(supplied_sources.get("mfa", "mfa" in data)),
+        "conditional": bool(supplied_sources.get("conditional", "conditional" in data)),
+        "guests": bool(supplied_sources.get("guests", "guests" in data)),
+    }
+
+    def value_of(item, *keys):
+        for key in keys:
+            if key in item and item.get(key) is not None:
+                return item.get(key)
+        return None
+
+    def dimensions_unassessed():
+        return {key: {"earned": None, "max": maximum, "status": "not_assessed"} for key, maximum in weights.items()}
+
+    if not sources["users"] or not users:
+        reason = "CIPP did not return tenant users" if sources["users"] else "CIPP user inventory is unavailable"
+        return {
+            "score": None,
+            "observed_score": None,
+            "grade": None,
+            "evidence_coverage_pct": 0,
+            "evidence_state": "not_assessed",
+            "total_users": len(users),
+            "breakdown": dimensions_unassessed(),
+            "risks": [{"factor": reason, "severity": "info", "impact": None}],
+            "positives": [],
+            "counts": {"total_users": len(users), "evidence_sources": sources},
+        }
+
+    account_state_available = any(value_of(user, "accountEnabled", "AccountEnabled", "enabled") is not None for user in users)
+    license_data_available = any(value_of(user, "assignedLicenses", "AssignedLicenses") is not None for user in users)
+
+    def license_count(user):
+        licenses = value_of(user, "assignedLicenses", "AssignedLicenses")
+        return len(licenses) if isinstance(licenses, list) else 0
+
+    def last_signin(user):
+        activity = value_of(user, "signInActivity", "SignInActivity") or {}
+        if isinstance(activity, dict):
+            return _parse_dt(activity.get("lastSignInDateTime") or activity.get("LastSignInDateTime"))
+        return _parse_dt(value_of(user, "lastSignIn", "LastSignIn"))
+
+    enabled_users = [user for user in users if value_of(user, "accountEnabled", "AccountEnabled", "enabled") is not False] if account_state_available else []
+    disabled_users = [user for user in users if value_of(user, "accountEnabled", "AccountEnabled", "enabled") is False] if account_state_available else []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=STALE_DAYS)
+    signin_observed = sum(1 for user in enabled_users if last_signin(user) is not None)
+    stale_users = [user for user in enabled_users if (last_signin(user) and last_signin(user) < cutoff)]
+
+    mfa_by_upn = {}
+    for row in mfa_rows:
+        upn = row.get("UPN") or row.get("userPrincipalName") or row.get("UserPrincipalName")
+        if upn:
+            mfa_by_upn[str(upn).lower()] = row
+    mfa_registered = 0
+    mfa_enforced = 0
+    mfa_checked = 0
+    for user in enabled_users:
+        upn = value_of(user, "userPrincipalName", "UserPrincipalName")
+        row = mfa_by_upn.get(str(upn).lower()) if upn else None
+        if row is None:
+            continue
+        mfa_checked += 1
+        if row.get("MFARegistration") or row.get("mfaRegistration") or row.get("isMfaRegistered"):
+            mfa_registered += 1
+        if row.get("MFAEnforced") or row.get("mfaEnforced") or row.get("PerUserMFAState") in ("enforced", "enabled"):
+            mfa_enforced += 1
+    mfa_coverage_pct = round((mfa_registered / mfa_checked) * 100) if mfa_checked else None
+
+    roles_observed = any(value_of(user, "assignedRoles", "AssignedRoles", "memberOf") is not None for user in users)
+    global_admins = 0
+    if roles_observed:
+        for user in users:
+            roles = value_of(user, "assignedRoles", "AssignedRoles", "memberOf") or []
+            for role in roles if isinstance(roles, list) else []:
+                name = (role.get("displayName") if isinstance(role, dict) else str(role)) or ""
+                if "global administrator" in name.lower():
+                    global_admins += 1
+                    break
+
+    stale_guests = 0
+    if sources["guests"]:
+        for guest in guests:
+            seen = last_signin(guest) or _parse_dt(guest.get("createdDateTime") or guest.get("CreatedDateTime"))
+            if seen and seen < cutoff:
+                stale_guests += 1
+    has_mfa_policy = False
+    if sources["conditional"]:
+        has_mfa_policy = any("mfa" in str(policy.get("displayName") or policy.get("DisplayName") or "").lower() or "require multi" in str(policy.get("displayName") or policy.get("DisplayName") or "").lower() for policy in conditional)
+
+    dimensions = dimensions_unassessed()
+    def assessed(key, earned):
+        dimensions[key] = {"earned": max(0, min(round(earned), weights[key])), "max": weights[key], "status": "assessed"}
+
+    if account_state_available and license_data_available:
+        unlicensed = [user for user in enabled_users if license_count(user) == 0]
+        unlicensed_pct = len(unlicensed) / max(len(enabled_users), 1)
+        assessed("license_efficiency", weights["license_efficiency"] * (1 - min(unlicensed_pct * 2, 1)))
+        assessed("license_waste", weights["license_waste"] if not [user for user in disabled_users if license_count(user) > 0] else max(0, weights["license_waste"] - len([user for user in disabled_users if license_count(user) > 0]) * 3))
+    else:
+        unlicensed = []
+    if sources["mfa"] and mfa_checked:
+        assessed("mfa_coverage", weights["mfa_coverage"] * (mfa_coverage_pct / 100))
+    if account_state_available and signin_observed:
+        stale_pct = len(stale_users) / max(signin_observed, 1)
+        assessed("stale_users", weights["stale_users"] * (1 - min(stale_pct * 1.5, 1)))
+    if roles_observed:
+        assessed("admin_sprawl", 6 if global_admins == 0 else weights["admin_sprawl"] if global_admins <= 4 else max(0, weights["admin_sprawl"] - (global_admins - 4) * 2))
+    if sources["guests"]:
+        assessed("guest_posture", weights["guest_posture"] if stale_guests == 0 else max(0, weights["guest_posture"] - stale_guests))
+    if sources["conditional"]:
+        assessed("modern_auth", weights["modern_auth"] if has_mfa_policy else 0)
+
+    assessed_weight = sum(value["max"] for value in dimensions.values() if value["status"] == "assessed")
+    earned = sum(value["earned"] for value in dimensions.values() if value["status"] == "assessed")
+    coverage = round((assessed_weight / sum(weights.values())) * 100)
+    observed_score = round((earned / assessed_weight) * 100) if assessed_weight else None
+    score = observed_score if coverage >= 60 else None
+    grade = "A" if score is not None and score >= 90 else "B" if score is not None and score >= 75 else "C" if score is not None and score >= 60 else "D" if score is not None and score >= 40 else "F" if score is not None else None
+
+    risks = []
+    if dimensions["license_efficiency"]["status"] == "assessed" and unlicensed:
+        risks.append({"factor": f"{len(unlicensed)} active users without a license", "severity": "warning", "impact": -(weights["license_efficiency"] - dimensions["license_efficiency"]["earned"])})
+    if dimensions["mfa_coverage"]["status"] == "assessed" and mfa_coverage_pct < 90:
+        risks.append({"factor": f"MFA coverage only {mfa_coverage_pct}% ({mfa_registered}/{mfa_checked})", "severity": "critical" if mfa_coverage_pct < 50 else "warning", "impact": -(weights["mfa_coverage"] - dimensions["mfa_coverage"]["earned"])})
+    if dimensions["stale_users"]["status"] == "assessed" and stale_users:
+        risks.append({"factor": f"{len(stale_users)} users have not signed in for {STALE_DAYS}+ days", "severity": "warning", "impact": -(weights["stale_users"] - dimensions["stale_users"]["earned"])})
+    if dimensions["admin_sprawl"]["status"] == "assessed" and global_admins == 0:
+        risks.append({"factor": "No global administrator was visible in the provider response", "severity": "critical", "impact": -4})
+    elif dimensions["admin_sprawl"]["status"] == "assessed" and global_admins > 4:
+        risks.append({"factor": f"{global_admins} global administrators (target <=4)", "severity": "warning", "impact": -(weights["admin_sprawl"] - dimensions["admin_sprawl"]["earned"])})
+    if dimensions["modern_auth"]["status"] == "assessed" and not has_mfa_policy:
+        risks.append({"factor": "No MFA Conditional Access policy detected in provider evidence", "severity": "critical", "impact": -weights["modern_auth"]})
+    for key, value in dimensions.items():
+        if value["status"] == "not_assessed":
+            risks.append({"factor": f"Evidence gap: {labels[key]} is unavailable", "severity": "info", "impact": None})
+
+    positives = []
+    if dimensions["license_efficiency"]["status"] == "assessed" and not unlicensed:
+        positives.append({"factor": "Every observed active user is licensed", "impact": "+5"})
+    if dimensions["mfa_coverage"]["status"] == "assessed" and mfa_coverage_pct >= 95:
+        positives.append({"factor": f"Observed MFA coverage {mfa_coverage_pct}%", "impact": "+5"})
+    if dimensions["modern_auth"]["status"] == "assessed" and has_mfa_policy:
+        positives.append({"factor": "An MFA Conditional Access policy is visible in provider evidence", "impact": "+5"})
+
+    return {
+        "score": score,
+        "observed_score": observed_score,
+        "grade": grade,
+        "evidence_coverage_pct": coverage,
+        "evidence_state": "evidence_available" if score is not None else "partial_evidence" if assessed_weight else "not_assessed",
+        "total_users": len(users),
+        "breakdown": dimensions,
+        "risks": risks,
+        "positives": positives,
+        "counts": {
+            "total_users": len(users), "enabled_users": len(enabled_users), "disabled_users": len(disabled_users),
+            "unlicensed_active": len(unlicensed), "stale_users": len(stale_users), "global_admins": global_admins,
+            "stale_guests": stale_guests, "mfa_registered": mfa_registered, "mfa_enforced": mfa_enforced,
+            "mfa_checked": mfa_checked, "mfa_coverage_pct": mfa_coverage_pct, "has_mfa_policy": has_mfa_policy,
+            "evidence_sources": sources,
+        },
+    }
+
+
 # Endpoints
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -274,7 +478,7 @@ async def _hygiene_for_tenant(tenant_id: str, force: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     if not force:
         cached = await db.cipp_hygiene_cache.find_one({"tenant_id": tenant_id}, {"_id": 0})
-        if cached and cached.get("computed_at"):
+        if cached and cached.get("schema_version") == HYGIENE_SCHEMA_VERSION and cached.get("computed_at"):
             dt = _parse_dt(cached["computed_at"])
             if dt and (now - dt) < timedelta(minutes=CACHE_TTL_MIN):
                 return cached["hygiene"]
@@ -283,7 +487,7 @@ async def _hygiene_for_tenant(tenant_id: str, force: bool = False) -> dict:
     hygiene = compute_hygiene(data)
     await db.cipp_hygiene_cache.update_one(
         {"tenant_id": tenant_id},
-        {"$set": {"tenant_id": tenant_id, "hygiene": hygiene, "computed_at": now.isoformat()}},
+        {"$set": {"tenant_id": tenant_id, "hygiene": hygiene, "computed_at": now.isoformat(), "schema_version": HYGIENE_SCHEMA_VERSION}},
         upsert=True,
     )
     return hygiene
@@ -333,8 +537,11 @@ async def hygiene_digest(current_user: dict = Depends(get_current_user)):
                 "client_name": c["name"],
                 "tenant_display": c.get("cipp_tenant_display", ""),
                 "tenant_domain": c.get("cipp_tenant_domain", ""),
-                "score": h.get("score", 0),
-                "grade": h.get("grade", "F"),
+                "score": h.get("score"),
+                "observed_score": h.get("observed_score"),
+                "evidence_coverage_pct": h.get("evidence_coverage_pct", 0),
+                "evidence_state": h.get("evidence_state", "not_assessed"),
+                "grade": h.get("grade"),
                 "top_risks": [r["factor"] for r in (h.get("risks") or [])[:3]],
                 "counts": h.get("counts", {}),
             })
@@ -351,7 +558,7 @@ async def hygiene_digest(current_user: dict = Depends(get_current_user)):
 
     # Summary + upsell hooks
     scored = [r for r in rows if r.get("score") is not None]
-    avg = round(sum(r["score"] for r in scored) / len(scored), 1) if scored else 0
+    avg = round(sum(r["score"] for r in scored) / len(scored), 1) if scored else None
     critical = [r for r in scored if r["score"] < 50]
     needs_upsell = [r for r in scored if any("MFA" in f or "unlicensed" in f.lower() or "license waste" in f.lower() for f in r.get("top_risks", []))]
 

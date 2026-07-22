@@ -9,6 +9,34 @@ from app.services.integrations import acronis_service
 
 router = APIRouter()
 
+
+async def _record_acronis_activity(
+    current_user: dict,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    entity_name: str,
+    details: str,
+    metadata: Optional[dict] = None,
+):
+    """Write a best-effort audit event without masking the primary operation."""
+    try:
+        await db.activity_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "entity_name": entity_name,
+            "user_id": current_user.get("id", ""),
+            "user_name": current_user.get("name") or current_user.get("email", ""),
+            "details": details,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": metadata or {},
+        })
+    except Exception:
+        pass
+
+
 # ============== ACRONIS LIVE INTEGRATION ==============
 
 
@@ -21,11 +49,17 @@ async def get_acronis_config(current_user: dict = Depends(get_current_user)):
     # Also check DB
     config = await db.settings.find_one({"key": "acronis_config"}, {"_id": 0})
     db_val = config.get("value", {}) if config else {}
+    configured_api_url = api_url or db_val.get("api_url", "")
+    configured_client_id = client_id or db_val.get("client_id", "")
+    configured_has_secret = has_secret or bool(db_val.get("client_secret"))
     return {
-        "api_url": api_url or db_val.get("api_url", ""),
-        "client_id": client_id or db_val.get("client_id", ""),
-        "has_secret": has_secret or bool(db_val.get("client_secret")),
+        "api_url": configured_api_url,
+        "client_id": configured_client_id,
+        "has_secret": configured_has_secret,
+        # `connected` is preserved for existing callers. `configured` makes it
+        # explicit that saved credentials still need a successful test call.
         "connected": bool(api_url and client_id and has_secret),
+        "configured": bool(configured_api_url and configured_client_id and configured_has_secret),
     }
 
 
@@ -365,16 +399,50 @@ async def run_acronis_backup(data: dict, current_user: dict = Depends(get_curren
         if failed:
             msg += f", {len(failed)} failed"
 
-        return {
+        response = {
             "status": "triggered" if not failed else "partial",
             "triggered_plans": triggered,
             "failed_plans": len(failed),
             "message": msg,
             "results": results,
         }
-    except HTTPException:
+        await _record_acronis_activity(
+            current_user,
+            "acronis_backup_run",
+            "backup_run",
+            resource_id or (application_ids[0] if application_ids else "acronis-backup-run"),
+            resource_id or f"{len(application_ids)} backup application(s)",
+            msg,
+            {
+                "application_ids": application_ids,
+                "resource_id": resource_id,
+                "policy_count": len(grouped),
+                "status": response["status"],
+                "failed_plans": len(failed),
+            },
+        )
+        return response
+    except HTTPException as exc:
+        await _record_acronis_activity(
+            current_user,
+            "acronis_backup_run_failed",
+            "backup_run",
+            resource_id or "acronis-backup-run",
+            resource_id or "Backup run",
+            str(exc.detail),
+            {"application_ids": application_ids, "resource_id": resource_id},
+        )
         raise
     except Exception as e:
+        await _record_acronis_activity(
+            current_user,
+            "acronis_backup_run_failed",
+            "backup_run",
+            resource_id or "acronis-backup-run",
+            resource_id or "Backup run",
+            str(e),
+            {"application_ids": application_ids, "resource_id": resource_id},
+        )
         raise HTTPException(status_code=500, detail=f"Run backup failed: {str(e)}")
 
 

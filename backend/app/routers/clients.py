@@ -136,6 +136,14 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 
     acronis_links = {l["client_id"] async for l in db.acronis_customer_links.find({}, {"_id": 0, "client_id": 1})}
     pax8_links = {l["client_id"] async for l in db.pax8_company_links.find({}, {"_id": 0, "client_id": 1})}
+    yeastar_records = await db.yeastar_pbxs.find(
+        {"client_id": {"$in": client_ids}, "enabled": {"$ne": False}},
+        {"_id": 0, "id": 1, "client_id": 1, "name": 1, "status": 1, "extension_count": 1, "billable_extension_count": 1, "last_sync": 1},
+    ).to_list(500)
+    yeastar_links = {record["client_id"] for record in yeastar_records if record.get("client_id")}
+    yeastar_by_client = {}
+    for record in yeastar_records:
+        yeastar_by_client.setdefault(record.get("client_id"), []).append(record)
 
     last_activity_map = {}
     async for t in db.tickets.find({"client_id": {"$in": client_ids}}, {"_id": 0, "client_id": 1, "updated_at": 1, "created_at": 1}).sort("updated_at", -1):
@@ -153,6 +161,8 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
         mrr = float(contract.get("mrr") or c.get("mrr") or 0)
         trend = [{"month": k, "value": round(mrr_trend_map[cid].get(k, 0), 2)} for k in month_keys]
 
+        voice_pbxs = yeastar_by_client.get(cid, [])
+        voice_online = len([pbx for pbx in voice_pbxs if pbx.get("status") == "online"])
         results.append({
             "id": cid,
             "name": c.get("name"),
@@ -181,10 +191,21 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
             "integrations": {
                 "acronis": cid in acronis_links,
                 "pax8": cid in pax8_links,
+                "yeastar": cid in yeastar_links,
                 "m365": bool(c.get("m365_tenant_id") or c.get("office365_tenant_id")),
                 "rmm": amap["total"] > 0,
                 "suped": bool(c.get("suped_tenant_id")),
                 "cipp": bool(c.get("cipp_tenant_id")),
+            },
+            "voice": {
+                "linked": bool(voice_pbxs),
+                "pbx_count": len(voice_pbxs),
+                "online_count": voice_online,
+                "extension_count": sum(int(pbx.get("extension_count") or 0) for pbx in voice_pbxs),
+                "billable_extension_count": sum(int(pbx.get("billable_extension_count") or 0) for pbx in voice_pbxs),
+                "status": "online" if voice_pbxs and voice_online == len(voice_pbxs) else ("attention" if voice_pbxs else "not_linked"),
+                "last_sync": max((pbx.get("last_sync") or "" for pbx in voice_pbxs), default="") or None,
+                "pbxs": voice_pbxs,
             },
             "last_activity": last_activity_map.get(cid),
             "last_qbr": c.get("last_qbr"),
@@ -218,19 +239,98 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
     # Recent tickets
     tickets = await db.tickets.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(20)
     for t in tickets:
-        timeline.append({"type": "ticket", "title": t.get("title"), "ticket_number": t.get("ticket_number"), "status": t.get("status"), "priority": t.get("priority"), "timestamp": t.get("created_at"), "id": t.get("id")})
+        timeline.append({"type": "ticket", "title": t.get("title"), "ticket_number": t.get("ticket_number"), "status": t.get("status"), "priority": t.get("priority"), "timestamp": t.get("created_at"), "id": t.get("id"), "route": f"/tickets?ticket={t.get('id')}"})
     
     # Recent invoices
     invoices = await db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(20)
     for inv in invoices:
-        timeline.append({"type": "invoice", "title": f"Invoice #{inv.get('invoice_number','')}", "amount": inv.get("total", 0), "status": inv.get("status"), "timestamp": inv.get("created_at"), "id": inv.get("id")})
+        timeline.append({"type": "invoice", "title": f"Invoice #{inv.get('invoice_number','')}", "amount": inv.get("total", 0), "status": inv.get("status"), "timestamp": inv.get("created_at"), "id": inv.get("id"), "route": f"/invoices?invoice={inv.get('id')}"})
+
+    # Delivery records include accepted, failed, and inbound client email so a
+    # technician can verify what correspondence actually left NexusMSP.
+    communications = await db.client_communication_events.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    for event in communications:
+        direction = event.get("direction", "outbound")
+        status = event.get("delivery_status", "recorded")
+        recipient = event.get("sender_email") if direction == "inbound" else ", ".join((event.get("recipients") or [])[:2])
+        timeline.append({
+            "type": "email",
+            "title": f"{'Received' if direction == 'inbound' else 'Sent'}: {event.get('subject') or '(no subject)'}",
+            "recipient": recipient,
+            "status": status,
+            "timestamp": event.get("created_at"),
+            "id": event.get("id"),
+            "route": f"/comms-timeline?client={client_id}",
+        })
+
+    # Client-level operational milestones, including onboarding completion,
+    # are kept with the same client history as correspondence and tickets.
+    client_activity = await db.activity_logs.find(
+        {"entity_type": "client", "entity_id": client_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    for entry in client_activity:
+        timeline.append({
+            "type": "client_activity",
+            "title": entry.get("details") or entry.get("action", "Client activity").replace("_", " "),
+            "status": entry.get("action"),
+            "timestamp": entry.get("created_at"),
+            "id": entry.get("id"),
+            "actor": entry.get("user_name"),
+        })
+
+    # The account feed must include the same persisted governance evidence an
+    # auditor sees. This deliberately reads audit records; it does not invent
+    # a "social" event for an action that has not been recorded.
+    audit_entries = await db.audit_logs.find({
+        "$or": [
+            {"entity_type": "client", "entity_id": client_id},
+            {"metadata.client_id": client_id},
+        ]
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    for entry in audit_entries:
+        entity_type = entry.get("entity_type") or "client"
+        entity_id = entry.get("entity_id")
+        route = None
+        if entity_type == "ticket" and entity_id:
+            route = f"/tickets?ticket={entity_id}"
+        elif entity_type == "invoice" and entity_id:
+            route = f"/invoices?invoice={entity_id}"
+        elif entity_type == "change_request":
+            route = "/change-management"
+        elif entity_type == "device" and entity_id:
+            route = f"/devices/{entity_id}"
+        timeline.append({
+            "type": "audit",
+            "title": entry.get("entity_name") or str(entry.get("action") or "Audited client action").replace("_", " "),
+            "status": entry.get("action"),
+            "timestamp": entry.get("created_at"),
+            "id": f"audit-{entry.get('id')}",
+            "actor": entry.get("user_name"),
+            "metadata": entry.get("metadata") or {},
+            "route": route,
+        })
+
+    # Change requests are client records in their own right. Keeping them in
+    # the account feed gives technicians an immediate path into planned or
+    # completed work without treating a schedule as a completed deployment.
+    changes = await db.change_requests.find({"client_id": client_id}, {"_id": 0}).sort("updated_at", -1).to_list(50)
+    for change in changes:
+        timeline.append({
+            "type": "change",
+            "title": change.get("title") or "Change request",
+            "status": change.get("status") or "recorded",
+            "timestamp": change.get("updated_at") or change.get("created_at"),
+            "id": f"change-{change.get('id')}",
+            "actor": change.get("requested_by"),
+            "route": "/change-management",
+        })
     
     # Recent time entries (via tickets linked to this client)
     client_ticket_ids = [t["id"] for t in tickets]
     if client_ticket_ids:
         time_entries = await db.time_entries.find({"ticket_id": {"$in": client_ticket_ids}}, {"_id": 0}).sort("date", -1).to_list(20)
         for te in time_entries:
-            timeline.append({"type": "time_entry", "title": te.get("description", "Time logged"), "minutes": te.get("minutes"), "billable": te.get("billable"), "timestamp": te.get("date"), "id": te.get("id")})
+            timeline.append({"type": "time_entry", "title": te.get("description", "Time logged"), "minutes": te.get("minutes"), "billable": te.get("billable"), "timestamp": te.get("date"), "id": te.get("id"), "route": f"/tickets?ticket={te.get('ticket_id')}"})
 
     # Agent and operator activity are operational evidence for this client.
     if device_ids:
@@ -241,7 +341,7 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
             timeline.append({
                 "type": "device_activity", "title": entry.get("details") or entry.get("action", "Device activity").replace("_", " "),
                 "device_name": entry.get("entity_name") or device_names.get(entry.get("entity_id")),
-                "status": entry.get("action"), "timestamp": entry.get("created_at"), "id": f"activity-{entry.get('id')}",
+                "status": entry.get("action"), "timestamp": entry.get("created_at"), "id": f"activity-{entry.get('id')}", "actor": entry.get("user_name"), "route": f"/devices/{entry.get('entity_id')}",
             })
         device_events = await db.device_events.find(
             {"device_id": {"$in": device_ids}}, {"_id": 0}
@@ -250,7 +350,7 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
             timeline.append({
                 "type": "device_event", "title": event.get("message") or event.get("event_type", "Device event").replace("_", " "),
                 "device_name": device_names.get(event.get("device_id")), "status": event.get("severity"),
-                "timestamp": event.get("timestamp"), "id": f"event-{event.get('id')}",
+                "timestamp": event.get("timestamp"), "id": f"event-{event.get('id')}", "route": f"/devices/{event.get('device_id')}",
             })
     
     # Sort by timestamp descending

@@ -1,4 +1,4 @@
-"""QBR Auto-Generator â€” Quarterly Business Reviews drafted by Claude Sonnet 4.5.
+"""QBR Auto-Generator â€” Quarterly Business Reviews drafted by Nexus AI.
 
 For a given client + quarter, gather:
   â€¢ Ticket volume + categories + SLA performance + top issues
@@ -7,7 +7,7 @@ For a given client + quarter, gather:
   â€¢ Active alerts + critical incidents
   â€¢ Cross-client pattern surges that affected this client (Blueprint Insights bridge)
   â€¢ Invoice / spend totals
-Then ask Claude to write a 6-section QBR ready for client delivery, plus a structured
+Then ask Nexus AI to write a 6-section QBR ready for client delivery, plus a structured
 JSON for the frontend to render + export to branded PDF.
 
 Endpoints:
@@ -30,8 +30,8 @@ from app.auth import get_current_user
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = "gpt-5.6-terra"
 
 
 def _quarter_window(label: str | None):

@@ -25,6 +25,7 @@ export default function BillingTab({ token }) {
   const [autoBillBusy, setAutoBillBusy] = useState(null);
   const [autoBillDialog, setAutoBillDialog] = useState(null);
   const [autoBillFrequency, setAutoBillFrequency] = useState("monthly");
+  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
 
   const fetchBilling = async () => {
     setLoading(true);
@@ -85,6 +86,11 @@ export default function BillingTab({ token }) {
       if (!dryRun) fetchBilling();
     } catch (e) { toast.error(e.response?.data?.detail || "Billing sync failed"); }
     finally { setSyncingBilling(false); }
+  };
+
+  const confirmBillingSync = async () => {
+    setSyncConfirmOpen(false);
+    await syncBillingToLineItems(false);
   };
 
   const handleToggleAutoBill = (row) => {
@@ -152,7 +158,7 @@ export default function BillingTab({ token }) {
           <Button size="sm" variant="outline" onClick={() => syncBillingToLineItems(true)} disabled={syncingBilling} data-testid="dry-run-billing-btn">
             <Eye className="w-3 h-3 mr-1" />Dry Run
           </Button>
-          <Button size="sm" onClick={() => syncBillingToLineItems(false)} disabled={syncingBilling || !(billingPreview?.linked_clients)} data-testid="sync-billing-btn">
+          <Button size="sm" onClick={() => setSyncConfirmOpen(true)} disabled={syncingBilling || !(billingPreview?.linked_clients)} data-testid="sync-billing-btn">
             {syncingBilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <FileText className="w-3 h-3 mr-1" />}Sync to Line Items
           </Button>
         </div>
@@ -305,6 +311,33 @@ export default function BillingTab({ token }) {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+        <DialogContent className="max-w-xl overflow-hidden border-emerald-400/20 bg-background p-0" data-testid="backup-billing-sync-confirmation">
+          <DialogHeader className="border-b border-emerald-400/15 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing control</p>
+            <DialogTitle className="mt-1 flex items-center gap-2 text-xl">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><FileText className="h-4 w-4 text-emerald-300" /></span>
+              Apply Acronis usage to billing
+            </DialogTitle>
+            <DialogDescription>Review the current calculation before NexusMSP creates or updates billable line items. The resulting changes remain linked to the affected client records.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 px-6 py-5">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-xl border border-border/70 bg-muted/20 p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Clients</p><p className="mt-1 text-lg font-semibold">{billingPreview?.linked_clients || 0}</p></div>
+              <div className="rounded-xl border border-border/70 bg-muted/20 p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Period</p><p className="mt-1 text-sm font-semibold">{billingPreview?.period || "Current"}</p></div>
+              <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-3"><p className="text-[10px] uppercase tracking-wide text-emerald-200/80">Total</p><p className="mt-1 text-sm font-semibold text-emerald-200">{currency} {(billingPreview?.grand_total || 0).toFixed(2)}</p></div>
+            </div>
+            <p className="text-xs text-muted-foreground">Use Dry Run if you need to refresh the calculation before applying it. This action does not issue an invoice; it syncs approved usage into the relevant billing line items.</p>
+          </div>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={() => setSyncConfirmOpen(false)} disabled={syncingBilling}>Cancel</Button>
+            <Button onClick={confirmBillingSync} disabled={syncingBilling} className="bg-emerald-600 hover:bg-emerald-700">
+              {syncingBilling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm & sync
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!autoBillDialog} onOpenChange={v => !v && setAutoBillDialog(null)}>
         <DialogContent>

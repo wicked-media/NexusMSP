@@ -254,48 +254,6 @@ class TestVendorScorecard:
 
 
 # =============================================================================
-# 8. Client IT Roadmap Builder Tests
-# =============================================================================
-class TestITRoadmap:
-    """Test IT roadmap CRUD operations"""
-
-    def test_get_all_roadmaps(self, authenticated_client):
-        """GET /api/it-roadmap - list all client roadmaps"""
-        response = authenticated_client.get(f"{BASE_URL}/api/it-roadmap")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        print(f"IT Roadmap: {len(data)} clients with roadmaps")
-
-    def test_get_client_roadmap(self, authenticated_client, test_client_id):
-        """GET /api/it-roadmap/{client_id} - get client roadmap items"""
-        response = authenticated_client.get(f"{BASE_URL}/api/it-roadmap/{test_client_id}")
-        assert response.status_code == 200
-        data = response.json()
-        assert "client" in data
-        assert "items" in data
-        print(f"IT Roadmap: Client {test_client_id} has {len(data['items'])} items")
-
-    def test_add_roadmap_item(self, authenticated_client, test_client_id):
-        """POST /api/it-roadmap/{client_id} - add roadmap item"""
-        payload = {
-            "title": "TEST_Server Upgrade",
-            "description": "Upgrade to Windows Server 2025",
-            "category": "upgrade",
-            "target_date": "2026-06-01",
-            "quarter": "Q2 2026",
-            "estimated_cost": 5000,
-            "priority": "high"
-        }
-        response = authenticated_client.post(f"{BASE_URL}/api/it-roadmap/{test_client_id}", json=payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert "id" in data
-        assert data["title"] == payload["title"]
-        print(f"IT Roadmap: Added item {data['id']} for client {test_client_id}")
-
-
-# =============================================================================
 # 9. Automated Warranty Tracker Tests
 # =============================================================================
 class TestWarrantyTracker:

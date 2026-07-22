@@ -45,14 +45,14 @@ def _parse_date(s: str) -> Optional[datetime]:
 
 
 async def _ai_chat(session_id: str, system_msg: str):
-    """Wrap OpenAI-compatible provider Claude Sonnet 4.5 for invoice AI features."""
+    """Use the centrally configured OpenAI model for invoice AI features."""
     from app.services.ai_provider import LlmChat
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
-    provider = cfg.get("provider", "anthropic")
-    model = cfg.get("model", "claude-sonnet-4-5-20250929")
+    provider = "openai"
+    model = cfg.get("model", "gpt-5.6-terra")
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
     chat.with_model(provider, model)
     return chat
@@ -136,6 +136,9 @@ async def ai_draft_invoice(data: dict, current_user: dict = Depends(get_current_
                     "quantity": qty, "unit_price": rate, "total": amt,
                     "source": "recurring",
                 })
+                # Normalise the user-facing source label independently of older
+                # seeded text so invoice drafts cannot expose mojibake.
+                line_items[-1]["description"] = f"{li.get('description', '')} - {ri.get('description', 'Recurring')}"
 
     if not line_items:
         # Fallback: ticket-only flat fee
@@ -338,6 +341,8 @@ async def smart_reminder(invoice_id: str, data: dict, current_user: dict = Depen
     except Exception as e:
         logger.warning(f"reminder AI failed: {e}")
         body = f"Hi {invoice.get('client_name', 'team')},\n\nFriendly reminder that Invoice {invoice.get('invoice_number')} (${invoice.get('total')}) was due on {invoice.get('due_date')}.\nLet us know if you have any questions.\n\nThanks!"
+    subject = f"Reminder: Invoice {invoice.get('invoice_number')} - {invoice.get('currency', 'AUD')} {invoice.get('total')}"
+    return {"stage": stage, "subject": subject, "body": body, "days_overdue": max(0, age)}
     return {"stage": stage, "subject": f"Reminder: Invoice {invoice.get('invoice_number')} Ã¢â‚¬â€ {invoice.get('currency', 'AUD')} {invoice.get('total')}", "body": body, "days_overdue": max(0, age)}
 
 
@@ -442,6 +447,9 @@ async def bulk_invoice_action(action: str, data: dict, current_user: dict = Depe
                 clone["status"] = "draft"
                 clone["payment_status"] = "unpaid"
                 clone["amount_paid"] = 0
+                source_name = str(inv.get("invoice_name") or "").strip()
+                if source_name:
+                    clone["invoice_name"] = f"Reissued: {source_name}"[:160]
                 clone["created_at"] = _now_iso()
                 clone["due_date"] = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
                 clone["reissued_from"] = inv_id
@@ -644,7 +652,7 @@ async def fire_invoice_webhook(event: str, invoice: dict):
         hooks = await db.invoice_webhooks.find({"active": True, "events": event}, {"_id": 0}).to_list(50)
         if not hooks:
             return
-        payload = {"event": event, "invoice": {k: invoice.get(k) for k in ("id", "invoice_number", "client_id", "client_name", "total", "status", "payment_status")}, "at": _now_iso()}
+        payload = {"event": event, "invoice": {k: invoice.get(k) for k in ("id", "invoice_number", "invoice_name", "client_id", "client_name", "total", "status", "payment_status")}, "at": _now_iso()}
         async with httpx.AsyncClient(timeout=8) as cli:
             for h in hooks:
                 try:

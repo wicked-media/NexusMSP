@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import SetupGuideCallout from "@/components/SetupGuideCallout";
 import { toast } from "sonner";
 import {
   Mail, Settings, CheckCircle, XCircle, RefreshCw, Loader2, Shield,
@@ -234,11 +235,12 @@ export default function O365SetupPage() {
   ];
 
   return (
-    <div className="space-y-6" data-testid="o365-setup-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6" data-testid="mailbox-email-workspace">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Microsoft 365 Mailboxes</h1>
-          <p className="text-muted-foreground">Microsoft Graph email intake, outbound routing, delivery audit, and automatic sync</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Mailbox and email</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">Microsoft 365 Mailboxes</h2>
+          <p className="text-sm text-muted-foreground">Microsoft Graph email intake, outbound routing, delivery audit, and automatic sync.</p>
         </div>
         <div className="flex gap-2">
           {isConnected && (
@@ -496,10 +498,7 @@ export default function O365SetupPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{isConnected ? "Add Microsoft 365 Mailbox" : "Connect Microsoft 365 Mailbox"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
-              <p className="font-medium text-blue-400 mb-1">Azure AD App Registration Required</p>
-              <p>Go to <span className="font-mono">portal.azure.com</span> &gt; Azure Active Directory &gt; App registrations &gt; New registration. Grant <span className="font-mono">Mail.Read, Mail.Send, Mail.ReadWrite</span> permissions.</p>
-            </div>
+            <SetupGuideCallout title="Azure app registration required" source="In Microsoft Entra admin centre, create an App registration, record its Directory (tenant) ID and Application (client) ID, create a Client Secret, then grant the required Microsoft Graph application permissions and administrator consent." steps={["Create the app registration in Microsoft Entra ID.", "Grant Mail.Read and Mail.Send application permissions; include Mail.ReadWrite only when the intended workflow requires it.", "Record the Client Secret in Keeper, then grant tenant-wide administrator consent and use Test Connection after saving."]} securityNote="The Client Secret is a password for the Azure app. Keep its source record in Keeper, enter it directly into this integration setting only when required, and replace it before it expires." helpSlug="email-intake-and-leads" />
             <div className="space-y-2">
               <Label>Tenant ID *</Label>
               <Input value={form.tenant_id} onChange={e => setForm({ ...form, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="o365-tenant-id" />

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
 import random; random = random.SystemRandom()
+import uuid
 
 router = APIRouter()
 
@@ -33,6 +34,35 @@ async def get_bandwidth_alerts(current_user: dict = Depends(get_current_user)):
             await db.bandwidth_alerts.insert_one(a)
         alerts = [dict((k, v) for k, v in a.items() if k != "_id") for a in alerts]
     return alerts
+
+@router.post("/bandwidth-monitor/alerts/{alert_id}/resolve")
+async def resolve_bandwidth_alert(alert_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+    """Resolve a bandwidth alert and retain a technician-attributed audit record."""
+    alert = await db.bandwidth_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="Bandwidth alert not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    note = (data or {}).get("note", "").strip()
+    update = {
+        "resolved": True,
+        "resolved_at": now,
+        "resolved_by": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "resolution_note": note,
+    }
+    await db.bandwidth_alerts.update_one({"id": alert_id}, {"$set": update})
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email"),
+        "action": "resolve",
+        "entity_type": "bandwidth_alert",
+        "entity_id": alert_id,
+        "entity_name": alert.get("site_name") or alert.get("site_id") or alert_id,
+        "metadata": {"severity": alert.get("severity"), "type": alert.get("type"), "note": note},
+        "created_at": now,
+    })
+    return {"message": "Bandwidth alert resolved", "alert": {**alert, **update}}
 
 @router.get("/bandwidth-monitor/top-talkers/{site_id}")
 async def get_top_talkers(site_id: str, current_user: dict = Depends(get_current_user)):

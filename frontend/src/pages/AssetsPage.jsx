@@ -12,22 +12,34 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { useNavigate, useParams } from "react-router-dom";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   Plus, Search, Loader2, Monitor, HardDrive, Laptop, Server, Wifi,
   AlertTriangle, Shield, DollarSign, Edit, Trash2, ArrowLeft, Calendar,
-  Building, Tag, MapPin, ArrowUpDown
+  Building, Tag, MapPin, ArrowUpDown, RefreshCw, Boxes, Wrench, MessageSquare, MoreHorizontal, ChevronDown, QrCode, ShoppingCart
 } from "lucide-react";
 import { format, formatDistanceToNow, isPast, parseISO, differenceInDays } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 const ASSET_TYPES = ["hardware", "software", "license", "peripheral", "network", "server", "mobile", "other"];
 const ASSET_ICONS = { hardware: Laptop, software: HardDrive, license: Tag, peripheral: Wifi, network: Wifi, server: Server, mobile: Monitor, other: Monitor };
+const INVENTORY_ASSET_TOOLS = [
+  { path: "/qr-assets", label: "QR Asset Tags", icon: QrCode },
+  { path: "/asset-lifecycle", label: "Lifecycle & Warranty", icon: Wrench },
+  { path: "/asset-depreciation", label: "Depreciation", icon: DollarSign },
+  { path: "/procurement-planner", label: "Procurement", icon: ShoppingCart },
+];
 
 export default function AssetsPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
+  const { assetId } = useParams();
   const [assets, setAssets] = useState([]);
   const [clients, setClients] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [stats, setStats] = useState({});
   const [expiring, setExpiring] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,10 +49,11 @@ export default function AssetsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewAsset, setViewAsset] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [sortField, setSortField] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [form, setForm] = useState({
-    name: "", client_id: "", asset_type: "hardware", manufacturer: "", model: "",
+    name: "", client_id: "", device_id: "", asset_type: "hardware", manufacturer: "", model: "",
     serial_number: "", purchase_date: "", warranty_expiry: "", cost: "",
     status: "active", location: "", assigned_to: "", depreciation_rate: "", notes: ""
   });
@@ -50,14 +63,20 @@ export default function AssetsPage() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [assetsRes, clientsRes, statsRes, expiringRes] = await Promise.all([
+      const [assetsRes, clientsRes, devicesRes, statsRes, expiringRes] = await Promise.all([
         axios.get(`${API}/assets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/assets/stats`, { headers }),
         axios.get(`${API}/assets/expiring`, { headers }),
       ]);
       setAssets(assetsRes.data);
+      if (assetId) {
+        const directAsset = assetsRes.data.find(asset => asset.id === assetId);
+        if (directAsset) setViewAsset(directAsset);
+      }
       setClients(clientsRes.data);
+      setDevices(devicesRes.data);
       setStats(statsRes.data);
       setExpiring(expiringRes.data);
     } catch { toast.error("Failed to load assets"); }
@@ -67,7 +86,7 @@ export default function AssetsPage() {
   useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetForm = () => setForm({
-    name: "", client_id: "", asset_type: "hardware", manufacturer: "", model: "",
+    name: "", client_id: "", device_id: "", asset_type: "hardware", manufacturer: "", model: "",
     serial_number: "", purchase_date: "", warranty_expiry: "", cost: "",
     status: "active", location: "", assigned_to: "", depreciation_rate: "", notes: ""
   });
@@ -76,7 +95,7 @@ export default function AssetsPage() {
   const openEdit = (a) => {
     setEditing(a);
     setForm({
-      name: a.name, client_id: a.client_id, asset_type: a.asset_type || "hardware",
+      name: a.name, client_id: a.client_id, device_id: a.device_id || "", asset_type: a.asset_type || "hardware",
       manufacturer: a.manufacturer || "", model: a.model || "", serial_number: a.serial_number || "",
       purchase_date: a.purchase_date || "", warranty_expiry: a.warranty_expiry || "",
       cost: String(a.cost || ""), status: a.status || "active",
@@ -104,6 +123,23 @@ export default function AssetsPage() {
   const handleDelete = async (id) => {
     try { await axios.delete(`${API}/assets/${id}`, { headers }); toast.success("Deleted"); fetchAll(); if (viewAsset?.id === id) setViewAsset(null); }
     catch { toast.error("Failed"); }
+    finally { setPendingDelete(null); }
+  };
+
+  const startLiveChat = async (asset) => {
+    if (!asset.device_id) {
+      toast.error("Link this inventory record to a managed asset before starting client chat");
+      return;
+    }
+    try {
+      const response = await axios.post(`${API}/live-chat/devices/${asset.device_id}/open`, {}, { headers });
+      const sessionId = response.data?.session?.id;
+      if (!sessionId) throw new Error("No chat session returned");
+      toast.success("Live support session opened");
+      navigate(`/live-chat?session=${encodeURIComponent(sessionId)}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to start client chat for this asset");
+    }
   };
 
   const getWarrantyBadge = (a) => {
@@ -136,13 +172,14 @@ export default function AssetsPage() {
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{editing ? "Edit Asset" : "Add Asset"}</DialogTitle></DialogHeader>
-        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+      <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Inventory register</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Boxes className="h-4 w-4 text-cyan-200" /></span>{editing ? "Refine inventory asset" : "Add inventory asset"}</DialogTitle><p className="mt-2 text-sm text-zinc-400">Record commercial and lifecycle evidence, then optionally link it to a live managed endpoint.</p></DialogHeader>
+        <div className="max-h-[68vh] space-y-3 overflow-y-auto px-6 py-5">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Dell OptiPlex 7090" data-testid="asset-name" /></div>
             <div><Label>Client *</Label><Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}><SelectTrigger data-testid="asset-client"><SelectValue placeholder="Select client" /></SelectTrigger><SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
           </div>
+          <div><Label>Managed asset link</Label><Select value={form.device_id || "unlinked"} onValueChange={v => setForm({ ...form, device_id: v === "unlinked" ? "" : v })}><SelectTrigger data-testid="asset-managed-device"><SelectValue placeholder="Not linked to a managed asset" /></SelectTrigger><SelectContent><SelectItem value="unlinked">Not linked — inventory record only</SelectItem>{devices.filter(d => !form.client_id || d.client_id === form.client_id).map(d => <SelectItem key={d.id} value={d.id}>{d.name}{d.status ? ` · ${d.status}` : ""}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">Link a managed asset to enable live support and keep inventory, ownership, and client communication together.</p></div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Type</Label><Select value={form.asset_type} onValueChange={v => setForm({ ...form, asset_type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ASSET_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Manufacturer</Label><Input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} placeholder="Dell" /></div>
@@ -164,7 +201,20 @@ export default function AssetsPage() {
           </div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes..." rows={2} /></div>
         </div>
-        <DialogFooter><Button onClick={handleSave} data-testid="save-asset-btn">{editing ? "Update" : "Create"} Asset</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-asset-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const deleteDialog = (
+    <Dialog open={Boolean(pendingDelete)} onOpenChange={open => !open && setPendingDelete(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Remove inventory asset?</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">This removes <span className="font-medium text-foreground">{pendingDelete?.name}</span> from the inventory register. Use this only for an accidental record; retiring an asset preserves its history.</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPendingDelete(null)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => handleDelete(pendingDelete.id)} data-testid="confirm-delete-asset">Remove asset</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -176,8 +226,20 @@ export default function AssetsPage() {
       : a.cost || 0;
     const TypeIcon = ASSET_ICONS[a.asset_type] || Monitor;
     return (
-      <div className="space-y-6" data-testid="asset-detail">
-        <Button variant="ghost" size="sm" onClick={() => setViewAsset(null)} data-testid="back-to-assets"><ArrowLeft className="w-4 h-4 mr-1" />Back to Assets</Button>
+      <PageShell data-testid="asset-detail">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <OperationalPageHeader
+          eyebrow="Inventory record"
+          title={a.name}
+          description={`${a.client_name || "Unassigned client"} · ${a.manufacturer || "Unknown manufacturer"} ${a.model || ""} · ${a.serial_number || "No serial recorded"}`}
+          icon={TypeIcon}
+          tone="sky"
+          actions={<>
+            <Button variant="outline" size="sm" onClick={() => { setViewAsset(null); navigate("/assets"); }} data-testid="back-to-assets"><ArrowLeft className="w-4 h-4 mr-1" />All assets</Button>
+            {a.device_id && <Button size="sm" onClick={() => startLiveChat(a)} className="bg-emerald-600 hover:bg-emerald-500" data-testid="start-asset-live-chat"><MessageSquare className="w-4 h-4 mr-1" />Start live chat</Button>}
+            <Button size="sm" onClick={() => openEdit(a)} data-testid="edit-asset-btn"><Edit className="w-4 h-4 mr-1" />Edit asset</Button>
+          </>}
+        />
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-8 space-y-4">
             <Card>
@@ -185,7 +247,7 @@ export default function AssetsPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"><TypeIcon className="w-6 h-6 text-primary" /></div>
-                    <div><CardTitle className="text-2xl">{a.name}</CardTitle><p className="text-sm text-muted-foreground">{a.manufacturer} {a.model}</p></div>
+                    <div><CardTitle className="text-base">Value & warranty</CardTitle><p className="text-sm text-muted-foreground">Lifecycle information for this inventory record</p></div>
                   </div>
                   <div className="flex gap-2">
                     <Badge variant={a.status === "active" ? "default" : "secondary"} className="capitalize">{a.status}</Badge>
@@ -209,23 +271,51 @@ export default function AssetsPage() {
               <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="font-medium capitalize">{a.asset_type}</span></div><Separator />
               <div className="flex justify-between"><span className="text-muted-foreground">Serial #</span><span className="font-mono">{a.serial_number || "N/A"}</span></div><Separator />
               <div className="flex justify-between"><span className="text-muted-foreground">Client</span><span className="font-medium">{a.client_name}</span></div><Separator />
+              <div className="flex justify-between gap-4"><span className="text-muted-foreground">Managed asset</span><span className="truncate font-medium">{a.device_id ? (devices.find(d => d.id === a.device_id)?.name || "Linked") : "Not linked"}</span></div><Separator />
               <div className="flex justify-between"><span className="text-muted-foreground">Location</span><span className="font-medium">{a.location || "N/A"}</span></div><Separator />
               <div className="flex justify-between"><span className="text-muted-foreground">Assigned To</span><span className="font-medium">{a.assigned_to || "Unassigned"}</span></div><Separator />
               <div className="flex justify-between"><span className="text-muted-foreground">Depreciation</span><span className="font-medium">{a.depreciation_rate || 0}% /yr</span></div>
             </CardContent></Card>
             <div className="flex flex-col gap-2">
-              <Button onClick={() => openEdit(a)} className="w-full" data-testid="edit-asset-btn"><Edit className="w-4 h-4 mr-1" />Edit Asset</Button>
-              <Button variant="destructive" onClick={() => handleDelete(a.id)} className="w-full"><Trash2 className="w-4 h-4 mr-1" />Delete</Button>
+              {a.device_id && <Button onClick={() => startLiveChat(a)} className="w-full bg-emerald-600 hover:bg-emerald-500" data-testid="start-asset-live-chat-panel"><MessageSquare className="w-4 h-4 mr-1" />Start live chat</Button>}
+              <Button variant="outline" onClick={() => navigate(`/clients?client=${a.client_id}`)} className="w-full"><Building className="w-4 h-4 mr-1" />Open client</Button>
+              <Button variant="destructive" onClick={() => setPendingDelete(a)} className="w-full" data-testid="delete-asset-btn"><Trash2 className="w-4 h-4 mr-1" />Remove asset</Button>
             </div>
           </div>
         </div>
         {formDialog}
+        {deleteDialog}
       </div>
+      </PageShell>
     );
   }
 
   return (
     <PageShell data-testid="assets-page">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      <OperationalPageHeader
+        eyebrow="Asset inventory"
+        title="Inventory Assets"
+        description={`${assets.length} tracked records across clients, with serial, ownership, warranty, and lifecycle detail in one place.`}
+        icon={Boxes}
+        tone="sky"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={fetchAll} data-testid="assets-refresh-btn"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+          <Button size="sm" onClick={openCreate} data-testid="add-asset-btn"><Plus className="w-4 h-4 mr-1" />Add Asset</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="inventory-assets-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {INVENTORY_ASSET_TOOLS.map(tool => {
+                const Icon = tool.icon;
+                return <DropdownMenuItem key={tool.path} onSelect={() => navigate(tool.path)}><Icon className="mr-2 h-3.5 w-3.5" />{tool.label}</DropdownMenuItem>;
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>}
+      />
+
       <MetricStrip columns={5}>
         <MetricTile label="Total Assets" value={stats.total || 0} accent="sky" icon={<HardDrive className="w-2.5 h-2.5 text-sky-400" />} testid="assets-metric-total" />
         <MetricTile label="Active" value={stats.active || 0} accent="emerald" icon={<Shield className="w-2.5 h-2.5 text-emerald-400" />} testid="assets-metric-active" />
@@ -233,11 +323,6 @@ export default function AssetsPage() {
         <MetricTile label="Warranty Expiring" value={stats.warranty_expiring_soon || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="assets-metric-expiring" />
         <MetricTile label="Warranty Expired" value={stats.warranty_expired || 0} accent="rose" icon={<Calendar className="w-2.5 h-2.5 text-rose-400" />} testid="assets-metric-expired" />
       </MetricStrip>
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight">Assets</h1><p className="text-xs text-zinc-500 mt-0.5">{assets.length} tracked assets</p></div>
-        <Button onClick={openCreate} data-testid="add-asset-btn"><Plus className="w-4 h-4 mr-1" />Add Asset</Button>
-      </div>
 
       <Tabs defaultValue="all">
         <TabsList><TabsTrigger value="all">All Assets</TabsTrigger><TabsTrigger value="expiring">Warranty Expiring</TabsTrigger></TabsList>
@@ -260,7 +345,7 @@ export default function AssetsPage() {
                 : filtered.map(a => {
                   const TypeIcon = ASSET_ICONS[a.asset_type] || Monitor;
                   return (
-                    <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setViewAsset(a)} data-testid={`asset-row-${a.id}`}>
+                    <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setViewAsset(a); navigate(`/assets/${a.id}`); }} data-testid={`asset-row-${a.id}`}>
                       <TableCell><div className="flex items-center gap-2"><TypeIcon className="w-4 h-4 text-muted-foreground" /><span className="font-medium">{a.name}</span></div></TableCell>
                       <TableCell><Badge variant="outline" className="capitalize text-xs">{a.asset_type}</Badge></TableCell>
                       <TableCell className="text-sm">{a.client_name}</TableCell>
@@ -268,7 +353,7 @@ export default function AssetsPage() {
                       <TableCell className="text-right font-mono text-sm">${(a.cost || 0).toFixed(2)}</TableCell>
                       <TableCell>{getWarrantyBadge(a)}</TableCell>
                       <TableCell><Badge variant={a.status === "active" ? "default" : "secondary"} className="capitalize text-[10px]">{a.status}</Badge></TableCell>
-                      <TableCell><div className="flex gap-1" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(a)}><Edit className="w-3 h-3" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(a.id)}><Trash2 className="w-3 h-3" /></Button></div></TableCell>
+                      <TableCell><div className="flex gap-1" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(a)} aria-label={`Edit ${a.name}`} title={`Edit ${a.name}`} data-testid={`edit-asset-${a.id}`}><Edit className="w-3 h-3" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setPendingDelete(a)} aria-label={`Delete ${a.name}`} title={`Delete ${a.name}`} data-testid={`delete-asset-${a.id}`}><Trash2 className="w-3 h-3" /></Button></div></TableCell>
                     </TableRow>
                   );
                 })}
@@ -299,6 +384,7 @@ export default function AssetsPage() {
       </Tabs>
 
       {formDialog}
+      {deleteDialog}
       </div>
     </PageShell>
   );

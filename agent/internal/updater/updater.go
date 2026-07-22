@@ -54,7 +54,9 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 	}
 
 	exe, err := os.Executable()
-	if err != nil { return fmt.Errorf("locate exe: %w", err) }
+	if err != nil {
+		return fmt.Errorf("locate exe: %w", err)
+	}
 	exeDir := filepath.Dir(exe)
 	newPath := exe + ".new"
 
@@ -100,19 +102,25 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 
 func download(url, dst, token string) error {
 	req, err := http.NewRequest("GET", url, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if token != "" {
 		req.Header.Set("X-Agent-Token", token)
 	}
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	f, err := os.Create(dst)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
@@ -120,10 +128,14 @@ func download(url, dst, token string) error {
 
 func fileSha256(path string) (string, error) {
 	f, err := os.Open(path)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil { return "", err }
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -158,7 +170,9 @@ func spawnWindows(exe, newPath, dir string) error {
 			"del \"%%~f0\" >nul 2>&1\r\n",
 		newPath, exe,
 	)
-	if err := os.WriteFile(bat, []byte(content), 0o755); err != nil { return err }
+	if err := os.WriteFile(bat, []byte(content), 0o755); err != nil {
+		return err
+	}
 	cmd := exec.Command("cmd", "/C", "start", "/B", bat)
 	return cmd.Start()
 }
@@ -168,6 +182,8 @@ func spawnUnix(exe, newPath, dir string) error {
 	sh := filepath.Join(dir, "_update.sh")
 	content := fmt.Sprintf("#!/bin/sh\nsleep 2\nmv -f '%s' '%s'\nchmod +x '%s'\nnohup '%s' -run foreground > /tmp/nexus-agent.log 2>&1 &\nrm -- \"$0\"\n",
 		newPath, exe, exe, exe)
-	if err := os.WriteFile(sh, []byte(content), 0o755); err != nil { return err }
+	if err := os.WriteFile(sh, []byte(content), 0o755); err != nil {
+		return err
+	}
 	return exec.Command("/bin/sh", sh).Start()
 }

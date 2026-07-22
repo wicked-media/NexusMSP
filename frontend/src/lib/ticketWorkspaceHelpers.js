@@ -1,8 +1,18 @@
 export const TICKET_MODULES = [
   { id: "queue", label: "Queue", path: "/tickets" },
   { id: "triage", label: "Triage", path: "/triage-queue" },
-  { id: "sla", label: "SLA", path: "/sla-hub" },
+  { id: "sla", label: "SLA", path: "/sla-timer" },
   { id: "dispatch", label: "Dispatch", path: "/dispatch-board" },
+];
+
+// These are ticket-delivery tools, not separate top-level workspaces. They
+// intentionally live in the Tickets header so the sidebar remains focused.
+export const TICKET_WORKSPACE_TOOLS = [
+  { id: "workshop", label: "Workshop Bench", path: "/workshop-bench" },
+  { id: "escalations", label: "Escalation Matrix", path: "/escalation-matrix" },
+  { id: "routing", label: "Smart Routing", path: "/intelligent-routing" },
+  { id: "blueprints", label: "Blueprints", path: "/blueprints" },
+  { id: "catalog", label: "Service Catalog", path: "/service-catalog" },
 ];
 
 export const TICKET_PRIORITY_STYLES = {
@@ -23,8 +33,12 @@ export const TICKET_STATUS_STYLES = {
 };
 
 export function ticketModuleForPath(pathname = "") {
-  if (["/sla-timer", "/sla-report-gen"].some(path => pathname === path || pathname.startsWith(`${path}/`))) return "sla";
+  if (["/sla-hub", "/sla-timer", "/sla-report-gen"].some(path => pathname === path || pathname.startsWith(`${path}/`))) return "sla";
   return TICKET_MODULES.find(module => pathname === module.path || pathname.startsWith(`${module.path}/`))?.id || "queue";
+}
+
+export function ticketWorkspaceToolForPath(pathname = "") {
+  return TICKET_WORKSPACE_TOOLS.find(tool => pathname === tool.path || pathname.startsWith(`${tool.path}/`)) || null;
 }
 
 export function ticketToolAvailability(ticket = {}, scripts = []) {

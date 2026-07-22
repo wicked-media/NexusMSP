@@ -53,20 +53,24 @@ export default function TicketSettingsPage() {
   const [padDigits, setPadDigits] = useState(4);
   const [separator, setSeparator] = useState("-");
   const [numberingSaving, setNumberingSaving] = useState(false);
+  const [workPrefixes, setWorkPrefixes] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
+  const [workPrefixesSaving, setWorkPrefixesSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchCategories = async () => {
     setLoading(true);
     try {
-      const [catRes, numRes] = await Promise.all([
+      const [catRes, numRes, workPrefixesRes] = await Promise.all([
         axios.get(`${API}/ticket-categories/all`, { headers }),
         axios.get(`${API}/ticket-numbering`, { headers }),
+        axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: null })),
       ]);
       setCategories(catRes.data);
       if (numRes.data.scheme) setNumberingScheme(numRes.data.scheme);
       if (numRes.data.pad_digits) setPadDigits(numRes.data.pad_digits);
       if (numRes.data.separator) setSeparator(numRes.data.separator);
+      if (workPrefixesRes.data) setWorkPrefixes(current => ({ ...current, ...workPrefixesRes.data }));
     } catch { toast.error("Failed to load settings"); }
     finally { setLoading(false); }
   };
@@ -150,6 +154,15 @@ export default function TicketSettingsPage() {
       ...prev,
       [typeKey]: { ...prev[typeKey], prefix: prefix.toUpperCase().replace(/[^A-Z0-9]/g, "") }
     }));
+  };
+
+  const handleSaveWorkPrefixes = async () => {
+    setWorkPrefixesSaving(true);
+    try {
+      await axios.put(`${API}/settings/job-numbering`, workPrefixes, { headers });
+      toast.success("Work order prefixes saved");
+    } catch { toast.error("Failed to save work order prefixes"); }
+    finally { setWorkPrefixesSaving(false); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -260,6 +273,11 @@ export default function TicketSettingsPage() {
                 ))}
               </div>
             </CardContent>
+          </Card>
+
+          <Card className="border-sky-500/20" data-testid="work-order-prefixes-card">
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Hash className="w-5 h-5 text-sky-300" />Work order prefixes</CardTitle><p className="text-sm text-muted-foreground">Prefixes for SLA, workshop, and cabling work orders. Keep these alongside ticket numbering so technicians can find all numbering rules together.</p></CardHeader>
+            <CardContent className="space-y-4"><div className="grid grid-cols-1 gap-4 md:grid-cols-3"><div className="space-y-2"><Label>SLA work</Label><Input value={workPrefixes.sla_prefix} onChange={e => setWorkPrefixes(current => ({ ...current, sla_prefix: e.target.value }))} placeholder="SLA-" /><p className="text-xs text-muted-foreground">Example: {workPrefixes.sla_prefix || "SLA-"}00001</p></div><div className="space-y-2"><Label>Workshop work</Label><Input value={workPrefixes.workshop_prefix} onChange={e => setWorkPrefixes(current => ({ ...current, workshop_prefix: e.target.value }))} placeholder="WS-" /><p className="text-xs text-muted-foreground">Example: {workPrefixes.workshop_prefix || "WS-"}00001</p></div><div className="space-y-2"><Label>Cabling / WISP work</Label><Input value={workPrefixes.cabling_prefix} onChange={e => setWorkPrefixes(current => ({ ...current, cabling_prefix: e.target.value }))} placeholder="CW-" /><p className="text-xs text-muted-foreground">Example: {workPrefixes.cabling_prefix || "CW-"}00001</p></div></div><div className="flex justify-end"><Button onClick={handleSaveWorkPrefixes} disabled={workPrefixesSaving}>{workPrefixesSaving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}{workPrefixesSaving ? "Saving..." : "Save work order prefixes"}</Button></div></CardContent>
           </Card>
         </TabsContent>
 

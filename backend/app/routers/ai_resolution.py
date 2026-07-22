@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
@@ -28,8 +28,37 @@ async def approve_resolution(issue_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/ai-resolution/{issue_id}/reject")
 async def reject_resolution(issue_id: str, current_user: dict = Depends(get_current_user)):
-    await db.ai_resolution_queue.update_one({"id": issue_id}, {"$set": {"status": "manual_required"}})
-    return {"status": "rejected"}
+    issue = await db.ai_resolution_queue.find_one({"id": issue_id}, {"_id": 0})
+    if not issue:
+        raise HTTPException(status_code=404, detail="AI resolution item not found")
+
+    ticket_id = issue.get("escalation_ticket_id")
+    ticket_number = None
+    if ticket_id:
+        ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "ticket_number": 1})
+        ticket_number = (ticket or {}).get("ticket_number")
+    else:
+        now = datetime.now(timezone.utc).isoformat()
+        ticket_id = f"ai-res-{uuid.uuid4().hex[:10]}"
+        ticket_number = f"AI-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        await db.tickets.insert_one({
+            "id": ticket_id,
+            "ticket_number": ticket_number,
+            "title": f"[AI Review Required] {issue.get('issue', 'Resolution requires review')}",
+            "description": f"AI recommendation was rejected and requires technician review. Matched runbook: {issue.get('runbook', 'None')}. Proposed action: {issue.get('action', 'None')}.",
+            "status": "open",
+            "priority": "high" if issue.get("category") in {"security", "backup", "certificate"} else "medium",
+            "source": "ai_resolution",
+            "client_name": issue.get("client"),
+            "device_name": issue.get("device"),
+            "ai_resolution_id": issue_id,
+            "created_at": now,
+            "updated_at": now,
+        })
+        await db.ai_resolution_queue.update_one({"id": issue_id}, {"$set": {"escalation_ticket_id": ticket_id}})
+
+    await db.ai_resolution_queue.update_one({"id": issue_id}, {"$set": {"status": "manual_required", "rejected_by": current_user.get("name"), "rejected_at": datetime.now(timezone.utc).isoformat()}})
+    return {"status": "rejected", "ticket_id": ticket_id, "ticket_number": ticket_number}
 
 async def _seed_ai_issues():
     templates = [

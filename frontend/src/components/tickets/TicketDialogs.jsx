@@ -66,19 +66,19 @@ export function EmailDialog({
 export function ChildTicketDialog({ open, onOpenChange, childForm, setChildForm, handleCreateChild }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Create Child Ticket</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div><Label>Title</Label><Input value={childForm.title} onChange={e => setChildForm({ ...childForm, title: e.target.value })} data-testid="child-title" /></div>
-          <div><Label>Description</Label><Textarea value={childForm.description} onChange={e => setChildForm({ ...childForm, description: e.target.value })} data-testid="child-desc" /></div>
-          <div><Label>Priority</Label>
+      <DialogContent className="max-w-2xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Service escalation</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><GitBranch className="h-4 w-4 text-cyan-200" /></span>Create linked child ticket</DialogTitle><p className="mt-2 text-sm text-zinc-400">Split related work into an independently owned ticket while preserving the parent relationship and audit trail.</p></DialogHeader>
+        <div className="space-y-4 px-6 py-5">
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Child ticket title</Label><Input autoFocus value={childForm.title} onChange={e => setChildForm({ ...childForm, title: e.target.value })} data-testid="child-title" /></div>
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Work brief</Label><Textarea rows={4} value={childForm.description} onChange={e => setChildForm({ ...childForm, description: e.target.value })} data-testid="child-desc" /></div>
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Initial priority</Label>
             <Select value={childForm.priority} onValueChange={v => setChildForm({ ...childForm, priority: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleCreateChild} data-testid="create-child-submit"><GitBranch className="w-4 h-4 mr-1" />Create</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleCreateChild} data-testid="create-child-submit"><GitBranch className="mr-2 h-4 w-4" />Create child ticket</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -124,15 +124,14 @@ export function LogTimeDialog({ open, onOpenChange, timeForm, setTimeForm, handl
 export function NotifyClientDialog({ open, onOpenChange, notifyForm, setNotifyForm, handleNotifyClient }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Notify Client with PDF</DialogTitle></DialogHeader>
-        <p className="text-sm text-muted-foreground">Send an email notification to the client with a branded PDF of the conversation history attached.</p>
-        <div className="space-y-3">
-          <div><Label>Client Email</Label><Input value={notifyForm.email} onChange={e => setNotifyForm({ ...notifyForm, email: e.target.value })} placeholder="client@email.com" data-testid="notify-email" /></div>
-          <div><Label>Subject</Label><Input value={notifyForm.subject} onChange={e => setNotifyForm({ ...notifyForm, subject: e.target.value })} data-testid="notify-subject" /></div>
-          <div><Label>Message</Label><Textarea value={notifyForm.message} onChange={e => setNotifyForm({ ...notifyForm, message: e.target.value })} rows={3} data-testid="notify-message" /></div>
+      <DialogContent className="max-w-2xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Client communication</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><BellRing className="h-4 w-4 text-cyan-200" /></span>Send service record</DialogTitle><p className="mt-2 text-sm text-zinc-400">Email the client a branded PDF of this ticket’s conversation and service history. Sending is recorded against the ticket.</p></DialogHeader>
+        <div className="space-y-4 px-6 py-5">
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Recipient</Label><Input value={notifyForm.email} onChange={e => setNotifyForm({ ...notifyForm, email: e.target.value })} placeholder="client@email.com" data-testid="notify-email" /></div>
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Email subject</Label><Input value={notifyForm.subject} onChange={e => setNotifyForm({ ...notifyForm, subject: e.target.value })} data-testid="notify-subject" /></div>
+          <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Message to client</Label><Textarea value={notifyForm.message} onChange={e => setNotifyForm({ ...notifyForm, message: e.target.value })} rows={4} data-testid="notify-message" /></div>
         </div>
-        <DialogFooter><Button onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="mr-2 h-4 w-4" />Send service record</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -220,28 +219,30 @@ export function AddItemsDialog({
 }
 
 export function PushInvoiceDialog({
-  open, onOpenChange, ticketProducts, invoicesList, pushToExisting, setPushToExisting, handlePushToInvoice,
+  open, onOpenChange, ticketProducts, invoicesList, pushToExisting, setPushToExisting, handlePushToInvoice, ticket,
 }) {
   const unbilledItems = ticketProducts.filter(item => !item.invoice_id);
   const unbilledTotal = unbilledItems.reduce((sum, item) => sum + (item.total || 0), 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Receipt className="w-5 h-5 text-green-400" />Push Items to Invoice</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Push {unbilledItems.length} unbilled item(s) totalling <span className="font-bold text-green-400">${unbilledTotal.toFixed(2)}</span> to an invoice.
-          </p>
+      <DialogContent className="max-w-xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Billing hand-off</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><Receipt className="h-4 w-4 text-emerald-300" /></span>Send ticket items to invoice</DialogTitle><p className="mt-2 text-sm text-zinc-400">Review the unbilled work, then create a new invoice or safely append it to an existing draft.</p></DialogHeader>
+        <div className="space-y-4 px-6 py-5">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-2.5">
+            <div className="min-w-0"><p className="truncate text-xs font-semibold text-zinc-200">{ticket?.ticket_number || "Ticket billing"}</p><p className="mt-0.5 truncate text-[10px] text-zinc-500">{ticket?.client_name || "No customer selected"}</p></div>
+            <span className="shrink-0 rounded-md border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-emerald-200">Ready to bill</span>
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-emerald-500/15 bg-emerald-500/[0.05] p-3"><span className="text-xs text-zinc-400">Unbilled ticket items</span><span className="font-mono text-sm font-bold text-emerald-300">{unbilledItems.length} · ${unbilledTotal.toFixed(2)}</span></div>
           <div className="space-y-3">
-            <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handlePushToInvoice(null)} disabled={unbilledItems.length === 0} data-testid="create-new-invoice-btn">
+            <Button className="h-10 w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => handlePushToInvoice(null)} disabled={unbilledItems.length === 0} data-testid="create-new-invoice-btn">
               <Plus className="w-4 h-4 mr-1" />Create New Invoice
             </Button>
             {invoicesList.length > 0 && (
               <>
                 <Separator />
-                <Label>Or add to existing invoice:</Label>
+                <Label className="text-xs text-zinc-300">Or add to an existing draft</Label>
                 <Select value={pushToExisting || "__none"} onValueChange={v => setPushToExisting(v === "__none" ? "" : v)}>
-                  <SelectTrigger><SelectValue placeholder="Select invoice..." /></SelectTrigger>
+                  <SelectTrigger className="border-cyan-400/20 bg-black/20"><SelectValue placeholder="Select invoice..." /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Choose...</SelectItem>
                     {invoicesList.filter(inv => inv.status !== "paid" && inv.status !== "cancelled").map(inv => (

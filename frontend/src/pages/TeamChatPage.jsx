@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { Link, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,11 +36,14 @@ import {
   Lock,
   MessageCircle,
   MessageSquarePlus,
+  MoreHorizontal,
   Paperclip,
   PanelRightOpen,
   Pin,
+  Phone,
   Plus,
   Reply,
+  RefreshCw,
   Search,
   Send,
   Smile,
@@ -49,11 +52,13 @@ import {
   Users,
   X,
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   channelDisplayName,
   filterChatChannels,
   groupChatMessages,
   PRESENCE_META,
+  repairDisplayText,
   totalUnread,
 } from "@/lib/teamChatHelpers";
 
@@ -155,6 +160,7 @@ export default function TeamChatPage() {
   const nearBottomRef = useRef(true);
   const typingAtRef = useRef(0);
   const fileRef = useRef(null);
+  const composerRef = useRef(null);
   const openedThreadRef = useRef("");
 
   const activeChannel = channels.find(channel => channel.id === activeId);
@@ -318,6 +324,7 @@ export default function TeamChatPage() {
       channel_id: activeId,
       user_id: user?.id,
       user_name: user?.name,
+      avatar_url: user?.avatar,
       body,
       ts: new Date().toISOString(),
       reactions: {},
@@ -503,11 +510,48 @@ export default function TeamChatPage() {
   const unread = totalUnread(channels);
   const activePresence = activeChannel?.other_user_id ? presenceFor(activeChannel.other_user_id) : null;
   const activeTeammates = users.filter(candidate => candidate.id !== user?.id && ["active", "busy", "dnd"].includes(presenceFor(candidate.id))).length;
+  const activeChannelTechnicians = useMemo(() => {
+    const memberIds = activeChannel?.member_ids?.length ? new Set(activeChannel.member_ids) : null;
+    return users.filter(candidate => candidate.id !== user?.id && (!memberIds || memberIds.has(candidate.id)) && ["active", "busy", "dnd"].includes(presenceFor(candidate.id)));
+  }, [activeChannel?.member_ids, presence, user?.id, users]);
+  const operationalContext = useMemo(() => {
+    const references = { tickets: new Set(), invoices: new Set(), purchaseOrders: new Set() };
+    messages.forEach(message => {
+      const body = repairDisplayText(message.body || "");
+      (body.match(/\bTKT(?:-CHAT)?-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.tickets.add(reference.toUpperCase()));
+      (body.match(/\bINV-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.invoices.add(reference.toUpperCase()));
+      (body.match(/\bPO-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.purchaseOrders.add(reference.toUpperCase()));
+    });
+    return {
+      tickets: references.tickets.size,
+      invoices: references.invoices.size,
+      purchaseOrders: references.purchaseOrders.size,
+    };
+  }, [messages]);
+  const draftOperationalCommand = command => {
+    setInput(current => current.trim() ? `${current}\n${command}` : command);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
 
   return (
-    <div className="h-[calc(100vh-60px)] min-h-[620px] flex overflow-hidden bg-[#111318] text-zinc-100" data-testid="team-chat-page">
-      <nav className="hidden md:flex w-[72px] shrink-0 flex-col items-center border-r border-white/5 bg-[#181a20] py-3" aria-label="Nexus Chat sections">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-950/40">
+    <div className="space-y-4" data-testid="team-chat-page">
+      <OperationalPageHeader
+        eyebrow="Collaboration workspace · real-time technician coordination"
+        title="Team Chat"
+        description="Bring operational conversations, work references, handovers and files into one live, auditable space."
+        icon={MessageCircle}
+        tone="emerald"
+        actions={<>
+          <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activeTeammates} online</span>
+          <Button variant="outline" size="sm" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`mr-1.5 h-4 w-4 ${(loading || channelLoading) ? "animate-spin" : ""}`} />Refresh</Button>
+          <Button size="sm" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-4 w-4" />New conversation</Button>
+        </>}
+      />
+
+      <section className="h-[calc(100vh-255px)] min-h-[620px] overflow-hidden rounded-2xl border border-border/80 bg-[#0f151c] text-zinc-100 shadow-2xl shadow-black/20">
+      <div className="flex h-full overflow-hidden">
+      <nav className="hidden md:flex w-[72px] shrink-0 flex-col items-center border-r border-cyan-500/10 bg-[#121a21] py-3" aria-label="Nexus Chat sections">
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-600 shadow-lg shadow-emerald-950/40">
           <MessageCircle className="h-5 w-5 text-white" />
         </div>
         <RailButton icon={Activity} label="Inbox" active={mode === "activity"} badge={unread} onClick={() => setMode("activity")} />
@@ -516,20 +560,31 @@ export default function TeamChatPage() {
         <div className="mt-auto px-2 text-center text-[9px] uppercase tracking-[0.16em] text-zinc-600">Nexus<br />Chat</div>
       </nav>
 
-      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[320px] shrink-0 flex-col border-r border-white/5 bg-[#1d1f26]`}>
-        <div className="border-b border-white/5 px-4 pb-3 pt-4">
+      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[320px] shrink-0 flex-col border-r border-cyan-500/10 bg-[#151e27]`}>
+        <div className="border-b border-cyan-500/10 px-4 pb-3 pt-4">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-400">Nexus collaboration</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Nexus collaboration</p>
               <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : "Direct messages"}</h1>
             </div>
-            <Button size="sm" className="h-9 w-9 rounded-lg bg-violet-600 p-0 hover:bg-violet-500" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn" aria-label="New conversation">
-              <MessageSquarePlus className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Collaboration workspace tools">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem asChild><Link to="/live-chat"><MessageCircle className="mr-2 h-4 w-4" />Client live chat</Link></DropdownMenuItem>
+                  <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Script-to-ticket</Link></DropdownMenuItem>
+                  <DropdownMenuItem asChild><Link to="/voice"><Phone className="mr-2 h-4 w-4" />Voice services</Link></DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />{activeTeammates} online now</span>
-            {unread > 0 && <span className="rounded-full border border-violet-500/15 bg-violet-500/5 px-2 py-1 text-violet-300">{unread} need attention</span>}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>{activeTeammates} online now</span>
+            {unread > 0 && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-cyan-200">{unread} need attention</span>}
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
@@ -538,16 +593,17 @@ export default function TeamChatPage() {
               onChange={event => { setQuery(event.target.value); if (!event.target.value) setSearchResults(null); }}
               onKeyDown={event => event.key === "Enter" && searchMessages()}
               placeholder="Search chats and messages"
-              className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-violet-500/50"
+              className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-emerald-500/50"
               data-testid="chat-search"
             />
-            {searching && <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-violet-400" />}
+            {searching && <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-emerald-400" />}
           </div>
         </div>
 
         {error && (
-          <div className="m-3 flex gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-200">
-            <AlertCircle className="h-4 w-4 shrink-0" /><span>{error}</span>
+          <div className="m-3 flex items-start gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span className="flex-1">{error}</span>
+            <button type="button" onClick={() => loadWorkspace()} className="shrink-0 rounded-md px-1.5 py-1 font-medium text-rose-100 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50">Retry</button>
           </div>
         )}
 
@@ -576,7 +632,7 @@ export default function TeamChatPage() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex w-full items-center gap-3 border-t border-white/5 px-4 py-3 text-left hover:bg-white/[0.03]" data-testid="chat-status-menu">
-              <Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(user?.name)}>{initials(user?.name)}</AvatarFallback></Avatar>
+              <TechnicianAvatar name={user?.name} avatarUrl={user?.avatar} className="h-9 w-9" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{user?.name}</p>
                 <PresenceLabel status={myPresence} detail={workItemLabel(presence[user?.id]?.busy_state)} />
@@ -602,12 +658,12 @@ export default function TeamChatPage() {
         </DropdownMenu>
       </aside>
 
-      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col bg-[#15171c]`}>
+      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col bg-[#0e151c]`}>
         {!activeChannel ? (
           <EmptyWorkspace onNew={() => setShowNewDialog(true)} />
         ) : (
           <>
-            <header className="border-b border-white/5 bg-[#1a1c22] px-3 md:px-5">
+            <header className="border-b border-cyan-500/10 bg-[#121b24] px-3 md:px-5">
               <div className="flex h-16 items-center gap-3">
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 md:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to conversations"><ArrowLeft className="h-4 w-4" /></Button>
                 <ChannelAvatar channel={activeChannel} presence={activePresence} size="md" />
@@ -622,7 +678,7 @@ export default function TeamChatPage() {
                       : activeChannel.description || `${activeChannel.member_count || 0} members`}
                   </p>
                 </div>
-                {typingUsers.length > 0 && <span className="hidden text-xs text-violet-300 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
+                {typingUsers.length > 0 && <span className="hidden text-xs text-cyan-200 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
               </div>
               <div className="flex h-10 items-end gap-5 text-sm">
@@ -631,12 +687,21 @@ export default function TeamChatPage() {
                   ["files", "Files", FileText, files.length],
                   ["pins", "Pinned", Pin, pinned.length],
                 ].map(([value, label, Icon, count]) => (
-                  <button key={value} onClick={() => { setActiveTab(value); setSearchResults(null); }} className={`flex h-10 items-center gap-1.5 border-b-2 px-1 transition ${activeTab === value ? "border-violet-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
+                  <button key={value} onClick={() => { setActiveTab(value); setSearchResults(null); }} className={`flex h-10 items-center gap-1.5 border-b-2 px-1 transition ${activeTab === value ? "border-emerald-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
                     <Icon className="h-3.5 w-3.5" />{label}{count > 0 && <span className="text-[10px] text-zinc-600">{count}</span>}
                   </button>
                 ))}
               </div>
             </header>
+
+            {activeTab === "posts" && !searchResults && activeChannel.kind === "team" && (
+              <NexusOperationsPulse
+                activeTechnicians={activeChannelTechnicians}
+                context={operationalContext}
+                pinnedCount={pinned.length}
+                onDraftCommand={draftOperationalCommand}
+              />
+            )}
 
             {searchResults ? (
               <SearchResults results={searchResults} onSelect={result => { selectChannel(result.channel_id); openThread({ id: result.thread_id || result.id }); }} onClose={() => setSearchResults(null)} />
@@ -653,7 +718,7 @@ export default function TeamChatPage() {
                   data-testid="chat-message-list"
                 >
                   {channelLoading && messages.length === 0 ? (
-                    <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
+                    <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-emerald-400" /></div>
                   ) : groupedMessages.length === 0 ? (
                     <ConversationWelcome channel={activeChannel} />
                   ) : (
@@ -687,13 +752,13 @@ export default function TeamChatPage() {
                           onDownload={downloadFile}
                         />
                       ))}
-                      {typingUsers.length > 0 && <TypingIndicator names={typingUsers.map(row => row.user_name)} />}
+                      {typingUsers.length > 0 && <TypingIndicator users={typingUsers} />}
                     </div>
                   )}
                 </div>
 
-                <div className="border-t border-white/5 bg-[#1a1c22] p-3 md:px-5 md:py-4">
-                  <div className="relative mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#22242c] shadow-lg shadow-black/10 focus-within:border-violet-500/50">
+                <div className="border-t border-cyan-500/10 bg-[#121b24] p-3 md:px-5 md:py-4">
+                  <div className="relative mx-auto max-w-4xl rounded-xl border border-cyan-500/10 bg-[#19232e] shadow-lg shadow-black/20 focus-within:border-emerald-500/50 focus-within:shadow-emerald-950/20">
                     {referenceMatch && referenceMatches.length > 0 && (
                       <SuggestionPanel className="bottom-full" title={`Link ${referenceMatch[1].toLowerCase()}`}>
                         {referenceMatches.map((reference, index) => (
@@ -708,9 +773,9 @@ export default function TeamChatPage() {
                     {slashSuggestions.length > 0 && (
                       <SuggestionPanel className="bottom-full" title="Commands">
                         {slashSuggestions.map((command, index) => (
-                          <button key={command.cmd} onMouseEnter={() => setSlashIndex(index)} onClick={() => setInput(`/${command.cmd}${command.args ? " " : ""}`)} className={`flex w-full items-start gap-3 px-3 py-2 text-left ${slashIndex === index ? "bg-violet-500/15" : "hover:bg-white/5"}`}>
-                            <Sparkles className="mt-0.5 h-4 w-4 text-violet-400" />
-                            <div><code className="text-sm text-violet-300">/{command.cmd}</code> <span className="text-xs text-zinc-500">{command.args}</span><p className="text-xs text-zinc-500">{command.description}</p></div>
+                          <button key={command.cmd} onMouseEnter={() => setSlashIndex(index)} onClick={() => setInput(`/${command.cmd}${command.args ? " " : ""}`)} className={`flex w-full items-start gap-3 px-3 py-2 text-left ${slashIndex === index ? "bg-emerald-500/15" : "hover:bg-white/5"}`}>
+                            <Sparkles className="mt-0.5 h-4 w-4 text-emerald-400" />
+                            <div><code className="text-sm text-emerald-300">/{command.cmd}</code> <span className="text-xs text-zinc-500">{command.args}</span><p className="text-xs text-zinc-500">{command.description}</p></div>
                           </button>
                         ))}
                       </SuggestionPanel>
@@ -718,8 +783,8 @@ export default function TeamChatPage() {
                     {mentionSuggestions.length > 0 && !slashSuggestions.length && (
                       <SuggestionPanel className="bottom-full" title="Mention a teammate">
                         {mentionSuggestions.map((candidate, index) => (
-                          <button key={candidate.id} onMouseEnter={() => setMentionIndex(index)} onClick={() => pickMention(candidate)} className={`flex w-full items-center gap-3 px-3 py-2 text-left ${mentionIndex === index ? "bg-violet-500/15" : "hover:bg-white/5"}`}>
-                            {candidate.broadcast ? <div className="grid h-7 w-7 place-items-center rounded-full bg-violet-500/15 text-violet-300"><AtSign className="h-3.5 w-3.5" /></div> : <Avatar className="h-7 w-7"><AvatarFallback style={avatarStyle(candidate.name)}>{initials(candidate.name)}</AvatarFallback></Avatar>}
+                          <button key={candidate.id} onMouseEnter={() => setMentionIndex(index)} onClick={() => pickMention(candidate)} className={`flex w-full items-center gap-3 px-3 py-2 text-left ${mentionIndex === index ? "bg-cyan-500/15" : "hover:bg-white/5"}`}>
+                            {candidate.broadcast ? <div className="grid h-7 w-7 place-items-center rounded-full bg-cyan-500/15 text-cyan-200"><AtSign className="h-3.5 w-3.5" /></div> : <TechnicianAvatar name={candidate.name} avatarUrl={candidate.avatar} className="h-7 w-7" fallbackClassName="text-[9px]" />}
                             <div><p className="text-sm">{candidate.broadcast ? `@${candidate.broadcast}` : candidate.name}</p><p className="text-[11px] text-zinc-500">{candidate.detail || candidate.email}</p></div>
                           </button>
                         ))}
@@ -731,6 +796,7 @@ export default function TeamChatPage() {
                       </div>
                     )}
                     <Textarea
+                      ref={composerRef}
                       value={input}
                       onChange={event => { setInput(event.target.value.slice(0, 5000)); sendTyping(); setSlashIndex(0); }}
                       onKeyDown={event => {
@@ -759,16 +825,17 @@ export default function TeamChatPage() {
                       }}
                       placeholder={`Message ${channelDisplayName(activeChannel)}`}
                       className="min-h-[64px] resize-none border-0 bg-transparent px-4 pb-2 pt-3 text-sm shadow-none focus-visible:ring-0"
+                      aria-label={`Message ${channelDisplayName(activeChannel)}`}
                       data-testid="chat-input"
                     />
                     <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5 text-[10px]">
                       <span className="mr-1 uppercase tracking-[0.14em] text-zinc-600">Ops actions</span>
-                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link ticket</button>
-                      <button type="button" onClick={() => setInput("/invoice ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link invoice</button>
-                      <button type="button" onClick={() => setInput("/po ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Link PO</button>
-                      <button type="button" onClick={() => setInput("/note ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">Add note</button>
+                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link ticket</button>
+                      <button type="button" onClick={() => setInput("/invoice ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link invoice</button>
+                      <button type="button" onClick={() => setInput("/po ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link PO</button>
+                      <button type="button" onClick={() => setInput("/note ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Add note</button>
                       <button type="button" onClick={() => setInput("/page ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-200">Page on-call</button>
-                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-200">AI summary</button>
+                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-100">AI summary</button>
                     </div>
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
@@ -776,8 +843,10 @@ export default function TeamChatPage() {
                       <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
                       <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
                       <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Shift+Enter for a new line</span>
-                      <Button onClick={send} disabled={!input.trim() || sending} className="ml-auto h-8 rounded-lg bg-violet-600 px-3 hover:bg-violet-500" data-testid="chat-send">
+                      <span className="ml-auto hidden text-[10px] tabular-nums text-zinc-600 sm:inline">{input.length}/5000</span>
+                      <Button onClick={send} disabled={!input.trim() || sending} className="h-8 rounded-lg bg-emerald-600 px-3 hover:bg-emerald-500" data-testid="chat-send">
                         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        <span className="ml-1.5 hidden sm:inline">Send</span>
                       </Button>
                     </div>
                   </div>
@@ -818,13 +887,53 @@ export default function TeamChatPage() {
           setShowNewDialog(false);
         }}
       />
+      </div>
+      </section>
     </div>
+  );
+}
+
+function NexusOperationsPulse({ activeTechnicians, context, pinnedCount, onDraftCommand }) {
+  const liveLabel = activeTechnicians.length === 1 ? "1 technician active" : `${activeTechnicians.length} technicians active`;
+  const contextMetrics = [
+    ["Tickets", context.tickets, "border-cyan-500/20 bg-cyan-500/[0.06] text-cyan-100"],
+    ["Invoices", context.invoices, "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-100"],
+    ["Purchase orders", context.purchaseOrders, "border-amber-500/20 bg-amber-500/[0.06] text-amber-100"],
+    ["Pinned", pinnedCount, "border-white/10 bg-white/[0.03] text-zinc-200"],
+  ];
+
+  return (
+    <section className="border-b border-cyan-500/10 bg-gradient-to-r from-cyan-500/[0.08] via-emerald-500/[0.045] to-transparent px-3 py-2.5 md:px-5" aria-label="Nexus operations pulse">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2.5 rounded-xl border border-cyan-500/10 bg-[#101a22]/70 px-3 py-2 shadow-inner shadow-cyan-950/20">
+        <div className="flex items-center gap-2 pr-1">
+          <span className="relative grid h-8 w-8 place-items-center rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">
+            <span className="absolute h-2 w-2 animate-ping rounded-full bg-emerald-400/70" /><Activity className="relative h-4 w-4" />
+          </span>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-300">Nexus operations pulse</p>
+            <p className="text-xs text-zinc-500">{liveLabel}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5" aria-label="Linked work in this channel">
+          {contextMetrics.map(([label, value, className]) => (
+            <span key={label} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] ${className}`}>
+              <strong className="text-xs leading-none">{value}</strong>{label}
+            </span>
+          ))}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => onDraftCommand("/ticket ")} className="rounded-md border border-white/8 bg-white/[0.03] px-2 py-1 text-[10px] font-medium text-zinc-300 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link work</button>
+          <button type="button" onClick={() => onDraftCommand("/page high")} className="rounded-md border border-rose-500/15 bg-rose-500/[0.05] px-2 py-1 text-[10px] font-medium text-rose-200 transition hover:border-rose-400/40 hover:bg-rose-500/10">Page team</button>
+          <button type="button" onClick={() => onDraftCommand("/summarize")} className="rounded-md border border-emerald-500/15 bg-emerald-500/[0.05] px-2 py-1 text-[10px] font-medium text-emerald-100 transition hover:border-emerald-400/40 hover:bg-emerald-500/10">Handoff brief</button>
+        </div>
+      </div>
+    </section>
   );
 }
 
 function RailButton({ icon: Icon, label, active, badge = 0, onClick }) {
   return (
-    <button onClick={onClick} className={`relative mb-2 flex w-full flex-col items-center gap-1 border-l-2 py-2 text-[10px] ${active ? "border-violet-500 text-violet-300" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
+    <button onClick={onClick} aria-current={active ? "page" : undefined} className={`relative mb-2 flex w-full flex-col items-center gap-1 border-l-2 py-2 text-[10px] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/60 ${active ? "border-cyan-500 bg-cyan-500/[0.05] text-cyan-200" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
       <Icon className="h-5 w-5" />{label}
       {badge > 0 && <span className="absolute right-3 top-0 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">{badge > 99 ? "99+" : badge}</span>}
     </button>
@@ -834,7 +943,7 @@ function RailButton({ icon: Icon, label, active, badge = 0, onClick }) {
 function ConversationRow({ channel, active, presence, onClick }) {
   const name = channelDisplayName(channel);
   return (
-    <button onClick={onClick} className={`mb-0.5 flex w-full gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? "bg-violet-500/15" : "hover:bg-white/[0.04]"}`} data-testid={`channel-${channel.id}`}>
+    <button onClick={onClick} aria-current={active ? "page" : undefined} className={`mb-0.5 flex w-full gap-3 rounded-lg border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${active ? "border-cyan-500/20 bg-cyan-500/10 shadow-sm shadow-cyan-950/20" : "border-transparent hover:bg-white/[0.04]"}`} data-testid={`channel-${channel.id}`}>
       <ChannelAvatar channel={channel} presence={presence} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -843,9 +952,9 @@ function ConversationRow({ channel, active, presence, onClick }) {
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <p className={`truncate text-xs ${channel.unread_count ? "text-zinc-300" : "text-zinc-600"}`}>
-            {channel.last_message ? `${channel.last_message.user_name ? `${channel.last_message.user_name.split(" ")[0]}: ` : ""}${channel.last_message.body || "Attachment"}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
+            {channel.last_message ? `${channel.last_message.user_name ? `${channel.last_message.user_name.split(" ")[0]}: ` : ""}${repairDisplayText(channel.last_message.body || "Attachment")}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
           </p>
-          {channel.unread_count > 0 && <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-500 px-1.5 text-[10px] font-semibold text-white">{channel.unread_count > 99 ? "99+" : channel.unread_count}</span>}
+          {channel.unread_count > 0 && <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500 px-1.5 text-[10px] font-semibold text-white">{channel.unread_count > 99 ? "99+" : channel.unread_count}</span>}
         </div>
       </div>
     </button>
@@ -858,11 +967,22 @@ function ChannelAvatar({ channel, presence, size = "sm" }) {
   const statusMeta = presence ? PRESENCE_META[presence] || PRESENCE_META.offline : null;
   return (
     <div className="relative shrink-0">
-      <Avatar className={dimension}>
-        <AvatarFallback style={avatarStyle(name)}>{channel.kind === "team" ? <Hash className="h-4 w-4" /> : initials(name)}</AvatarFallback>
-      </Avatar>
+      {channel.kind === "team" ? (
+        <Avatar className={dimension}>
+          <AvatarFallback style={avatarStyle(name)}><Hash className="h-4 w-4" /></AvatarFallback>
+        </Avatar>
+      ) : <TechnicianAvatar name={name} avatarUrl={channel.avatar} className={dimension} />}
       {statusMeta && <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[#1d1f26] ${statusMeta.dot}`} />}
     </div>
+  );
+}
+
+function TechnicianAvatar({ name, avatarUrl, className = "h-9 w-9", fallbackClassName = "" }) {
+  return (
+    <Avatar className={className}>
+      {avatarUrl && <AvatarImage src={avatarUrl} alt={`${name || "Technician"} profile`} className="object-cover" />}
+      <AvatarFallback className={fallbackClassName} style={avatarStyle(name)}>{initials(name)}</AvatarFallback>
+    </Avatar>
   );
 }
 
@@ -876,13 +996,13 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
   if (message.is_system) {
     return (
       <div className="my-3 flex justify-center">
-        <div className="max-w-2xl rounded-lg border border-violet-500/20 bg-violet-500/10 px-4 py-2 text-center text-xs text-violet-200">{message.body}</div>
+        <div className="max-w-2xl rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-center text-xs text-cyan-100">{repairDisplayText(message.body)}</div>
       </div>
     );
   }
   return (
-    <div className={`group relative flex gap-3 rounded-lg px-2 py-1.5 hover:bg-white/[0.025] ${compact ? "mt-0" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div className="w-9 shrink-0">{!compact && <Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(message.user_name)}>{initials(message.user_name)}</AvatarFallback></Avatar>}</div>
+    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? "border border-emerald-500/10 bg-emerald-500/[0.035]" : "hover:bg-cyan-500/[0.025]"} ${compact ? "mt-0.5" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <div className="w-9 shrink-0">{!compact && <TechnicianAvatar name={message.user_name} avatarUrl={message.avatar_url || message.avatar} className="h-9 w-9" />}</div>
       <div className="min-w-0 flex-1">
         {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span><span className="text-[10px] text-zinc-600">{formatTime(message.ts)}</span>{message.edited && <span className="text-[9px] text-zinc-600">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
         {editing ? (
@@ -894,9 +1014,9 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
           </div>
         )}
         {onReact && message.reactions && Object.keys(message.reactions).length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(message.reactions).map(([emoji, voters]) => <button key={emoji} onClick={() => onReact(emoji)} className={`rounded-full border px-2 py-0.5 text-xs ${voters.includes?.(currentUserId) ? "border-violet-500/50 bg-violet-500/15" : "border-white/10 bg-white/[0.03]"}`}>{emoji} <span className="text-zinc-500">{voters.length}</span></button>)}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(message.reactions).map(([emoji, voters]) => <button key={emoji} onClick={() => onReact(emoji)} className={`rounded-full border px-2 py-0.5 text-xs ${voters.includes?.(currentUserId) ? "border-emerald-500/50 bg-emerald-500/15" : "border-white/10 bg-white/[0.03]"}`}>{emoji} <span className="text-zinc-500">{voters.length}</span></button>)}</div>
         )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">{message.thread_count > 0 && onThread && <button onClick={onThread} className="flex items-center gap-1 text-xs font-medium text-violet-400 hover:text-violet-300"><CornerDownRight className="h-3.5 w-3.5" />{message.thread_count} {message.thread_count === 1 ? "reply" : "replies"}</button>}<MessageReadReceipt message={message} currentUserId={currentUserId} receipts={readReceipts} /></div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">{message.thread_count > 0 && onThread && <button onClick={onThread} className="flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-200"><CornerDownRight className="h-3.5 w-3.5" />{message.thread_count} {message.thread_count === 1 ? "reply" : "replies"}</button>}<MessageReadReceipt message={message} currentUserId={currentUserId} receipts={readReceipts} /></div>
       </div>
       {hovered && !editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
         <div className="absolute right-3 top-0 flex -translate-y-1/2 items-center rounded-lg border border-white/10 bg-[#252832] p-0.5 shadow-xl">
@@ -922,15 +1042,15 @@ function MessageReadReceipt({ message, currentUserId, receipts }) {
   if (!message.ts || message.pending || message.deleted || message.user_id !== currentUserId) return null;
   const readers = (receipts || []).filter(receipt => receipt.user_id !== message.user_id && receipt.user_id !== currentUserId && receipt.last_read_at >= message.ts);
   if (!readers.length) return null;
-  return <span className="flex items-center gap-1.5 text-[10px] text-zinc-500" title={`Seen by ${readers.map(reader => reader.user_name).join(", ")}`}><span className="flex -space-x-1">{readers.slice(0, 3).map(reader => <Avatar key={reader.user_id} className="h-4 w-4 border border-[#1d1f26]"><AvatarFallback className="text-[7px]" style={avatarStyle(reader.user_name)}>{initials(reader.user_name)}</AvatarFallback></Avatar>)}</span><Check className="h-3 w-3 text-emerald-400" />Seen{readers.length > 1 ? ` by ${readers.length}` : ""}</span>;
+  return <span className="flex items-center gap-1.5 text-[10px] text-zinc-500" title={`Seen by ${readers.map(reader => reader.user_name).join(", ")}`}><span className="flex -space-x-1">{readers.slice(0, 3).map(reader => <TechnicianAvatar key={reader.user_id} name={reader.user_name} avatarUrl={reader.avatar_url || reader.avatar} className="h-4 w-4 border border-[#1d1f26]" fallbackClassName="text-[7px]" />)}</span><Check className="h-3 w-3 text-emerald-400" />Seen{readers.length > 1 ? ` by ${readers.length}` : ""}</span>;
 }
 
 function MessageAction({ icon: Icon, label, onClick, destructive }) {
-  return <button onClick={onClick} title={label} className={`rounded-md p-1.5 hover:bg-white/10 ${destructive ? "text-rose-400" : "text-zinc-400"}`}><Icon className="h-3.5 w-3.5" /></button>;
+  return <button onClick={onClick} title={label} aria-label={label} className={`rounded-md p-1.5 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${destructive ? "text-rose-400 focus-visible:ring-rose-400/60" : "text-zinc-400 hover:text-zinc-100"}`}><Icon className="h-3.5 w-3.5" /></button>;
 }
 
 function MessageBody({ body, headers, presence }) {
-  const text = body || "";
+  const text = repairDisplayText(body);
   const tickets = [...new Set([...text.matchAll(TICKET_REGEX)].map(match => match[1]))];
   const invoices = [...new Set([...text.matchAll(INVOICE_REGEX)].map(match => match[1]))];
   const purchaseOrders = [...new Set([...text.matchAll(PO_REGEX)].map(match => match[1]))];
@@ -946,7 +1066,7 @@ function MessageBody({ body, headers, presence }) {
 }
 
 function RichMessageText({ text }) {
-  return <span className="whitespace-pre-wrap break-words">{String(text || "").split(/(@[\w.-]+)/g).map((part, index) => part.startsWith("@") ? <span key={`${part}-${index}`} className={`rounded px-1 py-0.5 text-xs font-medium ${["@channel", "@here", "@everyone"].includes(part.toLowerCase()) ? "bg-amber-500/15 text-amber-200" : "bg-violet-500/15 text-violet-200"}`}>{part}</span> : part)}</span>;
+  return <span className="whitespace-pre-wrap break-words">{String(text || "").split(/(@[\w.-]+)/g).map((part, index) => part.startsWith("@") ? <span key={`${part}-${index}`} className={`rounded px-1 py-0.5 text-xs font-medium ${["@channel", "@here", "@everyone"].includes(part.toLowerCase()) ? "bg-amber-500/15 text-amber-200" : "bg-cyan-500/15 text-cyan-100"}`}>{part}</span> : part)}</span>;
 }
 
 function TicketCard({ ticketNumber, headers, presence }) {
@@ -958,8 +1078,8 @@ function TicketCard({ ticketNumber, headers, presence }) {
   }, [headers, ticketNumber]);
   if (!ticket) return null;
   return (
-    <Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`} className="mt-2 block max-w-lg rounded-lg border border-white/10 bg-black/20 p-3 transition hover:border-violet-500/40">
-      <div className="mb-1 flex items-center gap-2"><code className="text-xs text-violet-300">{ticket.ticket_number}</code><Badge variant="outline" className="text-[9px] capitalize">{ticket.priority}</Badge><Badge variant="outline" className="text-[9px] capitalize">{ticket.status?.replace(/_/g, " ")}</Badge></div>
+    <Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`} className="mt-2 block max-w-lg rounded-lg border border-white/10 bg-black/20 p-3 transition hover:border-cyan-500/40">
+      <div className="mb-1 flex items-center gap-2"><code className="text-xs text-cyan-200">{ticket.ticket_number}</code><Badge variant="outline" className="text-[9px] capitalize">{ticket.priority}</Badge><Badge variant="outline" className="text-[9px] capitalize">{ticket.status?.replace(/_/g, " ")}</Badge></div>
       <p className="text-sm font-medium text-zinc-200">{ticket.title}</p><p className="mt-1 text-xs text-zinc-500">{ticket.client_name}{ticket.assigned_to_name ? ` · ${ticket.assigned_to_name}` : ""}</p>
       <WorkPresence kind="ticket" reference={ticket.ticket_number} presence={presence} headers={headers} />
     </Link>
@@ -1007,15 +1127,15 @@ function WorkPresence({ kind, reference, workItemId, presence, headers }) {
   const people = Object.values(presence || {}).filter(person => person.busy_state === workItem && person.led !== "offline");
   if (!people.length && !events.length) return null;
   const latest = events[0];
-  return <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/5 pt-2"><div className="flex -space-x-1.5">{people.slice(0, 4).map(person => <Avatar key={person.user_id} className="h-5 w-5 border border-[#1d1f26]"><AvatarFallback className="text-[8px]" style={avatarStyle(person.user_name)}>{initials(person.user_name)}</AvatarFallback></Avatar>)}</div>{people.length > 0 && <><p className="text-[10px] text-emerald-300">{people.length === 1 ? `${people[0].user_name} is active here` : `${people.length} technicians active here`}</p><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /></>}{latest && <p className="basis-full text-[10px] text-zinc-500">{latest.user_name || "Technician"} {latest.event === "left" ? "last left" : "opened"} {formatRelative(latest.created_at)}</p>}</div>;
+  return <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/5 pt-2"><div className="flex -space-x-1.5">{people.slice(0, 4).map(person => <TechnicianAvatar key={person.user_id} name={person.user_name} avatarUrl={person.avatar_url || person.avatar} className="h-5 w-5 border border-[#1d1f26]" fallbackClassName="text-[8px]" />)}</div>{people.length > 0 && <><p className="text-[10px] text-emerald-300">{people.length === 1 ? `${people[0].user_name} is active here` : `${people.length} technicians active here`}</p><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /></>}{latest && <p className="basis-full text-[10px] text-zinc-500">{latest.user_name || "Technician"} {latest.event === "left" ? "last left" : "opened"} {formatRelative(latest.created_at)}</p>}</div>;
 }
 
 function AttachmentCard({ attachment, headers, onDownload }) {
   return (
     <div className="mt-2 w-full max-w-md overflow-hidden rounded-lg border border-white/10 bg-black/20">
       {attachment.is_image && <ImageAttachmentPreview attachment={attachment} headers={headers} onDownload={onDownload} />}
-      <button onClick={onDownload} className="flex w-full items-center gap-3 p-3 text-left hover:bg-white/[0.03] hover:text-violet-100">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/15"><FileText className="h-4 w-4 text-violet-300" /></div>
+      <button onClick={onDownload} className="flex w-full items-center gap-3 p-3 text-left hover:bg-white/[0.03] hover:text-cyan-100">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/15"><FileText className="h-4 w-4 text-cyan-200" /></div>
         <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{attachment.filename}</p><p className="text-[10px] text-zinc-600">{formatBytes(attachment.size)} · Download original</p></div><Download className="h-4 w-4 text-zinc-500" />
       </button>
     </div>
@@ -1046,18 +1166,18 @@ function FilesView({ files, onDownload }) {
   return (
     <div className="flex-1 overflow-y-auto p-5 md:p-8">
       <div className="mx-auto max-w-4xl"><h3 className="mb-1 text-lg font-semibold">Shared files</h3><p className="mb-5 text-sm text-zinc-500">Files shared in this conversation.</p>
-        {files.length === 0 ? <EmptyContent icon={FileText} title="No shared files" body="Attachments shared in posts appear here." /> : <div className="overflow-hidden rounded-xl border border-white/5">{files.map(message => <button key={message.id} onClick={() => onDownload(message.attachment)} className="flex w-full items-center gap-3 border-b border-white/5 bg-white/[0.02] p-4 text-left last:border-0 hover:bg-white/[0.04]"><FileText className="h-5 w-5 text-violet-400" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{message.attachment.filename}</p><p className="text-xs text-zinc-600">{message.user_name} · {formatRelative(message.ts)} · {formatBytes(message.attachment.size)}</p></div><Download className="h-4 w-4 text-zinc-500" /></button>)}</div>}
+        {files.length === 0 ? <EmptyContent icon={FileText} title="No shared files" body="Attachments shared in posts appear here." /> : <div className="overflow-hidden rounded-xl border border-white/5">{files.map(message => <button key={message.id} onClick={() => onDownload(message.attachment)} className="flex w-full items-center gap-3 border-b border-white/5 bg-white/[0.02] p-4 text-left last:border-0 hover:bg-white/[0.04]"><FileText className="h-5 w-5 text-cyan-300" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{message.attachment.filename}</p><p className="text-xs text-zinc-600">{message.user_name} · {formatRelative(message.ts)} · {formatBytes(message.attachment.size)}</p></div><Download className="h-4 w-4 text-zinc-500" /></button>)}</div>}
       </div>
     </div>
   );
 }
 
 function PinnedView({ messages, onOpenThread }) {
-  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><h3 className="mb-1 text-lg font-semibold">Pinned posts</h3><p className="mb-5 text-sm text-zinc-500">Important updates kept for the team.</p>{messages.length === 0 ? <EmptyContent icon={Pin} title="Nothing pinned" body="Pin a post from its More actions menu." /> : <div className="space-y-3">{messages.map(message => <button key={message.id} onClick={() => onOpenThread(message)} className="block w-full rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4 text-left hover:border-amber-500/30"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500"><Pin className="h-3.5 w-3.5 text-amber-400" />Pinned by {message.pinned_by || "a teammate"} · {formatRelative(message.pinned_at || message.ts)}</div><p className="whitespace-pre-wrap text-sm text-zinc-300">{message.body}</p></button>)}</div>}</div></div>;
+  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><h3 className="mb-1 text-lg font-semibold">Pinned posts</h3><p className="mb-5 text-sm text-zinc-500">Important updates kept for the team.</p>{messages.length === 0 ? <EmptyContent icon={Pin} title="Nothing pinned" body="Pin a post from its More actions menu." /> : <div className="space-y-3">{messages.map(message => <button key={message.id} onClick={() => onOpenThread(message)} className="block w-full rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4 text-left hover:border-amber-500/30"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500"><Pin className="h-3.5 w-3.5 text-amber-400" />Pinned by {message.pinned_by || "a teammate"} · {formatRelative(message.pinned_at || message.ts)}</div><p className="whitespace-pre-wrap text-sm text-zinc-300">{repairDisplayText(message.body)}</p></button>)}</div>}</div></div>;
 }
 
 function SearchResults({ results, onSelect, onClose }) {
-  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-violet-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{result.user_name}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{result.body}</p></button>)}</div>}</div></div>;
+  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-cyan-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{result.user_name}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{repairDisplayText(result.body)}</p></button>)}</div>}</div></div>;
 }
 
 function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpdated, onClose }) {
@@ -1087,8 +1207,8 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
   return (
     <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
-      {canManageMembers && <div className="border-b border-white/5 bg-violet-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-violet-200">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-violet-600 px-3 text-xs hover:bg-violet-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
-      <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><Avatar className="h-8 w-8"><AvatarFallback style={avatarStyle(member.name)}>{initials(member.name)}</AvatarFallback></Avatar><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
+      {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
+      <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
     </aside>
   );
 }
@@ -1098,7 +1218,7 @@ function ThreadPanel({ thread, currentUserId, headers, input, onInput, onSend, o
     <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="thread-panel">
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><div><h3 className="font-semibold">Thread</h3><p className="text-xs text-zinc-600">{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</p></div><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
       <div className="flex-1 overflow-y-auto p-3"><MessageRow message={thread.parent} own={thread.parent.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />{thread.replies.length > 0 && <div className="my-3 border-t border-white/5" />}{thread.replies.map(reply => <MessageRow key={reply.id} message={reply} own={reply.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />)}</div>
-      <div className="border-t border-white/5 p-3"><div className="flex gap-2 rounded-lg border border-white/10 bg-black/20 p-2"><Input value={input} onChange={event => onInput(event.target.value)} onKeyDown={event => event.key === "Enter" && onSend()} placeholder="Reply to thread" className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" data-testid="thread-input" /><Button size="sm" onClick={onSend} disabled={!input.trim()} className="h-8 w-8 bg-violet-600 p-0"><Send className="h-3.5 w-3.5" /></Button></div></div>
+      <div className="border-t border-white/5 p-3"><div className="flex gap-2 rounded-lg border border-white/10 bg-black/20 p-2"><Input value={input} onChange={event => onInput(event.target.value)} onKeyDown={event => event.key === "Enter" && onSend()} placeholder="Reply to thread" className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" data-testid="thread-input" /><Button size="sm" onClick={onSend} disabled={!input.trim()} className="h-8 w-8 bg-emerald-600 p-0 hover:bg-emerald-500"><Send className="h-3.5 w-3.5" /></Button></div></div>
     </aside>
   );
 }
@@ -1131,14 +1251,14 @@ function NewConversationDialog({ open, onOpenChange, users, currentUserId, heade
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg border-white/10 bg-[#1d1f26]">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><MessageSquarePlus className="h-5 w-5 text-violet-400" />Start collaborating</DialogTitle><DialogDescription>Start a private message, bring a group together, or create an operational channel.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><MessageSquarePlus className="h-5 w-5 text-emerald-400" />Start collaborating</DialogTitle><DialogDescription>Start a private message, bring a group together, or create an operational channel.</DialogDescription></DialogHeader>
         <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }}>
           <TabsList className="grid w-full grid-cols-3"><TabsTrigger value="dm">Direct</TabsTrigger><TabsTrigger value="group">Group chat</TabsTrigger><TabsTrigger value="channel">Channel</TabsTrigger></TabsList>
           <TabsContent value="dm" className="space-y-3"><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={id => setSelected([id])} /></TabsContent>
           <TabsContent value="group" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.slice(0, 80))} placeholder="Group name (optional)" className="border-white/10 bg-black/20" /><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></TabsContent>
-          <TabsContent value="channel" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="What is this channel for?" className="min-h-20 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/5 p-3"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-violet-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can find and read it.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
+          <TabsContent value="channel" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="What is this channel for?" className="min-h-20 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/5 p-3"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-emerald-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can find and read it.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
         </Tabs>
-        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="bg-violet-600 hover:bg-violet-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
+        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="bg-emerald-600 hover:bg-emerald-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1149,7 +1269,7 @@ function UserSearch({ value, onChange }) {
 }
 
 function UserPicker({ candidates, selected, onToggle }) {
-  return <ScrollArea className="h-64 rounded-lg border border-white/5"><div className="p-1">{candidates.map(candidate => { const checked = selected.includes(candidate.id); return <button key={candidate.id} onClick={() => onToggle(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${checked ? "bg-violet-500/15" : "hover:bg-white/[0.04]"}`}><Avatar className="h-9 w-9"><AvatarFallback style={avatarStyle(candidate.name)}>{initials(candidate.name)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{candidate.name}</p><p className="truncate text-xs text-zinc-600">{candidate.email}</p></div>{checked && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-500"><Check className="h-3 w-3" /></span>}</button>; })}{candidates.length === 0 && <p className="p-8 text-center text-sm text-zinc-600">No teammates found</p>}</div></ScrollArea>;
+  return <ScrollArea className="h-64 rounded-lg border border-white/5"><div className="p-1">{candidates.map(candidate => { const checked = selected.includes(candidate.id); return <button key={candidate.id} onClick={() => onToggle(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${checked ? "bg-cyan-500/15" : "hover:bg-white/[0.04]"}`}><TechnicianAvatar name={candidate.name} avatarUrl={candidate.avatar} className="h-9 w-9" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{candidate.name}</p><p className="truncate text-xs text-zinc-600">{candidate.email}</p></div>{checked && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500"><Check className="h-3 w-3" /></span>}</button>; })}{candidates.length === 0 && <p className="p-8 text-center text-sm text-zinc-600">No teammates found</p>}</div></ScrollArea>;
 }
 
 function ConversationWelcome({ channel }) {
@@ -1157,7 +1277,7 @@ function ConversationWelcome({ channel }) {
 }
 
 function EmptyWorkspace({ onNew }) {
-  return <div className="flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-violet-500/15"><MessageCircle className="h-9 w-9 text-violet-400" /></div><h2 className="mt-5 text-2xl font-semibold">Nexus Chat, built for the work</h2><p className="mt-2 max-w-md text-sm text-zinc-500">Keep private conversations, operational channels, files, and ticket context in one secure workspace.</p><Button onClick={onNew} className="mt-5 bg-violet-600 hover:bg-violet-500"><Plus className="mr-2 h-4 w-4" />Start collaborating</Button></div>;
+  return <div className="flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-500/15"><MessageCircle className="h-9 w-9 text-emerald-400" /></div><h2 className="mt-5 text-2xl font-semibold">Nexus Chat, built for the work</h2><p className="mt-2 max-w-md text-sm text-zinc-500">Keep private conversations, operational channels, files, and ticket context in one secure workspace.</p><Button onClick={onNew} className="mt-5 bg-emerald-600 hover:bg-emerald-500"><Plus className="mr-2 h-4 w-4" />Start collaborating</Button></div>;
 }
 
 function EmptyContent({ icon: Icon, title, body }) {
@@ -1172,12 +1292,12 @@ function DayDivider({ label }) {
   return <div className="my-5 flex items-center gap-3"><div className="h-px flex-1 bg-white/5" /><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">{label}</span><div className="h-px flex-1 bg-white/5" /></div>;
 }
 
-function TypingIndicator({ names }) {
-  return <div className="ml-12 mt-2 flex items-center gap-2 text-xs text-zinc-500"><span className="flex gap-1 rounded-full bg-white/5 px-3 py-2"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:240ms]" /></span>{names.join(", ")} typing</div>;
+function TypingIndicator({ users }) {
+  return <div className="ml-12 mt-2 flex items-center gap-2 text-xs text-zinc-500"><span className="flex -space-x-1">{users.slice(0, 3).map(person => <TechnicianAvatar key={person.user_id} name={person.user_name} avatarUrl={person.avatar_url || person.avatar} className="h-6 w-6 border border-[#1d1f26]" fallbackClassName="text-[8px]" />)}</span><span className="flex gap-1 rounded-full bg-white/5 px-3 py-2"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:240ms]" /></span>{users.map(person => person.user_name).join(", ")} typing</div>;
 }
 
 function ComposerButton({ icon: Icon, label, onClick }) {
-  return <button type="button" onClick={onClick} title={label} className="rounded-md p-2 text-zinc-500 hover:bg-white/5 hover:text-zinc-200"><Icon className="h-4 w-4" /></button>;
+  return <button type="button" onClick={onClick} title={label} aria-label={label} className="rounded-md p-2 text-zinc-500 transition hover:bg-cyan-500/10 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"><Icon className="h-4 w-4" /></button>;
 }
 
 function SuggestionPanel({ children, title, className = "" }) {

@@ -1,6 +1,8 @@
 """Shared outbound email delivery through the primary Microsoft 365 mailbox."""
 import logging
 import base64
+import re
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 import httpx
@@ -34,10 +36,40 @@ async def _require_admin(current_user: dict):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict):
-    """Maintain a provider-independent outbound email audit without storing message bodies."""
+async def _resolve_client_for_addresses(addresses: list[str], explicit_client_id: str | None = None) -> dict | None:
+    """Resolve a client from its profile email or any recorded client contact."""
+    if explicit_client_id:
+        client = await db.clients.find_one({"id": explicit_client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+        if client:
+            return client
+    for address in addresses:
+        value = str(address or "").strip()
+        if not value:
+            continue
+        match = {"$regex": f"^{re.escape(value)}$", "$options": "i"}
+        client = await db.clients.find_one(
+            {"$or": [{"email": match}, {"contact_email": match}, {"contacts.email": match}]},
+            {"_id": 0, "id": 1, "name": 1, "company_name": 1},
+        )
+        if client:
+            return client
+        contact = await db.client_contacts.find_one({"email": match}, {"_id": 0, "client_id": 1})
+        if not contact:
+            contact = await db.contacts.find_one({"email": match}, {"_id": 0, "client_id": 1})
+        if contact and contact.get("client_id"):
+            client = await db.clients.find_one({"id": contact["client_id"]}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+            if client:
+                return client
+    return None
+
+
+async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
+    """Maintain a delivery audit and attach client correspondence to the client history."""
     try:
-        await db.email_delivery_log.insert_one({
+        delivery_id = str(uuid.uuid4())
+        client = await _resolve_client_for_addresses([*recipients, *cc_recipients], client_id)
+        entry = {
+            "id": delivery_id,
             "recipients": recipients,
             "cc_recipients": cc_recipients,
             "subject": subject,
@@ -46,28 +78,92 @@ async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], s
             "attachment_count": len(attachments or []),
             "status": result.get("status"),
             "message": result.get("message"),
+            "client_id": (client or {}).get("id"),
+            "client_name": (client or {}).get("company_name") or (client or {}).get("name"),
+            "related_type": related_type,
+            "related_id": related_id,
+            "initiated_by": initiated_by,
+            "initiated_by_name": initiated_by_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        await db.email_delivery_log.insert_one(entry)
+        if client:
+            await db.client_communication_events.insert_one({
+                "id": str(uuid.uuid4()),
+                "delivery_id": delivery_id,
+                "client_id": client["id"],
+                "direction": "outbound",
+                "channel": "email",
+                "recipients": recipients,
+                "cc_recipients": cc_recipients,
+                "subject": subject,
+                "category": category,
+                "sender_mailbox": sender,
+                "delivery_status": result.get("status"),
+                "delivery_message": result.get("message"),
+                "delivery_confirmed": result.get("status") == "sent",
+                "related_type": related_type,
+                "related_id": related_id,
+                "initiated_by": initiated_by,
+                "initiated_by_name": initiated_by_name,
+                "created_at": entry["created_at"],
+            })
+        return delivery_id
     except Exception as exc:
         logger.warning("Unable to save email delivery audit record: %s", exc)
+        return None
 
 
-async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, attachments: list[dict] | None = None):
+async def record_inbound_client_email(*, sender_email: str, sender_name: str, subject: str, mailbox: str | None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None):
+    """Add an inbound message to the same immutable client correspondence history."""
+    client = await _resolve_client_for_addresses([sender_email], client_id)
+    if not client:
+        return None
+    event = {
+        "id": str(uuid.uuid4()),
+        "client_id": client["id"],
+        "direction": "inbound",
+        "channel": "email",
+        "sender_email": sender_email,
+        "sender_name": sender_name,
+        "recipients": [mailbox] if mailbox else [],
+        "subject": subject,
+        "category": "inbound",
+        "sender_mailbox": mailbox,
+        "delivery_status": "received",
+        "delivery_confirmed": True,
+        "related_type": related_type,
+        "related_id": related_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.client_communication_events.insert_one(event)
+    return event
+
+
+async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, attachments: list[dict] | None = None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
     """Send through the selected Microsoft 365 mailbox for an outbound category."""
     recipients = [to_email] if isinstance(to_email, str) else [address for address in to_email if address]
     cc_recipients = [address for address in (cc_addresses or []) if address]
+
+    async def record(result: dict):
+        result["delivery_id"] = await _record_delivery(
+            recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category,
+            sender=result.get("sender"), attachments=attachments, result=result, client_id=client_id,
+            related_type=related_type, related_id=related_id, initiated_by=initiated_by,
+            initiated_by_name=initiated_by_name,
+        )
+        return result
+
     config = await _load_microsoft365_config()
     if not config:
         logger.info("[EMAIL MOCK] To: %s | Subject: %s", to_email, subject)
         result = {"status": "mocked", "message": "Email logged (Microsoft 365 mailbox not connected)", "email_id": None}
-        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=None, attachments=attachments, result=result)
-        return result
+        return await record(result)
 
     sender = (config.get("outbound_routing") or {}).get(category) or config["sender_email"]
     if not recipients:
         result = {"status": "failed", "message": "No email recipient provided", "email_id": None}
-        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
-        return result
+        return await record(result)
     graph_attachments = []
     for attachment in attachments or []:
         content = attachment.get("content", b"")
@@ -91,8 +187,7 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
             )
             if token_response.status_code != 200:
                 result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
-                await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
-                return result
+                return await record(result)
             access_token = token_response.json().get("access_token")
             send_response = await client.post(
                 f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
@@ -110,17 +205,14 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
             )
             if send_response.status_code not in (200, 202):
                 result = {"status": "failed", "message": "Microsoft 365 rejected the email", "email_id": None}
-                await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
-                return result
+                return await record(result)
         logger.info("[EMAIL SENT via Microsoft 365] From: %s To: %s", sender, ", ".join(recipients))
         result = {"status": "sent", "message": f"Email sent to {', '.join(recipients)} via Microsoft 365", "email_id": None, "sender": sender}
-        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
-        return result
+        return await record(result)
     except Exception as exc:
         logger.error("[EMAIL FAILED via Microsoft 365] To: %s | Error: %s", to_email, exc)
         result = {"status": "failed", "message": "Microsoft 365 delivery failed", "email_id": None}
-        await _record_delivery(recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category, sender=sender, attachments=attachments, result=result)
-        return result
+        return await record(result)
 
 
 

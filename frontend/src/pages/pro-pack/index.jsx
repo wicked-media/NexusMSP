@@ -16,7 +16,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
-import { MetricStrip, MetricTile } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
 import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } from "@/lib/ticketPreviewData";
@@ -46,7 +45,7 @@ const PageHeader = ({ title, subtitle, icon: Icon = Sparkles, children }) => (
 );
 
 /* ============== TRIAGE QUEUE ============== */
-export function TriageQueuePage() {
+export function TriageQueuePage({ embedded = false }) {
   const { headers } = useApi();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(false);
@@ -56,20 +55,28 @@ export function TriageQueuePage() {
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, []); // eslint-disable-line
   if (!data) return <div className="p-6 space-y-4"><TicketModuleHeader title="Triage queue" subtitle="Loading unassigned tickets…" /><Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" /></div>;
   return (
-    <div className="p-6 space-y-4" data-testid="triage-queue-page">
-      <TicketModuleHeader
+    <div className="space-y-4" data-testid="triage-queue-page">
+      {!embedded && <TicketModuleHeader
         title="Triage queue"
         subtitle={`${data.count} unassigned · oldest ${Math.floor(data.oldest_age_minutes / 60)}h ${data.oldest_age_minutes % 60}m · ordered for rapid ownership`}
         actions={
         <Button variant="outline" size="sm" onClick={load}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button>
         }
-      />
+      />}
       {loadError && <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">Live triage data is unavailable. Showing the safe local queue.</div>}
-      <MetricStrip columns={4}>
-        {Object.entries(data.by_priority || {}).map(([k, v]) => (
-          <MetricTile key={k} label={k} value={v} accent={k === "critical" ? "rose" : k === "high" ? "amber" : k === "medium" ? "sky" : "zinc"} icon={<Inbox className={`w-2.5 h-2.5 ${k === "critical" ? "text-rose-400" : k === "high" ? "text-amber-400" : k === "medium" ? "text-sky-400" : "text-zinc-400"}`} />} testid={`triage-metric-${k}`} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {Object.entries(data.by_priority || {}).map(([priority, count]) => (
+          <HeroTile
+            key={priority}
+            label={priority}
+            value={count}
+            icon={priority === "critical" ? AlertTriangle : Inbox}
+            glow={priority === "critical" ? "rose" : priority === "high" ? "amber" : priority === "medium" ? "cyan" : "zinc"}
+            subtitle={priority === "critical" ? "Immediate ownership" : priority === "high" ? "Priority review" : priority === "medium" ? "Planned response" : "Monitor queue"}
+            testId={`triage-metric-${priority}`}
+          />
         ))}
-      </MetricStrip>
+      </div>
       <Card><CardContent className="p-0"><Table>
         <TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead><TableHead>Priority</TableHead><TableHead>Source</TableHead><TableHead>Age</TableHead></TableRow></TableHeader>
         <TableBody>{(data.items || []).map(t => (
@@ -91,75 +98,92 @@ export function TriageQueuePage() {
 export function ServiceCatalogPage() {
   const { headers } = useApi();
   const [items, setItems] = useState([]);
+  const [usage, setUsage] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", code: "", category: "managed_services", default_priority: "medium", sla_response_hours: 4, sla_resolve_hours: 24, billing_unit_price: 0, billing_unit: "each", is_active: true });
-  const fetch = () => axios.get(`${API}/pro-pack/service-catalog`, { headers }).then(r => setItems(r.data));
+  const fetch = () => { setLoading(true); return Promise.all([axios.get(`${API}/pro-pack/service-catalog`, { headers }), axios.get(`${API}/pro-pack/service-catalog/usage/summary`, { headers }).catch(() => ({ data: { usage: [] } }))]).then(([services, usageResult]) => { setItems(services.data || []); setUsage(Object.fromEntries((usageResult.data?.usage || []).map(row => [row.service_id, row]))); }).catch(() => toast.error("Could not load the service catalog")).finally(() => setLoading(false)); };
   useEffect(() => { fetch(); }, []); // eslint-disable-line
   const save = async () => {
+    if (!form.name.trim() || !form.code.trim()) { toast.error("Service name and code are required"); return; }
     try {
       if (editing) await axios.put(`${API}/pro-pack/service-catalog/${editing.id}`, form, { headers });
       else await axios.post(`${API}/pro-pack/service-catalog`, form, { headers });
       toast.success("Saved"); setShow(false); setEditing(null); fetch();
-    } catch { toast.error("Save failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Save failed"); }
   };
   const del = async (id) => {
-    if (!window.confirm("Delete this service?")) return;
+    if (!window.confirm("Archive this service? It remains on historic tickets but cannot be selected for new tickets.")) return;
     await axios.delete(`${API}/pro-pack/service-catalog/${id}`, { headers });
-    fetch();
+    toast.success("Service archived"); fetch();
   };
+  const activeItems = items.filter(s => s.is_active !== false);
+  const visibleItems = items.filter(s => (showArchived || s.is_active !== false) && `${s.name} ${s.code} ${s.category}`.toLowerCase().includes(query.toLowerCase()));
   return (
-    <div className="p-6 space-y-4" data-testid="service-catalog-page">
-      <PageHeader title="Service Catalog" subtitle="Define services that auto-attach SLA and billing to tickets" icon={Briefcase}>
-        <Button size="sm" onClick={() => { setEditing(null); setForm({ name: "", code: "", category: "managed_services", default_priority: "medium", sla_response_hours: 4, sla_resolve_hours: 24, billing_unit_price: 0, billing_unit: "each", is_active: true }); setShow(true); }} data-testid="new-service-btn"><Plus className="w-3.5 h-3.5 mr-1" />New Service</Button>
-      </PageHeader>
-      <Card><CardContent className="p-0"><Table>
-        <TableHeader><TableRow><TableHead>Service</TableHead><TableHead>Code</TableHead><TableHead>Category</TableHead><TableHead>SLA Response</TableHead><TableHead>SLA Resolve</TableHead><TableHead className="text-right">Price</TableHead><TableHead></TableHead></TableRow></TableHeader>
-        <TableBody>{items.map(s => (
-          <TableRow key={s.id}>
-            <TableCell className="font-medium">{s.name}</TableCell>
+    <div className="space-y-5" data-testid="service-catalog-page">
+      <div className="rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_28%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.20)] md:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300">Service policy register</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Briefcase className="h-6 w-6 text-cyan-200" />Service Catalog</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Every policy applies an auditable service classification, SLA targets, routing defaults and billable context at ticket intake. Historic tickets retain the policy snapshot.</p></div><Button onClick={() => { setEditing(null); setForm({ name: "", code: "", category: "managed_services", default_priority: "medium", sla_response_hours: 4, sla_resolve_hours: 24, billing_unit_price: 0, billing_unit: "each", is_active: true }); setShow(true); }} data-testid="new-service-btn"><Plus className="mr-2 h-4 w-4" />New service policy</Button></div></div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <HeroTile label="Active policies" value={activeItems.length} icon={Briefcase} glow="cyan" subtitle="Available during ticket intake" testId="service-catalog-stat-active" />
+        <HeroTile label="Billable services" value={activeItems.filter(s => Number(s.billing_unit_price || 0) > 0).length} icon={Receipt} glow="emerald" subtitle="With a billable unit price" testId="service-catalog-stat-billable" />
+        <HeroTile label="Priority services" value={activeItems.filter(s => ["critical", "high"].includes(s.default_priority)).length} icon={AlertTriangle} glow="amber" subtitle="High or critical by default" testId="service-catalog-stat-priority" />
+        <HeroTile label="Archived" value={items.filter(s => s.is_active === false).length} icon={Layers} glow="sky" subtitle="Kept for historic ticket context" testId="service-catalog-stat-archived" />
+      </div>
+      <Card className="overflow-hidden border-border/70"><CardContent className="p-0"><div className="flex flex-col gap-3 border-b border-border/60 p-3 md:flex-row md:items-center md:justify-between"><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search service name, code, or category" className="max-w-md" data-testid="service-catalog-search" /><div className="flex items-center gap-2"><Switch checked={showArchived} onCheckedChange={setShowArchived} /><span className="text-xs text-muted-foreground">Show archived</span><Button size="sm" variant="outline" onClick={fetch}><RefreshCw className="mr-1 h-3.5 w-3.5" />Refresh</Button></div></div><Table>
+        <TableHeader><TableRow><TableHead>Service policy</TableHead><TableHead>Code</TableHead><TableHead>Ticket defaults</TableHead><TableHead>SLA response</TableHead><TableHead>SLA resolve</TableHead><TableHead>Ticket evidence</TableHead><TableHead className="text-right">Billable context</TableHead><TableHead></TableHead></TableRow></TableHeader>
+        <TableBody>{visibleItems.map(s => (
+          <TableRow key={s.id} className={s.is_active === false ? "opacity-55" : ""}>
+            <TableCell><div className="font-medium">{s.name}</div><div className="mt-0.5 text-[10px] text-muted-foreground line-clamp-1">{s.description || "No service description"}</div></TableCell>
             <TableCell className="font-mono text-xs">{s.code}</TableCell>
-            <TableCell><Badge variant="outline" className="text-[10px] capitalize">{s.category?.replace("_", " ")}</Badge></TableCell>
+            <TableCell><div className="flex flex-wrap gap-1"><Badge variant="outline" className="text-[10px] capitalize">{s.category?.replace("_", " ")}</Badge><Badge variant="outline" className="text-[10px] capitalize">{s.default_priority}</Badge>{s.is_active === false && <Badge variant="outline" className="border-amber-500/25 text-[9px] text-amber-300">archived</Badge>}</div></TableCell>
             <TableCell className="text-xs">{s.sla_response_hours}h</TableCell>
             <TableCell className="text-xs">{s.sla_resolve_hours}h</TableCell>
-            <TableCell className="text-right font-mono">${s.billing_unit_price?.toFixed(2)}/{s.billing_unit}</TableCell>
+            <TableCell><div className="text-xs font-medium">{usage[s.id]?.tickets || 0} tickets</div><div className="mt-0.5 text-[10px] text-muted-foreground">{usage[s.id]?.open_tickets || 0} open{usage[s.id]?.last_used_at ? ` · last ${new Date(usage[s.id].last_used_at).toLocaleDateString()}` : ""}</div></TableCell>
+            <TableCell className="text-right font-mono">${Number(s.billing_unit_price || 0).toFixed(2)}/{s.billing_unit}</TableCell>
             <TableCell className="text-right">
               <Button size="sm" variant="ghost" onClick={() => { setEditing(s); setForm(s); setShow(true); }}><Save className="w-3 h-3" /></Button>
-              <Button size="sm" variant="ghost" onClick={() => del(s.id)}><Trash2 className="w-3 h-3 text-rose-400" /></Button>
+              {s.is_active !== false && <Button size="sm" variant="ghost" onClick={() => del(s.id)}><Trash2 className="w-3 h-3 text-rose-400" /></Button>}
             </TableCell>
           </TableRow>
         ))}</TableBody>
-      </Table>{items.length === 0 && <p className="py-12 text-center text-muted-foreground text-sm">No services yet — click "New Service" to add the first one.</p>}</CardContent></Card>
-      <Dialog open={show} onOpenChange={setShow}><DialogContent>
-        <DialogHeader><DialogTitle>{editing ? "Edit" : "New"} Service</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3"><div><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div><div><Label>Code</Label><Input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} /></div></div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="managed_services">Managed Services</SelectItem><SelectItem value="security">Security</SelectItem><SelectItem value="backup">Backup</SelectItem><SelectItem value="consulting">Consulting</SelectItem><SelectItem value="project">Project</SelectItem></SelectContent></Select></div>
-            <div><Label>Default Priority</Label><Select value={form.default_priority} onValueChange={v => setForm({ ...form, default_priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent></Select></div>
-            <div><Label>Unit</Label><Select value={form.billing_unit} onValueChange={v => setForm({ ...form, billing_unit: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="each">Each</SelectItem><SelectItem value="hour">Hour</SelectItem><SelectItem value="month">Month</SelectItem><SelectItem value="user">User</SelectItem></SelectContent></Select></div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div><Label>SLA Response (h)</Label><Input type="number" step="0.5" value={form.sla_response_hours} onChange={e => setForm({ ...form, sla_response_hours: parseFloat(e.target.value) })} /></div>
-            <div><Label>SLA Resolve (h)</Label><Input type="number" step="0.5" value={form.sla_resolve_hours} onChange={e => setForm({ ...form, sla_resolve_hours: parseFloat(e.target.value) })} /></div>
-            <div><Label>Unit Price</Label><Input type="number" step="0.01" value={form.billing_unit_price} onChange={e => setForm({ ...form, billing_unit_price: parseFloat(e.target.value) })} /></div>
-          </div>
-          <div><Label>Description</Label><Textarea rows={2} value={form.description || ""} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+      </Table>{loading ? <p className="py-12 text-center text-muted-foreground text-sm"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading services…</p> : visibleItems.length === 0 && <p className="py-12 text-center text-muted-foreground text-sm">No matching services. Create one to make intake consistent.</p>}</CardContent></Card>
+      <Dialog open={show} onOpenChange={setShow}><DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Service policy workspace</p>
+          <DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Briefcase className="h-4 w-4 text-cyan-200" /></span>{editing ? "Refine service policy" : "Create service policy"}</DialogTitle>
+          <DialogDescription className="mt-2 max-w-xl">Define the default ticket treatment, SLA commitment and billable unit once. Every ticket keeps an auditable snapshot of this policy.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[68vh] space-y-5 overflow-y-auto px-6 py-5">
+          <section className="space-y-3"><div><p className="text-xs font-semibold text-zinc-200">Policy identity</p><p className="mt-0.5 text-[11px] text-zinc-500">Use a clear client-facing name and a short internal code.</p></div>
+            <div className="grid gap-3 md:grid-cols-[1fr_180px]"><div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Service name</Label><Input autoFocus placeholder="e.g. Managed endpoint support" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div><div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Policy code</Label><Input placeholder="MS-ENDPOINT" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} /></div></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Technician guidance</Label><Textarea rows={3} placeholder="Explain when this policy should be selected and any included work." value={form.description || ""} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+          </section>
+          <section className="grid gap-3 border-y border-white/[0.07] py-5 md:grid-cols-3"><div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Service category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="managed_services">Managed Services</SelectItem><SelectItem value="security">Security</SelectItem><SelectItem value="backup">Backup</SelectItem><SelectItem value="consulting">Consulting</SelectItem><SelectItem value="project">Project</SelectItem></SelectContent></Select></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Default priority</Label><Select value={form.default_priority} onValueChange={v => setForm({ ...form, default_priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent></Select></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Billing unit</Label><Select value={form.billing_unit} onValueChange={v => setForm({ ...form, billing_unit: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="each">Each</SelectItem><SelectItem value="hour">Hour</SelectItem><SelectItem value="month">Month</SelectItem><SelectItem value="user">User</SelectItem></SelectContent></Select></div>
+          </section>
+          <section className="grid gap-3 md:grid-cols-3"><div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04] p-3"><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">Response target</Label><div className="flex items-center gap-2"><Input className="bg-black/15" type="number" min="0" step="0.5" value={form.sla_response_hours} onChange={e => setForm({ ...form, sla_response_hours: Number(e.target.value) })} /><span className="text-xs text-zinc-500">hours</span></div></div>
+            <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04] p-3"><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">Resolution target</Label><div className="flex items-center gap-2"><Input className="bg-black/15" type="number" min="0" step="0.5" value={form.sla_resolve_hours} onChange={e => setForm({ ...form, sla_resolve_hours: Number(e.target.value) })} /><span className="text-xs text-zinc-500">hours</span></div></div>
+            <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.04] p-3"><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200">Unit price</Label><div className="flex items-center gap-2"><span className="text-sm text-zinc-500">$</span><Input className="bg-black/15" type="number" min="0" step="0.01" value={form.billing_unit_price} onChange={e => setForm({ ...form, billing_unit_price: Number(e.target.value) })} /></div></div>
+          </section>
+          <div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/15 p-4"><div><p className="text-sm font-medium text-zinc-100">Available for new tickets</p><p className="mt-1 max-w-lg text-xs text-zinc-500">Turning this off preserves historic reporting and ticket snapshots, but removes this policy from future intake.</p></div><Switch checked={form.is_active !== false} onCheckedChange={is_active => setForm({ ...form, is_active })} /></div>
         </div>
-        <DialogFooter><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save} data-testid="save-service-btn">Save</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={save} data-testid="save-service-btn"><Save className="mr-2 h-4 w-4" />{editing ? "Save policy" : "Create policy"}</Button></DialogFooter>
       </DialogContent></Dialog>
     </div>
   );
 }
 
 /* ============== CUSTOMER HEALTH ============== */
-export function CustomerHealthPage() {
+export function CustomerHealthPage({ embedded = false }) {
   const { headers } = useApi();
   const [items, setItems] = useState([]);
   useEffect(() => { axios.get(`${API}/pro-pack/customer-health`, { headers }).then(r => setItems(r.data)); }, []); // eslint-disable-line
   return (
     <div className="p-6 space-y-4" data-testid="customer-health-page">
-      <PageHeader title="Customer Health" subtitle="Composite score: open tickets, criticals, overdue invoices, CSAT" icon={Heart} />
+      {!embedded && <PageHeader title="Customer Health" subtitle="Composite score: open tickets, criticals, overdue invoices, CSAT" icon={Heart} />}
       <Card><CardContent className="p-0"><Table>
         <TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Score</TableHead><TableHead>Open Tickets</TableHead><TableHead>Critical</TableHead><TableHead>Overdue Invoices</TableHead></TableRow></TableHeader>
         <TableBody>{items.map(c => (
@@ -261,23 +285,42 @@ export function NotifyChannelsPage() {
 /* ============== PATCH TUESDAY ============== */
 export function PatchTuesdayPage() {
   const { headers } = useApi();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
-  useEffect(() => { axios.get(`${API}/pro-pack/patch-tuesday?months=12`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
+  const load = () => axios.get(`${API}/pro-pack/patch-tuesday?months=12`, { headers })
+    .then(r => setData(r.data))
+    .catch(() => toast.error("Could not load the Patch Tuesday calendar"));
+  useEffect(() => { load(); }, []); // eslint-disable-line
   if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
+  const events = data.events || [];
+  const upcoming = events.filter(event => !event.is_past);
+  const nextPatch = upcoming[0];
+  const thisWeek = upcoming.filter(event => event.days_until <= 7).length;
   return (
-    <div className="p-6 space-y-4" data-testid="patch-tuesday-page">
-      <PageHeader title="Patch Tuesday Calendar" subtitle="2nd Tuesday each month — Microsoft's monthly security release" icon={Calendar} />
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {data.events.map(e => (
-          <Card key={e.date} className={e.is_past ? "opacity-50" : e.days_until <= 7 ? "border-amber-500/40 bg-amber-500/[0.04]" : e.days_until <= 0 ? "border-rose-500/40" : ""}>
-            <CardContent className="pt-4 pb-3">
-              <p className="text-[10px] uppercase text-muted-foreground">{e.month}</p>
-              <p className="text-3xl font-bold font-mono mt-1">{new Date(e.date).getDate()}</p>
-              <p className="text-xs mt-1">{e.is_past ? "Past" : e.days_until === 0 ? "Today!" : `In ${e.days_until} days`}</p>
-            </CardContent>
-          </Card>
-        ))}
+    <div className="space-y-5" data-testid="patch-tuesday-page">
+      <section className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/[0.10] via-background to-background p-5 md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300">Patch operations</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Calendar className="h-6 w-6 text-sky-300" />Patch Tuesday</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Plan around Microsoft release dates, then schedule approved Windows updates through an auditable Nexus Agent maintenance window.</p></div>
+          <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={load} data-testid="refresh-patch-calendar"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button><Button size="sm" onClick={() => navigate("/maintenance-scheduler")} data-testid="open-patch-manager"><Shield className="mr-1.5 h-3.5 w-3.5" />Schedule maintenance</Button></div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <HeroTile label="Next release" value={nextPatch ? new Date(`${nextPatch.date}T00:00:00`).getDate() : "-"} subtitle={nextPatch ? nextPatch.month : "No release scheduled"} icon={Calendar} glow="sky" animated={false} testId="patch-tuesday-next-release" />
+        <HeroTile label="Days to prepare" value={nextPatch ? Math.max(nextPatch.days_until, 0) : "-"} subtitle={nextPatch?.days_until === 0 ? "Release day" : "Until the next release"} icon={Clock} glow={nextPatch?.days_until <= 7 ? "amber" : "cyan"} animated={false} testId="patch-tuesday-days-until" />
+        <HeroTile label="Release this week" value={thisWeek} subtitle={thisWeek ? "Review approval rings" : "No release this week"} icon={AlertTriangle} glow={thisWeek ? "amber" : "emerald"} animated={false} testId="patch-tuesday-this-week" />
+        <HeroTile label="Planning horizon" value={upcoming.length} subtitle="Upcoming monthly releases" icon={Shield} glow="emerald" animated={false} testId="patch-tuesday-upcoming" />
       </div>
+
+      <Card className="overflow-hidden border-border/70"><CardHeader className="border-b border-border/60 py-4"><CardTitle className="text-sm">Release calendar</CardTitle><p className="text-xs text-muted-foreground">Each entry is the second Tuesday of the month. Schedule selected assets when an approved update window is ready.</p></CardHeader><CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+        {events.map(e => {
+          const isImmediate = !e.is_past && e.days_until <= 7;
+          return <button type="button" key={e.date} onClick={() => navigate("/maintenance-scheduler")} className={`rounded-xl border p-4 text-left transition-colors hover:border-sky-500/40 hover:bg-sky-500/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${e.is_past ? "border-border/50 opacity-55" : isImmediate ? "border-amber-500/40 bg-amber-500/[0.04]" : "border-border/70 bg-card/40"}`} data-testid={`patch-release-${e.date}`}>
+            <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{e.month}</p><p className="mt-1 text-3xl font-semibold tabular-nums">{new Date(`${e.date}T00:00:00`).getDate()}</p></div><Badge variant="outline" className={e.is_past ? "border-border/60 text-muted-foreground" : isImmediate ? "border-amber-500/30 text-amber-300" : "border-sky-500/30 text-sky-300"}>{e.is_past ? "Completed" : e.days_until === 0 ? "Release day" : `In ${e.days_until} days`}</Badge></div>
+            <p className="mt-3 text-xs text-muted-foreground">Open Maintenance to select assets, queue approved updates, and retain endpoint result evidence.</p>
+          </button>;
+        })}
+      </CardContent></Card>
     </div>
   );
 }
@@ -544,30 +587,6 @@ export function DRPlansPage() {
         </div>
         <DialogFooter><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save}>Create</Button></DialogFooter>
       </DialogContent></Dialog>
-    </div>
-  );
-}
-
-/* ============== CYBER INSURANCE EXPORT (per client) ============== */
-export function CyberInsurancePage() {
-  const { headers } = useApi();
-  const [clients, setClients] = useState([]);
-  const [cid, setCid] = useState("");
-  const [data, setData] = useState(null);
-  useEffect(() => { axios.get(`${API}/clients`, { headers }).then(r => setClients(r.data)); }, []); // eslint-disable-line
-  const load = async (id) => { setCid(id); const r = await axios.get(`${API}/pro-pack/cyber-insurance-export/${id}`, { headers }); setData(r.data); };
-  return (
-    <div className="p-6 space-y-4" data-testid="cyber-insurance-page">
-      <PageHeader title="Cyber Insurance Compliance Export" subtitle="One-click control posture export for insurers" icon={FileSpreadsheet} />
-      <Select value={cid} onValueChange={load}><SelectTrigger className="w-[400px]"><SelectValue placeholder="Select client to export" /></SelectTrigger><SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
-      {data && <Card><CardHeader><CardTitle className="text-sm">{data.client_name} — Control Posture</CardTitle></CardHeader><CardContent>
-        <Table><TableBody>
-          {Object.entries(data.controls).map(([k, v]) => (
-            <TableRow key={k}><TableCell className="capitalize text-xs">{k.replace(/_/g, " ")}</TableCell><TableCell className="font-mono text-sm">{typeof v === "boolean" ? (v ? "✓ Yes" : "✗ No") : String(v)}</TableCell></TableRow>
-          ))}
-        </TableBody></Table>
-        <p className="text-[11px] text-muted-foreground mt-3">As of {new Date(data.as_of).toLocaleString()}. Submit this snapshot to your cyber-insurance broker.</p>
-      </CardContent></Card>}
     </div>
   );
 }

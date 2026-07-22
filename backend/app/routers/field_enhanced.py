@@ -8,6 +8,7 @@ import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user
+from app.services.avatar_enrichment import attach_user_avatars
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,7 +35,7 @@ async def _fj_audit(job_id: str, action: str, details: str, user: dict):
 @router.get("/field-jobs/{job_id}/notes")
 async def get_field_notes(job_id: str, current_user: dict = Depends(get_current_user)):
     notes = await db.field_notes.find({"job_id": job_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return notes
+    return await attach_user_avatars(notes)
 
 
 @router.post("/field-jobs/{job_id}/notes")
@@ -47,6 +48,7 @@ async def add_field_note(job_id: str, data: dict, current_user: dict = Depends(g
         "job_id": job_id,
         "user_id": current_user["id"],
         "user_name": current_user.get("name", ""),
+        "avatar_url": current_user.get("avatar"),
         "content": data.get("content", ""),
         "note_type": data.get("note_type", "general"),
         "is_internal": data.get("is_internal", True),

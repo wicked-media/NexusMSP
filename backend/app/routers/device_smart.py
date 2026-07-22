@@ -45,7 +45,7 @@ async def _ai_chat(session_id: str, system_msg: str):
         raise HTTPException(500, "AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0}) or {}
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
-    chat.with_model(cfg.get("provider", "anthropic"), cfg.get("model", "claude-sonnet-4-5-20250929"))
+    chat.with_model("openai", cfg.get("model", "gpt-5.6-terra"))
     return chat
 
 
@@ -55,7 +55,7 @@ async def _ai_chat(session_id: str, system_msg: str):
 
 @router.post("/devices/{device_id}/ai-diagnose")
 async def ai_diagnose(device_id: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
-    """Pull device telemetry + recent agent events + services and ask Claude to write a
+    """Pull device telemetry + recent agent events + services and ask Nexus AI to write a
     succinct diagnostic. Optionally posts the result as a comment to the provided ticket_id."""
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:

@@ -353,6 +353,7 @@ async def quick_connect(data: dict, current_user: dict = Depends(get_current_use
 @router.post("/rustdesk/devices/{device_id}/deploy-agent")
 async def deploy_agent_to_device(device_id: str, current_user: dict = Depends(get_current_user)):
     """Queue a patch agent deployment for a device. Generates the deploy command and tracks status."""
+    raise HTTPException(status_code=410, detail="The legacy Patch Agent is retired. Install Nexus Agent from the Nexus Agent workspace.")
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -393,6 +394,7 @@ async def deploy_agent_to_device(device_id: str, current_user: dict = Depends(ge
 @router.post("/rustdesk/devices/{device_id}/deploy-agent/complete")
 async def mark_agent_deployed(device_id: str, current_user: dict = Depends(get_current_user)):
     """Mark a device's agent deployment as complete (tech confirms after running the script)."""
+    raise HTTPException(status_code=410, detail="The legacy Patch Agent is retired. Nexus Agent enrollment is recorded automatically.")
     await db.agent_deployments.update_one(
         {"device_id": device_id},
         {"$set": {"status": "deployed", "deployed_at": datetime.now(timezone.utc).isoformat(), "deployed_by": current_user.get("name", "")}}
@@ -404,6 +406,7 @@ async def mark_agent_deployed(device_id: str, current_user: dict = Depends(get_c
 @router.post("/rustdesk/deploy-agent/bulk")
 async def bulk_deploy_agent(data: dict, current_user: dict = Depends(get_current_user)):
     """Queue agent deployment for multiple devices at once."""
+    raise HTTPException(status_code=410, detail="The legacy Patch Agent is retired. Use Nexus Agent installers instead.")
     device_ids = data.get("device_ids", [])
     if not device_ids:
         raise HTTPException(status_code=400, detail="No devices specified")
@@ -443,6 +446,7 @@ async def bulk_deploy_agent(data: dict, current_user: dict = Depends(get_current
 @router.get("/rustdesk/agent-deployments")
 async def get_agent_deployments(current_user: dict = Depends(get_current_user)):
     """Get all agent deployment statuses."""
+    raise HTTPException(status_code=410, detail="The legacy Patch Agent is retired. Nexus Agent enrollment is available in the Nexus Agent workspace.")
     deployments = await db.agent_deployments.find({}, {"_id": 0}).sort("queued_at", -1).to_list(500)
     return {
         "total": len(deployments),

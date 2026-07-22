@@ -170,6 +170,59 @@ async def device_remote_url(ticket_id: str, device_id: str | None = Query(None),
     return {"success": False, "message": "Splashtop integration not yet wired. Coming in Phase 4."}
 
 
+@router.post("/tickets/{ticket_id}/devices/{device_id}/remote-connect")
+async def ticket_device_remote_connect(ticket_id: str, device_id: str, current_user: dict = Depends(get_current_user)):
+    """Create an auditable RustDesk connection from a linked ticket asset.
+
+    This deliberately does not require the NexusOps Agent: a managed asset can
+    still be remoted through its configured RustDesk identity.
+    """
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    linked = list(ticket.get("device_ids") or [])
+    if ticket.get("device_id") and ticket["device_id"] not in linked:
+        linked.append(ticket["device_id"])
+    if device_id not in linked:
+        raise HTTPException(400, "Device is not linked to this ticket")
+
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Linked device not found")
+    mapping = await db.rustdesk_devices.find_one({"linked_device_id": device_id}, {"_id": 0})
+    rustdesk_id = (device.get("rustdesk_id") or (mapping or {}).get("rustdesk_id") or "").strip()
+    if not rustdesk_id:
+        raise HTTPException(409, "No RustDesk identity is configured for this asset")
+
+    config_row = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
+    config = (config_row or {}).get("value") or {}
+    relay = str(config.get("relay_server") or config.get("server_url") or "").strip().rstrip("/")
+    relay_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    connection_url = f"rustdesk://{rustdesk_id}@{relay_host}" if relay_host else f"rustdesk://{rustdesk_id}"
+
+    await db.rustdesk_sessions.insert_one({
+        "id": uuid.uuid4().hex,
+        "device_id": device_id,
+        "client_id": device.get("client_id") or ticket.get("client_id"),
+        "ticket_id": ticket_id,
+        "rustdesk_id": rustdesk_id,
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name"),
+        "status": "initiated",
+        "started_at": _now(),
+        "ended_at": None,
+    })
+    await _post_action_note(ticket_id, current_user, "Remote session initiated", f"{device.get('name') or device.get('hostname') or device_id} via RustDesk")
+    return {
+        "success": True,
+        "device_name": device.get("name") or device.get("hostname") or device_id,
+        "rustdesk_id": rustdesk_id,
+        "connection_url": connection_url,
+        "web_client_url": str(config.get("server_url") or "").strip() or None,
+        "relay_server": relay_host or None,
+    }
+
+
 # ─────────────────────── Linked devices listing (for cockpit) ───────────────────────
 
 @router.get("/tickets/{ticket_id}/devices")

@@ -15,6 +15,7 @@ from app.services.chat_access import (
     require_channel_access,
     require_message_access,
 )
+from app.services.avatar_enrichment import attach_user_avatars
 
 router = APIRouter()
 
@@ -63,6 +64,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
         "thread_id": msg_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
+        "avatar_url": current_user.get("avatar"),
         "body": body[:5000],
         "mentions": re.findall(r"@([\w._-]+)", body),
         "ts": _now(),
@@ -104,7 +106,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
 async def get_thread(msg_id: str, current_user: dict = Depends(get_current_user)):
     parent, _ = await require_message_access(msg_id, current_user)
     replies = await db.chat_messages.find({"thread_id": msg_id}, {"_id": 0}).sort("ts", 1).to_list(500)
-    return {"parent": parent, "replies": replies}
+    return {"parent": (await attach_user_avatars([parent]))[0], "replies": await attach_user_avatars(replies)}
 
 
 # ============================================================================
@@ -155,13 +157,13 @@ async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_us
 async def list_pinned(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
     rows = await db.chat_messages.find({"channel_id": channel_id, "pinned": True}, {"_id": 0}).sort("ts", -1).to_list(50)
-    return rows
+    return await attach_user_avatars(rows)
 
 
 @router.get("/chat/channels/{channel_id}/files")
 async def list_channel_files(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
-    return await db.chat_messages.find(
+    rows = await db.chat_messages.find(
         {
             "channel_id": channel_id,
             "attachment.file_id": {"$exists": True},
@@ -169,6 +171,7 @@ async def list_channel_files(channel_id: str, current_user: dict = Depends(get_c
         },
         {"_id": 0},
     ).sort("ts", -1).limit(100).to_list(100)
+    return await attach_user_avatars(rows)
 
 
 # ============================================================================
@@ -204,7 +207,7 @@ async def search_messages(q: str, channel_id: str = None, current_user: dict = D
         channel = channel_map.get(row.get("channel_id")) or {}
         row["channel_name"] = channel.get("display_name") or channel.get("name")
         row["channel_kind"] = channel.get("kind")
-    return rows
+    return await attach_user_avatars(rows)
 
 
 # ============================================================================
@@ -243,6 +246,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
+        "avatar_url": current_user.get("avatar"),
         "body": body,
         "ts": _now(),
         "edited": False,
@@ -527,6 +531,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
+        "avatar_url": current_user.get("avatar"),
         "body": body,
         "ts": _now(),
         "edited": False,
@@ -546,7 +551,7 @@ async def typing(channel_id: str, current_user: dict = Depends(get_current_user)
     await require_channel_access(channel_id, current_user)
     await db.chat_typing.update_one(
         {"channel_id": channel_id, "user_id": current_user.get("id")},
-        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "ts": _now()}},
+        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "ts": _now()}},
         upsert=True,
     )
     return {"ok": True}
@@ -564,7 +569,7 @@ async def get_typing(channel_id: str, current_user: dict = Depends(get_current_u
         try:
             t = datetime.fromisoformat(r["ts"]).timestamp()
             if t >= cutoff:
-                active.append({"user_id": r["user_id"], "user_name": r["user_name"]})
+                active.append({"user_id": r["user_id"], "user_name": r["user_name"], "avatar_url": r.get("avatar_url")})
         except Exception:
             pass
     return active

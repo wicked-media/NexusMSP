@@ -371,10 +371,13 @@ async def standup_digest(
     out = await _llm_complete(meta["system"], prompt_body, session_prefix=f"digest-{meta['key']}")
 
     ai_brief = None
+    ai_status = "ready"
     if out.startswith("__AI_NOT_CONFIGURED__"):
-        ai_brief = "AI briefing unavailable (OPENAI_API_KEY not configured)."
+        ai_status = "not_configured"
+        ai_brief = "AI briefing is not configured yet."
     elif out.startswith("__AI_ERROR__"):
-        ai_brief = f"AI briefing unavailable: {out.split(':', 1)[-1]}"
+        ai_status = "unavailable"
+        ai_brief = "AI briefing is temporarily unavailable. Try again shortly."
     else:
         ai_brief = out
 
@@ -386,6 +389,7 @@ async def standup_digest(
         "slot_label": meta["label"],
         "slot_icon": meta["icon"],
         "ai_brief": ai_brief,
+        "ai_status": ai_status,
         "stats": {
             "new_tickets": snap["new_ticket_count"],
             "critical_open": len(snap["critical_open"]),

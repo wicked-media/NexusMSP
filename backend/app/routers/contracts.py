@@ -9,6 +9,73 @@ from app.models import *
 
 router = APIRouter()
 
+DEFAULT_CONTRACT_TYPES = [
+    {"code": "managed_services", "name": "Managed Services", "description": "Ongoing managed IT agreement", "color": "blue", "default_billing_frequency": "monthly", "default_sla_tier": "standard", "is_active": True},
+    {"code": "break_fix", "name": "Break/Fix", "description": "Ad-hoc support agreement", "color": "amber", "default_billing_frequency": "monthly", "default_sla_tier": "standard", "is_active": True},
+    {"code": "project", "name": "Project", "description": "Fixed-scope delivery agreement", "color": "violet", "default_billing_frequency": "monthly", "default_sla_tier": "standard", "is_active": True},
+    {"code": "retainer", "name": "Retainer", "description": "Prepaid advisory or vCIO capacity", "color": "emerald", "default_billing_frequency": "monthly", "default_sla_tier": "standard", "is_active": True},
+]
+
+async def _ensure_contract_types():
+    if await db.contract_types.count_documents({}) == 0:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.contract_types.insert_many([{**row, "id": str(uuid.uuid4()), "created_at": now, "updated_at": now} for row in DEFAULT_CONTRACT_TYPES])
+
+@router.get("/contract-types")
+async def list_contract_types(include_inactive: bool = False, current_user: dict = Depends(get_current_user)):
+    await _ensure_contract_types()
+    query = {} if include_inactive else {"is_active": True}
+    return await db.contract_types.find(query, {"_id": 0}).sort("name", 1).to_list(200)
+
+@router.post("/contract-types")
+async def create_contract_type(data: dict, current_user: dict = Depends(get_current_user)):
+    name = str(data.get("name") or "").strip()
+    code = str(data.get("code") or name.lower().replace(" ", "_")).strip().lower()
+    if not name or not code:
+        raise HTTPException(status_code=400, detail="Name and code are required")
+    if await db.contract_types.find_one({"code": code}):
+        raise HTTPException(status_code=409, detail="A contract type with this code already exists")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "code": code, "name": name, "description": data.get("description", ""), "color": data.get("color", "blue"), "default_billing_frequency": data.get("default_billing_frequency", "monthly"), "default_sla_tier": data.get("default_sla_tier", "standard"), "is_active": bool(data.get("is_active", True)), "created_at": now, "updated_at": now}
+    await db.contract_types.insert_one(doc)
+    await log_activity(current_user, "created", "contract_type", doc["id"], name, f"Created contract type {code}")
+    return doc
+
+@router.put("/contract-types/{type_id}")
+async def update_contract_type(type_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    current = await db.contract_types.find_one({"id": type_id}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="Contract type not found")
+    update = {key: data[key] for key in ("name", "description", "color", "default_billing_frequency", "default_sla_tier", "is_active") if key in data}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.contract_types.update_one({"id": type_id}, {"$set": update})
+    await log_activity(current_user, "updated", "contract_type", type_id, current.get("name", ""), "Updated contract type", changes=update)
+    return {"message": "Contract type updated"}
+
+
+async def _resolve_billing_inclusion(item: dict) -> dict:
+    """Resolve dynamic contract quantities without mutating the source inclusion."""
+    resolved = dict(item)
+    source = item.get("billing_source") or ("asset_backed" if item.get("line_type") == "asset_backed" else "manual")
+    if source == "asset_count":
+        query = {"client_id": item.get("client_id"), "status": "active"}
+        if item.get("asset_type_filter"):
+            query["asset_type"] = item["asset_type_filter"]
+        resolved["quantity"] = await db.assets.count_documents(query)
+        resolved["source_label"] = f"Live asset count{': ' + item['asset_type_filter'] if item.get('asset_type_filter') else ''}"
+    elif source == "inventory" and item.get("product_id"):
+        product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0, "quantity_in_stock": 1, "name": 1})
+        resolved["quantity"] = int((product or {}).get("quantity_in_stock", 0))
+        resolved["source_label"] = f"Warehouse stock: {(product or {}).get('name', item.get('name', 'Product'))}"
+    resolved["total"] = round(float(resolved.get("quantity", 0)) * float(resolved.get("unit_price", 0)), 2)
+    return resolved
+
+
+def _recurring_line(item: dict) -> dict:
+    qty = float(item.get("quantity", 1))
+    rate = float(item.get("unit_price", 0))
+    return {"description": item.get("name", ""), "details": item.get("description", ""), "quantity": qty, "rate": rate, "amount": round(qty * rate, 2), "source_line_item_id": item.get("id"), "line_type": item.get("line_type", "standard"), "billing_source": item.get("billing_source", "manual"), "asset_id": item.get("asset_id"), "asset_serial_number": item.get("asset_serial_number"), "term_end": item.get("term_end"), "asset_type_filter": item.get("asset_type_filter"), "product_id": item.get("product_id")}
+
 # ============== CONTRACTS ENDPOINTS ==============
 
 @router.get("/contracts", response_model=List[Contract])
@@ -215,6 +282,32 @@ async def create_line_item(item_data: LineItemCreate, current_user: dict = Depen
     client = await db.clients.find_one({"id": item_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
     
+    if item_data.line_type == "asset_backed":
+        item_data.billing_source = "asset_backed"
+        if not item_data.asset_id:
+            raise HTTPException(status_code=400, detail="Choose an asset for an asset-backed line")
+        asset = await db.assets.find_one({"id": item_data.asset_id}, {"_id": 0})
+        if not asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        if item_data.client_id and asset.get("client_id") and asset.get("client_id") != item_data.client_id:
+            raise HTTPException(status_code=400, detail="The asset belongs to a different client")
+        existing = await db.line_items.find_one({"asset_id": item_data.asset_id, "asset_status": "active"}, {"_id": 0, "id": 1})
+        if existing:
+            raise HTTPException(status_code=409, detail="This asset is already locked to another active contract line")
+        item_data.asset_name = asset.get("name", item_data.asset_name)
+        item_data.asset_serial_number = asset.get("serial_number", item_data.asset_serial_number)
+        item_data.asset_imei = asset.get("imei", item_data.asset_imei)
+        item_data.billing_lock = True
+    if item_data.billing_source == "pax8_subscription":
+        link = await db.pax8_company_links.find_one({"client_id": item_data.client_id}, {"_id": 0})
+        if not link:
+            raise HTTPException(status_code=400, detail="Link this client to a Pax8 company before adding a live subscription inclusion")
+        if not item_data.pax8_product_id:
+            raise HTTPException(status_code=400, detail="Choose a Pax8 subscription product")
+        item_data.quantity = 0
+        item_data.unit_price = 0
+        item_data.source_label = "Live Pax8 subscription — invoiced from current seats"
+
     total = item_data.quantity * item_data.unit_price
     
     item = LineItem(**item_data.model_dump(), client_name=client_name, total=total)
@@ -223,23 +316,142 @@ async def create_line_item(item_data: LineItemCreate, current_user: dict = Depen
     if doc.get('synced_at'):
         doc['synced_at'] = doc['synced_at'].isoformat()
     await db.line_items.insert_one(doc)
+    if item.line_type == "asset_backed":
+        await db.assets.update_one({"id": item.asset_id}, {"$set": {
+            "contract_id": item.contract_id, "contract_line_item_id": item.id,
+            "billing_lock": True, "billing_status": "active"
+        }})
+    await log_activity(current_user, "created", "contract_line_item", item.id, item.name,
+                       f"Added {item.line_type.replace('_', ' ')} billing inclusion", metadata={"contract_id": item.contract_id, "asset_id": item.asset_id})
     return item
 
 @router.put("/line-items/{item_id}")
 async def update_line_item(item_id: str, item_data: dict, current_user: dict = Depends(get_current_user)):
+    existing = await db.line_items.find_one({"id": item_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Line item not found")
+    protected = {"asset_id", "asset_name", "asset_serial_number", "asset_imei", "asset_status", "billing_lock", "asset_history"}
+    if protected.intersection(item_data) and existing.get("line_type") == "asset_backed":
+        raise HTTPException(status_code=400, detail="Use Replace asset or Return asset to change a locked asset")
     if 'quantity' in item_data and 'unit_price' in item_data:
         item_data['total'] = item_data['quantity'] * item_data['unit_price']
     result = await db.line_items.update_one({"id": item_id}, {"$set": item_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Line item not found")
+    await log_activity(current_user, "updated", "contract_line_item", item_id, existing.get("name", ""),
+                       "Updated billing inclusion", changes=item_data, metadata={"contract_id": existing.get("contract_id")})
     return {"message": "Line item updated"}
 
 @router.delete("/line-items/{item_id}")
 async def delete_line_item(item_id: str, current_user: dict = Depends(get_current_user)):
+    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Line item not found")
+    if item.get("line_type") == "asset_backed" and item.get("asset_status") == "active":
+        raise HTTPException(status_code=400, detail="Return or replace the locked asset before removing this line")
     result = await db.line_items.delete_one({"id": item_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Line item not found")
     return {"message": "Line item deleted"}
+
+@router.get("/contracts/{contract_id}/billing-inclusions")
+async def get_contract_billing_inclusions(contract_id: str, current_user: dict = Depends(get_current_user)):
+    """Contract inclusions plus their immutable asset lifecycle audit trail."""
+    items = await db.line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(500)
+    audits = await db.activity_logs.find({"entity_type": "contract_line_item", "metadata.contract_id": contract_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"items": items, "audit": audits}
+
+@router.get("/contracts/{contract_id}/billing-sources")
+async def get_contract_billing_sources(contract_id: str, current_user: dict = Depends(get_current_user)):
+    """Candidates and live indicators for source-driven contract inclusions."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    client_id = contract.get("client_id")
+    asset_types = await db.assets.distinct("asset_type", {"client_id": client_id, "status": "active"})
+    asset_counts = [{"asset_type": t or "hardware", "quantity": await db.assets.count_documents({"client_id": client_id, "status": "active", "asset_type": t})} for t in asset_types]
+    products = await db.products.find({"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "sku": 1, "quantity_in_stock": 1, "retail_price": 1, "track_inventory": 1}).to_list(500)
+    pax8_link = await db.pax8_company_links.find_one({"client_id": client_id}, {"_id": 0})
+    pax8_products = []
+    if pax8_link:
+        subs = await db.pax8_subscriptions.find({"companyId": pax8_link.get("pax8_company_id"), "status": "Active"}, {"_id": 0, "productId": 1, "quantity": 1, "price": 1, "billingTerm": 1}).to_list(500)
+        product_ids = list({sub.get("productId") for sub in subs if sub.get("productId")})
+        names = {p["id"]: p async for p in db.pax8_products.find({"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "name": 1, "vendorName": 1})}
+        grouped = {}
+        for sub in subs:
+            pid = sub.get("productId")
+            if not pid: continue
+            entry = grouped.setdefault(pid, {"product_id": pid, "name": (names.get(pid) or {}).get("name", "Unknown product"), "vendor": (names.get(pid) or {}).get("vendorName", ""), "quantity": 0, "unit_price": float(sub.get("price") or 0), "billing_term": sub.get("billingTerm", "Monthly")})
+            entry["quantity"] += float(sub.get("quantity") or 0)
+        pax8_products = list(grouped.values())
+    return {"asset_counts": asset_counts, "products": products, "pax8_linked": bool(pax8_link), "pax8_products": pax8_products}
+
+
+@router.get("/contracts/{contract_id}/billing-health")
+async def get_contract_billing_health(contract_id: str, current_user: dict = Depends(get_current_user)):
+    """Pre-billing controls: source connectivity, quantity and duplicate-charge risk."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    items = await db.line_items.find({"contract_id": contract_id, "$or": [{"asset_status": {"$exists": False}}, {"asset_status": "active"}]}, {"_id": 0}).to_list(500)
+    ri = await db.recurring_invoices.find_one({"id": contract.get("recurring_invoice_id")}, {"_id": 0}) if contract.get("recurring_invoice_id") else None
+    checks = []
+    pax8_link = await db.pax8_company_links.find_one({"client_id": contract.get("client_id")}, {"_id": 0})
+    for item in items:
+        source = item.get("billing_source") or ("asset_backed" if item.get("line_type") == "asset_backed" else "manual")
+        if source == "pax8_subscription":
+            ok = bool(pax8_link and ri and ri.get("include_pax8_usage"))
+            checks.append({"item_id": item["id"], "name": item.get("name"), "source": source, "state": "ready" if ok else "attention", "detail": "Current seats will be attached at generation" if ok else "Link Pax8 and sync this contract to its recurring invoice"})
+        elif source == "asset_count":
+            resolved = await _resolve_billing_inclusion(item)
+            quantity = resolved.get("quantity", 0)
+            checks.append({"item_id": item["id"], "name": item.get("name"), "source": source, "state": "ready" if quantity else "attention", "quantity": quantity, "detail": f"{quantity} active client asset(s) match the source" if quantity else "No active client assets currently match this source"})
+        elif source == "asset_backed":
+            ok = bool(item.get("asset_id") and item.get("billing_lock"))
+            checks.append({"item_id": item["id"], "name": item.get("name"), "source": source, "state": "ready" if ok else "attention", "detail": f"Locked to {item.get('asset_serial_number') or item.get('asset_name', 'asset')}" if ok else "Asset lock is missing"})
+        else:
+            checks.append({"item_id": item["id"], "name": item.get("name"), "source": source, "state": "ready", "detail": "Static contract inclusion"})
+    overall = "ready" if ri and all(check["state"] == "ready" for check in checks) else "attention"
+    return {"contract_id": contract_id, "recurring_invoice_id": contract.get("recurring_invoice_id"), "recurring_status": (ri or {}).get("status"), "next_generation": (ri or {}).get("next_generation"), "overall": overall, "checks": checks}
+
+@router.post("/line-items/{item_id}/replace-asset")
+async def replace_line_item_asset(item_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
+    if not item or item.get("line_type") != "asset_backed":
+        raise HTTPException(status_code=404, detail="Asset-backed line item not found")
+    if item.get("asset_status") != "active":
+        raise HTTPException(status_code=400, detail="Only an active asset-backed line can be replaced")
+    new_asset_id = data.get("asset_id")
+    new_asset = await db.assets.find_one({"id": new_asset_id}, {"_id": 0})
+    if not new_asset:
+        raise HTTPException(status_code=404, detail="Replacement asset not found")
+    if new_asset.get("client_id") and new_asset.get("client_id") != item.get("client_id"):
+        raise HTTPException(status_code=400, detail="The replacement asset belongs to a different client")
+    locked = await db.line_items.find_one({"asset_id": new_asset_id, "asset_status": "active", "id": {"$ne": item_id}}, {"_id": 0, "id": 1})
+    if locked:
+        raise HTTPException(status_code=409, detail="The replacement asset is already locked to another active contract line")
+    now = datetime.now(timezone.utc).isoformat()
+    history = {"asset_id": item.get("asset_id"), "asset_name": item.get("asset_name"), "serial_number": item.get("asset_serial_number"), "imei": item.get("asset_imei"), "status": "replaced", "reason": data.get("reason", "Asset replacement"), "effective_date": data.get("effective_date") or now[:10], "changed_at": now, "changed_by": current_user.get("name", "System")}
+    if item.get("asset_id"):
+        await db.assets.update_one({"id": item["asset_id"]}, {"$set": {"billing_lock": False, "billing_status": "replaced", "contract_line_item_id": None}})
+    update = {"asset_id": new_asset_id, "asset_name": new_asset.get("name", ""), "asset_serial_number": new_asset.get("serial_number", ""), "asset_imei": new_asset.get("imei", ""), "asset_status": "active", "billing_lock": True, "updated_at": now}
+    await db.line_items.update_one({"id": item_id}, {"$set": update, "$push": {"asset_history": history}})
+    await db.assets.update_one({"id": new_asset_id}, {"$set": {"contract_id": item.get("contract_id"), "contract_line_item_id": item_id, "billing_lock": True, "billing_status": "active"}})
+    await log_activity(current_user, "asset_replaced", "contract_line_item", item_id, item.get("name", ""), f"Replaced {history['serial_number'] or history['asset_name']} with {new_asset.get('serial_number') or new_asset.get('name')}", metadata={"contract_id": item.get("contract_id"), "old_asset_id": history["asset_id"], "new_asset_id": new_asset_id, "reason": history["reason"]})
+    return {"message": "Asset replaced and billing lock transferred"}
+
+@router.post("/line-items/{item_id}/return-asset")
+async def return_line_item_asset(item_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
+    if not item or item.get("line_type") != "asset_backed":
+        raise HTTPException(status_code=404, detail="Asset-backed line item not found")
+    if item.get("asset_status") != "active":
+        raise HTTPException(status_code=400, detail="This asset is already closed")
+    now = datetime.now(timezone.utc).isoformat()
+    reason = data.get("reason", "Returned")
+    await db.line_items.update_one({"id": item_id}, {"$set": {"asset_status": "returned", "billing_lock": False, "ended_at": now, "end_reason": reason}, "$push": {"asset_history": {"asset_id": item.get("asset_id"), "asset_name": item.get("asset_name"), "serial_number": item.get("asset_serial_number"), "status": "returned", "reason": reason, "effective_date": data.get("effective_date") or now[:10], "changed_at": now, "changed_by": current_user.get("name", "System")}}})
+    if item.get("asset_id"):
+        await db.assets.update_one({"id": item["asset_id"]}, {"$set": {"billing_lock": False, "billing_status": "returned", "contract_line_item_id": None}})
+    await log_activity(current_user, "asset_returned", "contract_line_item", item_id, item.get("name", ""), f"Returned asset {item.get('asset_serial_number') or item.get('asset_name')}: {reason}", metadata={"contract_id": item.get("contract_id"), "asset_id": item.get("asset_id")})
+    return {"message": "Asset returned; it will be excluded when the recurring invoice is synchronised"}
 
 
 # ============== CONTRACT ENHANCEMENTS ==============
@@ -351,26 +563,20 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
         raise HTTPException(status_code=404, detail="Contract not found")
 
     # Gather line items for this contract
-    items = await db.line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(500)
+    items = await db.line_items.find({"contract_id": contract_id, "$or": [{"asset_status": {"$exists": False}}, {"asset_status": "active"}]}, {"_id": 0}).to_list(500)
     if not items:
         raise HTTPException(status_code=400, detail="Contract has no line items to convert")
 
     # Build recurring invoice line items (normalized shape used by recurring_invoices router)
     ri_items = []
+    has_pax8_source = False
     for li in items:
-        qty = float(li.get("quantity", 1))
-        rate = float(li.get("unit_price", 0))
-        amount = round(qty * rate, 2)
-        ri_items.append({
-            "description": li.get("name", ""),
-            "details": li.get("description", ""),
-            "quantity": qty,
-            "rate": rate,
-            "amount": amount,
-            "source_line_item_id": li.get("id"),
-            "acronis_offering_code": li.get("acronis_offering_code"),
-            "acronis_synced": li.get("acronis_synced", False),
-        })
+        if li.get("billing_source") == "pax8_subscription":
+            has_pax8_source = True
+            continue  # Invoice generation appends the current Pax8 seat quantities.
+        row = _recurring_line(await _resolve_billing_inclusion(li))
+        row.update({"acronis_offering_code": li.get("acronis_offering_code"), "acronis_synced": li.get("acronis_synced", False)})
+        ri_items.append(row)
 
     subtotal = round(sum(li["amount"] for li in ri_items), 2)
     tax_rate = float(data.get("tax_rate", 10 if contract.get("country", "AU") == "AU" else 0))
@@ -419,6 +625,7 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
         "auto_send_email": data.get("auto_send_email", ""),
         "include_pdf": True,
         "include_acronis_usage": bool(data.get("include_acronis_usage", True)),
+        "include_pax8_usage": has_pax8_source,
         "status": "active",
         "invoices_generated": 0,
         "total_billed": 0,
@@ -430,6 +637,8 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
     }
     await db.recurring_invoices.insert_one(ri)
     await db.contracts.update_one({"id": contract_id}, {"$set": {"recurring_invoice_id": ri["id"]}})
+    await db.line_items.update_many({"contract_id": contract_id}, {"$set": {"linked_recurring_invoice_id": ri["id"]}})
+    await log_activity(current_user, "recurring_invoice_created", "contract", contract_id, contract.get("name", ""), "Created linked recurring invoice from active billing inclusions", metadata={"recurring_invoice_id": ri["id"]})
 
     return {
         "message": f"Created recurring invoice with {len(ri_items)} line item(s). Next run: {ri['next_generation']}.",
@@ -439,6 +648,27 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
         "line_items": len(ri_items),
         "next_generation": ri["next_generation"],
     }
+
+
+@router.post("/contracts/{contract_id}/sync-recurring")
+async def sync_contract_recurring(contract_id: str, current_user: dict = Depends(get_current_user)):
+    """Refresh contract-owned invoice lines without touching vendor-usage additions."""
+    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    if not contract or not contract.get("recurring_invoice_id"):
+        raise HTTPException(status_code=404, detail="No linked recurring invoice found")
+    ri = await db.recurring_invoices.find_one({"id": contract["recurring_invoice_id"]}, {"_id": 0})
+    if not ri:
+        raise HTTPException(status_code=404, detail="Linked recurring invoice not found")
+    items = await db.line_items.find({"contract_id": contract_id, "$or": [{"asset_status": {"$exists": False}}, {"asset_status": "active"}]}, {"_id": 0}).to_list(500)
+    contract_lines = [_recurring_line(await _resolve_billing_inclusion(li)) for li in items if li.get("billing_source") != "pax8_subscription"]
+    has_pax8_source = any(li.get("billing_source") == "pax8_subscription" for li in items)
+    external_lines = [line for line in ri.get("line_items", []) if not line.get("source_line_item_id")]
+    all_lines = contract_lines + external_lines
+    subtotal = round(sum(float(line.get("amount", 0)) for line in all_lines), 2)
+    tax_rate = float(ri.get("tax_rate", 0))
+    await db.recurring_invoices.update_one({"id": ri["id"]}, {"$set": {"line_items": all_lines, "include_pax8_usage": has_pax8_source or ri.get("include_pax8_usage", False), "subtotal": subtotal, "tax_amount": round(subtotal * tax_rate / 100, 2), "amount": round(subtotal * (1 + tax_rate / 100), 2), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await log_activity(current_user, "recurring_invoice_synced", "contract", contract_id, contract.get("name", ""), f"Synced {len(contract_lines)} active billing inclusion(s)", metadata={"recurring_invoice_id": ri["id"]})
+    return {"message": "Recurring invoice synchronised", "active_lines": len(contract_lines), "recurring_invoice_id": ri["id"]}
 
 
 @router.get("/contracts/{contract_id}/price-history")

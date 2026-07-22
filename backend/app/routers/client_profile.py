@@ -45,36 +45,74 @@ async def _ensure_client(client_id: str):
     return client
 
 
-@router.post("/clients/{client_id}/profile-picture")
-async def upload_profile_picture(client_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    await _ensure_client(client_id)
+async def _write_client_audit(current_user: dict, action: str, client_id: str, client_name: str, metadata: dict | None = None) -> None:
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "action": action,
+        "entity_type": "client",
+        "entity_id": client_id,
+        "entity_name": client_name,
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def _store_client_image(client_id: str, client: dict, file: UploadFile, image_kind: str, field_name: str, current_user: dict) -> dict:
     ext = _safe_ext(file.filename, ALLOWED_IMAGE_EXTS)
-    filename = f"{client_id}-avatar.{ext}"
+    filename = f"{client_id}-{image_kind}.{ext}"
     filepath = CLIENT_ASSETS_DIR / filename
-    # Clean any existing avatar of a different extension
     for old_ext in ALLOWED_IMAGE_EXTS:
-        old_path = CLIENT_ASSETS_DIR / f"{client_id}-avatar.{old_ext}"
+        old_path = CLIENT_ASSETS_DIR / f"{client_id}-{image_kind}.{old_ext}"
         if old_path.exists() and old_path != filepath:
             old_path.unlink()
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 20MB)")
-    with open(filepath, "wb") as f:
-        f.write(content)
+    with open(filepath, "wb") as output:
+        output.write(content)
     url = f"/api/uploads/clients/{filename}"
-    await db.clients.update_one({"id": client_id}, {"$set": {"profile_picture_url": url, "updated_at": datetime.now(timezone.utc).isoformat()}})
-    return {"profile_picture_url": url}
+    await db.clients.update_one({"id": client_id}, {"$set": {field_name: url, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await _write_client_audit(current_user, f"client_{image_kind}_updated", client_id, client.get("name") or "Client", {"field": field_name})
+    return {field_name: url}
+
+
+@router.post("/clients/{client_id}/profile-picture")
+async def upload_profile_picture(client_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    client = await _ensure_client(client_id)
+    return await _store_client_image(client_id, client, file, "avatar", "profile_picture_url", current_user)
 
 
 @router.delete("/clients/{client_id}/profile-picture")
 async def delete_profile_picture(client_id: str, current_user: dict = Depends(get_current_user)):
-    await _ensure_client(client_id)
+    client = await _ensure_client(client_id)
     for old_ext in ALLOWED_IMAGE_EXTS:
         old_path = CLIENT_ASSETS_DIR / f"{client_id}-avatar.{old_ext}"
         if old_path.exists():
             old_path.unlink()
     await db.clients.update_one({"id": client_id}, {"$unset": {"profile_picture_url": ""}})
+    await _write_client_audit(current_user, "client_avatar_removed", client_id, client.get("name") or "Client")
     return {"message": "Profile picture removed"}
+
+
+@router.post("/clients/{client_id}/logo")
+async def upload_client_logo(client_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    """Store the client business logo separately from a contact/avatar image."""
+    client = await _ensure_client(client_id)
+    return await _store_client_image(client_id, client, file, "logo", "logo_url", current_user)
+
+
+@router.delete("/clients/{client_id}/logo")
+async def delete_client_logo(client_id: str, current_user: dict = Depends(get_current_user)):
+    client = await _ensure_client(client_id)
+    for old_ext in ALLOWED_IMAGE_EXTS:
+        old_path = CLIENT_ASSETS_DIR / f"{client_id}-logo.{old_ext}"
+        if old_path.exists():
+            old_path.unlink()
+    await db.clients.update_one({"id": client_id}, {"$unset": {"logo_url": ""}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    await _write_client_audit(current_user, "client_logo_removed", client_id, client.get("name") or "Client")
+    return {"message": "Business logo removed"}
 
 
 @router.post("/clients/{client_id}/cover-image")
@@ -231,23 +269,90 @@ async def list_client_notes(client_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/clients/{client_id}/notes")
 async def add_client_note(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    await _ensure_client(client_id)
+    client = await _ensure_client(client_id)
+    body = str(data.get("body") or "").strip()
+    title = str(data.get("title") or "").strip()
+    if len(body) < 4:
+        raise HTTPException(status_code=400, detail="Account alert details must contain at least 4 characters")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="Account alert headline cannot exceed 120 characters")
     note = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
-        "body": data.get("body", ""),
+        "title": title,
+        "body": body,
         "pinned": bool(data.get("pinned", False)),
+        "show_on_open": bool(data.get("show_on_open", data.get("pinned", False))),
+        "alert_level": data.get("alert_level") if data.get("alert_level") in {"critical", "warning", "info"} else "info",
+        "expires_at": data.get("expires_at") or None,
         "author_id": current_user.get("id"),
         "author_name": current_user.get("name"),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "acknowledgements": [],
     }
     await db.client_notes.insert_one({**note})
+    await _write_client_audit(current_user, "client_account_alert_created", client_id, client.get("name") or "Client", {"note_id": note["id"], "alert_level": note["alert_level"], "title": title})
     return note
 
 
 @router.delete("/clients/{client_id}/notes/{note_id}")
 async def delete_client_note(client_id: str, note_id: str, current_user: dict = Depends(get_current_user)):
+    client = await _ensure_client(client_id)
+    note = await db.client_notes.find_one({"id": note_id, "client_id": client_id}, {"_id": 0})
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
     res = await db.client_notes.delete_one({"id": note_id, "client_id": client_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Note not found")
+    await _write_client_audit(current_user, "client_account_alert_deleted", client_id, client.get("name") or "Client", {"note_id": note_id, "alert_level": note.get("alert_level"), "title": note.get("title") or note.get("body", "")[:100]})
     return {"message": "Note deleted"}
+
+
+@router.put("/clients/{client_id}/notes/{note_id}")
+async def update_client_note(client_id: str, note_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    client = await _ensure_client(client_id)
+    allowed = {"title", "body", "pinned", "show_on_open", "alert_level", "expires_at"}
+    update = {key: value for key, value in data.items() if key in allowed}
+    if "body" in update:
+        update["body"] = str(update["body"] or "").strip()
+        if len(update["body"]) < 4:
+            raise HTTPException(status_code=400, detail="Account alert details must contain at least 4 characters")
+    if "title" in update:
+        update["title"] = str(update["title"] or "").strip()
+        if len(update["title"]) > 120:
+            raise HTTPException(status_code=400, detail="Account alert headline cannot exceed 120 characters")
+    if "alert_level" in update and update["alert_level"] not in {"critical", "warning", "info"}:
+        raise HTTPException(status_code=400, detail="Invalid account alert level")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update["updated_by"] = current_user.get("name", "")
+    result = await db.client_notes.update_one({"id": note_id, "client_id": client_id}, {"$set": update})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note = await db.client_notes.find_one({"id": note_id, "client_id": client_id}, {"_id": 0})
+    await _write_client_audit(current_user, "client_account_alert_updated", client_id, client.get("name") or "Client", {"note_id": note_id, "alert_level": note.get("alert_level"), "title": note.get("title") or note.get("body", "")[:100]})
+    return note
+
+
+@router.post("/clients/{client_id}/notes/{note_id}/acknowledge")
+async def acknowledge_client_alert(client_id: str, note_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _ensure_client(client_id)
+    note = await db.client_notes.find_one({"id": note_id, "client_id": client_id}, {"_id": 0})
+    if not note:
+        raise HTTPException(status_code=404, detail="Account alert not found")
+    acknowledgement = {
+        "id": str(uuid.uuid4()), "user_id": current_user.get("id", ""), "user_name": current_user.get("name", ""),
+        "acknowledged_at": datetime.now(timezone.utc).isoformat(), "context": data.get("context", "client_workspace"),
+    }
+    result = await db.client_notes.update_one(
+        {"id": note_id, "client_id": client_id, "acknowledgements.user_id": {"$ne": acknowledgement["user_id"]}},
+        {"$push": {"acknowledgements": acknowledgement}},
+    )
+    if not result.modified_count:
+        return {"message": "Acknowledgement was already recorded", "acknowledgement": None}
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()), "user_id": current_user.get("id", ""), "user_name": current_user.get("name", ""),
+        "action": "client_alert_acknowledged", "entity_type": "client", "entity_id": client_id,
+        "entity_name": note.get("body", "Account alert")[:100], "details": "Technician acknowledged a critical account alert.",
+        "created_at": acknowledgement["acknowledged_at"],
+    })
+    return {"message": "Acknowledgement recorded", "acknowledgement": acknowledgement}

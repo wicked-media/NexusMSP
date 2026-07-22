@@ -1,6 +1,6 @@
 import {
   collectionFromResponse, matchTicketByReference, TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES,
-  ticketModuleForPath, ticketToolAvailability,
+  ticketModuleForPath, ticketToolAvailability, ticketWorkspaceToolForPath,
 } from "./ticketWorkspaceHelpers";
 
 describe("ticket workspace helpers", () => {
@@ -11,6 +11,8 @@ describe("ticket workspace helpers", () => {
     expect(ticketModuleForPath("/sla-timer")).toBe("sla");
     expect(ticketModuleForPath("/sla-report-gen")).toBe("sla");
     expect(ticketModuleForPath("/dispatch-board")).toBe("dispatch");
+    expect(ticketWorkspaceToolForPath("/workshop-bench")?.id).toBe("workshop");
+    expect(ticketWorkspaceToolForPath("/blueprints")?.id).toBe("blueprints");
   });
 
   test("only exposes device actions when a device is linked", () => {

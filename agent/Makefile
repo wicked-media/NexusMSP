@@ -1,7 +1,7 @@
-VERSION ?= 0.1.0-dev
+VERSION ?= 0.1.5-nexus-shield
 LDFLAGS  = -s -w -X main.Version=$(VERSION)
 
-.PHONY: all windows linux test clean fmt vet tidy
+.PHONY: all windows chat windows-chat linux test clean fmt vet tidy
 
 all: windows
 
@@ -10,6 +10,12 @@ windows:
 	@echo ">> building windows/amd64 nexus-agent ($(VERSION))"
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/nexus-agent.exe ./cmd/nexus-agent
 	@ls -lah dist/nexus-agent.exe
+
+windows-chat:
+	@mkdir -p dist
+	@echo ">> building windows/amd64 nexus-client-chat ($(VERSION))"
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/nexus-client-chat.exe ./cmd/nexus-chat
+	@ls -lah dist/nexus-client-chat.exe
 
 linux:
 	@mkdir -p dist

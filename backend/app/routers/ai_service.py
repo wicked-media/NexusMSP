@@ -5,6 +5,7 @@ import uuid
 from dotenv import load_dotenv
 from app.database import db
 from app.auth import get_current_user
+from app.services.ai_provider import DEFAULT_MODEL, normalise_model
 
 load_dotenv()
 
@@ -12,16 +13,21 @@ router = APIRouter()
 
 # AI Model config
 DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL = "gpt-4o-mini"
 
 
 def _normalise_config(config: dict | None) -> dict:
     """Migrate legacy provider values in-memory without retaining external dependencies."""
-    configured_model = (config or {}).get("model", DEFAULT_MODEL)
+    configured_model = normalise_model((config or {}).get("model"))
     return {
         "type": "ai_config",
         "provider": DEFAULT_PROVIDER,
-        "model": configured_model if isinstance(configured_model, str) and configured_model.startswith("gpt-") else DEFAULT_MODEL,
+        "model": configured_model,
+        "reasoning_effort": (config or {}).get("reasoning_effort") if (config or {}).get("reasoning_effort") in {"none", "low", "medium", "high", "xhigh", "max"} else "medium",
+        "connection": {
+            "configured": bool(os.environ.get("OPENAI_API_KEY")),
+            "method": "environment",
+            "key_source": "OPENAI_API_KEY",
+        },
     }
 
 async def get_ai_config():
@@ -37,7 +43,7 @@ async def get_chat(session_id: str, system_message: str):
     provider = config.get("provider", DEFAULT_PROVIDER)
     model = config.get("model", DEFAULT_MODEL)
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_message)
-    chat.with_model(provider, model)
+    chat.with_model(provider, model).with_reasoning_effort(config.get("reasoning_effort"))
     return chat
 
 # ============== AI CONFIG ==============
@@ -51,12 +57,15 @@ async def get_ai_settings(current_user: dict = Depends(get_current_user)):
 async def update_ai_settings(data: dict, current_user: dict = Depends(get_current_user)):
     provider = "openai"
     requested_model = data.get("model", DEFAULT_MODEL)
-    model = requested_model if isinstance(requested_model, str) and requested_model.startswith("gpt-") else DEFAULT_MODEL
+    model = normalise_model(requested_model)
+    requested_reasoning = data.get("reasoning_effort", "medium")
+    reasoning_effort = requested_reasoning if requested_reasoning in {"none", "low", "medium", "high", "xhigh", "max"} else "medium"
     await db.settings.update_one({"type": "ai_config"}, {"$set": {
-        "type": "ai_config", "provider": provider, "model": model,
+        "type": "ai_config", "provider": provider, "model": model, "reasoning_effort": reasoning_effort,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }}, upsert=True)
-    return {"message": "AI config saved", "provider": provider, "model": model}
+    return {"message": "AI config saved", "provider": provider, "model": model, "reasoning_effort": reasoning_effort,
+            "connection": {"configured": bool(os.environ.get("OPENAI_API_KEY")), "method": "environment", "key_source": "OPENAI_API_KEY"}}
 
 # ============== TECHNICIAN CO-PILOT ==============
 
@@ -109,7 +118,7 @@ async def copilot_chat(data: dict, current_user: dict = Depends(get_current_user
     config = await get_ai_config()
     try:
         chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
-        chat.with_model(config.get("provider", DEFAULT_PROVIDER), config.get("model", DEFAULT_MODEL))
+        chat.with_model(config.get("provider", DEFAULT_PROVIDER), config.get("model", DEFAULT_MODEL)).with_reasoning_effort(config.get("reasoning_effort"))
         response = await chat.send_message(UserMessage(text=message))
         return {"response": response, "session_id": session_id}
     except Exception as e:

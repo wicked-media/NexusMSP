@@ -383,6 +383,51 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             result = processed.get("result", {})
             return {**result, "duplicate": True, "message": "This inbound email was already processed"}
 
+    # Match the sender before routing so every known-client message is retained
+    # in the client correspondence history, even if ticket intake is disabled.
+    email_match = {"$regex": f"^{re.escape(sender_email)}$", "$options": "i"}
+    known_client = await db.clients.find_one({"$or": [
+        {"email": email_match}, {"contact_email": email_match}, {"contacts.email": email_match}
+    ]}, {"_id": 0})
+    if not known_client:
+        contact = await db.client_contacts.find_one({"email": email_match}, {"_id": 0, "client_id": 1})
+        if contact and contact.get("client_id"):
+            known_client = await db.clients.find_one({"id": contact["client_id"]}, {"_id": 0})
+    if known_client:
+        from app.routers.email_utils import record_inbound_client_email
+        await record_inbound_client_email(
+            sender_email=sender_email, sender_name=sender_name, subject=subject,
+            mailbox=routed_mailbox, client_id=known_client.get("id"), related_type="email_intake",
+        )
+
+    # Replies to a job update must return to that job rather than creating a
+    # duplicate service ticket or CRM lead. Match a known client's recent job
+    # email by its normalised subject, which remains stable across Re:/Fwd:.
+    job_reply = None
+    if known_client:
+        normalise_subject = lambda value: re.sub(r"^(?:re|fw|fwd)\s*:\s*", "", (value or "").strip(), flags=re.I).casefold()
+        inbound_subject = normalise_subject(subject)
+        candidates = await db.job_emails.find(
+            {"client_id": known_client.get("id"), "direction": "outbound"}, {"_id": 0}
+        ).sort("created_at", -1).to_list(30)
+        job_reply = next((item for item in candidates if item.get("job_id") and normalise_subject(item.get("subject")) == inbound_subject), None)
+        if job_reply:
+            inbound_job_email = {
+                "id": str(uuid.uuid4()), "job_type": job_reply.get("job_type"), "job_id": job_reply.get("job_id"),
+                "client_id": known_client.get("id"), "job_number": job_reply.get("job_number"),
+                "from_address": sender_email, "from_name": sender_name, "to_addresses": [routed_mailbox] if routed_mailbox else [],
+                "subject": subject, "body": body, "body_type": "html" if "<" in body else "text",
+                "direction": "inbound", "status": "received", "sender_mailbox": routed_mailbox,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await db.job_emails.insert_one(inbound_job_email)
+            audit_collection = "workshop_audit_log" if job_reply.get("job_type") == "workshop" else "field_audit_log"
+            await db[audit_collection].insert_one({
+                "id": str(uuid.uuid4()), "job_id": job_reply.get("job_id"), "action": "conversation_email_received",
+                "details": f"Email reply received from {sender_name or sender_email}", "user_id": "system",
+                "user_name": sender_name or sender_email, "created_at": inbound_job_email["created_at"],
+            })
+
     auto_reply_result = None
 
     async def remember(result: dict) -> dict:
@@ -401,6 +446,9 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             )
         return result
 
+    if job_reply:
+        return await remember({"status": "job_reply_recorded", "job_id": job_reply.get("job_id"), "job_type": job_reply.get("job_type"), "mailbox": routed_mailbox, "message": "Email reply added to the service-job conversation"})
+
     # An acknowledgement is useful for new enquiries, but avoid obvious mail
     # loops and automated senders. The delivery is also captured in the shared
     # outbound audit trail through send_email.
@@ -416,6 +464,8 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
                 f"Re: {subject or 'Your enquiry'}",
                 f"<div style='font-family:system-ui,sans-serif;white-space:pre-wrap'>{escape(auto_reply_message)}</div>",
                 category="notifications",
+                client_id=(known_client or {}).get("id"),
+                related_type="email_intake",
             )
             auto_reply_result = {
                 "status": delivery.get("status"),
@@ -424,16 +474,10 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             }
     
     # Check if sender is a known client contact → create ticket
-    email_match = {"$regex": f"^{re.escape(sender_email)}$", "$options": "i"}
     email_to_ticket = routing.get("email_to_ticket_enabled", False)
     if email_to_ticket:
-        # Check if this email belongs to a known client
-        client = await db.clients.find_one({"$or": [
-            {"email": email_match},
-            {"contacts.email": email_match}
-        ]}, {"_id": 0})
-        
-        if client:
+        if known_client:
+            client = known_client
             # Create a ticket for the known client
             tier_fields = {}
             if client.get("service_tier_id"):

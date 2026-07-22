@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Sparkles, Wand2, Mail, AlertCircle, TrendingDown, Calendar, DollarSign,
@@ -324,6 +325,7 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
   const [reminderData, setReminderData] = useState(null);
   const [feeType, setFeeType] = useState("percent");
   const [feeValue, setFeeValue] = useState(5);
+  const [showReissueConfirm, setShowReissueConfirm] = useState(false);
 
   const createPlan = async () => {
     setBusy(true);
@@ -382,11 +384,11 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
   };
 
   const reissue = async () => {
-    if (!window.confirm("Clone this invoice as a new draft with a new invoice number?")) return;
     setBusy(true);
     try {
       const r = await axios.post(`${API}/invoices/${invoice.id}/reissue`, {}, { headers });
       toast.success(`Reissued as ${r.data.invoice_number}`);
+      setShowReissueConfirm(false);
       onReload && onReload();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
     finally { setBusy(false); }
@@ -394,26 +396,26 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap" data-testid="invoice-detail-smart-actions">
-      <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30" onClick={() => setShowReminder(true)} data-testid="btn-smart-reminder">
+      <Button size="sm" variant="outline" className="h-8 rounded-lg border-emerald-500/30 text-emerald-400" onClick={() => setShowReminder(true)} data-testid="btn-smart-reminder">
         <Mail className="w-3 h-3 mr-1" /> Smart Reminder
       </Button>
-      <Button size="sm" variant="outline" onClick={() => setShowPlan(true)} data-testid="btn-payment-plan">
+      <Button size="sm" variant="outline" className="h-8 rounded-lg" onClick={() => setShowPlan(true)} data-testid="btn-payment-plan">
         <Calendar className="w-3 h-3 mr-1" /> Payment Plan
       </Button>
-      <Button size="sm" variant="outline" className="text-amber-400 border-amber-500/30" onClick={() => setShowLateFee(true)} data-testid="btn-late-fee">
+      <Button size="sm" variant="outline" className="h-8 rounded-lg border-amber-500/30 text-amber-400" onClick={() => setShowLateFee(true)} data-testid="btn-late-fee">
         <Percent className="w-3 h-3 mr-1" /> Late Fee
       </Button>
-      <Button size="sm" variant="outline" onClick={generatePayLink} disabled={busy} data-testid="btn-pay-now-link">
+      <Button size="sm" variant="outline" className="h-8 rounded-lg" onClick={generatePayLink} disabled={busy} data-testid="btn-pay-now-link">
         <DollarSign className="w-3 h-3 mr-1" /> Pay-Now Link
       </Button>
-      <Button size="sm" variant="outline" onClick={reissue} disabled={busy} data-testid="btn-reissue">
+      <Button size="sm" variant="outline" className="h-8 rounded-lg" onClick={() => setShowReissueConfirm(true)} disabled={busy} data-testid="btn-reissue">
         <RefreshCw className="w-3 h-3 mr-1" /> Reissue
       </Button>
 
       <Dialog open={showPlan} onOpenChange={setShowPlan}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Payment Plan</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+        <DialogContent className="max-w-lg overflow-hidden border-cyan-400/20 bg-background p-0">
+          <DialogHeader className="border-b border-cyan-400/15 bg-[linear-gradient(135deg,rgba(34,211,238,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Collections workflow</p><DialogTitle className="mt-1 text-xl">Create payment plan</DialogTitle><DialogDescription>Set an auditable instalment schedule for the outstanding invoice balance.</DialogDescription></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 px-6 py-5">
             <div>
               <Label className="text-xs">Installments</Label>
               <Input type="number" min={2} max={12} value={installments} onChange={(e) => setInstallments(parseInt(e.target.value || "3"))} />
@@ -423,7 +425,7 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
               <Input type="number" value={interval} onChange={(e) => setInterval(parseInt(e.target.value || "30"))} />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
             <Button variant="outline" onClick={() => setShowPlan(false)}>Cancel</Button>
             <Button onClick={createPlan} disabled={busy}>{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}Create</Button>
           </DialogFooter>
@@ -431,12 +433,13 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
       </Dialog>
 
       <Dialog open={showReminder} onOpenChange={(o) => { setShowReminder(o); if (!o) setReminderData(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" />Smart Reminder</DialogTitle>
+        <DialogContent className="max-w-2xl overflow-hidden border-emerald-400/20 bg-background p-0">
+          <DialogHeader className="border-b border-emerald-400/15 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Collections workflow</p>
+            <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><Sparkles className="h-4 w-4 text-emerald-300" />Smart reminder</DialogTitle>
             <DialogDescription>AI drafts the message with tone matched to how overdue the invoice is.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 px-6 py-5">
             <div className="grid grid-cols-4 gap-2">
               {Object.entries(STAGE_LABELS).map(([stage, label]) => (
                 <Button key={stage} size="sm" variant="outline" onClick={() => draftReminder(stage)} disabled={busy} data-testid={`reminder-${stage}`}>
@@ -459,7 +462,7 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
             <Button variant="outline" onClick={() => setShowReminder(false)}>Cancel</Button>
             {reminderData && <Button onClick={sendReminderEmail} disabled={busy} data-testid="send-reminder-btn"><Send className="w-3 h-3 mr-1" />Send Now</Button>}
           </DialogFooter>
@@ -467,9 +470,9 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
       </Dialog>
 
       <Dialog open={showLateFee} onOpenChange={setShowLateFee}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Apply Late Fee</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+        <DialogContent className="max-w-lg overflow-hidden border-amber-400/20 bg-background p-0">
+          <DialogHeader className="border-b border-amber-400/15 bg-[linear-gradient(135deg,rgba(245,158,11,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300">Collections workflow</p><DialogTitle className="mt-1 text-xl">Apply late fee</DialogTitle><DialogDescription>Add an explicit, auditable fee to the invoice.</DialogDescription></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 px-6 py-5">
             <div>
               <Label className="text-xs">Type</Label>
               <Select value={feeType} onValueChange={setFeeType}>
@@ -485,12 +488,25 @@ export function InvoiceDetailSmartActions({ invoice, onReload }) {
               <Input type="number" value={feeValue} onChange={(e) => setFeeValue(parseFloat(e.target.value || "0"))} />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
             <Button variant="outline" onClick={() => setShowLateFee(false)}>Cancel</Button>
             <Button onClick={applyLateFee} disabled={busy}>Apply</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showReissueConfirm} onOpenChange={setShowReissueConfirm}>
+        <AlertDialogContent className="border-cyan-400/20">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reissue invoice as a new draft?</AlertDialogTitle>
+            <AlertDialogDescription>This preserves the existing invoice and creates a new draft with a new invoice number. The operation is recorded in the invoice audit history.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Keep current invoice</AlertDialogCancel>
+            <AlertDialogAction onClick={reissue} disabled={busy} className="bg-cyan-600 text-white hover:bg-cyan-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Reissue draft</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

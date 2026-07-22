@@ -9,12 +9,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Loader2, Cloud, CheckCircle, XCircle, RefreshCw, Users, Link2, Play,
   DollarSign, Plus, Search, Package, Building2, Save
 } from "lucide-react";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 export default function Pax8CommandCenterPage() {
   const { token } = useAuth();
@@ -163,15 +165,23 @@ export default function Pax8CommandCenterPage() {
   // Not configured state
   if (!settings?.enabled) {
     return (
-      <div className="p-6">
-        <Card className="max-w-2xl">
+      <div className="p-6 space-y-5" data-testid="pax8-command-center">
+        <OperationalPageHeader
+          eyebrow="Cloud distribution"
+          title="Pax8"
+          description="Connect the Pax8 partner account to synchronise CSP subscriptions, map customers, and keep recurring billing accurate."
+          icon={Cloud}
+          tone="sky"
+          actions={<Badge variant="outline" className="border-amber-500/30 text-amber-300">Configuration required</Badge>}
+        />
+        <Card className="max-w-2xl border-amber-500/25 bg-amber-500/[0.035]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Cloud className="w-5 h-5 text-indigo-400" />Pax8 Not Configured</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <p className="text-muted-foreground">Connect your Pax8 partner account to sync Microsoft / CSP subscriptions and enable auto-billing on recurring invoices.</p>
             <p className="text-muted-foreground">Go to <strong>Settings → Integrations → Pax8</strong> and enter your Client ID + Client Secret from the Pax8 Partner Portal.</p>
-            <Button variant="outline" onClick={() => window.location.assign("/settings")} data-testid="go-to-settings-btn"><Save className="w-3 h-3 mr-1" />Open Settings</Button>
+            <Button variant="outline" asChild data-testid="go-to-settings-btn"><Link to="/settings?tab=integrations&anchor=pax8-settings-card"><Save className="mr-1.5 h-3.5 w-3.5" />Open Pax8 settings</Link></Button>
           </CardContent>
         </Card>
       </div>
@@ -179,30 +189,30 @@ export default function Pax8CommandCenterPage() {
   }
 
   return (
-    <PageShell data-testid="pax8-command-center">
-      <MetricStrip columns={4}>
-        <MetricTile label="Companies" value={companies.length} accent="indigo" icon={<Building2 className="w-2.5 h-2.5 text-indigo-400" />} testid="pax8-metric-companies" />
-        <MetricTile label="Linked to Clients" value={linkedCount} accent="emerald" icon={<Link2 className="w-2.5 h-2.5 text-emerald-400" />} testid="pax8-metric-linked" />
-        <MetricTile label="Billable MRR" value={`AUD ${(billing?.grand_total || 0).toFixed(2)}`} accent="sky" icon={<DollarSign className="w-2.5 h-2.5 text-sky-400" />} testid="pax8-metric-mrr" />
-        <MetricTile label="Auto-Billed" value={(billing?.results || []).filter(r => r.auto_bill_recurring).length} accent="amber" icon={<RefreshCw className="w-2.5 h-2.5 text-amber-400" />} testid="pax8-metric-autobilled" />
-      </MetricStrip>
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Cloud className="w-6 h-6 text-indigo-400" />Pax8 Command Center</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            {companies.length} companies · {linkedCount} linked · {unlinkedCount} unlinked ·
-            {settings?.last_sync_at && <> last synced {new Date(settings.last_sync_at).toLocaleString()}</>}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={runSync} disabled={syncing} className="bg-indigo-600 hover:bg-indigo-700" data-testid="pax8-sync-btn">
-            {syncing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
-            Sync Now
+    <div className="p-6 space-y-5" data-testid="pax8-command-center">
+      <OperationalPageHeader
+        eyebrow="Cloud distribution"
+        title="Pax8"
+        description="Synchronise CSP subscriptions, map Pax8 companies to clients, and keep recurring invoice quantities aligned with real customer usage."
+        icon={Cloud}
+        tone="sky"
+        actions={<>
+          <Badge variant="outline" className="border-emerald-500/30 text-emerald-300">{settings?.last_sync_at ? `Synced ${new Date(settings.last_sync_at).toLocaleString()}` : "Ready to sync"}</Badge>
+          <Button variant="outline" size="sm" asChild><Link to="/settings?tab=integrations&anchor=pax8-settings-card"><Save className="mr-1.5 h-3.5 w-3.5" />Connection</Link></Button>
+          <Button size="sm" onClick={runSync} disabled={syncing} data-testid="pax8-sync-btn">
+            {syncing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Sync now
           </Button>
-        </div>
+        </>}
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroTile label="Companies" value={companies.length} icon={Building2} glow="cyan" subtitle="Discovered in Pax8" testId="pax8-metric-companies" />
+        <HeroTile label="Linked clients" value={linkedCount} icon={Link2} glow="emerald" subtitle={`${unlinkedCount} awaiting client mapping`} testId="pax8-metric-linked" />
+        <HeroTile label="Billable MRR" value={`AUD ${(billing?.grand_total || 0).toFixed(2)}`} icon={DollarSign} glow="sky" subtitle="Subscription billing preview" testId="pax8-metric-mrr" />
+        <HeroTile label="Auto-billed" value={(billing?.results || []).filter(r => r.auto_bill_recurring).length} icon={RefreshCw} glow="violet" subtitle="Linked to recurring invoices" testId="pax8-metric-autobilled" />
       </div>
+
+      <div className="space-y-4">
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList data-testid="pax8-tabs">
@@ -345,7 +355,7 @@ export default function Pax8CommandCenterPage() {
                       <Button
                         size="sm"
                         variant={r.auto_bill_recurring ? "outline" : "default"}
-                        className={r.auto_bill_recurring ? "text-sky-400 border-sky-500/40 hover:bg-sky-500/10" : "bg-sky-600 hover:bg-sky-700"}
+                        className={r.auto_bill_recurring ? "text-sky-400 border-sky-500/40 hover:bg-sky-500/10" : ""}
                         onClick={() => handleToggleAutoBill(r)}
                         disabled={autoBillBusy === r.client_id}
                         data-testid={`pax8-auto-bill-toggle-${r.client_id}`}
@@ -432,7 +442,6 @@ export default function Pax8CommandCenterPage() {
             <Button
               onClick={() => enableAutoBill(autoBillDialog.client_id, true)}
               disabled={autoBillBusy === autoBillDialog?.client_id}
-              className="bg-sky-600 hover:bg-sky-700"
               data-testid="pax8-confirm-auto-bill-create-btn"
             >
               {autoBillBusy === autoBillDialog?.client_id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
@@ -442,6 +451,6 @@ export default function Pax8CommandCenterPage() {
         </DialogContent>
       </Dialog>
       </div>
-    </PageShell>
+    </div>
   );
 }

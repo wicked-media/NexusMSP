@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
@@ -75,11 +75,40 @@ async def execute_healing(event_id: str, current_user: dict = Depends(get_curren
 
 @router.post("/self-healing/escalate/{event_id}")
 async def escalate_event(event_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+    event = await db.self_healing_events.find_one({"id": event_id}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Self-healing event not found")
+
+    existing_ticket_id = event.get("escalation_ticket_id")
+    if existing_ticket_id:
+        existing_ticket = await db.tickets.find_one({"id": existing_ticket_id}, {"_id": 0, "ticket_number": 1})
+        return {"status": "escalated", "ticket_id": existing_ticket_id, "ticket_number": (existing_ticket or {}).get("ticket_number")}
+
+    now = datetime.now(timezone.utc).isoformat()
+    ticket_id = f"ai-sh-{uuid.uuid4().hex[:10]}"
+    ticket_number = f"AI-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    ticket = {
+        "id": ticket_id,
+        "ticket_number": ticket_number,
+        "title": f"[AI Escalation] {event.get('issue_description') or 'Self-healing review required'}",
+        "description": "Created from AI Operations self-healing escalation. Review the matched runbook and execution evidence before taking action.",
+        "status": "open",
+        "priority": event.get("severity", "medium"),
+        "source": "ai_self_healing",
+        "client_name": event.get("client_name"),
+        "device_id": event.get("device_id"),
+        "device_name": event.get("device_name"),
+        "ai_event_id": event_id,
+        "matched_runbook": event.get("matched_runbook"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.tickets.insert_one(ticket)
     await db.self_healing_events.update_one(
         {"id": event_id},
-        {"$set": {"status": "escalated", "escalated_by": current_user.get("name"), "escalation_reason": data.get("reason", "Manual escalation"), "escalated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {"status": "escalated", "escalated_by": current_user.get("name"), "escalation_reason": data.get("reason", "Manual escalation"), "escalated_at": now, "escalation_ticket_id": ticket_id}}
     )
-    return {"status": "escalated"}
+    return {"status": "escalated", "ticket_id": ticket_id, "ticket_number": ticket_number}
 
 
 @router.get("/self-healing/event/{event_id}")
@@ -95,7 +124,9 @@ async def list_runbooks(current_user: dict = Depends(get_current_user)):
     runbooks = await db.healing_runbooks.find({}, {"_id": 0}).to_list(50)
     if not runbooks:
         runbooks = await _seed_runbooks()
-    return runbooks
+    # Historical dev seeds may have inserted the same runbook more than once.
+    # Return one authoritative definition per stable runbook id.
+    return list({runbook.get("id"): runbook for runbook in runbooks if runbook.get("id")}.values())
 
 
 @router.post("/self-healing/simulate")
@@ -214,7 +245,7 @@ async def _seed_runbooks():
         ], "success_rate_pct": 91, "avg_execution_seconds": 50, "enabled": True},
     ]
     for rb in runbooks:
-        await db.healing_runbooks.insert_one(rb)
+        await db.healing_runbooks.update_one({"id": rb["id"]}, {"$set": rb}, upsert=True)
     return [{k: v for k, v in rb.items() if k != "_id"} for rb in runbooks]
 
 

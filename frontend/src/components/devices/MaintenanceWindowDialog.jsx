@@ -13,15 +13,17 @@ import { toast } from "sonner";
 import { Calendar, Clock, Wrench, Power, RefreshCw, Download, Loader2, Sparkles, History, Trash2, Play, X, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 
 const ACTION_OPTIONS = [
-  { key: "install-patches", label: "Windows Update", icon: Download, color: "emerald" },
-  { key: "install-winget", label: "Approved Apps", icon: Download, color: "cyan" },
-  { key: "run-checks", label: "Run Checks", icon: RefreshCw, color: "violet" },
-  { key: "reboot", label: "Reboot", icon: Power, color: "amber" },
+  { key: "install-patches", label: "Windows Update", icon: Download },
+  { key: "install-winget", label: "Approved Apps", icon: Download },
+  { key: "run-checks", label: "Run Checks", icon: RefreshCw },
+  { key: "reboot", label: "Reboot", icon: Power },
 ];
 
 const STATUS_STYLES = {
   scheduled: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  dispatching: "bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse",
   running: "bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse",
+  awaiting_results: "bg-violet-500/20 text-violet-300 border-violet-500/30",
   completed: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
   cancelled: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
   failed: "bg-rose-500/20 text-rose-300 border-rose-500/30",
@@ -42,7 +44,6 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
   const [scheduledAt, setScheduledAt] = useState(presetDate(8)); // default: 8h from now
   const [actions, setActions] = useState(["install-patches"]);
   const [parentTicketId, setParentTicketId] = useState("");
-  const [notifyClients, setNotifyClients] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -71,7 +72,6 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
         device_ids: selectedIds,
         actions,
         parent_ticket_id: parentTicketId.trim() || null,
-        notify_clients: notifyClients,
       }, { headers });
       toast.success(`Window scheduled · ${r.data.id.slice(0, 8)}`);
       onScheduled && onScheduled(r.data);
@@ -105,18 +105,18 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
               </div>
             </div>
             <div>
-              <Label className="text-xs">Parent ticket (optional)</Label>
-              <Input value={parentTicketId} onChange={(e) => setParentTicketId(e.target.value)} placeholder="ticket id or TKT-NNN" data-testid="mw-parent-ticket" />
-              <p className="text-[10px] text-muted-foreground mt-1">AI summary will be posted as a comment.</p>
+              <Label className="text-xs">Related ticket (optional)</Label>
+              <Input value={parentTicketId} onChange={(e) => setParentTicketId(e.target.value)} placeholder="Ticket ID or ticket number" data-testid="mw-parent-ticket" />
+              <p className="text-[10px] text-muted-foreground mt-1">A factual completion record will be posted as a ticket comment.</p>
             </div>
           </div>
 
           <div>
             <Label className="text-xs">Actions to run on each device</Label>
             <div className="grid grid-cols-4 gap-2 mt-1">
-              {ACTION_OPTIONS.map(({ key, label, icon: Icon, color }) => (
+              {ACTION_OPTIONS.map(({ key, label, icon: Icon }) => (
                 <Button key={key} variant={actions.includes(key) ? "default" : "outline"}
-                  className={actions.includes(key) ? `bg-${color}-500/30 text-${color}-200 border-${color}-500/50 hover:bg-${color}-500/40` : ""}
+                  className="h-10 justify-start text-xs"
                   onClick={() => toggleAction(key)} data-testid={`mw-action-${key}`}>
                   <Icon className="w-3.5 h-3.5 mr-1" />{label}
                 </Button>
@@ -129,12 +129,9 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="What this window covers…" />
           </div>
 
-          <div className="flex items-center justify-between p-2 rounded bg-muted/30">
-            <div className="flex items-center gap-2 text-sm">
-              <input type="checkbox" id="notify-clients" checked={notifyClients} onChange={(e) => setNotifyClients(e.target.checked)} />
-              <label htmlFor="notify-clients">Email clients 24h before the window</label>
-            </div>
-            <Badge variant="outline" className="text-[10px]">{selectedIds.length} devices</Badge>
+          <div className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/20 p-3">
+            <p className="text-xs text-muted-foreground">Only assets enrolled with Nexus Agent can be scheduled. Customer notifications are sent from the linked ticket conversation when required.</p>
+            <Badge variant="outline" className="ml-3 shrink-0 text-[10px]">{selectedIds.length} assets</Badge>
           </div>
 
           {selectedIds.length > 0 && (

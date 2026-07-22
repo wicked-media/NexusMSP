@@ -31,7 +31,7 @@ import time
 import uuid
 import zipfile
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
@@ -53,13 +53,30 @@ MAX_FLEET_TARGETS = 200
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCAL_AGENT_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-agent.exe"
 _CONTAINER_AGENT_BINARY = Path("/app/agent/dist/nexus-agent.exe")
+_LOCAL_CHAT_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-client-chat.exe"
+_CONTAINER_CHAT_COMPANION_BINARY = Path("/app/agent/dist/nexus-client-chat.exe")
 AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NEXUS_AGENT_BINARY") else (
     _CONTAINER_AGENT_BINARY if _CONTAINER_AGENT_BINARY.exists() else _LOCAL_AGENT_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.0-dev"
+CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if os.environ.get("NEXUS_CHAT_COMPANION_BINARY") else (
+    _CONTAINER_CHAT_COMPANION_BINARY if _CONTAINER_CHAT_COMPANION_BINARY.exists() else _LOCAL_CHAT_COMPANION_BINARY
+)
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.5-nexus-shield"
+
+# Bundled into every newly generated Windows installer. This profile enables
+# evidence collection and Canary integrity monitoring only; it does not claim
+# to install an AV/EDR or silently change Defender, firewall or user settings.
+NEXUS_SHIELD_AGENT_PROFILE = {
+    "enabled": True,
+    "posture_telemetry": True,
+    "canary_enabled": True,
+    "canary_check_secs": 30,
+    "auto_deploy_canary": True,
+}
 
 # Cached binary fingerprint (computed lazily; invalidated when mtime changes).
 _binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
+_companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 
 
 def _binary_info() -> dict[str, Any]:
@@ -75,6 +92,20 @@ def _binary_info() -> dict[str, Any]:
                 h.update(chunk)
         _binary_cache.update({"mtime": st.st_mtime, "sha256": h.hexdigest(), "size": st.st_size})
     return {"version": AGENT_VERSION, "sha256": _binary_cache["sha256"], "size": _binary_cache["size"], "exists": True}
+
+
+def _companion_binary_info() -> dict[str, Any]:
+    """Return the fingerprint for the user-session support companion."""
+    if not CHAT_COMPANION_BINARY_PATH.exists():
+        return {"sha256": "", "size": 0, "exists": False}
+    stat = CHAT_COMPANION_BINARY_PATH.stat()
+    if _companion_binary_cache["mtime"] != stat.st_mtime or not _companion_binary_cache["sha256"]:
+        digest = hashlib.sha256()
+        with CHAT_COMPANION_BINARY_PATH.open("rb") as fp:
+            for chunk in iter(lambda: fp.read(1024 * 64), b""):
+                digest.update(chunk)
+        _companion_binary_cache.update({"mtime": stat.st_mtime, "sha256": digest.hexdigest(), "size": stat.st_size})
+    return {"sha256": _companion_binary_cache["sha256"], "size": _companion_binary_cache["size"], "exists": True}
 
 # Installer archives are stored locally by default. Set NEXUS_AGENT_INSTALLER_DIR
 # to a mounted volume in production; no third-party object storage is required.
@@ -141,6 +172,18 @@ async def require_agent_operator(user=Depends(get_current_user)) -> dict:
     return user
 
 
+async def require_agent_admin(user=Depends(get_current_user)) -> dict:
+    """Restrict tenant-wide agent configuration to platform administrators.
+
+    Command operators can run work on endpoints, but they must not be able to
+    change the callback URL, update cadence, or remote-access deployment code
+    for every installer in the tenant.
+    """
+    if not _is_agent_admin(user):
+        raise HTTPException(403, "Nexus Agent administrator permission required")
+    return user
+
+
 def _batch_scope(batch_id: str, user: dict) -> dict[str, Any]:
     query: dict[str, Any] = {"batch_id": batch_id}
     if not _is_agent_admin(user):
@@ -168,6 +211,79 @@ async def _audit(db, kind: str, payload: dict) -> None:
         })
     except Exception:
         pass
+
+
+def _nexus_shield_profile_from_token(token: dict[str, Any]) -> dict[str, Any]:
+    profile = token.get("nexus_shield")
+    if not isinstance(profile, dict):
+        return dict(NEXUS_SHIELD_AGENT_PROFILE)
+    return {
+        **NEXUS_SHIELD_AGENT_PROFILE,
+        **{key: value for key, value in profile.items() if key in NEXUS_SHIELD_AGENT_PROFILE},
+    }
+
+
+async def _queue_default_nexus_canary(agent: dict[str, Any], profile: dict[str, Any]) -> None:
+    """Queue the installer-bundled Canary exactly once for a Windows agent.
+
+    The command remains asynchronous: the installer never creates files itself,
+    and the agent reports the resulting fingerprint before Shield marks the
+    sensor active. Existing manually deployed canaries prevent a duplicate.
+    """
+    if not profile.get("enabled") or not profile.get("canary_enabled") or not profile.get("auto_deploy_canary"):
+        return
+    platform = str(agent.get("os") or "").lower()
+    if platform and "windows" not in platform:
+        return
+    agent_id = str(agent.get("id") or "").strip()
+    if not agent_id:
+        return
+    existing = await db.ransomware_canaries.find_one({
+        "agent_id": agent_id,
+        "deployment_source": "nexus-agent",
+    }, {"_id": 0, "id": 1})
+    if existing:
+        return
+
+    canary_id = f"canary-{uuid.uuid4().hex[:12]}"
+    path = str(PureWindowsPath(r"C:\Users\Public\Documents") / f"NexusShield-{canary_id}-Canary.txt")
+    mirrored = await db.devices.find_one({"nexus_agent_id": agent_id}, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1}) or {}
+    now = _now()
+    command_id = str(uuid.uuid4())
+    await db.ransomware_canaries.insert_one({
+        "id": canary_id,
+        "agent_id": agent_id,
+        "device_id": mirrored.get("id") or agent_id,
+        "device_name": mirrored.get("name") or agent.get("hostname") or agent_id,
+        "client_id": mirrored.get("client_id") or agent.get("client_id"),
+        "client_name": mirrored.get("client_name") or agent.get("client_name") or "Unassigned client",
+        "file_path": path,
+        "status": "queued",
+        "deployment_source": "nexus-agent",
+        "auto_provisioned": True,
+        "created_at": now,
+        "created_by": "nexus-shield-installer",
+    })
+    await db.nexus_agent_commands.insert_one({
+        "id": command_id,
+        "device_id": agent_id,
+        "kind": "canary_deploy",
+        "payload": {"canary_id": canary_id, "canary_path": path},
+        "status": "pending",
+        "queued_by": "nexus-shield-installer",
+        "created_at": now,
+    })
+    await db.nexus_agents.update_one({"id": agent_id}, {"$set": {
+        "nexus_shield_canary_status": "queued",
+        "nexus_shield_canary_id": canary_id,
+        "nexus_shield_canary_queued_at": now,
+    }})
+    await _audit(db, "nexus_shield_canary_queued", {
+        "device_id": agent_id,
+        "canary_id": canary_id,
+        "command_id": command_id,
+        "source": "installer",
+    })
 
 
 # ----------------------------------------------------------------------
@@ -205,6 +321,13 @@ async def queue_command_for_device(device_doc: dict, kind: str, payload: dict, q
         "queued_by": queued_by,
         "created_at": _now(),
     })
+    await _audit(db, "queue", {
+        "cmd_id": cmd_id,
+        "device_id": nid,
+        "kind": kind,
+        "by": queued_by,
+        "source": "device_action",
+    })
     return cmd_id
 
 
@@ -221,6 +344,7 @@ class EnrollRequest(BaseModel):
     os_version: str = ""
     mac: str = ""
     agent_version: str = ""
+    capabilities: list[str] = Field(default_factory=list, max_length=20)
 
 
 class EnrollResponse(BaseModel):
@@ -231,6 +355,7 @@ class EnrollResponse(BaseModel):
 class HeartbeatPayload(BaseModel):
     agent_version: str = ""
     snapshot: dict = Field(default_factory=dict)
+    capabilities: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CommandRequest(BaseModel):
@@ -246,6 +371,11 @@ class CommandResult(BaseModel):
     stdout: str = Field(default="", max_length=70_000)
     stderr: str = Field(default="", max_length=20_000)
     duration_ms: int = Field(default=0, ge=0, le=86_400_000)
+
+
+class CompanionDeployRequest(BaseModel):
+    device_ids: list[str] = Field(default_factory=list, max_length=200)
+    all_online: bool = False
 
 
 class InstallerBuildRequest(BaseModel):
@@ -278,6 +408,8 @@ async def enroll(req: EnrollRequest):
         raise HTTPException(401, "enrollment token expired")
 
     client_id = tok.get("client_id") or req.client_id or ""
+    shield_profile = _nexus_shield_profile_from_token(tok)
+    reported_capabilities = [item for item in req.capabilities if isinstance(item, str)][:20]
 
     # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
     existing = None
@@ -300,10 +432,13 @@ async def enroll(req: EnrollRequest):
                 "os_version": req.os_version,
                 "agent_version": req.agent_version,
                 "primary_mac": req.mac,
+                "nexus_shield": shield_profile,
+                "nexus_shield_capabilities": reported_capabilities,
             }},
         )
         await _audit(db, "re-enroll", {"device_id": existing["id"], "client_id": client_id})
         await _sync_to_devices(db, existing["id"], client_id, req)
+        await _queue_default_nexus_canary({**existing, "os": req.os or existing.get("os"), "nexus_shield": shield_profile}, shield_profile)
         return EnrollResponse(agent_token=new_token, device_id=existing["id"])
 
     device_id = str(uuid.uuid4())
@@ -322,10 +457,13 @@ async def enroll(req: EnrollRequest):
         "enrolled_at": _now(),
         "last_seen": _now(),
         "source": "nexus-agent",
+        "nexus_shield": shield_profile,
+        "nexus_shield_capabilities": reported_capabilities,
     }
     await db.nexus_agents.insert_one(doc)
     await _audit(db, "enroll", {"device_id": device_id, "client_id": client_id, "hostname": req.hostname})
     await _sync_to_devices(db, device_id, client_id, req)
+    await _queue_default_nexus_canary(doc, shield_profile)
     return EnrollResponse(agent_token=agent_token, device_id=device_id)
 
 
@@ -354,6 +492,8 @@ async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "Enrol
             "status": "online",
             "last_seen": _now(),
             "source": "nexus-agent",
+            "nexus_shield_enabled": True,
+            "nexus_canary_enabled": True,
         },
         "$setOnInsert": {
             "id": str(uuid.uuid4()),
@@ -488,6 +628,7 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
         "last_seen": now,
         "agent_version": p.agent_version or agent.get("agent_version", ""),
         "online": True,
+        "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
     }
     # Top-level snapshot fields useful for list views
     for k in ("hostname", "os", "os_version", "os_platform", "arch",
@@ -516,6 +657,9 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
                 "mac_address": agent.get("primary_mac", ""),
                 "agent_version": p.agent_version or agent.get("agent_version", ""),
                 "source": "nexus-agent",
+                "nexus_shield_enabled": "nexus_shield" in p.capabilities,
+                "nexus_canary_enabled": "nexus_canary" in p.capabilities,
+                "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
                 **telemetry,
             }},
         )
@@ -690,8 +834,35 @@ async def command_result(res: CommandResult, x_agent_token: str | None = Header(
             for run in runs:
                 counts[run.get("status", "skipped")] = counts.get(run.get("status", "skipped"), 0) + 1
             await db.maintenance_windows.update_one({"id": maintenance_run["window_id"]}, {"$set": {"summary_counts": counts, "reconciled_at": _now()}})
+            from app.routers.maintenance_windows import reconcile_window_from_runs
+            await reconcile_window_from_runs(maintenance_run["window_id"])
     except Exception:
         logger.exception("[nexus-agent] failed to reconcile maintenance command")
+    # Command-console sessions use the same agent transport. Persist actual
+    # stdout/stderr only after the endpoint has returned its command result.
+    try:
+        terminal_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"]},
+            {"_id": 0, "terminal_session_id": 1, "terminal_command_id": 1},
+        )
+        terminal_session_id = (terminal_command or {}).get("terminal_session_id")
+        if terminal_session_id:
+            terminal_status = "completed" if res.status == "ok" else ("timeout" if res.status == "timeout" else "failed")
+            terminal_output = res.stdout or res.stderr or "Command returned no output."
+            await db.terminal_sessions.update_one(
+                {"id": terminal_session_id, "commands.id": res.id},
+                {"$set": {
+                    "commands.$.status": terminal_status,
+                    "commands.$.output": terminal_output,
+                    "commands.$.stderr": res.stderr or "",
+                    "commands.$.exit_code": res.exit_code,
+                    "commands.$.duration_ms": res.duration_ms,
+                    "commands.$.completed_at": _now(),
+                    "last_result_at": _now(),
+                }},
+            )
+    except Exception:
+        logger.exception("[nexus-agent] failed to mirror command-console result")
     try:
         mirrored = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1, "name": 1})
         command = await db.nexus_agent_commands.find_one({"id": res.id, "device_id": agent["id"]}, {"_id": 0, "kind": 1})
@@ -709,6 +880,90 @@ async def command_result(res: CommandResult, x_agent_token: str | None = Header(
             })
     except Exception:
         logger.exception("[nexus-agent] failed to write command audit entry")
+    # Native elevation commands are reflected in the purpose-built, immutable
+    # audit trail as well as the normal agent command history.
+    try:
+        elevate_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "elevate_launch"},
+            {"_id": 0},
+        )
+        if elevate_command:
+            from app.routers.permission_elevation import record_native_elevation_execution
+            await record_native_elevation_execution(elevate_command, {
+                "status": res.status,
+                "exit_code": res.exit_code,
+                "stdout": res.stdout,
+                "stderr": res.stderr,
+                "duration_ms": res.duration_ms,
+            }, agent)
+    except Exception:
+        logger.exception("[nexus-agent] failed to record Nexus Elevate execution")
+    # Companion readiness is recorded only after the agent has returned a
+    # verified successful installation result.
+    try:
+        companion_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "install_companion"},
+            {"_id": 0},
+        )
+        if companion_command and res.status == "ok":
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                "client_companion_installed_at": _now(),
+                "client_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+            }})
+            await _audit(db, "companion_installed", {"device_id": agent["id"], "command_id": res.id})
+    except Exception:
+        logger.exception("[nexus-agent] failed to record companion deployment")
+    try:
+        canary_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "canary_deploy"},
+            {"_id": 0},
+        )
+        if canary_command:
+            payload = canary_command.get("payload") or {}
+            canary_id = payload.get("canary_id")
+            updates: dict[str, Any] = {
+                "agent_command_id": res.id,
+                "last_command_result_at": _now(),
+            }
+            if res.status == "ok":
+                manifest = json.loads(res.stdout or "{}")
+                updates.update({
+                    "status": "active",
+                    "expected_sha256": str(manifest.get("sha256") or ""),
+                    "file_path": str(manifest.get("path") or payload.get("canary_path") or ""),
+                    "deployed_at": _now(),
+                    "deployment_error": "",
+                })
+                await _audit(db, "canary_deployed", {"canary_id": canary_id, "device_id": agent["id"], "command_id": res.id})
+            else:
+                updates.update({"status": "failed", "deployment_error": res.stderr or "Agent deployment failed"})
+                await _audit(db, "canary_deploy_failed", {"canary_id": canary_id, "device_id": agent["id"], "command_id": res.id})
+            await db.ransomware_canaries.update_one({"id": canary_id, "agent_id": agent["id"]}, {"$set": updates})
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile ransomware canary deployment")
+    # Scripts queued from the Scripting workspace use this same transport, so
+    # mirror their agent result into the execution history.
+    try:
+        command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"]},
+            {"_id": 0, "script_execution_id": 1, "dispatched_at": 1},
+        )
+        execution_id = (command or {}).get("script_execution_id")
+        if execution_id:
+            now = _now()
+            final_status = "completed" if res.status == "ok" else ("timeout" if res.status == "timeout" else "failed")
+            await db.script_executions.update_one({"id": execution_id}, {"$set": {
+                "status": final_status,
+                "exit_code": res.exit_code,
+                "output": res.stdout or "",
+                "error_output": res.stderr or "",
+                "duration_ms": res.duration_ms,
+                "duration_seconds": round(res.duration_ms / 1000, 3),
+                "started_at": (command or {}).get("dispatched_at") or now,
+                "completed_at": now,
+            }})
+    except Exception:
+        logger.exception("[nexus-agent] failed to mirror script execution result")
     return {"ok": True}
 
 
@@ -766,6 +1021,62 @@ async def queue_command(device_id: str, req: CommandRequest, user=Depends(requir
     return {"id": cmd_id, "status": "pending"}
 
 
+@router.post("/nexus-agent/companions/deploy")
+async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(require_agent_operator)):
+    """Queue the signed user-session companion to selected online agents.
+
+    The agent validates the SHA-256 after download. A companion is copied to
+    the agent installation folder but is never launched by the service, so it
+    still opens only in an interactive user session.
+    """
+    companion = _companion_binary_info()
+    if not companion["exists"]:
+        raise HTTPException(409, "Nexus Client Chat companion binary is not available on the server")
+    selected_ids = list(dict.fromkeys([item.strip() for item in req.device_ids if item and item.strip()]))
+    if req.all_online:
+        agents = await db.nexus_agents.find({
+            "is_active": True,
+            "last_seen": {"$gte": _online_cutoff()},
+            "agent_version": AGENT_VERSION,
+        }, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).sort("last_seen", -1).to_list(MAX_FLEET_TARGETS)
+    else:
+        if not selected_ids:
+            raise HTTPException(400, "Select at least one online agent or choose all online agents")
+        agents = await db.nexus_agents.find({
+            "id": {"$in": selected_ids},
+            "is_active": True,
+            "last_seen": {"$gte": _online_cutoff()},
+            "agent_version": AGENT_VERSION,
+        }, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).to_list(MAX_FLEET_TARGETS)
+    if not agents:
+        raise HTTPException(409, "No selected Nexus Agents are online with the current companion-rollout agent version")
+
+    now = _now()
+    commands: list[dict] = []
+    for agent in agents:
+        commands.append({
+            "id": str(uuid.uuid4()),
+            "device_id": agent["id"],
+            "kind": "install_companion",
+            "payload": {"sha256": companion["sha256"]},
+            "status": "pending",
+            "queued_by": user.get("email") or user.get("id"),
+            "created_at": now,
+        })
+    await db.nexus_agent_commands.insert_many(commands)
+    await _audit(db, "companion_deploy", {
+        "count": len(commands),
+        "device_ids": [command["device_id"] for command in commands],
+        "sha256": companion["sha256"],
+        "by": user.get("email") or user.get("id"),
+    })
+    return {
+        "queued": len(commands),
+        "commands": [{"id": command["id"], "device_id": command["device_id"]} for command in commands],
+        "companion_sha256": companion["sha256"],
+    }
+
+
 @router.get("/nexus-agent/agents/{device_id}/commands")
 async def agent_commands(
     device_id: str,
@@ -780,16 +1091,32 @@ async def agent_commands(
 # INSTALLER BUILDER
 # ----------------------------------------------------------------------
 
-def _build_installer_zip(client_id: str, client_name: str, enrollment_token: str, server_url: str, binary_bytes: bytes) -> bytes:
-    """Build a ZIP containing nexus-agent.exe + config.json + install.bat."""
+def _build_installer_zip(
+    client_id: str,
+    client_name: str,
+    enrollment_token: str,
+    server_url: str,
+    binary_bytes: bytes,
+    chat_companion_bytes: bytes | None = None,
+    heartbeat_secs: int = 60,
+    poll_secs: int = 10,
+) -> bytes:
+    """Build a ZIP containing the service agent and optional user-session companion."""
     config = {
         "server_url": server_url,
         "enrollment_token": enrollment_token,
         "client_id": client_id,
         "client_name": client_name,
-        "heartbeat_secs": 60,
-        "poll_secs": 10,
+        "heartbeat_secs": heartbeat_secs,
+        "poll_secs": poll_secs,
+        "nexus_shield": NEXUS_SHIELD_AGENT_PROFILE,
     }
+    companion_copy_line = 'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n' if chat_companion_bytes else ""
+    companion_start_menu_lines = (
+        'if not exist "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP" mkdir "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP"\r\n'
+        'copy /Y "%~dp0Open Nexus Client Chat.bat" "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP\\Nexus Client Chat.bat" >nul\r\n'
+        if chat_companion_bytes else ""
+    )
     install_bat = (
         "@echo off\r\n"
         "REM NexusOps Agent installer\r\n"
@@ -799,7 +1126,9 @@ def _build_installer_zip(client_id: str, client_name: str, enrollment_token: str
         "if not exist \"%INSTDIR%\" mkdir \"%INSTDIR%\"\r\n"
         "copy /Y \"%~dp0nexus-agent.exe\" \"%INSTDIR%\\nexus-agent.exe\" >nul\r\n"
         "copy /Y \"%~dp0config.json\"     \"%INSTDIR%\\config.json\"     >nul\r\n"
-        "cd /d \"%INSTDIR%\"\r\n"
+        + companion_copy_line
+        + companion_start_menu_lines
+        + "cd /d \"%INSTDIR%\"\r\n"
         "\"%INSTDIR%\\nexus-agent.exe\" -run install\r\n"
         "if errorlevel 1 (\r\n"
         "  echo Install failed. Run this script as Administrator.\r\n"
@@ -818,6 +1147,9 @@ def _build_installer_zip(client_id: str, client_name: str, enrollment_token: str
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("nexus-agent.exe", binary_bytes)
+        if chat_companion_bytes:
+            z.writestr("nexus-client-chat.exe", chat_companion_bytes)
+            z.writestr("Open Nexus Client Chat.bat", "@echo off\r\n\"%ProgramFiles%\\NexusOps Agent\\nexus-client-chat.exe\"\r\n")
         z.writestr("config.json", json.dumps(config, indent=2))
         z.writestr("install.bat", install_bat)
         z.writestr("uninstall.bat", uninstall_bat)
@@ -845,10 +1177,22 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         server_url = f"{scheme}://{host}" if host else str(request.base_url)
     server_url = server_url.rstrip("/")
 
+    # Store the cadence in each package so the installer is deterministic.
+    # Values may pre-date Pydantic validation, so normalise legacy settings.
+    heartbeat_secs = min(max(int(settings.get("heartbeat_secs") or 60), 15), 3600)
+    poll_secs = min(max(int(settings.get("poll_secs") or 10), 2), 300)
+
     # Read the compiled binary
     if not AGENT_BINARY_PATH.exists():
         raise HTTPException(500, f"agent binary missing at {AGENT_BINARY_PATH}; run `make windows` in /app/agent")
     binary_bytes = AGENT_BINARY_PATH.read_bytes()
+    chat_companion_bytes = CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None
+    includes_client_chat = bool(chat_companion_bytes)
+    # Nexus Elevate is delivered through the protected agent service together
+    # with the user-session Client Chat companion; it is not a separate agent.
+    includes_nexus_elevate = includes_client_chat
+    includes_nexus_shield = True
+    includes_nexus_canary = True
 
     # Mint an enrollment token bound to this client
     enrollment_token = secrets.token_urlsafe(28)
@@ -861,6 +1205,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "created_by": user.get("email") or user.get("id"),
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
         "note": req.note or "",
+        "nexus_shield": NEXUS_SHIELD_AGENT_PROFILE,
     })
 
     # Build the ZIP
@@ -870,6 +1215,9 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         enrollment_token=enrollment_token,
         server_url=server_url,
         binary_bytes=binary_bytes,
+        chat_companion_bytes=chat_companion_bytes,
+        heartbeat_secs=heartbeat_secs,
+        poll_secs=poll_secs,
     )
 
     # Store on local installer storage (with a download token) and record a manifest entry
@@ -889,9 +1237,28 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "created_at": _now(),
         "created_by": user.get("email") or user.get("id"),
         "agent_version": AGENT_VERSION,
+        "package_format": "zip",
+        "includes_client_chat": includes_client_chat,
+        "includes_nexus_elevate": includes_nexus_elevate,
+        "includes_nexus_shield": includes_nexus_shield,
+        "includes_nexus_canary": includes_nexus_canary,
+        "heartbeat_secs": heartbeat_secs,
+        "poll_secs": poll_secs,
         "is_deleted": False,
     }
     await db.nexus_agent_installers.insert_one(manifest)
+    await _audit(db, "installer_built", {
+        "installer_id": manifest["id"],
+        "client_id": req.client_id,
+        "agent_version": AGENT_VERSION,
+        "includes_client_chat": includes_client_chat,
+        "includes_nexus_elevate": includes_nexus_elevate,
+        "includes_nexus_shield": includes_nexus_shield,
+        "includes_nexus_canary": includes_nexus_canary,
+        "heartbeat_secs": heartbeat_secs,
+        "poll_secs": poll_secs,
+        "by": manifest["created_by"],
+    })
 
     # Keep a direct local request on its real scheme (HTTP in local development),
     # while still respecting the public origin supplied by a reverse proxy.
@@ -906,8 +1273,14 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "filename": f"NexusOpsAgent_{client['name'].replace(' ', '_')}.zip",
         "size_bytes": len(zip_bytes),
         "agent_version": AGENT_VERSION,
+        "package_format": "zip",
+        "includes_client_chat": includes_client_chat,
+        "includes_nexus_elevate": includes_nexus_elevate,
+        "includes_nexus_shield": includes_nexus_shield,
+        "includes_nexus_canary": includes_nexus_canary,
         "server_url": server_url,
-        "enrollment_token": enrollment_token,
+        "heartbeat_secs": heartbeat_secs,
+        "poll_secs": poll_secs,
     }
 
 
@@ -930,6 +1303,9 @@ async def installer_download(token: str):
             enrollment_token=manifest["enrollment_token"],
             server_url=str(manifest.get("server_url") or "").strip(),
             binary_bytes=AGENT_BINARY_PATH.read_bytes(),
+            chat_companion_bytes=CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None,
+            heartbeat_secs=int(manifest.get("heartbeat_secs") or 60),
+            poll_secs=int(manifest.get("poll_secs") or 10),
         )
     filename = f"NexusOpsAgent_{manifest['client_name'].replace(' ', '_')}.zip"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -1190,32 +1566,6 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
             "cancelled_by": user.get("email") or user.get("id"),
         }},
     )
-    # Scripts queued from the Scripting workspace are delivered through this
-    # same agent channel. Mirror the real agent result back into the execution
-    # history so technicians see completion, exit code and captured output.
-    try:
-        command = await db.nexus_agent_commands.find_one(
-            {"id": res.id, "device_id": agent["id"]},
-            {"_id": 0, "script_execution_id": 1, "dispatched_at": 1},
-        )
-        execution_id = (command or {}).get("script_execution_id")
-        if execution_id:
-            now = _now()
-            final_status = "completed" if res.status == "ok" else ("timeout" if res.status == "timeout" else "failed")
-            output = res.stdout or ""
-            error_output = res.stderr or ""
-            await db.script_executions.update_one({"id": execution_id}, {"$set": {
-                "status": final_status,
-                "exit_code": res.exit_code,
-                "output": output,
-                "error_output": error_output,
-                "duration_ms": res.duration_ms,
-                "duration_seconds": round(res.duration_ms / 1000, 3),
-                "started_at": (command or {}).get("dispatched_at") or now,
-                "completed_at": now,
-            }})
-    except Exception:
-        logger.exception("[nexus-agent] failed to mirror script execution result")
     await _audit(db, "fleet_script_cancel", {
         "batch_id": batch_id,
         "cancelled_count": result.modified_count,
@@ -1224,12 +1574,25 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
     return {"batch_id": batch_id, "cancelled": result.modified_count}
 
 
+@router.get("/nexus-agent/companion/latest")
+async def latest_client_companion(x_agent_token: str | None = Header(None)):
+    """Authenticated companion download used only by an enrolled agent."""
+    await _verify_agent_token(db, x_agent_token)
+    if not CHAT_COMPANION_BINARY_PATH.exists():
+        raise HTTPException(404, "Nexus Client Chat companion binary is not built")
+    return Response(
+        content=CHAT_COMPANION_BINARY_PATH.read_bytes(),
+        media_type="application/vnd.microsoft.portable-executable",
+        headers={"Content-Disposition": 'attachment; filename="nexus-client-chat.exe"'},
+    )
+
+
 # ----------------------------------------------------------------------
 # ADMIN SETTINGS
 # ----------------------------------------------------------------------
 
 @router.get("/nexus-agent/settings")
-async def get_settings(user=Depends(require_agent_operator)):
+async def get_settings(user=Depends(require_agent_admin)):
     s = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
     return {
         "heartbeat_secs": s.get("heartbeat_secs", 60),
@@ -1244,11 +1607,14 @@ async def get_settings(user=Depends(require_agent_operator)):
         "agent_binary_exists": AGENT_BINARY_PATH.exists(),
         "agent_binary_sha256": _binary_info()["sha256"],
         "agent_binary_size": _binary_info()["size"],
+        "client_companion_exists": _companion_binary_info()["exists"],
+        "client_companion_sha256": _companion_binary_info()["sha256"],
+        "client_companion_size": _companion_binary_info()["size"],
     }
 
 
 @router.put("/nexus-agent/settings")
-async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_operator)):
+async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_admin)):
     await db.nexus_agent_settings.update_one(
         {"_id": "settings"},
         {"$set": {
@@ -1265,6 +1631,13 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_o
         }},
         upsert=True,
     )
+    await _audit(db, "settings_updated", {
+        "heartbeat_secs": payload.heartbeat_secs,
+        "poll_secs": payload.poll_secs,
+        "auto_update_enabled": payload.auto_update_enabled,
+        "winget_enabled": payload.winget_enabled,
+        "by": user.get("email") or user.get("id"),
+    })
     return {"ok": True}
 
 
@@ -1275,10 +1648,21 @@ async def stats(user=Depends(get_current_user)):
     cutoff = (now - timedelta(minutes=3)).isoformat()
     online = await db.nexus_agents.count_documents({"is_active": True, "last_seen": {"$gte": cutoff}})
     cmds_pending = await db.nexus_agent_commands.count_documents({"status": "pending"})
-    assessed_devices = await db.devices.count_documents({"security_assessed_at": {"$exists": True, "$ne": None}})
+    active_agents = await db.nexus_agents.find({"is_active": True}, {"_id": 0, "id": 1}).to_list(length=10_000)
+    active_agent_ids = [agent["id"] for agent in active_agents if agent.get("id")]
+    agent_device_query: dict[str, Any] = {"nexus_agent_id": {"$in": active_agent_ids}}
+    agent_devices = await db.devices.count_documents(agent_device_query)
+    assessed_devices = await db.devices.count_documents({
+        **agent_device_query,
+        "security_assessed_at": {"$exists": True, "$ne": None},
+    })
     managed_devices = await db.devices.count_documents({})
     assessed_rows = await db.devices.find(
-        {"security_assessed_at": {"$exists": True, "$ne": None}}, {"_id": 0, "pending_patches": 1}
+        {
+            **agent_device_query,
+            "security_assessed_at": {"$exists": True, "$ne": None},
+        },
+        {"_id": 0, "pending_patches": 1},
     ).to_list(5000)
     pending_updates = sum(int(row.get("pending_patches") or 0) for row in assessed_rows)
     by_client = await db.nexus_agents.aggregate([
@@ -1292,6 +1676,7 @@ async def stats(user=Depends(get_current_user)):
         "online_agents": online,
         "offline_agents": max(0, total - online),
         "pending_commands": cmds_pending,
+        "agent_devices": agent_devices,
         "assessed_devices": assessed_devices,
         "managed_devices": managed_devices,
         "pending_updates": pending_updates,

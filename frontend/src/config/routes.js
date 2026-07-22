@@ -8,7 +8,8 @@ const page = (name) => lazy(() => import(`@/pages/${name}`));
 export const routeConfig = [
   // Core
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
-  { path: "/shadow-it", component: page("ShadowItPage"), auth: true, layout: true },
+  { path: "/shadow-it", component: page("ShadowITPage"), auth: true, layout: true },
+  { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/cipp", component: page("CippCommandCenterPage"), auth: true, layout: true },
   { path: "/m365", component: page("M365CommandCenter"), auth: true, layout: true },
@@ -35,31 +36,38 @@ export const routeConfig = [
   { path: "/devices/:deviceId", component: page("DeviceDetailPage"), auth: true, layout: true },
   { path: "/devices/:deviceId/chat", component: page("DeviceChatPage"), auth: true, layout: true },
   { path: "/assets", component: page("AssetsPage"), auth: true, layout: true },
+  { path: "/assets/:assetId", component: page("AssetsPage"), auth: true, layout: true },
   { path: "/clients", component: page("ClientsPage"), auth: true, layout: true },
   { path: "/contracts", component: page("ContractsPage"), auth: true, layout: true },
   { path: "/invoices", component: page("InvoicesPage"), auth: true, layout: true },
   { path: "/time-tracking", component: page("TimeTrackingPage"), auth: true, layout: true },
-  { path: "/knowledge-base", component: page("KnowledgeBasePage"), auth: true, layout: true },
+  { path: "/knowledge-base", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/documentation-hub?tab=library" },
   { path: "/insights", component: page("InsightsHubPage"), auth: true, layout: true },
-  { path: "/command-center", component: page("CommandCenterPage"), auth: true, layout: true },
+  // The original cross-domain Command Center duplicated the Dashboard, Team,
+  // Finance and AI workspaces. Keep existing bookmarks working without a
+  // second operational cockpit.
+  { path: "/command-center", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/" },
   { path: "/me", component: page("TechProfilePage"), auth: true, layout: true },
   { path: "/team/:id", component: page("TechProfilePage"), auth: true, layout: true },
-  { path: "/help", component: page("HelpCenterPage"), auth: true, layout: true },
+  { path: "/help", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/documentation-hub?tab=help" },
   { path: "/help/:slug", component: page("HelpCenterPage"), auth: true, layout: true },
-  { path: "/atmosphere", component: page("AtmospherePage"), auth: true, layout: true },
+  // Atmosphere duplicated the live wallboard, asset lifecycle, security, client and
+  // team workspaces. Preserve inbound links while sending users to the operational view.
+  { path: "/atmosphere", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/wallboard" },
   { path: "/change-freezes", component: page("ChangeFreezePage"), auth: true, layout: true },
   { path: "/finance-intel", component: page("FinanceIntelPage"), auth: true, layout: true },
-  { path: "/device-reliability", component: page("DeviceReliabilityPage"), auth: true, layout: true },
+  // Tactical RMM reliability was replaced by the Nexus Agent. Keep historic
+  // links working, but return technicians to the one Managed Assets workspace.
+  { path: "/device-reliability", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/devices" },
 
   // Integrations
   { path: "/pax8", component: page("Pax8CommandCenterPage"), auth: true, layout: true },
   { path: "/domotz", component: page("DomotzPage"), auth: true, layout: true },
   { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
-  { path: "/acronis", component: page("AcronisPage"), auth: true, layout: true },
+  { path: "/acronis", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center?tab=tenants" },
   { path: "/proxmox", component: page("ProxmoxPage"), auth: true, layout: true },
   { path: "/splynx-dashboard", component: page("SplynxDashboardPage"), auth: true, layout: true },
   { path: "/xero", component: page("XeroDashboardPage"), auth: true, layout: true },
-  { path: "/o365-setup", component: page("O365SetupPage"), auth: true, layout: true },
 
   // Reports & Analytics
   { path: "/reports", component: page("ReportsHubPage"), auth: true, layout: true },
@@ -71,7 +79,7 @@ export const routeConfig = [
   { path: "/cost-per-ticket", component: page("CostPerTicketPage"), auth: true, layout: true },
   { path: "/revenue-forecast", component: page("RevenueCommandCenterPage"), auth: true, layout: true },
   { path: "/rpe-dashboard", component: page("RpeDashboardPage"), auth: true, layout: true },
-  { path: "/client-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=client" },
+  { path: "/client-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=clients" },
 
   // Service Management
   { path: "/sla-timer", component: page("SlaManagerPage"), auth: true, layout: true },
@@ -79,9 +87,11 @@ export const routeConfig = [
   { path: "/dispatch-board", component: page("DispatchCenterPage"), auth: true, layout: true },
   { path: "/escalation-matrix", component: page("EscalationMatrixPage"), auth: true, layout: true },
   { path: "/change-management", component: page("ChangeManagementPage"), auth: true, layout: true },
-  { path: "/postmortem", component: page("PostmortemPage"), auth: true, layout: true },
+  { path: "/postmortem", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=postmortems" },
   { path: "/live-chat", component: page("LiveChatPage"), auth: true, layout: true },
-  { path: "/bulk-actions", component: page("BulkActionsPage"), auth: true, layout: true },
+  // Bulk actions are now part of Managed Assets, where the selected-device
+  // toolbar can show actual Nexus Agent eligibility and command results.
+  { path: "/bulk-actions", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/devices" },
 
   // Infrastructure
   { path: "/topology", component: page("TopologyPage"), auth: true, layout: true },
@@ -90,12 +100,15 @@ export const routeConfig = [
   { path: "/qr-assets", component: page("QrAssetsPage"), auth: true, layout: true },
   { path: "/asset-lifecycle", component: page("AssetLifecyclePage"), auth: true, layout: true },
   { path: "/asset-depreciation", component: page("AssetDepreciationPage"), auth: true, layout: true },
-  { path: "/warranty-tracker", component: page("WarrantyTrackerPage"), auth: true, layout: true },
+  // Warranty evidence belongs to the canonical inventory record. Preserve
+  // historic links without keeping a second, conflicting warranty register.
+  { path: "/warranty-tracker", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/asset-lifecycle" },
   { path: "/backup-compliance", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
   { path: "/procurement-planner", component: page("ProcurementPlannerPage"), auth: true, layout: true },
   { path: "/predictive-maintenance", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/predictive-failure" },
   { path: "/doc-scanner", component: page("DocScannerPage"), auth: true, layout: true },
-  { path: "/vault", component: page("CredentialsTabRedirectPage"), auth: true, layout: true, redirectTab: "vault" },
+  // NexusMSP does not manage credentials or MFA. Legacy links point to the external credential workspace.
+  { path: "/vault", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
   { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
 
@@ -116,7 +129,6 @@ export const routeConfig = [
   { path: "/csat-surveys", component: page("CsatSurveysPage"), auth: true, layout: true },
   { path: "/onboarding", component: page("OnboardingWizardPage"), auth: true, layout: true },
   { path: "/sentiment", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "sentiment" },
-  { path: "/it-roadmap", component: page("ItRoadmapPage"), auth: true, layout: true },
   // Legacy Upsell Detector links now resolve to the richer Revenue Growth pipeline.
   { path: "/upsell", component: page("UpsellRedirectPage"), auth: true, layout: true },
   { path: "/contract-profit", component: page("ContractProfitPage"), auth: true, layout: true },
@@ -125,8 +137,8 @@ export const routeConfig = [
 
   // Business Operations
   { path: "/leads", component: page("LeadsPage"), auth: true, layout: true },
-  { path: "/loyalty", component: page("LoyaltyDashboardPage"), auth: true, layout: true },
-  { path: "/campaigns", component: page("CampaignsPage"), auth: true, layout: true },
+  { path: "/loyalty", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/leads?tab=renewals" },
+  { path: "/campaigns", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/leads?tab=campaigns" },
   { path: "/products", component: page("ProductsPage"), auth: true, layout: true },
   { path: "/purchase-orders", component: page("PurchaseOrdersPage"), auth: true, layout: true },
   { path: "/stocktake", component: page("StocktakePage"), auth: true, layout: true },
@@ -138,7 +150,7 @@ export const routeConfig = [
 
   // Communication
   { path: "/email", component: page("EmailPage"), auth: true, layout: true },
-  { path: "/documentation", component: page("ITDocumentationPage"), auth: true, layout: true },
+  { path: "/documentation", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/documentation-hub?tab=it-docs" },
   { path: "/settings", component: page("SettingsPage"), auth: true, layout: true },
   { path: "/expiry-tracker", component: page("ExpiryTrackerPage"), auth: true, layout: true },
   { path: "/white-label", component: page("WhiteLabelPage"), auth: true, layout: true },
@@ -151,19 +163,23 @@ export const routeConfig = [
   { path: "/patch-compliance", component: page("PatchCompliancePage"), auth: true, layout: true },
   { path: "/client-portal-admin", component: page("ClientPortalAdminPage"), auth: true, layout: true },
   { path: "/backup-dashboard", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
-  // MFA management lives in the Credentials Hub alongside vault and rotation controls.
-  { path: "/mfa-management", component: page("MfaManagementRedirectPage"), auth: true, layout: true },
-  { path: "/alert-suppression", component: page("AlertSuppressionPage"), auth: true, layout: true },
+  { path: "/backup-command-center", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
+  { path: "/mfa-management", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/m365" },
+  // The former suppression screen only stored display rules; it never took part
+  // in alert evaluation. Keep old links working, but route technicians to the
+  // enforced Alert Rules Engine instead.
+  { path: "/alert-suppression", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/alert-rules" },
   { path: "/license-management", component: page("LicenseManagementPage"), auth: true, layout: true },
   { path: "/maintenance-scheduler", component: page("MaintenanceSchedulerPage"), auth: true, layout: true },
   { path: "/bandwidth-monitor", component: page("BandwidthMonitorPage"), auth: true, layout: true },
 
   // Phase D: Security Operations + Huntress-killers
   { path: "/security-dashboard", component: page("SecurityDashboardPage"), auth: true, layout: true },
-  { path: "/endpoint-security", component: page("EndpointSecurityPage"), auth: true, layout: true },
+  { path: "/nexus-shield", component: page("NexusShieldPage"), auth: true, layout: true },
+  { path: "/endpoint-security", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-shield?tab=endpoints" },
   { path: "/threat-timeline", component: page("ThreatTimelinePage"), auth: true, layout: true },
   { path: "/identity-threats", component: page("IdentityThreatPage"), auth: true, layout: true },
-  { path: "/ransomware-canary", component: page("RansomwareCanaryPage"), auth: true, layout: true },
+  { path: "/ransomware-canary", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-shield?tab=canary" },
   { path: "/remediation-playbooks", component: page("RemediationPlaybooksPage"), auth: true, layout: true },
   { path: "/soc-feed", component: page("SocFeedPage"), auth: true, layout: true },
   { path: "/vulnerability-scanner", component: page("VulnerabilityScannerPage"), auth: true, layout: true },
@@ -173,15 +189,15 @@ export const routeConfig = [
 
   // Phase D: Operations & Business
   { path: "/script-ticket", component: page("ScriptTicketPage"), auth: true, layout: true },
-  { path: "/custom-monitors", component: page("CustomMonitorsPage"), auth: true, layout: true },
+  { path: "/custom-monitors", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-agent" },
   { path: "/recurring-invoices", component: page("RecurringInvoicesPage"), auth: true, layout: true },
-  { path: "/password-rotation", component: page("CredentialsTabRedirectPage"), auth: true, layout: true, redirectTab: "password-rotation" },
+  { path: "/password-rotation", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
   { path: "/sla-report-gen", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer?tab=reports" },
-  { path: "/capacity-planner", component: page("CapacityPlannerPage"), auth: true, layout: true },
-  { path: "/auto-documentation", component: page("AutoDocumentationPage"), auth: true, layout: true },
+  { path: "/capacity-planner", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/documentation-hub?tab=capacity" },
+  { path: "/auto-documentation", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/documentation-hub?tab=automation" },
 
   // Phase E: Deep Patching
-  { path: "/patch-hub", component: page("PatchHubPage"), auth: true, layout: true },
+  { path: "/patch-hub", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/maintenance-scheduler" },
 
   // Phase E: AI & Autonomous
   // Conversational AI is available globally from the sidebar; retain old deep links for operations.
@@ -190,20 +206,22 @@ export const routeConfig = [
 
   // Phase F: AI Self-Healing + Advanced Ops
   { path: "/self-healing", component: page("SelfHealingPage"), auth: true, layout: true },
-  { path: "/predictive-failure", component: page("PredictiveIntelPage"), auth: true, layout: true },
+  { path: "/predictive-failure", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/auto-ops?tab=predictive" },
   { path: "/usage-billing", component: page("UsageBillingPage"), auth: true, layout: true },
   { path: "/pricing-calc", component: page("PricingCalcPage"), auth: true, layout: true },
-  { path: "/comms-timeline", component: page("CommsTimelinePage"), auth: true, layout: true },
+  // The standalone communications page was consolidated into Client Insights.
+  // Preserve existing bookmarks while keeping one authoritative client timeline.
+  { path: "/comms-timeline", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/client-insights?tab=client-timeline" },
   // Legacy QBR generator bookmarks resolve to the unified QBR workspace.
   { path: "/qbr-generator", component: page("QBRRedirectPage"), auth: true, layout: true },
-  { path: "/zero-trust", component: page("ZeroTrustPage"), auth: true, layout: true },
+  { path: "/zero-trust", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/m365" },
   { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
   { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
   { path: "/ransomware-tabletop", component: page("RansomwareTabletopPage"), auth: true, layout: true },
 
-  // Phase G: Dashboard Builder + Channel Mode + Real-time SOC + Revenue
-  { path: "/dashboard-builder", component: page("DashboardBuilderPage"), auth: true, layout: true },
+  // Dashboard Builder was a duplicate cockpit. Preserve old bookmarks without exposing it.
+  { path: "/dashboard-builder", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/" },
   { path: "/channel-mode", component: page("ChannelModePage"), auth: true, layout: true },
   { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
   { path: "/revenue-tracker", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/revenue-forecast" },
@@ -212,19 +230,22 @@ export const routeConfig = [
 
   // Phase E: Revenue & Billing
   { path: "/client-budget", component: page("ClientBudgetPage"), auth: true, layout: true },
-  { path: "/executive-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=executive" },
+  { path: "/executive-reports", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/reports?tab=clients" },
   { path: "/nps-tracker", component: page("NPSTrackerPage"), auth: true, layout: true },
 
   // Phase E: Security
-  { path: "/dark-web-monitor", component: page("DarkWebMonitorPage"), auth: true, layout: true },
-  { path: "/phishing-sim", component: page("PhishingSimPage"), auth: true, layout: true },
+  { path: "/dark-web-monitor", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/security-dashboard" },
+  { path: "/phishing-sim", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/security-dashboard" },
   { path: "/backup-center", component: page("BackupCenterPage"), auth: true, layout: true },
   { path: "/backup-verify", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
-  { path: "/compliance-frameworks", component: page("ComplianceCenterPage"), auth: true, layout: true },
+  { path: "/compliance-frameworks", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/compliance?tab=overview" },
 
   // Phase E: Operations
-  { path: "/hardware-refresh", component: page("HardwareRefreshPage"), auth: true, layout: true },
-  { path: "/geo-map", component: page("GeoMapPage"), auth: true, layout: true },
+  // The old refresh planner generated artificial ages and budgets. Procurement
+  // Planner is the evidence-based replacement.
+  { path: "/hardware-refresh", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/procurement-planner" },
+  // NexusMSP has no verified GPS telemetry; do not present seeded locations as live data.
+  { path: "/geo-map", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/dispatch-board?tab=availability" },
 
   // Special: Wallboard (no MainLayout)
   { path: "/wallboard", component: page("WallboardPage"), auth: true, layout: false },
@@ -264,15 +285,19 @@ export const routeConfig = [
   // Defender posture is represented in the unified Endpoint Security workspace.
   { path: "/defender-health", component: page("DefenderHealthRedirectPage"), auth: true, layout: true },
   { path: "/stocktake-mobile", component: page("StocktakeMobilePage"), auth: true, layout: true },
-  { path: "/crm-pipeline", component: page("CrmPipelinePage"), auth: true, layout: true },
+  { path: "/crm-pipeline", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/leads?tab=pipeline" },
   { path: "/dr-plans", component: page("DRPlansPage"), auth: true, layout: true },
-  { path: "/cyber-insurance", component: page("CyberInsurancePage"), auth: true, layout: true },
+  // Consolidated into Compliance. Preserve existing bookmarks without retaining
+  // the previous placeholder export workspace.
+  { path: "/cyber-insurance", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/compliance?tab=insurance" },
   { path: "/asset-print-batch", component: page("AssetPrintBatchPage"), auth: true, layout: true },
   { path: "/automation-hub", component: page("AutomationHubPage"), auth: true, layout: true },
   { path: "/documentation-hub", component: page("DocumentationHubPage"), auth: true, layout: true },
   { path: "/financial-analytics", component: page("FinancialAnalyticsHubPage"), auth: true, layout: true },
   { path: "/sla-hub", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer" },
-  { path: "/phone-integration", component: page("PhoneIntegrationPage"), auth: true, layout: true },
+  // Voice is provider-agnostic; the legacy route remains for bookmarks and integrations.
+  { path: "/voice", component: page("VoiceWorkspacePage"), auth: true, layout: true },
+  { path: "/phone-integration", component: page("VoiceWorkspacePage"), auth: true, layout: true },
 
   // Auth callback (no auth, no layout)
   { path: "/auth/callback", component: page("AuthCallbackPage"), auth: false, layout: false },
@@ -282,7 +307,7 @@ export const routeConfig = [
   // Consolidation hubs (Feb 2026 dedup)
   { path: "/client-insights", component: page("ClientInsightsHubPage"), auth: true, layout: true },
   { path: "/auto-ops", component: page("AutoOpsHubPage"), auth: true, layout: true },
-  { path: "/credentials", component: page("CredentialsHubPage"), auth: true, layout: true },
+  { path: "/credentials", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
   { path: "/team-hub", component: page("TeamHubPage"), auth: true, layout: true },
 
   // Public routes (no auth, no layout)

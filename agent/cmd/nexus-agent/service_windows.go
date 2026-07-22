@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/exec"
 
-	"nexusagent/internal/config"
 	"golang.org/x/sys/windows/svc"
+	"nexusagent/internal/config"
 )
 
 const svcName = "NexusOpsAgent"
@@ -48,7 +48,9 @@ func svcRunIfNeeded(cfg *config.Config) (bool, error) {
 
 func svcInstall(cfg *config.Config) error {
 	exe, err := os.Executable()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	// No explicit run flag: main detects Service Control Manager execution and
 	// starts the Windows service handler; interactive launches remain console-mode.
 	cmd := exec.Command("sc", "create", svcName,
@@ -66,24 +68,32 @@ func svcInstall(cfg *config.Config) error {
 func svcUninstall() error {
 	_ = svcStop()
 	out, err := exec.Command("sc", "delete", svcName).CombinedOutput()
-	if err != nil { return fmt.Errorf("sc delete: %v: %s", err, string(out)) }
+	if err != nil {
+		return fmt.Errorf("sc delete: %v: %s", err, string(out))
+	}
 	return nil
 }
 
 func svcStart() error {
 	out, err := exec.Command("sc", "start", svcName).CombinedOutput()
-	if err != nil { return fmt.Errorf("sc start: %v: %s", err, string(out)) }
+	if err != nil {
+		return fmt.Errorf("sc start: %v: %s", err, string(out))
+	}
 	return nil
 }
 
 func svcStop() error {
 	out, err := exec.Command("sc", "stop", svcName).CombinedOutput()
-	if err != nil { return fmt.Errorf("sc stop: %v: %s", err, string(out)) }
+	if err != nil {
+		return fmt.Errorf("sc stop: %v: %s", err, string(out))
+	}
 	return nil
 }
 
 func svcStatus() (string, error) {
 	out, err := exec.Command("sc", "query", svcName).CombinedOutput()
-	if err != nil { return "", fmt.Errorf("sc query: %v: %s", err, string(out)) }
+	if err != nil {
+		return "", fmt.Errorf("sc query: %v: %s", err, string(out))
+	}
 	return string(out), nil
 }

@@ -12,6 +12,17 @@ import httpx
 
 router = APIRouter()
 
+NETWORK_SECRET_FIELDS = {"password", "api_key"}
+
+
+def _public_site(site: dict) -> dict:
+    """Return a site record without controller credentials or tokens."""
+    public = dict(site)
+    public.pop("_id", None)
+    for field in NETWORK_SECRET_FIELDS:
+        public.pop(field, None)
+    return public
+
 # ============== NETWORKING / UNIFI ENDPOINTS ==============
 
 # -------- UNIFI LIVE SYNC --------
@@ -24,7 +35,7 @@ async def _unifi_login(site):
     if not url or not username or not password:
         return None, None
     try:
-        client = httpx.AsyncClient(verify=site.get("verify_ssl", False), timeout=15)
+        client = httpx.AsyncClient(verify=site.get("verify_ssl", True), timeout=15)
         resp = await client.post(f"{url}/api/login", json={"username": username, "password": password})
         if resp.status_code == 200:
             return client, url
@@ -53,6 +64,10 @@ async def sync_site_from_controller(site_id: str, current_user: dict = Depends(g
     
     client, base_url = await _unifi_login(site)
     if not client:
+        await db.network_sites.update_one({"id": site_id}, {"$set": {
+            "status": "sync_failed",
+            "last_sync_attempt": datetime.now(timezone.utc).isoformat(),
+        }})
         return {"success": False, "message": "Cannot connect to controller. Check credentials.", "synced_devices": 0, "synced_clients": 0}
     
     site_name = site.get("site_id", "default")
@@ -105,12 +120,15 @@ async def sync_site_from_controller(site_id: str, current_user: dict = Depends(g
                 client_doc = {
                     "site_id": site_id,
                     "mac": mac,
+                    "name": cli.get("name", cli.get("hostname", mac)),
                     "hostname": cli.get("hostname", cli.get("name", mac)),
                     "ip": cli.get("ip", ""),
+                    "ip_address": cli.get("ip", ""),
                     "is_wireless": cli.get("is_wired", False) == False,
                     "is_connected": True,
                     "network": cli.get("essid", cli.get("network", "")),
                     "signal": cli.get("signal", 0),
+                    "signal_strength": cli.get("signal", 0),
                     "rssi": cli.get("rssi", 0),
                     "tx_bytes": cli.get("tx_bytes", 0),
                     "rx_bytes": cli.get("rx_bytes", 0),
@@ -131,23 +149,33 @@ async def sync_site_from_controller(site_id: str, current_user: dict = Depends(g
                     await db.network_clients.insert_one(client_doc)
                 synced_clients += 1
         
-        # Update site health
+        # Update site health with the controller's factual status when returned.
+        health = None
         health_data = await _unifi_api(client, base_url, "stat/health", site_name)
         if health_data:
             health = {}
             for h in health_data:
                 subsystem = h.get("subsystem", "")
                 health[subsystem] = h.get("status", "unknown")
-            await db.network_sites.update_one({"id": site_id}, {"$set": {
-                "health": health, "status": "online",
-                "last_sync": datetime.now(timezone.utc).isoformat(),
-            }})
+        site_update = {
+            "status": "online",
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+            "last_sync_attempt": datetime.now(timezone.utc).isoformat(),
+        }
+        if health is not None:
+            site_update["health"] = health
+        await db.network_sites.update_one({"id": site_id}, {"$set": site_update})
         
         await client.aclose()
         return {"success": True, "message": f"Synced {synced_devices} devices, {synced_clients} clients", "synced_devices": synced_devices, "synced_clients": synced_clients}
     except Exception as e:
         try: await client.aclose()
         except: pass
+        await db.network_sites.update_one({"id": site_id}, {"$set": {
+            "status": "sync_failed",
+            "last_sync_attempt": datetime.now(timezone.utc).isoformat(),
+            "last_sync_error": str(e)[:500],
+        }})
         return {"success": False, "message": str(e)[:200], "synced_devices": synced_devices, "synced_clients": synced_clients}
 
 # -------- WLAN MANAGEMENT --------
@@ -155,16 +183,6 @@ async def sync_site_from_controller(site_id: str, current_user: dict = Depends(g
 @router.get("/networking/sites/{site_id}/wlans")
 async def get_site_wlans(site_id: str, current_user: dict = Depends(get_current_user)):
     wlans = await db.network_wlans.find({"site_id": site_id}, {"_id": 0}).to_list(50)
-    if not wlans:
-        # Seed demo WLANs
-        demo = [
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Corporate-5G", "ssid": "Corporate-5G", "enabled": True, "security": "WPA3-Enterprise", "vlan_id": 10, "band": "5GHz", "client_count": 0, "guest": False},
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Guest-WiFi", "ssid": "Guest-WiFi", "enabled": True, "security": "WPA2-PSK", "vlan_id": 50, "band": "Both", "client_count": 0, "guest": True},
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "IoT-Network", "ssid": "IoT-Devices", "enabled": True, "security": "WPA2-PSK", "vlan_id": 100, "band": "2.4GHz", "client_count": 0, "guest": False},
-        ]
-        for w in demo:
-            await db.network_wlans.insert_one(w)
-        wlans = demo
     for w in wlans:
         w.pop("_id", None)
     return wlans
@@ -201,16 +219,6 @@ async def delete_wlan(wlan_id: str, current_user: dict = Depends(get_current_use
 @router.get("/networking/sites/{site_id}/port-profiles")
 async def get_port_profiles(site_id: str, current_user: dict = Depends(get_current_user)):
     profiles = await db.network_port_profiles.find({"site_id": site_id}, {"_id": 0}).to_list(50)
-    if not profiles:
-        demo = [
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "All", "native_vlan": 1, "tagged_vlans": [], "poe": True},
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "VoIP", "native_vlan": 20, "tagged_vlans": [1], "poe": True},
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Security Cameras", "native_vlan": 30, "tagged_vlans": [], "poe": True},
-            {"id": str(uuid.uuid4()), "site_id": site_id, "name": "Guest VLAN", "native_vlan": 50, "tagged_vlans": [], "poe": False},
-        ]
-        for p in demo:
-            await db.network_port_profiles.insert_one(p)
-        profiles = demo
     for p in profiles:
         p.pop("_id", None)
     return profiles
@@ -222,23 +230,13 @@ async def get_site_dpi(site_id: str, current_user: dict = Depends(get_current_us
     """Deep packet inspection / traffic analytics"""
     dpi = await db.network_dpi.find_one({"site_id": site_id}, {"_id": 0})
     if not dpi:
-        dpi = {
+        return {
             "site_id": site_id,
-            "categories": [
-                {"name": "Web Browsing", "rx_bytes": 45_000_000_000, "tx_bytes": 3_200_000_000, "clients": 28},
-                {"name": "Video Streaming", "rx_bytes": 120_000_000_000, "tx_bytes": 800_000_000, "clients": 15},
-                {"name": "Social Media", "rx_bytes": 18_000_000_000, "tx_bytes": 5_000_000_000, "clients": 22},
-                {"name": "Cloud Services", "rx_bytes": 35_000_000_000, "tx_bytes": 28_000_000_000, "clients": 30},
-                {"name": "VoIP", "rx_bytes": 2_000_000_000, "tx_bytes": 2_100_000_000, "clients": 8},
-                {"name": "Gaming", "rx_bytes": 8_000_000_000, "tx_bytes": 1_500_000_000, "clients": 4},
-                {"name": "Email", "rx_bytes": 5_000_000_000, "tx_bytes": 3_000_000_000, "clients": 25},
-                {"name": "File Sharing", "rx_bytes": 15_000_000_000, "tx_bytes": 12_000_000_000, "clients": 10},
-            ],
+            "categories": [],
             "top_clients": [],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "not_available",
+            "updated_at": None,
         }
-        await db.network_dpi.insert_one(dpi)
-        dpi.pop("_id", None)
     return dpi
 
 # -------- SEED UNIFI DEMO DATA --------
@@ -246,6 +244,7 @@ async def get_site_dpi(site_id: str, current_user: dict = Depends(get_current_us
 @router.post("/networking/seed-demo")
 async def seed_unifi_demo(current_user: dict = Depends(get_current_user)):
     """Seed comprehensive demo data for UniFi networking"""
+    raise HTTPException(status_code=410, detail="Demo network data is retired. Connect a controller or add an audited manual record instead.")
     existing_sites = await db.network_sites.count_documents({})
     if existing_sites > 0:
         return {"message": f"Demo data already exists ({existing_sites} sites)"}
@@ -386,30 +385,33 @@ async def seed_unifi_demo(current_user: dict = Depends(get_current_user)):
 @router.get("/networking/sites")
 async def get_networking_sites(current_user: dict = Depends(get_current_user)):
     sites = await db.network_sites.find({}, {"_id": 0}).to_list(100)
-    return sites
+    return [_public_site(site) for site in sites]
 
 @router.post("/networking/sites")
 async def create_networking_site(data: dict, current_user: dict = Depends(get_current_user)):
+    controller_url = str(data.get("controller_url") or "").strip().rstrip("/")
     site = {
         "id": str(uuid.uuid4()), "name": data.get("name", ""),
         "client_id": data.get("client_id"), "client_name": data.get("client_name", ""),
-        "controller_url": data.get("controller_url", ""), "site_id": data.get("site_id", "default"),
-        "status": "online", "location": data.get("location", ""),
+        "controller_url": controller_url, "site_id": data.get("site_id", "default"),
+        "status": "pending_configuration" if not controller_url else "pending_sync", "location": data.get("location", ""),
         "wan_ip": data.get("wan_ip", ""), "isp": data.get("isp", ""),
         "download_speed_mbps": data.get("download_speed_mbps", 0),
         "upload_speed_mbps": data.get("upload_speed_mbps", 0),
+        "username": data.get("username", ""), "password": data.get("password", ""),
+        "verify_ssl": data.get("verify_ssl", True),
+        "notes": data.get("notes", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.network_sites.insert_one(site)
-    site.pop("_id", None)
-    return site
+    return _public_site(site)
 
 @router.get("/networking/sites/{site_id}")
 async def get_networking_site(site_id: str, current_user: dict = Depends(get_current_user)):
     site = await db.network_sites.find_one({"id": site_id}, {"_id": 0})
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
-    return site
+    return _public_site(site)
 
 @router.put("/networking/sites/{site_id}")
 async def update_networking_site(site_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -417,6 +419,11 @@ async def update_networking_site(site_id: str, data: dict, current_user: dict = 
                "wan_ip", "isp", "download_speed_mbps", "upload_speed_mbps", "status",
                "api_key", "username", "password", "verify_ssl", "notes"}
     update = {k: v for k, v in data.items() if k in allowed}
+    for secret in {"username", "password", "api_key"}:
+        if not str(update.get(secret) or "").strip():
+            update.pop(secret, None)
+    if "controller_url" in update:
+        update["controller_url"] = str(update["controller_url"] or "").strip().rstrip("/")
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = await db.network_sites.update_one({"id": site_id}, {"$set": update})
     if result.matched_count == 0:
@@ -428,6 +435,9 @@ async def delete_networking_site(site_id: str, current_user: dict = Depends(get_
     await db.network_sites.delete_one({"id": site_id})
     await db.network_devices.delete_many({"site_id": site_id})
     await db.network_clients.delete_many({"site_id": site_id})
+    await db.network_wlans.delete_many({"site_id": site_id})
+    await db.network_port_profiles.delete_many({"site_id": site_id})
+    await db.network_dpi.delete_many({"site_id": site_id})
     return {"message": "Site and associated devices deleted"}
 
 @router.post("/networking/sites/{site_id}/test-connection")
@@ -439,7 +449,7 @@ async def test_site_connection(site_id: str, current_user: dict = Depends(get_cu
     if not controller_url:
         return {"success": False, "message": "No controller URL configured"}
     try:
-        async with httpx.AsyncClient(verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true', timeout=10) as client:
+        async with httpx.AsyncClient(verify=site.get("verify_ssl", True), timeout=10) as client:
             resp = await client.get(f"{controller_url}/api/s/default/stat/health")
             if resp.status_code in (200, 401, 403):
                 await db.network_sites.update_one({"id": site_id}, {"$set": {"last_connection_test": datetime.now(timezone.utc).isoformat(), "connection_status": "reachable"}})
@@ -458,7 +468,7 @@ async def adopt_network_device(site_id: str, data: dict, current_user: dict = De
         "id": str(uuid.uuid4()), "site_id": site_id,
         "name": data.get("name", "New Device"), "mac": data.get("mac", ""),
         "model": data.get("model", "Unknown"), "device_type": data.get("device_type", "ap"),
-        "ip_address": data.get("ip_address", ""), "status": "pending_adoption",
+        "ip_address": data.get("ip_address", ""), "status": "recorded", "source": "manual",
         "firmware": data.get("firmware", ""), "uptime_seconds": 0,
         "cpu_usage": 0, "mem_usage": 0, "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -496,12 +506,17 @@ async def get_site_overview(site_id: str, current_user: dict = Depends(get_curre
     wired_clients = [c for c in clients if not c.get("is_wireless")]
     total_rx = sum(c.get("rx_bytes", 0) for c in clients)
     total_tx = sum(c.get("tx_bytes", 0) for c in clients)
+    health = site.get("health") or {
+        "wan": "reachable" if site.get("connection_status") == "reachable" else "unknown",
+        "lan": "healthy" if online_devices else "unknown",
+        "wlan": "healthy" if any(device.get("device_type") == "ap" and device.get("status") == "online" for device in devices) else "unknown",
+    }
     return {
-        "site": site, "total_devices": len(devices), "online_devices": len(online_devices),
+        "site": _public_site(site), "total_devices": len(devices), "online_devices": len(online_devices),
         "access_points": len(aps), "switches": len(switches), "gateways": len(gateways),
         "total_clients": len(clients), "wireless_clients": len(wireless_clients), "wired_clients": len(wired_clients),
         "total_rx_bytes": total_rx, "total_tx_bytes": total_tx,
-        "health": {"wan": "healthy", "lan": "healthy", "wlan": "healthy" if aps else "n/a"},
+        "health": health,
     }
 
 @router.get("/networking/sites/{site_id}/devices")
@@ -573,7 +588,7 @@ async def get_networking_dashboard(current_user: dict = Depends(get_current_user
     for d in all_devices:
         dt = d.get("device_type", "unknown")
         device_types[dt] = device_types.get(dt, 0) + 1
-        fw = d.get("firmware_version", "unknown")
+        fw = d.get("firmware") or d.get("firmware_version") or "unknown"
         firmware_versions[fw] = firmware_versions.get(fw, 0) + 1
         if d.get("status") != "online":
             offline_devices.append({"name": d.get("name"), "site_id": d.get("site_id"), "type": dt, "status": d.get("status"), "last_seen": d.get("last_seen")})

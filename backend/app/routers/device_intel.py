@@ -6,11 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 import asyncio
+import base64
 import logging
 import os
 
 from app.database import db
 from app.routers.auth import get_current_user
+from app.services.activity import log_activity
 
 router = APIRouter()
 logger = logging.getLogger("device_intel")
@@ -412,7 +414,16 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
                 return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "tag exists"}
             tags.append(tag)
             await db.devices.update_one({"id": d["id"]}, {"$set": {"tags": tags}})
-            return {"device_id": d["id"], "device_name": name, "status": "ok"}
+            await log_activity(
+                current_user,
+                "device_tagged",
+                "device",
+                d["id"],
+                name,
+                f"Applied device tag: {tag}",
+                metadata={"tag": tag, "source": "bulk-actions"},
+            )
+            return {"device_id": d["id"], "device_name": name, "status": "completed", "message": "Tag applied"}
 
         if not d.get("nexus_agent_id"):
             return {"device_id": d["id"], "device_name": name, "status": "skipped", "message": "No NexusOps Agent installed"}
@@ -428,23 +439,67 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
             }
             cmd_payload: dict = {}
             if action == "install-patches":
-                cmd_payload = {"shell": "powershell", "script": "Get-WindowsUpdate -Install -AcceptAll -AutoReboot:$false", "timeout_sec": 1800}
+                # Use the built-in Windows Update Agent COM API. This avoids
+                # pretending PSWindowsUpdate is installed on every endpoint.
+                cmd_payload = {
+                    "shell": "powershell",
+                    "script": (
+                        "$session = New-Object -ComObject Microsoft.Update.Session; "
+                        "$searcher = $session.CreateUpdateSearcher(); "
+                        "$updates = $searcher.Search('IsInstalled=0 and Type=\'Software\' and IsHidden=0').Updates; "
+                        "if ($updates.Count -eq 0) { Write-Output 'No applicable Windows updates'; exit 0 }; "
+                        "$collection = New-Object -ComObject Microsoft.Update.UpdateColl; "
+                        "foreach ($update in $updates) { [void]$collection.Add($update) }; "
+                        "$installer = $session.CreateUpdateInstaller(); $installer.Updates = $collection; "
+                        "$result = $installer.Install(); Write-Output ('Windows Update result code: ' + $result.ResultCode)"
+                    ),
+                    "timeout_sec": 1800,
+                }
             elif action == "send-message":
                 title = (payload.get("title") or "Message from IT").strip()
                 body = (payload.get("body") or "").strip()
                 if not body:
                     return {"device_id": d["id"], "device_name": name, "status": "failed", "message": "body required"}
-                cmd_payload = {"shell": "powershell", "script": f"msg * /TIME:60 '{title}: {body}'", "timeout_sec": 30}
+                # Base64 keeps user-provided content out of the PowerShell
+                # syntax, preventing message text from becoming executable.
+                title64 = base64.b64encode(title.encode("utf-8")).decode("ascii")
+                body64 = base64.b64encode(body.encode("utf-8")).decode("ascii")
+                cmd_payload = {
+                    "shell": "powershell",
+                    "script": (
+                        "$title = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + title64 + "')); "
+                        "$body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + body64 + "')); "
+                        "& msg.exe * /TIME:60 ($title + ': ' + $body)"
+                    ),
+                    "timeout_sec": 30,
+                }
             cmd_id = await queue_command_for_device(d, kind_map[action], cmd_payload, queued_by=current_user.get("email") or "bulk")
-            return {"device_id": d["id"], "device_name": name, "status": "ok", "command_id": cmd_id}
+            return {
+                "device_id": d["id"],
+                "device_name": name,
+                "status": "queued",
+                "command_id": cmd_id,
+                "message": "Queued for the live Nexus Agent",
+            }
         except Exception as e:
             return {"device_id": d["id"], "device_name": name, "status": "failed", "message": str(e)[:200]}
 
     results = await asyncio.gather(*[_run_one(d) for d in targets])
-    ok = sum(1 for r in results if r["status"] == "ok")
+    queued = sum(1 for r in results if r["status"] == "queued")
+    completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
     skipped = sum(1 for r in results if r["status"] == "skipped")
-    return {"action": action, "results": results, "summary": {"total": len(results), "ok": ok, "failed": failed, "skipped": skipped}}
+    return {
+        "action": action,
+        "results": results,
+        "summary": {
+            "total": len(results),
+            "queued": queued,
+            "completed": completed,
+            "failed": failed,
+            "skipped": skipped,
+        },
+    }
 
 
 # ─────────────────────── Site map (geo) ───────────────────────

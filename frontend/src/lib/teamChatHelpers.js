@@ -7,6 +7,42 @@ export const PRESENCE_META = {
   offline: { label: "Offline", dot: "bg-zinc-500", text: "text-zinc-500" },
 };
 
+// Some early chat system records were written through a non-UTF-8 pipeline.
+// Keep the original audit record untouched, but make historic notices readable
+// anywhere they are presented in Nexus Chat.
+const WINDOWS_1252_BYTES = {
+  "\u20ac": 0x80, "\u201a": 0x82, "\u0192": 0x83, "\u201e": 0x84,
+  "\u2026": 0x85, "\u2020": 0x86, "\u2021": 0x87, "\u02c6": 0x88,
+  "\u2030": 0x89, "\u0160": 0x8a, "\u2039": 0x8b, "\u0152": 0x8c,
+  "\u017d": 0x8e, "\u2018": 0x91, "\u2019": 0x92, "\u201c": 0x93,
+  "\u201d": 0x94, "\u2022": 0x95, "\u2013": 0x96, "\u2014": 0x97,
+  "\u02dc": 0x98, "\u2122": 0x99, "\u0161": 0x9a, "\u203a": 0x9b,
+  "\u0153": 0x9c, "\u017e": 0x9e, "\u0178": 0x9f,
+};
+
+export function repairDisplayText(value) {
+  const text = String(value ?? "");
+  if (!/[\u00e2\u00c3\u00c2\u00f0]/.test(text)) return text;
+
+  const bytes = [];
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code <= 0x7f || (code >= 0x80 && code <= 0x9f) || (code >= 0xa0 && code <= 0xff)) {
+      bytes.push(code);
+    } else if (Object.prototype.hasOwnProperty.call(WINDOWS_1252_BYTES, char)) {
+      bytes.push(WINDOWS_1252_BYTES[char]);
+    } else {
+      return text;
+    }
+  }
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return text;
+  }
+}
+
 export function channelDisplayName(channel) {
   if (!channel) return "Conversation";
   if (channel.display_name) return channel.display_name;

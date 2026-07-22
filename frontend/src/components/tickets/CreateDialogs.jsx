@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock } from "lucide-react";
+import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock, FileText, Building2, ShieldCheck, Sparkles } from "lucide-react";
 import { priorityConfig } from "@/config/ticketConfig";
 
 export function CreateTicketDialog({
@@ -15,15 +15,27 @@ export function CreateTicketDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh]">
-        <DialogHeader><DialogTitle>Create New Ticket</DialogTitle></DialogHeader>
-        <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-1">
-          <div><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief description of the issue" data-testid="create-title" /></div>
-          <div><Label>Description</Label><Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={3} placeholder="Detailed description, steps to reproduce, etc." data-testid="create-desc" /></div>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden gap-0 p-0">
+        <DialogHeader className="border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))] px-6 py-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/[0.10] shadow-[0_10px_28px_rgba(6,182,212,0.12)]"><FileText className="h-5 w-5 text-cyan-200" /></div>
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Service desk intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div>
+              <DialogTitle className="text-xl tracking-tight">Create a service ticket</DialogTitle>
+              <p className="max-w-2xl text-sm text-muted-foreground">Capture the operational brief once. NexusMSP will inherit the client service tier, calculate SLA targets, and preserve the intake context on the ticket.</p>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5 pr-4">
+          <section className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.025] p-4 shadow-sm">
+            <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Service brief</h3><span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Required context</span></div>
+            <div><Label>Title <span className="text-destructive">*</span></Label><Input className="mt-1.5 bg-background/65" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief, outcome-focused description of the issue" data-testid="create-title" /></div>
+            <div><Label>Description</Label><Textarea className="mt-1.5 bg-background/65" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={4} placeholder="Describe the impact, affected people or systems, timing, and any steps already tried." data-testid="create-desc" /></div>
+          </section>
 
           {(services?.length > 0) && (
-            <div className="p-3 rounded-lg border border-violet-500/30 bg-violet-500/[0.04]">
-              <Label className="text-xs uppercase text-violet-300 flex items-center gap-1"><Wrench className="w-3 h-3" />Service Catalog (auto-attaches SLA & billing)</Label>
+            <section className="p-4 rounded-xl border border-violet-500/25 bg-violet-500/[0.045]">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><Label className="text-xs uppercase tracking-wider text-violet-200 flex items-center gap-1.5"><Wrench className="w-3.5 h-3.5" />Service policy <span className="normal-case tracking-normal text-muted-foreground">Select a service to apply its SLA and billing rules.</span></Label><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-cyan-200 hover:bg-cyan-500/[0.08] hover:text-cyan-100" onClick={() => window.location.assign("/service-catalog")} data-testid="manage-service-policies">Manage policies</Button></div>
               <Select
                 value={formData.service_code || "__none"}
                 onValueChange={v => {
@@ -49,10 +61,11 @@ export function CreateTicketDialog({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </section>
           )}
 
-          <div className="flex items-center gap-2">
+          <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-3.5">
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleAiTriage} disabled={triaging} className="text-cyan-400 border-cyan-500/30" data-testid="ai-triage-btn">
               {triaging ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Brain className="w-3 h-3 mr-1" />}
               AI Triage
@@ -75,8 +88,12 @@ export function CreateTicketDialog({
               {triageResult.analysis?.infrastructure_impact && <Badge className="ml-2 bg-orange-500/20 text-orange-400 text-[9px]">Infrastructure Impact</Badge>}
             </div>
           )}
+          {!triageResult?.triage && <p className="mt-2 text-[11px] text-muted-foreground">Use AI triage once the brief is complete to recommend a category, urgency, tags, and technician. You remain in control of what is applied.</p>}
+          </section>
 
-          <div className="grid grid-cols-3 gap-3">
+          <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-4">
+          <div className="mb-3 flex items-center gap-2"><Building2 className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Client and affected asset</h3><span className="ml-auto text-[10px] text-muted-foreground">The client tier is applied automatically</span></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div><Label>Client *</Label>
               <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "", device_id: "" })}>
                 <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
@@ -165,10 +182,11 @@ export function CreateTicketDialog({
               </div>
             </div>
           </div>
+          </section>
 
-          <Separator />
-
-          <div className="grid grid-cols-3 gap-3">
+          <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-4">
+          <div className="mb-3 flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" /><h3 className="text-sm font-semibold">Routing and service level</h3><span className="ml-auto text-[10px] text-muted-foreground">Sets dispatch, reporting, and SLA visibility</span></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div><Label>Ticket Type</Label>
               <Select value={formData.ticket_type} onValueChange={v => setFormData({ ...formData, ticket_type: v })}>
                 <SelectTrigger data-testid="create-type"><SelectValue /></SelectTrigger>
@@ -215,7 +233,7 @@ export function CreateTicketDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div><Label>Priority</Label>
               <Select value={formData.priority} onValueChange={v => setFormData({ ...formData, priority: v })}>
                 <SelectTrigger data-testid="create-priority"><SelectValue /></SelectTrigger>
@@ -262,7 +280,9 @@ export function CreateTicketDialog({
             </div>
           </div>
 
-          <div><Label>Tags</Label>
+          </section>
+
+          <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-4"><div className="mb-3 flex items-center gap-2"><Sparkles className="h-4 w-4 text-amber-300" /><h3 className="text-sm font-semibold">Operational context</h3><span className="text-[10px] text-muted-foreground">Optional tags improve search and reporting</span></div><div><Label>Tags</Label>
             <div className="flex gap-2 flex-wrap mb-2">{(formData.tags || []).map(t => (
               <Badge key={t} variant="secondary" className="gap-1">{t}
                 <button className="ml-1 text-xs hover:text-destructive" onClick={() => setFormData({ ...formData, tags: formData.tags.filter(tag => tag !== t) })}>x</button>
@@ -270,24 +290,27 @@ export function CreateTicketDialog({
             ))}</div>
             <Input placeholder="Type a tag and press Enter" data-testid="create-tags"
               onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) { e.preventDefault(); setFormData({ ...formData, tags: [...(formData.tags || []), e.target.value.trim()] }); e.target.value = ""; } }} />
-          </div>
+          </div></section>
         </div>
-        <DialogFooter><Button onClick={handleCreateTicket} data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1" />Create Ticket</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.06] bg-background/92 px-6 py-4 sm:justify-between">
+          <p className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p>
+          <Button onClick={handleCreateTicket} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1.5" />Create and open ticket</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm, users, handleCreateWsJob }) {
+export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm, users, clients = [], handleCreateWsJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-purple-500/[0.12] via-purple-500/[0.04] to-transparent">
+        <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shadow-sm">
-              <Wrench className="w-5 h-5 text-purple-300" />
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shadow-sm">
+              <Wrench className="w-5 h-5 text-cyan-200" />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1"><div className="flex items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Workshop intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div>
               <DialogTitle className="text-lg">Check in workshop repair</DialogTitle>
               <p className="text-sm text-muted-foreground">Create a job card with the essentials. Intake, quote and repair evidence can be captured after check-in.</p>
             </div>
@@ -296,7 +319,8 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
         <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
-              <div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">1. Customer</h3></div>
+              <div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer</h3></div>
+              <div><Label>Linked client</Label><Select value={wsForm.client_id || "none"} onValueChange={value => { const client = clients.find(item => item.id === value); setWsForm({ ...wsForm, client_id: value === "none" ? "" : value, customer_name: client?.company_name || client?.name || wsForm.customer_name, customer_phone: client?.phone || client?.mobile || wsForm.customer_phone, customer_email: client?.email || client?.contact_email || wsForm.customer_email }); }}><SelectTrigger data-testid="ws-client-select"><SelectValue placeholder="Select a managed client" /></SelectTrigger><SelectContent><SelectItem value="none">Unlinked / walk-in customer</SelectItem>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.company_name || client.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Links correspondence, billing, history and client reporting.</p></div>
               <div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={wsForm.customer_name} onChange={e => setWsForm({ ...wsForm, customer_name: e.target.value })} placeholder="Name or business" data-testid="ws-customer" /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Phone</Label><Input value={wsForm.customer_phone} onChange={e => setWsForm({ ...wsForm, customer_phone: e.target.value })} placeholder="Best contact number" /></div>
@@ -318,8 +342,8 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
               <div><Label>Serial number</Label><Input value={wsForm.serial_number} onChange={e => setWsForm({ ...wsForm, serial_number: e.target.value })} placeholder="Record if available" className="font-mono" /></div>
             </section>
           </div>
-          <section className="rounded-xl border border-purple-500/20 bg-purple-500/[0.035] p-4 space-y-3">
-            <div className="flex items-center gap-2"><ClipboardList className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">3. Repair brief</h3><span className="text-xs text-muted-foreground ml-auto">Give the bench technician useful starting context</span></div>
+          <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 space-y-3">
+            <div className="flex items-center gap-2"><ClipboardList className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">3. Repair brief</h3><span className="text-xs text-muted-foreground ml-auto">Give the bench technician useful starting context</span></div>
             <div><Label>Reported fault <span className="text-destructive">*</span></Label><Textarea value={wsForm.fault_description} onChange={e => setWsForm({ ...wsForm, fault_description: e.target.value })} rows={4} placeholder="What is the device doing, when did it start, and what has already been tried?" data-testid="ws-fault" /></div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Priority</Label>
@@ -340,29 +364,29 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
         </div>
         <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between">
           <span className="text-xs text-muted-foreground hidden sm:block">A job number and repair timeline will be created immediately.</span>
-          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateWsJob} disabled={!wsForm.customer_name.trim() || !wsForm.fault_description.trim()} className="bg-purple-600 hover:bg-purple-700" data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Check in device</Button></div>
+          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateWsJob} disabled={!wsForm.customer_name.trim() || !wsForm.fault_description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Check in and open job</Button></div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-export function CreateFieldJobDialog({ open, onOpenChange, fjForm, setFjForm, users, handleCreateFjJob }) {
+export function CreateFieldJobDialog({ open, onOpenChange, fjForm, setFjForm, users, clients = [], handleCreateFjJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-cyan-500/[0.12] via-cyan-500/[0.04] to-transparent">
-          <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><Radio className="w-5 h-5 text-cyan-300" /></div><div><DialogTitle className="text-lg">Dispatch field work</DialogTitle><p className="text-sm text-muted-foreground mt-1">Create a clear site brief, schedule the visit and give the field technician what they need before departure.</p></div></div>
+        <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
+          <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><Radio className="w-5 h-5 text-cyan-300" /></div><div><div className="flex items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Field service intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div><DialogTitle className="text-lg mt-1">Dispatch field work</DialogTitle><p className="text-sm text-muted-foreground mt-1">Create a clear site brief, schedule the visit and give the field technician what they need before departure.</p></div></div>
         </DialogHeader>
         <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer & location</h3></div><div className="grid grid-cols-2 gap-3"><div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} placeholder="Customer or site" data-testid="fj-customer" /></div><div><Label>Contact phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} placeholder="On-site contact" /></div></div><div><Label>Service address <span className="text-destructive">*</span></Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} placeholder="Full site address" data-testid="fj-address" /></div><div><Label>Zone / area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div></section>
+            <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer & location</h3></div><div><Label>Linked client</Label><Select value={fjForm.client_id || "none"} onValueChange={value => { const client = clients.find(item => item.id === value); setFjForm({ ...fjForm, client_id: value === "none" ? "" : value, customer_name: client?.company_name || client?.name || fjForm.customer_name, customer_phone: client?.phone || client?.mobile || fjForm.customer_phone, customer_email: client?.email || client?.contact_email || fjForm.customer_email, service_address: client?.address || fjForm.service_address }); }}><SelectTrigger data-testid="fj-client-select"><SelectValue placeholder="Select a managed client" /></SelectTrigger><SelectContent><SelectItem value="none">Unlinked / ad hoc site</SelectItem>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.company_name || client.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Keeps scheduling, communications and billing under the correct client.</p></div><div className="grid grid-cols-2 gap-3"><div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} placeholder="Customer or site" data-testid="fj-customer" /></div><div><Label>Contact phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} placeholder="On-site contact" /></div></div><div><Label>Service address <span className="text-destructive">*</span></Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} placeholder="Full site address" data-testid="fj-address" /></div><div><Label>Zone / area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div></section>
             <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">2. Dispatch plan</h3></div><div><Label>Job category</Label><Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site survey</SelectItem></SelectContent></Select></div><div className="grid grid-cols-3 gap-3"><div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div><div><Label>Arrival time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div><div><Label>Duration</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} placeholder="Minutes" /></div></div><div><Label>Field technician</Label><Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}><SelectTrigger><SelectValue placeholder="Leave in dispatch queue" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned — dispatch queue</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select></div></section>
           </div>
           <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 space-y-3"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">3. Site work brief</h3><span className="text-xs text-muted-foreground ml-auto">Make the first visit count</span></div><div><Label>Scope of work <span className="text-destructive">*</span></Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={4} placeholder="What needs to be installed, investigated or completed? Include site access, risks and any equipment expected on site." data-testid="fj-description" /></div><div><Label>Priority</Label><Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low — schedule when available</SelectItem><SelectItem value="normal">Normal — planned visit</SelectItem><SelectItem value="high">High — expedite dispatch</SelectItem><SelectItem value="critical">Critical — urgent site response</SelectItem></SelectContent></Select></div></section>
           <div className="flex gap-2 text-xs text-muted-foreground px-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />After dispatch, capture site details, photos, materials and sign-off from the field job card.</div>
         </div>
-        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between"><span className="text-xs text-muted-foreground hidden sm:block">A field job number and dispatch timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateFjJob} disabled={!fjForm.customer_name.trim() || !fjForm.service_address.trim() || !fjForm.description.trim()} className="bg-cyan-600 hover:bg-cyan-700" data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Dispatch field job</Button></div></DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between"><span className="text-xs text-muted-foreground hidden sm:block">A field job number and dispatch timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateFjJob} disabled={!fjForm.customer_name.trim() || !fjForm.service_address.trim() || !fjForm.description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Dispatch and open job</Button></div></DialogFooter>
       </DialogContent>
     </Dialog>
   );

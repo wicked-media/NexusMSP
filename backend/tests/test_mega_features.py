@@ -363,20 +363,22 @@ class TestRestoreDrills:
 class TestInsuranceVault:
     """17. Cyber Insurance Vault - compliance evidence"""
     
-    def test_vault_returns_score(self, auth_headers):
+    def test_vault_returns_observed_evidence(self, auth_headers):
         resp = requests.get(f"{BASE_URL}/api/security/insurance-vault", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert "score" in data
-        assert "tier" in data
+        assert "readiness_score" in data
+        assert "readiness_state" in data
+        assert data["readiness_state"] in ["ready_for_review", "evidence_gaps", "not_assessed"]
+        assert "evidence_coverage_pct" in data
+        assert "metrics" in data
         assert "controls" in data
-        assert data["tier"] in ["insurable", "needs-improvement", "high-risk"]
         controls = data["controls"]
         assert "mfa_coverage_pct" in controls
         assert "edr_coverage_pct" in controls
         assert "encryption_pct" in controls
         assert "patched_within_30_days_pct" in controls
-        print(f"Insurance vault: score={data.get('score')}/100, tier={data.get('tier')}")
+        print(f"Insurance vault: readiness={data.get('readiness_score')}, state={data.get('readiness_state')}")
 
 
 # ============ TEAM FEATURES ============

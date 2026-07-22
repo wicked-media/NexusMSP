@@ -23,6 +23,73 @@ async def _ensure_recurring_period_guard():
     )
 
 
+async def _resolve_source_driven_lines(recurring: dict) -> list:
+    """Refresh live asset/stock quantities at the moment of invoicing."""
+    resolved = []
+    for line in recurring.get("line_items", []):
+        if line.get("acronis_auto") or line.get("pax8_auto") or line.get("yeastar_auto"):
+            continue
+        updated = dict(line)
+        source = line.get("billing_source", "manual")
+        source_id = line.get("source_line_item_id")
+        source_item = await db.line_items.find_one({"id": source_id}, {"_id": 0}) if source_id else None
+        if source == "asset_count" and source_item:
+            query = {"client_id": recurring.get("client_id"), "status": "active"}
+            if source_item.get("asset_type_filter"):
+                query["asset_type"] = source_item["asset_type_filter"]
+            updated["quantity"] = await db.assets.count_documents(query)
+            updated["details"] = f"Live asset count{': ' + source_item['asset_type_filter'] if source_item.get('asset_type_filter') else ''}"
+        elif source == "inventory" and source_item and source_item.get("product_id"):
+            product = await db.products.find_one({"id": source_item["product_id"]}, {"_id": 0, "quantity_in_stock": 1})
+            updated["quantity"] = int((product or {}).get("quantity_in_stock", 0))
+            updated["details"] = "Live warehouse stock level"
+        updated["amount"] = round(float(updated.get("quantity", 0)) * float(updated.get("rate", 0)), 2)
+        resolved.append(updated)
+    return resolved
+
+
+async def _resolve_yeastar_usage_lines_legacy(recurring: dict, current_user: dict) -> list:
+    """Attach only product-mapped, client-scoped Yeastar extension usage."""
+    if not recurring.get("include_yeastar_usage") or not recurring.get("client_id"):
+        return []
+    try:
+        from app.routers.yeastar import get_client_yeastar_billing
+        usage = await get_client_yeastar_billing(recurring["client_id"], current_user=current_user)
+        if not usage.get("linked") or not usage.get("billing_ready"):
+            return []
+        return [{
+            "description": f"Yeastar — {item['pbx_name']} ({usage['period']})",
+            "details": f"{item['quantity']} live billable extensions × {usage['currency']} {item['unit_price']:.4f}",
+            "quantity": item["quantity"], "rate": item["unit_price"], "amount": item["total"],
+            "yeastar_auto": True, "yeastar_pbx_id": item["pbx_id"],
+            "yeastar_product_id": item["product_id"], "yeastar_period": usage["period"],
+        } for item in usage.get("line_items", [])]
+    except Exception:
+        # A provider outage must not prevent the rest of a recurring invoice from generating.
+        return []
+
+
+async def _resolve_yeastar_usage_lines(recurring: dict, current_user: dict) -> list:
+    """Attach product-mapped, client-scoped Yeastar extension usage without blocking invoicing."""
+    if not recurring.get("include_yeastar_usage") or not recurring.get("client_id"):
+        return []
+    try:
+        from app.routers.yeastar import get_client_yeastar_billing
+        usage = await get_client_yeastar_billing(recurring["client_id"], current_user=current_user)
+        if not usage.get("linked") or not usage.get("billing_ready"):
+            return []
+        return [{
+            "description": f"Yeastar - {item['pbx_name']} ({usage['period']})",
+            "details": f"{item['quantity']} live billable extensions x {usage['currency']} {item['unit_price']:.4f}",
+            "quantity": item["quantity"], "rate": item["unit_price"], "amount": item["total"],
+            "yeastar_auto": True, "yeastar_pbx_id": item["pbx_id"],
+            "yeastar_product_id": item["product_id"], "yeastar_period": usage["period"],
+        } for item in usage.get("line_items", [])]
+    except Exception:
+        # A provider outage must not prevent the rest of a recurring invoice from generating.
+        return []
+
+
 async def _deliver_recurring_invoice(invoice: dict, recurring: dict, current_user: dict) -> dict:
     """Use the normal invoice email pipeline and persist an auditable outcome."""
     if not recurring.get("auto_send"):
@@ -256,7 +323,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
     # Start with the template's static line items (excluding any prior auto-attach)
-    line_items = [li for li in ri.get("line_items", []) if not (li.get("acronis_auto") or li.get("pax8_auto"))]
+    line_items = await _resolve_source_driven_lines(ri)
 
     # Auto-attach Acronis usage if enabled and client is linked
     acronis_attached = []
@@ -302,6 +369,9 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         except Exception:
             pass
 
+    yeastar_attached = await _resolve_yeastar_usage_lines(ri, current_user)
+    line_items.extend(yeastar_attached)
+
     # Recompute totals
     subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
     tax_rate = float(ri.get("tax_rate", 0))
@@ -311,6 +381,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     invoice = {
         "id": f"inv-{uuid.uuid4().hex[:8]}",
         "invoice_number": inv_number,
+        "invoice_name": str(ri.get("invoice_name") or ri.get("description") or "").strip()[:160] or None,
         "client_id": ri.get("client_id", ""),
         "client_name": ri.get("client_name", ""),
         "description": ri.get("description", ""),
@@ -331,6 +402,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         "notes": ri.get("notes", ""),
         "acronis_auto_attached": len(acronis_attached),
         "pax8_auto_attached": len(pax8_attached),
+        "yeastar_auto_attached": len(yeastar_attached),
         "created_at": now.isoformat(),
         "created_by": current_user.get("name", ""),
     }
@@ -345,7 +417,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total,
                  "generated_at": now.isoformat(), "generated_by": current_user.get("name", ""),
                  "acronis_items": len(acronis_attached),
-                 "pax8_items": len(pax8_attached), "delivery": delivery}
+                 "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached), "delivery": delivery}
     next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
     await db.recurring_invoices.update_one({"id": ri_id}, {
         "$inc": {"invoices_generated": 1, "total_billed": total},
@@ -359,10 +431,12 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         extras.append(f"{len(acronis_attached)} Acronis")
     if pax8_attached:
         extras.append(f"{len(pax8_attached)} Pax8")
+    if yeastar_attached:
+        extras.append(f"{len(yeastar_attached)} Yeastar")
     if extras:
         msg += f" (+{' + '.join(extras)} auto-attached line items)"
     return {"message": msg, "invoice_id": invoice["id"], "invoice_number": inv_number,
-            "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached),
+            "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached),
             "delivery": delivery}
 
 
@@ -530,7 +604,7 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
             due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
             # Start from static line items (strip any prior auto-attach)
-            line_items = [li for li in ri.get("line_items", []) if not (li.get("acronis_auto") or li.get("pax8_auto"))]
+            line_items = await _resolve_source_driven_lines(ri)
             acronis_attached = []
             pax8_attached = []
 
@@ -576,6 +650,9 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 except Exception:
                     pass
 
+            yeastar_attached = await _resolve_yeastar_usage_lines(ri, current_user)
+            line_items.extend(yeastar_attached)
+
             subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
             tax_rate = float(ri.get("tax_rate", 0))
             tax_amount = round(subtotal * tax_rate / 100, 2)
@@ -584,6 +661,7 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
             invoice = {
                 "id": f"inv-{uuid.uuid4().hex[:8]}",
                 "invoice_number": inv_number,
+                "invoice_name": str(ri.get("invoice_name") or ri.get("description") or "").strip()[:160] or None,
                 "client_id": ri.get("client_id", ""),
                 "client_name": ri.get("client_name", ""),
                 "description": ri.get("description", ""),
@@ -605,6 +683,7 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "auto_generated": True,
                 "acronis_auto_attached": len(acronis_attached),
                 "pax8_auto_attached": len(pax8_attached),
+                "yeastar_auto_attached": len(yeastar_attached),
                 "created_at": now.isoformat(),
                 "created_by": actor_name,
             }
@@ -617,7 +696,7 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
             await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"recurring_delivery": delivery}})
 
             next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
-            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": actor_name, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "delivery": delivery}
+            gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": actor_name, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached), "delivery": delivery}
             await db.recurring_invoices.update_one({"id": ri["id"]}, {
                 "$inc": {"invoices_generated": 1, "total_billed": total},
                 "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
@@ -631,6 +710,7 @@ async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
                 "amount": total, "status": "generated",
                 "acronis_items": len(acronis_attached),
                 "pax8_items": len(pax8_attached),
+                "yeastar_items": len(yeastar_attached),
                 "delivery": delivery,
                 "triggered_by": actor_name, "timestamp": now.isoformat(),
             })

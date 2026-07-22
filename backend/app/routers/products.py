@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
-from app.database import db, AVATARS_DIR
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
@@ -12,6 +12,11 @@ from io import BytesIO
 import base64
 
 router = APIRouter()
+
+PRODUCT_IMAGES_DIR = UPLOADS_DIR / "products"
+PRODUCT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_PRODUCT_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
+MAX_PRODUCT_IMAGE_SIZE = 10 * 1024 * 1024
 
 # ============== PRODUCTS ENDPOINTS ==============
 
@@ -60,6 +65,7 @@ async def create_product(data: dict, current_user: dict = Depends(get_current_us
         "is_recurring": data.get("is_recurring", False),
         "billing_cycle": data.get("billing_cycle", "monthly"),
         "track_inventory": data.get("track_inventory", str(data.get("category", "")).lower() in {"hardware", "accessories", "networking", "security"}),
+        "image_url": data.get("image_url", ""),
         "barcode": barcode_value,
         "barcode_type": barcode_type,
         "barcode_image": barcode_image,
@@ -84,7 +90,7 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
 async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     allowed = {"name", "sku", "description", "category", "vendor", "cost_price", "retail_price",
                "tax_rate", "quantity_in_stock", "reorder_level", "unit", "is_active", "is_taxable",
-               "is_recurring", "billing_cycle", "track_inventory", "barcode", "barcode_type", "bundle_items", "is_bundle"}
+               "is_recurring", "billing_cycle", "track_inventory", "barcode", "barcode_type", "bundle_items", "is_bundle", "image_url"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "cost_price" in update:
         update["cost_price"] = float(update["cost_price"])
@@ -103,6 +109,25 @@ async def update_product(product_id: str, data: dict, current_user: dict = Depen
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.products.update_one({"id": product_id}, {"$set": update})
     return {"message": "Product updated"}
+
+
+@router.post("/products/upload-image")
+async def upload_product_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    """Stage a product image for use on a new or existing catalogue record."""
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ALLOWED_PRODUCT_IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="Use a JPG, PNG, WEBP, or GIF product image")
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+
+    content = await file.read()
+    if len(content) > MAX_PRODUCT_IMAGE_SIZE:
+        raise HTTPException(status_code=413, detail="Product image is too large (maximum 10 MB)")
+
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    with open(PRODUCT_IMAGES_DIR / filename, "wb") as output:
+        output.write(content)
+    return {"image_url": f"/api/uploads/products/{filename}"}
 
 @router.delete("/products/{product_id}")
 async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
@@ -458,6 +483,10 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
         invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
+        if invoice.get("ticket_id") and invoice.get("ticket_id") != ticket_id:
+            raise HTTPException(status_code=409, detail="This invoice is already linked to a different ticket")
+        if invoice.get("client_id") and ticket.get("client_id") and invoice.get("client_id") != ticket.get("client_id"):
+            raise HTTPException(status_code=422, detail="The selected invoice belongs to a different client")
         existing_items = invoice.get("line_items", [])
         existing_items.extend(invoice_line(item) for item in unbilled_items)
         new_subtotal = sum(li.get("amount", 0) for li in existing_items)
@@ -467,6 +496,9 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
         await db.invoices.update_one({"id": invoice_id}, {"$set": {
             "line_items": existing_items, "subtotal": round(new_subtotal, 2),
             "tax_amount": round(new_tax, 2), "total": round(new_total, 2),
+            "ticket_id": ticket_id,
+            "ticket_number": ticket.get("ticket_number", ""),
+            "ticket_title": ticket.get("title", ""),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }})
         invoice_number = invoice.get("invoice_number", "")
@@ -483,7 +515,8 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
             "subtotal": round(subtotal, 2), "tax_rate": 0, "tax_amount": 0,
             "total": round(subtotal, 2), "amount_paid": 0,
             "due_date": "", "notes": f"Generated from ticket {ticket.get('ticket_number', ticket_id)}",
-            "from_ticket": ticket_id,
+            "from_ticket": ticket_id, "ticket_id": ticket_id,
+            "ticket_number": ticket.get("ticket_number", ""), "ticket_title": ticket.get("title", ""),
             "created_by": current_user["id"],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -504,6 +537,8 @@ async def push_ticket_products_to_invoice(ticket_id: str, data: dict, current_us
         for item in products_on_ticket
     ]
     await db.tickets.update_one({"id": ticket_id}, {"$set": {"products": updated_ticket_items, "updated_at": invoiced_at}})
+    await ticket_audit(ticket_id, current_user, "invoice_linked", f"Invoice {invoice_number} was linked to this ticket from the billing hand-off.")
+    await log_activity(current_user, "updated", "invoice", invoice_id, invoice_number, f"Linked invoice {invoice_number} to ticket {ticket.get('ticket_number', ticket_id)}", metadata={"ticket_id": ticket_id, "ticket_number": ticket.get("ticket_number", "")})
     return {
         "message": f"Added {len(unbilled_items)} item(s) to invoice",
         "invoice_id": invoice_id,

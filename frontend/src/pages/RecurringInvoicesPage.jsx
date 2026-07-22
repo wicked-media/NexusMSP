@@ -274,7 +274,7 @@ export default function RecurringInvoicesPage() {
           <div><h1 className="text-2xl font-bold tracking-tight">Recurring Billing</h1><p className="text-sm text-muted-foreground">Contracts, templates, automated generation, and revenue health.</p></div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} data-testid="goto-billing-pro" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Command</Button>
           <Button variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><FileText className="w-4 h-4 mr-1" />New Template</Button>
           <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Recurring Invoice</Button>
         </div>

@@ -12,7 +12,7 @@ The reseed endpoint in `chat_help.py` will:
 """
 
 # Stale slugs that referenced merged / deleted modules. Safe to remove.
-HELP_CATALOG_VERSION = "2026-07-18-openai-help-language"
+HELP_CATALOG_VERSION = "2026-07-21-security-evidence-v4"
 
 STALE_SLUGS = [
     # The "*-audit" articles were one-off audits, not user docs
@@ -32,6 +32,9 @@ STALE_SLUGS = [
     "tickets-toolbar-reference",  # superseded by tactical-ticket-console-v2
     "stale-agent-radar",          # rolled into device-smart-bar
     "outage-detective",           # rolled into auto-ops-hub
+    "trmm-reliability",           # Tactical RMM workspace retired for Nexus Agent
+    "bulk-trmm-actions",          # replaced by Managed Assets bulk actions
+    "huntress-soc",               # replaced by provider-backed security guidance
 ]
 
 
@@ -55,7 +58,7 @@ MODERN_ARTICLES = [
 - Four new conceptual hubs introduced:
   - **Client Insights** â€” `/client-insights` â€” Customer Health Â· RMM Health Â· Risk Â· Sentiment Â· Timeline.
   - **Auto-Ops Hub** â€” `/auto-ops` â€” Triage Queue Â· Smart Routing Â· Auto-Resolve Â· Self-Healing.
-  - **Credentials Hub** â€” `/credentials` â€” Vault Â· Rotation Â· MFA.
+  - **Credential systems** â€” Keeper holds credentials, Hudu holds controlled documentation, and Microsoft manages MFA.
   - **Team Hub** â€” `/team-hub` â€” Command Center Â· Technicians Â· Roster Â· Utilization Â· Skills Â· Leaderboard.
 
 ### 2026-06-24 â€” Tactical Ticket Console v2
@@ -103,7 +106,7 @@ NexusMSP is your MSP command-and-control hub. Here's what to do in your first se
 
 ## Sidebar layout
 - **Service Desk** â€” Dashboard Â· Workspace Â· Tickets Â· Dispatch Â· Change Â· Team Â· Scheduling Â· Live Support.
-- **Infrastructure** â€” Devices Â· Network Â· Assets Â· Backup Â· Automation Â· Vault & Credentials.
+- **Infrastructure** â€” Devices Â· Network Â· Assets Â· Backup Â· Automation.
 - **Business** â€” Clients Â· Client Portal Â· CRM Â· Billing Â· Financial Analytics Â· Products Â· POs Â· Projects Â· Contracts.
 - **Security** â€” SOC Â· Endpoint Â· Ransomware Â· Compliance.
 - **AI & Intelligence** â€” Copilot Â· Auto-Ops Â· Knowledge & Docs.
@@ -154,20 +157,25 @@ Deep-link: `/auto-ops?tab=ai-resolution`.
     },
     {
         "slug": "credentials-hub",
-        "title": "Credentials Hub",
+        "title": "Credential systems: Keeper, Hudu, and Microsoft",
         "category": "Security",
         "icon": "ðŸ”",
         "order": 12,
-        "summary": "Password vault, rotation and MFA â€” single pane.",
-        "body_md": """## Where
-`/credentials` (Sidebar â†’ Infrastructure â†’ Vault & Credentials â†’ Credentials Hub)
+        "summary": "Where password records, client documentation, and MFA controls are managed outside NexusMSP.",
+        "body_md": """## System ownership
+- **Keeper** is the password and secret source of truth.
+- **Hudu** is the controlled client documentation and credential-reference workspace.
+- **Microsoft 365 / Entra** manages Microsoft MFA policy, enrolment, and enforcement.
 
-## Tabs
-- **Password Vault** â€” encrypted credentials per client and per device.
-- **Rotation** â€” cadence + audit of password rotations.
-- **MFA Management** â€” enrolment, factor reset and bypass approvals.
+## Credential boundary
+NexusMSP does not store, reveal, rotate, or enforce passwords or MFA. Keep secrets out of tickets, chat, client notes, screenshots, and documentation.
 
-Deep-link: `/credentials?tab=mfa-management`.
+## Where to work
+- Open **Hudu** from the sidebar for client documentation and linked credential references.
+- Use **Keeper** to create, retrieve, approve, and rotate passwords.
+- Use the **Microsoft 365** workspace or Microsoft Entra for MFA posture and enforcement.
+
+Legacy NexusMSP credential links redirect safely to Hudu or Microsoft 365.
 """,
     },
     {
@@ -248,7 +256,9 @@ Power users can restore the old multi-panel header via the layout settings (`leg
 - `POST /api/tickets/{ticket_id}/change-customer` â€” body `{ "client_id": "..." }`.
 """,
     },
-    {
+    # Retained only as source history. The replacement article below is the
+    # shipped help entry; do not seed the former mock-first documentation.
+    *([] if True else [{
         "slug": "m365-command-center",
         "title": "M365 Command Center",
         "category": "Integrations",
@@ -269,6 +279,33 @@ Power users can restore the old multi-panel header via the layout settings (`leg
 
 ## Currently
 Mock data. The MOCK badge in the top-right will disappear once Connection credentials are saved.
+""",
+    }]),
+    {
+        "slug": "m365-command-center",
+        "title": "Microsoft 365 evidence workspace",
+        "category": "Integrations",
+        "icon": "cloud",
+        "order": 31,
+        "summary": "Evidence-first Microsoft 365 connection readiness, guardrail planning and verified provider telemetry.",
+        "body_md": """## Where
+`/m365` (Sidebar > Platform > Integrations > Microsoft 365)
+
+## What the workspace shows
+- **Tenants** only shows tenant, user, MFA, Secure Score and GDAP evidence received from a verified Microsoft Graph or Partner Center provider.
+- **Guardrails** is a reference library for MSP policy planning. Turning a guardrail on stores a plan; it does not run a check or change Microsoft configuration.
+- **GDAP** provides least-privilege role templates and provider-confirmed relationship evidence when a synchronisation provider is installed.
+- **Security** shows verified MFA and Secure Score evidence when available, Conditional Access references, and a manual sign-in-warning snippet.
+- **Detection drafts** are auditable designs only. They do not read audit logs, raise alerts, create tickets or trigger webhooks without an evaluated provider.
+- **Connection** records the Entra app details required by a Microsoft Graph synchronisation provider.
+
+## Setup path
+1. Create a dedicated Entra app registration for the MSP integration.
+2. Grant only the Graph application permissions the synchronisation provider requires, then obtain tenant admin consent.
+3. Save the App (client) ID, Directory (tenant) ID and client secret in **Connection**.
+4. Install and verify the Nexus Microsoft Graph synchronisation provider.
+
+Saving credentials is not a successful connection test. Until the provider authenticates and records evidence, metrics stay blank. NexusMSP never creates demo tenants, posture scores, alert counts or remediation results.
 """,
     },
     {
@@ -341,9 +378,14 @@ Block-based template editor:
         "category": "Basics",
         "icon": "ðŸ“˜",
         "order": 99,
-        "summary": "How to find docs, ask the AI co-pilot, and contribute.",
+        "summary": "How to find docs, use setup guidance, ask the AI co-pilot, and contribute.",
         "body_md": """## Browse
 Use the left rail to jump between categories. Articles are ordered by importance within each category.
+
+## In-product setup guidance
+When a technician opens a credential-based setup form, NexusMSP shows a **Before you connect** guide beside the fields. It explains where credentials come from, required permissions, a safe validation path, and how to handle the secret. Use this contextual guide first, then open the linked article if more detail is needed.
+
+Start with [Set up integrations safely](/help/secure-integration-setup) for the standard workflow, or open the provider-specific guide such as [Connect a Yeastar PBX to Voice](/help/voice-yeastar-pbx-onboarding).
 
 ## Search
 Type into the search box at the top â€” title, summary and body all match.
@@ -425,7 +467,7 @@ The service tier comes from the client account. Update the client's tier if the 
         "slug": "consolidated-workspaces",
         "title": "Finding consolidated workspaces",
         "category": "Basics",
-        "icon": "Guide",
+        "icon": "🧭",
         "order": 38,
         "summary": "Where related tools now live after the sidebar simplification.",
         "body_md": """## One capability, one home
@@ -437,7 +479,7 @@ NexusMSP reduces duplicate navigation by grouping related views into a single pa
 | Connected services and their setup | **Integrations** |
 | Client health, risk, sentiment or timeline | **Client Insights** |
 | Triage, routing and self-healing | **Auto-Ops** |
-| Vault, password rotation and MFA | **Credentials** |
+| Passwords, client documentation, or MFA controls | **Keeper, Hudu, or Microsoft 365** |
 | Dispatch board, calendar and availability | **Dispatch** |
 | SLA timers, penalties and reports | **SLA Manager** |
 
@@ -589,6 +631,194 @@ The current Email Intake page stores and manages mailbox configuration, supports
 - **Wrong result for a customer email:** check the known contact email and whether Email to ticket is enabled.
 - **Cannot add or remove inboxes:** Email Intake settings require an administrator.
 - **Duplicate inbox:** connect the same mailbox only once; reconnecting it refreshes its saved configuration.
+""",
+    },
+    {
+        "slug": "voice-yeastar-pbx-onboarding",
+        "title": "Connect a Yeastar PBX to Voice",
+        "category": "Integrations",
+        "icon": "Phone",
+        "order": 34,
+        "summary": "Link a Yeastar P-Series PBX to the right client, validate the API connection, and prepare extension billing safely.",
+        "body_md": """# Connect a Yeastar PBX to Voice
+
+Use **Voice → Add PBX** to create one managed PBX record for each customer. Selecting the customer is important: it makes the PBX visible as a linked **PBX** service on the client profile and keeps its billing and audit history in the correct account.
+
+## Before you start
+
+- Confirm the customer uses **Yeastar P-Series** with OpenAPI access available.
+- Ensure the technician has permission to manage integrations on the PBX.
+- Use the customer PBX Cloud URL or FQDN, including `https://`; do not enter the `/openapi/...` path.
+
+## Get the Yeastar credentials
+
+1. Sign in to the customer’s Yeastar P-Series PBX web portal.
+2. Go to **Integrations → API**.
+3. Enable the API feature and save the setting.
+4. Copy the **Client ID** and **Client Secret** displayed there.
+5. Record the Client Secret in Keeper, then enter it directly into the PBX configuration. Do not add it to a ticket, client note, chat message, or general documentation.
+
+For P-Series Cloud Edition, NexusMSP requests an access token from `POST /openapi/v1.0/get_token`, using the Client ID as the API username and the Client Secret as the API password. Yeastar requires a User-Agent header. NexusMSP caches the short-lived access token and uses it for extension, system, and call queries. Yeastar limits a third-party application to eight simultaneous valid access tokens, so avoid repeatedly testing the same credentials from several tools.
+
+## Add the PBX in NexusMSP
+
+1. Open **Voice** and select **Add PBX**.
+2. Choose the correct **Client**.
+3. Enter a meaningful PBX name, such as `Head Office P-Series`.
+4. Enter the Yeastar Cloud URL/FQDN, Client ID, and Client Secret.
+5. Select a sync schedule and enter optional agreement/product mapping for recurring billing.
+6. Select **Link PBX**.
+7. Use **Test connection**, then **Sync now**. A successful sync records timing, extension count, and outcome in Sync history.
+
+## Billing controls
+
+By default, every enabled extension is billable. Switch the billing policy to **Registered extensions only** only when that matches the customer agreement. Use the Extensions tab to exclude a specific extension with an auditable manual override. Run **Recalculate billing** to create a billing snapshot before changing a recurring invoice or contract inclusion.
+
+## Troubleshooting
+
+- **Authentication failed:** confirm API is enabled, the URL is the PBX base URL, and the Client ID/Secret are from Integrations → API.
+- **TLS error:** leave TLS validation enabled unless the customer PBX has a trusted, correctly configured certificate. Escalate certificate problems rather than disabling validation permanently.
+- **No extensions after sync:** confirm the API account has access to extension data and retry after Yeastar token expiry if its token limit has been reached.
+- **PBX missing on client:** verify the PBX was linked to the intended client when added; the PBX chip lights up only for that linked client.
+
+## References
+
+- [Enable the Yeastar P-Series Cloud Edition API](https://help.yeastar.com/en/p-series-cloud-edition/developer-guide/enable-yeastar-p-series-pbx-api.html)
+- [Yeastar: get an access token](https://help.yeastar.com/en/p-series-cloud-edition/developer-guide/get-access-token.html)
+""",
+    },
+    {
+        "slug": "secure-integration-setup",
+        "title": "Set up integrations safely",
+        "category": "Platform Setup",
+        "icon": "Key",
+        "order": 18,
+        "summary": "A technician checklist for connecting external services, testing access, and protecting credentials in NexusMSP.",
+        "body_md": """# Set up integrations safely
+
+NexusMSP now shows an in-product setup guide beside credential-based configuration. Use it before saving a connection for Voice, Microsoft 365, RustDesk, Xero, Stripe, Acronis, Pax8, Huntress, UniFi, CIPP, Hudu, Splynx, SMS, and related providers.
+
+## The standard workflow
+
+1. **Confirm ownership:** verify the customer, MSP tenant, organisation, data centre, or provider account before creating a credential.
+2. **Create a dedicated credential:** use a service account, application registration, or named API key for NexusMSP rather than a personal technician credential.
+3. **Use least privilege:** grant only the permissions required by the intended workflow. Do not enable billing, write, or administration scopes for a read-only integration.
+4. **Record it in Keeper first:** enter a secret directly into its NexusMSP integration setting only when required; NexusMSP is not a password vault. Never paste API keys, Client Secrets, function keys, or passwords into tickets, chat, contracts, client notes, screenshots, or documentation.
+5. **Save and test:** use the connection test before enabling sync, alerting, billing automation, or customer communications.
+6. **Verify the result:** confirm the expected customer/site/tenant data appears. A successful login to the wrong tenant is still a configuration failure.
+7. **Record operational ownership:** capture who owns renewal, rotation, and supplier escalation in your normal credential-management process.
+
+## What the setup guide tells you
+
+Each callout answers four questions:
+
+- **Where do I get this credential?** The provider portal and relevant menu path.
+- **What must be configured first?** Redirect URIs, API enablement, sender approval, consent, or tenant selection.
+- **How do I validate it?** The expected test or safe first synchronisation.
+- **What is the risk?** A short reminder about what the credential can access and how to respond to exposure.
+
+## If a credential may be exposed
+
+1. Disable or revoke it in the provider portal immediately.
+2. Create a replacement credential with the same minimum permissions.
+3. Update NexusMSP and run the provider test.
+4. Review the integration audit/sync history for unexpected activity.
+5. Record the security event using your normal incident process.
+
+## Provider-specific guides
+
+- [Connect a Yeastar PBX to Voice](/help/voice-yeastar-pbx-onboarding)
+- [Email intake and leads](/help/email-intake-and-leads)
+- [Nexus Elevate: approve endpoint administrator access](/help/nexus-elevate-setup)
+
+For a provider-specific exception, follow the guide embedded in that provider’s settings card; it takes precedence over this general checklist.
+""",
+    },
+    {
+        "slug": "nexus-elevate-setup",
+        "title": "Nexus Elevate: approve an exact endpoint service launch",
+        "category": "Security",
+        "icon": "ShieldCheck",
+        "order": 36,
+        "summary": "Set up universal, agent-backed, hash-pinned service-launch approvals without requiring Keeper EPM for the customer.",
+        "body_md": """# Nexus Elevate technician setup
+
+**Nexus Elevate** is the native, agent-backed approval workflow for NexusMSP. It is available to **every customer with an enrolled Windows NexusOps Agent**. A customer does not need Keeper, Hudu, or a separate endpoint privilege product to submit a controlled request.
+
+## What Nexus Elevate approves
+
+Nexus Elevate approves one precise, unattended executable launch through the Nexus Agent service. Each request is tied to:
+
+- the enrolled endpoint and customer;
+- the exact absolute Windows `.exe` path;
+- the executable SHA-256 fingerprint;
+- the program arguments;
+- the requester, justification, and optional ticket; and
+- an expiry selected by the approving technician.
+
+The agent verifies the SHA-256 again immediately before it launches the process. A changed executable, expired approval, different path, or malformed argument is rejected and audited. An approval that expires before the agent reports a successful launch is automatically marked **Expired** and retained in the audit timeline.
+
+> **Current boundary:** this is a controlled service-context launch for unattended installers, repairs, and other non-interactive executable tasks. It does not elevate the signed-in Windows user, display a desktop installer, bypass UAC, or create permanent local-administrator rights. Use a technician-assisted remote session for interactive work.
+
+## Enable it once for the organisation
+
+1. Open **Settings -> Integrations -> Nexus Elevate**.
+2. Leave **Enable native service-launch approvals** turned on. This is the switch that makes the feature available to every enrolled Windows NexusOps Agent.
+3. Keep **Require request justification** enabled.
+4. Set the shortest practical **maximum approval duration**. Fifteen minutes is a sensible normal default; the hard product limit is sixty minutes.
+5. Select **Save elevation policy**.
+
+Use **Nexus Elevate** from the Endpoint Security workspace to review the queue and audit history.
+
+## Build a policy safely
+
+Use **Nexus Elevate -> Policies** when a customer has a repeatable elevation need such as a verified hardware utility or a known vendor updater.
+
+1. Start with a **Monitor only** policy and scope it to the intended customer or endpoint.
+2. Pin the exact Windows executable path and, where possible, the SHA-256 fingerprint. An enforced automatic approval requires both values.
+3. Use **Simulate a request** before enforcement. Confirm whether the result is an allow, review, or deny decision and that the scope is correct.
+4. Keep a ticket and a requester justification required for any workflow that needs stronger accountability.
+5. Move the policy to **Enforce** only after the monitor evidence is expected. Every policy version, simulation, match, automatic approval, and denial is retained for audit.
+
+Policies do not create a general administrator account and do not disable UAC. The first release intentionally does **not** remove local administrator memberships or enforce system-wide application control. Those capabilities require tested endpoint recovery and break-glass controls before they can be enabled safely.
+
+## Day-to-day technician workflow
+
+1. On the customer endpoint, open **Nexus Client Chat** from the Windows Start Menu under **NexusMSP**, then select **Request admin access**. Use this only for an unattended executable task; the companion fingerprints the selected executable locally before it submits the request.
+2. The endpoint companion submits the requested program, its hash, arguments, user/session information, and why the work is required. It never exposes the agent token to the browser window.
+3. In **Nexus Elevate**, filter to **Awaiting review** and open the request.
+4. Confirm the customer, endpoint, ticket, program path, publisher, SHA-256 fingerprint, and arguments all make sense together.
+5. Choose **Approve controlled launch** only when the request is expected. Record a specific approval rationale and use the shortest available time bound.
+6. The agent receives only the approved executable launch and runs it in its service context. The resulting exit code, output, timestamp, approver, and decision reason are retained in the audit timeline.
+
+If the request is unclear, choose **Deny request** and say what evidence or safer process is needed. A denial is just as valuable as an approval because it closes the accountability loop.
+
+## Companion deployment
+
+New NexusOps Agent installer packs include **Nexus Client Chat** alongside the Windows service. The installer and managed rollout add it to the Windows Start Menu under **NexusMSP**; it does not need local administrator rights just to submit a request.
+
+The companion is a user-session window, while the NexusOps Agent remains a background service. This split is intentional: the service retains the protected server connection and the companion gives the signed-in user a safe, visible request experience.
+
+## Important security boundaries
+
+- Do not approve an unfamiliar path, unsigned or unexpected publisher, changed hash, or generic justification such as "need admin".
+- Nexus Elevate does **not** open a general command shell and does not give the endpoint user an administrator account, interactive UAC elevation, or a desktop-visible installer session.
+- Native approvals are Windows-first. The current launch contract supports a precise `.exe`; use the standard controlled script library for PowerShell or command work.
+- If an agent is offline, its request stays visible but must be revalidated by the endpoint when it returns. Do not treat an old approval as permission to substitute a newer file.
+- The first deployment scope is a controlled request-and-approved-launch workflow. A full replacement for operating-system-wide UAC interception needs the separate signed user-session companion, tamper protection, and Windows service hardening rollout.
+
+## Optional Keeper EPM bridge
+
+Keeper EPM is optional. If your organisation also uses it, enable **Optional Keeper EPM bridge** in the same Settings card and enter only the approved deployment-secret reference for the connector. Do not paste Keeper credentials into NexusMSP, tickets, chat, documentation, or notes.
+
+The bridge is for reconciling external Keeper approval events. It never removes native Nexus Elevate coverage from a customer that does not have Keeper.
+
+## Troubleshooting
+
+- **No request arrives:** confirm the device is enrolled and online in **Managed Assets**, then confirm Native approvals are enabled in Settings.
+- **Request is rejected before review:** check that the companion supplied an absolute `.exe` path, a 64-character SHA-256 fingerprint, clean arguments, and a sufficiently detailed justification.
+- **Approved launch fails:** compare the fingerprint and path in the audit entry with the endpoint file. A mismatch is expected to fail safely; investigate why the executable changed.
+- **A technician cannot approve:** an administrator must grant the technician the Agent command execution permission or perform the approval themselves.
 """,
     },
 ]

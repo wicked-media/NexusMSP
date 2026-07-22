@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import httpx
 import asyncio
+import uuid
 
 from app.database import db
 from app.auth import get_current_user
@@ -226,6 +227,10 @@ async def incident_action(
     assignee = (data or {}).get("assignee", "")
     if action not in ("close", "resolve", "assign", "comment", "acknowledge"):
         raise HTTPException(400, "action must be close|resolve|assign|comment|acknowledge")
+    if action in {"close", "resolve", "comment", "acknowledge"} and len(note.strip()) < 8:
+        raise HTTPException(400, "Record an audit note of at least 8 characters for this incident action")
+    if action == "assign" and not assignee.strip():
+        raise HTTPException(400, "Choose an assignee for this incident")
 
     # Candidate path sets per action — we try each until one succeeds
     path_map = {
@@ -262,21 +267,41 @@ async def incident_action(
         "by_id": current_user.get("id"),
         "timestamp": now,
     })
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "action": f"huntress_incident_{action}",
+        "entity_type": "huntress_incident",
+        "entity_id": incident_id,
+        "entity_name": "Huntress incident",
+        "metadata": {"assignee": assignee or None, "note": note or None, "provider_result": result},
+        "created_at": now,
+    })
     return result
 
 
 @router.post("/huntress/agents/{agent_id}/isolate")
 async def agent_isolate(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
     note = (data or {}).get("note", "") if data else ""
+    if len(note.strip()) < 8:
+        raise HTTPException(400, "Record a containment reason of at least 8 characters")
     paths = [
         f"/v1/agents/{agent_id}/isolate",
         f"/v1/agents/{agent_id}/isolation",
         f"/v1/agents/{agent_id}/contain",
     ]
     result = await _try_paths(paths, payload={"note": note} if note else {})
+    now = datetime.now(timezone.utc).isoformat()
     await db.huntress_actions.insert_one({
         "agent_id": agent_id, "action": "isolate", "result": result,
-        "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(),
+        "by": current_user.get("name"), "timestamp": now,
+    })
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()), "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "action": "huntress_agent_isolate", "entity_type": "huntress_agent", "entity_id": agent_id,
+        "entity_name": "Huntress agent", "metadata": {"note": note, "provider_result": result}, "created_at": now,
     })
     return result
 
@@ -284,15 +309,24 @@ async def agent_isolate(agent_id: str, data: Optional[dict] = None, current_user
 @router.post("/huntress/agents/{agent_id}/release")
 async def agent_release(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
     note = (data or {}).get("note", "") if data else ""
+    if len(note.strip()) < 8:
+        raise HTTPException(400, "Record a release reason of at least 8 characters")
     paths = [
         f"/v1/agents/{agent_id}/release",
         f"/v1/agents/{agent_id}/unisolate",
         f"/v1/agents/{agent_id}/uncontain",
     ]
     result = await _try_paths(paths, payload={"note": note} if note else {})
+    now = datetime.now(timezone.utc).isoformat()
     await db.huntress_actions.insert_one({
         "agent_id": agent_id, "action": "release", "result": result,
-        "by": current_user.get("name"), "timestamp": datetime.now(timezone.utc).isoformat(),
+        "by": current_user.get("name"), "timestamp": now,
+    })
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()), "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "action": "huntress_agent_release", "entity_type": "huntress_agent", "entity_id": agent_id,
+        "entity_name": "Huntress agent", "metadata": {"note": note, "provider_result": result}, "created_at": now,
     })
     return result
 
@@ -312,7 +346,7 @@ async def huntress_summary(current_user: dict = Depends(get_current_user)):
     if not creds:
         return {
             "configured": False,
-            "message": "Huntress not configured — add API key & secret in Settings → Integrations",
+            "message": "Huntress not configured — add API key and secret in Settings > Integrations",
             "stats": {
                 "agents_total": 0, "agents_online": 0, "agents_offline": 0,
                 "incidents_total": 0, "incidents_critical": 0, "incidents_high": 0, "incidents_low": 0,
@@ -350,7 +384,7 @@ async def huntress_summary(current_user: dict = Depends(get_current_user)):
         "agents_online": sum(1 for a in agents_list if norm(a.get("status")) == "online"),
         "agents_offline": sum(1 for a in agents_list if norm(a.get("status")) == "offline"),
         "incidents_total": len(incidents_list),
-        "incidents_critical": sum(1 for i in incidents_list if norm(i.get("severity")) in ("critical", "high")),
+        "incidents_critical": sum(1 for i in incidents_list if norm(i.get("severity")) == "critical"),
         "incidents_high": sum(1 for i in incidents_list if norm(i.get("severity")) == "high"),
         "incidents_low": sum(1 for i in incidents_list if norm(i.get("severity")) == "low"),
         "incidents_open": sum(1 for i in incidents_list if norm(i.get("status")) in ("sent", "open", "reviewing")),
@@ -371,6 +405,7 @@ async def huntress_summary(current_user: dict = Depends(get_current_user)):
     recent = sorted(incidents_list, key=ts, reverse=True)[:10]
     recent_slim = [{
         "id": i.get("id"),
+        "agent_id": i.get("agent_id") or i.get("agent_uuid") or (i.get("agent") or {}).get("id"),
         "severity": i.get("severity"),
         "status": i.get("status"),
         "summary": i.get("summary") or i.get("title"),
@@ -407,7 +442,7 @@ async def huntress_summary(current_user: dict = Depends(get_current_user)):
             continue
         row = org_map.setdefault(oid, {"id": oid, "name": i.get("organization_name") or f"Org {oid}", "agents_total": 0, "agents_online": 0, "agents_offline": 0, "incidents_total": 0, "incidents_critical": 0, "incidents_open": 0})
         row["incidents_total"] += 1
-        if norm(i.get("severity")) in ("critical", "high"):
+        if norm(i.get("severity")) == "critical":
             row["incidents_critical"] += 1
         if norm(i.get("status")) in ("sent", "open", "reviewing"):
             row["incidents_open"] += 1

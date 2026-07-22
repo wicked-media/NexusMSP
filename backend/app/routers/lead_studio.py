@@ -2,8 +2,8 @@
 
 Endpoints (all prefixed /api):
   GET    /leads/score                              Hash-stable AI score for every lead
-  GET    /leads/{id}/next-best-action              Per-lead Claude-suggested action
-  POST   /leads/{id}/ai-draft-email                Claude drafts a follow-up email
+  GET    /leads/{id}/next-best-action              Per-lead Nexus AI suggested action
+  POST   /leads/{id}/ai-draft-email                Nexus AI drafts a follow-up email
   POST   /leads/quick-parse                        Parse pasted text/URL into lead fields
   GET    /leads/hot                                Top 5 highest-scoring leads
   GET    /leads/stale?days=14                      Leads not touched in N days

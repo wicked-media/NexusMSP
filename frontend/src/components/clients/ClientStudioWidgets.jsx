@@ -46,7 +46,7 @@ export function ExpansionEngineTile({ clientId }) {
   useEffect(() => {
     if (!clientId) return;
     axios.get(`${API}/client-studio/${clientId}/expansion`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => setData(r.data)).catch(() => setData({ opportunities: [], total_arr_uplift: 0 }));
+      .then(r => setData(r.data)).catch(() => setData({ opportunities: [], total_arr_uplift: null }));
   }, [clientId, token]);
   if (!data) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" />Scanning expansion opportunities…</Card>;
   return (
@@ -54,7 +54,7 @@ export function ExpansionEngineTile({ clientId }) {
       <div className="flex items-center gap-2 mb-2">
         <TrendingUp className="w-3.5 h-3.5 text-emerald-300" />
         <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200">Expansion Opportunities</p>
-        <span className="ml-auto text-[10px] font-mono text-emerald-300">+{moneyShort(data.total_arr_uplift)}/yr</span>
+        <span className="ml-auto text-[10px] font-mono text-emerald-300">{Number.isFinite(data.total_arr_uplift) ? `+${moneyShort(data.total_arr_uplift)}/yr` : "Pricing required"}</span>
       </div>
       <div className="space-y-1.5">
         {(data.opportunities || []).slice(0, 5).map(o => (
@@ -64,10 +64,10 @@ export function ExpansionEngineTile({ clientId }) {
               <p className="text-zinc-100">{o.title}</p>
               <p className="text-[10px] text-zinc-400 line-clamp-1">{o.reason}</p>
             </div>
-            <span className="text-[10px] font-mono text-emerald-300 flex-shrink-0">+{moneyShort(o.arr_uplift)}</span>
+            <span className="text-[10px] font-mono text-emerald-300 flex-shrink-0">{Number.isFinite(o.arr_uplift) ? `+${moneyShort(o.arr_uplift)}` : "Rate card"}</span>
           </div>
         ))}
-        {data.opportunities?.length === 0 && <p className="text-[11px] text-zinc-500">No expansion gaps detected — well covered ✓</p>}
+        {data.opportunities?.length === 0 && <p className="text-[11px] text-zinc-500">No coverage gaps were identified from recorded subscriptions.</p>}
       </div>
     </Card>
   );
@@ -82,7 +82,9 @@ export function RenewalForecastTile({ clientId }) {
       .then(r => setData(r.data)).catch(() => setData(null));
   }, [clientId, token]);
   if (!data) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" />Forecasting renewal…</Card>;
-  const color = data.probability >= 75 ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
+  const assessed = Number.isFinite(data.probability);
+  const color = !assessed ? "text-slate-300 border-slate-500/40 bg-slate-500/10"
+              : data.probability >= 75 ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
               : data.probability >= 50 ? "text-amber-300 border-amber-500/40 bg-amber-500/10"
               : "text-red-300 border-red-500/40 bg-red-500/10";
   return (
@@ -93,8 +95,8 @@ export function RenewalForecastTile({ clientId }) {
         <span className="ml-auto text-[10px] uppercase font-semibold">{data.verdict}</span>
       </div>
       <div className="flex items-baseline gap-2 mb-2">
-        <p className="text-3xl font-mono font-bold">{data.probability}%</p>
-        <p className="text-[10px] opacity-70">likely to renew</p>
+        <p className="text-3xl font-mono font-bold">{assessed ? `${data.probability}%` : "Not assessed"}</p>
+        <p className="text-[10px] opacity-70">{assessed ? "evidence-backed estimate" : "renewal history is not connected"}</p>
       </div>
       <ul className="text-[10px] opacity-90 space-y-0.5">
         {(data.reasoning || []).map((r, i) => <li key={i}>• {r}</li>)}
@@ -114,6 +116,7 @@ export function ChurnRadarCard({ clientId }) {
   if (!data) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" /></Card>;
   // 6-axis radar polygon
   const axes = data.axes || [];
+  if (!Number.isFinite(data.overall_health) || axes.length < 2) return <Card className="p-3 bg-zinc-900/40 border-zinc-800/60" data-testid="churn-radar-card"><div className="flex items-center gap-2"><ActivityIcon className="w-3.5 h-3.5 text-slate-300" /><p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Churn Risk Radar</p></div><p className="mt-3 text-xs text-zinc-400">Not assessed. Connect at least two recorded evidence sources before showing a churn-risk indicator.</p></Card>;
   const n = axes.length || 6;
   const cx = 110, cy = 110, R = 90;
   const points = axes.map((a, i) => {
@@ -225,15 +228,16 @@ export function HoursBurndownCard({ clientId }) {
       .then(r => setData(r.data)).catch(() => setData(null));
   }, [clientId, token]);
   if (!data) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" /></Card>;
-  const pct = Math.min(100, data.pct || 0);
+  const assessed = Number.isFinite(data.pct);
+  const pct = assessed ? Math.min(100, data.pct) : 0;
   const color = pct > 90 ? "bg-red-500" : pct > 70 ? "bg-amber-400" : "bg-emerald-500";
   return (
     <Card className="p-3 bg-zinc-900/40 border-zinc-800/60" data-testid="hours-burndown-card">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-2">Retainer Hours</p>
       <div className="flex items-baseline gap-2 mb-1">
-        <p className="text-2xl font-mono font-bold text-zinc-100">{data.used}h</p>
-        <p className="text-[11px] text-zinc-500">used / {data.purchased}h</p>
-        <p className="ml-auto text-[10px] font-mono text-zinc-400">{data.remaining}h left</p>
+        <p className="text-2xl font-mono font-bold text-zinc-100">{assessed ? `${data.used}h` : "Not set"}</p>
+        <p className="text-[11px] text-zinc-500">{assessed ? `used / ${data.purchased}h` : "No retainer allocation recorded"}</p>
+        <p className="ml-auto text-[10px] font-mono text-zinc-400">{assessed ? `${data.remaining}h left` : "—"}</p>
       </div>
       <div className="h-1.5 rounded bg-zinc-800 overflow-hidden">
         <div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} />
@@ -343,17 +347,17 @@ export function ComplianceCard({ clientId }) {
       <div className="flex items-center gap-2 mb-2">
         <Shield className="w-3.5 h-3.5 text-sky-300" />
         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Compliance</p>
-        <span className="ml-auto text-[10px] font-mono text-sky-300">{data.overall_score}%</span>
+        <span className="ml-auto text-[10px] font-mono text-sky-300">{Number.isFinite(data.overall_score) ? `${data.overall_score}%` : "Not assessed"}</span>
       </div>
       <div className="space-y-1.5">
         {(data.frameworks || []).map(f => (
           <div key={f.name} data-testid={`compliance-fw-${f.name.replace(/\s/g, '-')}`}>
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-zinc-200">{f.icon} {f.name}</span>
-              <span className="font-mono text-zinc-300">{f.score}%</span>
+              <span className="font-mono text-zinc-300">{Number.isFinite(f.score) ? `${f.score}%` : "Not assessed"}</span>
             </div>
             <div className="h-1 rounded bg-zinc-800 overflow-hidden">
-              <div className="h-full transition-all" style={{ width: `${f.score}%`, background: healthColor(f.score) }} />
+              <div className="h-full transition-all" style={{ width: `${Number.isFinite(f.score) ? f.score : 0}%`, background: healthColor(f.score) }} />
             </div>
           </div>
         ))}
@@ -428,7 +432,7 @@ export function AccountPlanCanvas({ clientId }) {
                   {s.isObj ? (
                     <>
                       <Input value={it?.title || ""} onChange={e => updateList(s.key, i, { ...it, title: e.target.value })} placeholder="Opportunity title" className="text-xs h-7" />
-                      <Input type="number" value={it?.value || 0} onChange={e => updateList(s.key, i, { ...it, value: Number(e.target.value) })} className="text-xs h-7 w-24" />
+                      <Input type="number" value={it?.value ?? ""} onChange={e => updateList(s.key, i, { ...it, value: e.target.value === "" ? null : Number(e.target.value) })} className="text-xs h-7 w-24" placeholder="Rate card" />
                     </>
                   ) : (
                     <Input value={it || ""} onChange={e => updateList(s.key, i, e.target.value)} placeholder={s.placeholder} className="text-xs h-7" />
@@ -449,7 +453,7 @@ export function StakeholderMapCard({ clientId }) {
   const { token } = useAuth();
   const [list, setList] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: 70 });
+  const [form, setForm] = useState({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: null });
   const reload = () => axios.get(`${API}/client-studio/${clientId}/stakeholders`, { headers: { Authorization: `Bearer ${token}` } })
     .then(r => setList(r.data || [])).catch(() => setList([]));
   useEffect(() => { if (clientId) reload(); /* eslint-disable-next-line */ }, [clientId, token]);
@@ -457,7 +461,7 @@ export function StakeholderMapCard({ clientId }) {
     if (!form.name.trim()) return;
     try {
       await axios.post(`${API}/client-studio/${clientId}/stakeholders`, form, { headers: { Authorization: `Bearer ${token}` } });
-      setForm({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: 70 });
+      setForm({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: null });
       setShowAdd(false);
       reload();
       toast.success("Stakeholder added");

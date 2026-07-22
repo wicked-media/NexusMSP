@@ -13,8 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertical, X, Sparkles, Users, ChevronRight, Send } from "lucide-react";
+import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertical, X, Sparkles, Users, ChevronRight, Send, GitBranch, Monitor } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import HeroTile from "@/components/HeroTile";
 
 const FIELD_TYPES = [
   { value: "text", label: "Short text" },
@@ -31,7 +32,7 @@ const STATUS_OPTS = ["open", "in_progress", "on_hold"];
 const EMPTY_BP = {
   name: "", description: "", icon: "Clipboard", color: "sky",
   default_priority: "", default_category: "", default_status: "",
-  sla_minutes: "", require_completion: false, fields: [], checklist: [],
+  sla_minutes: "", require_completion: false, fields: [], checklist: [], child_templates: [],
 };
 
 const slugify = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
@@ -45,6 +46,7 @@ export default function BlueprintsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_BP);
 
@@ -70,6 +72,7 @@ export default function BlueprintsPage() {
       default_status: bp.default_status || "",
       fields: bp.fields || [],
       checklist: bp.checklist || [],
+      child_templates: bp.child_templates || [],
     });
     setOpen(true);
   };
@@ -105,6 +108,17 @@ export default function BlueprintsPage() {
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
   };
 
+  const installStarterLibrary = async () => {
+    setInstalling(true);
+    try {
+      const response = await axios.post(`${API}/blueprints/install-starter-library`, {}, { headers });
+      const count = response.data?.installed?.length || 0;
+      toast.success(count ? `${count} MSP starter blueprints installed` : "Starter library is already installed");
+      await load();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not install starter blueprints"); }
+    finally { setInstalling(false); }
+  };
+
   const addField = () => setForm((f) => ({ ...f, fields: [...f.fields, { key: "", label: "", type: "text", required: false, placeholder: "", options: [] }] }));
   const updateField = (i, patch) => setForm((f) => {
     const nf = [...f.fields]; nf[i] = { ...nf[i], ...patch };
@@ -119,21 +133,34 @@ export default function BlueprintsPage() {
   });
   const removeChecklist = (i) => setForm((f) => ({ ...f, checklist: f.checklist.filter((_, idx) => idx !== i) }));
 
+  const addChildTemplate = () => setForm((f) => ({
+    ...f,
+    child_templates: [...f.child_templates, {
+      id: `child-${Date.now()}-${f.child_templates.length}`,
+      title: "",
+      description: "",
+      priority: "medium",
+      category: "onboarding",
+      blueprint_id: "",
+      per_device: false,
+      required: true,
+    }],
+  }));
+  const updateChildTemplate = (i, patch) => setForm((f) => {
+    const child_templates = [...f.child_templates];
+    child_templates[i] = { ...child_templates[i], ...patch };
+    return { ...f, child_templates };
+  });
+  const removeChildTemplate = (i) => setForm((f) => ({ ...f, child_templates: f.child_templates.filter((_, idx) => idx !== i) }));
+
   return (
-    <div className="p-6 space-y-5" data-testid="blueprints-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <Clipboard className="w-7 h-7 text-sky-500" />
-            Ticket Blueprints
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Reusable worksheets + checklists that auto-apply to new tickets. Assign per-client as a default workflow.
-          </p>
-        </div>
-        <Button onClick={openCreate} variant="outline" className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="blueprints-new-btn">
-          <Plus className="w-4 h-4 mr-1" /> New Blueprint
-        </Button>
+    <div className="space-y-5" data-testid="blueprints-page">
+      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/[0.10] via-background to-background p-5 md:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300">Service design</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Clipboard className="h-6 w-6 text-sky-300" />Ticket Blueprints</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Reusable ticket playbooks with intake fields, completion gates, and client-ready defaults.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={installStarterLibrary} disabled={installing} data-testid="install-starter-blueprints">{installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Install MSP starters</Button><Button onClick={openCreate} data-testid="blueprints-new-btn"><Plus className="mr-2 h-4 w-4" />New blueprint</Button></div></div></div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <HeroTile label="Active blueprints" value={bps.filter(bp => bp.active !== false).length} icon={Clipboard} glow="sky" subtitle="Ready for ticket intake" testId="blueprints-stat-active" />
+        <HeroTile label="Completion gates" value={bps.filter(bp => bp.require_completion && bp.active !== false).length} icon={ListChecks} glow="amber" subtitle="Require technician sign-off" testId="blueprints-stat-gates" />
+        <HeroTile label="Worksheet fields" value={bps.reduce((total, bp) => total + (bp.fields?.length || 0), 0)} icon={Wand2} glow="violet" subtitle="Structured intake prompts" testId="blueprints-stat-fields" />
+        <HeroTile label="Starter library" value={bps.filter(bp => bp.starter_template && bp.active !== false).length} icon={Sparkles} glow="emerald" subtitle="MSP-ready templates" testId="blueprints-stat-starters" />
       </div>
 
       <Tabs defaultValue={initialTab}>
@@ -143,13 +170,13 @@ export default function BlueprintsPage() {
         </TabsList>
 
         <TabsContent value="library" className="mt-4">
-          <Card>
+          <Card className="overflow-hidden border-border/70">
             <CardContent className="p-0">
           {loading ? (
             <div className="p-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Loading…</div>
           ) : bps.length === 0 ? (
             <div className="p-16 text-center text-sm text-muted-foreground">
-              No blueprints yet. Create one to standardise how tickets get triaged and filled out.
+              <Clipboard className="mx-auto mb-3 h-8 w-8 text-sky-400/60" />No blueprints yet. Install the MSP starter library or create a focused workflow from scratch.
             </div>
           ) : (
             <Table>
@@ -158,6 +185,7 @@ export default function BlueprintsPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Fields</TableHead>
                   <TableHead>Checklist</TableHead>
+                  <TableHead>Delivery plan</TableHead>
                   <TableHead>Defaults</TableHead>
                   <TableHead>Gates</TableHead>
                   <TableHead>Status</TableHead>
@@ -173,6 +201,7 @@ export default function BlueprintsPage() {
                     </TableCell>
                     <TableCell><Badge variant="outline">{(bp.fields || []).length} fields</Badge></TableCell>
                     <TableCell><Badge variant="outline">{(bp.checklist || []).length} items</Badge></TableCell>
+                    <TableCell>{bp.child_templates?.length ? <Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-cyan-200"><GitBranch className="mr-1 h-3 w-3" />{bp.child_templates.length} child task{bp.child_templates.length === 1 ? "" : "s"}</Badge> : <span className="text-[10px] text-muted-foreground">Ticket only</span>}</TableCell>
                     <TableCell className="text-[10px] text-muted-foreground">
                       {bp.default_priority && <Badge variant="outline" className="mr-1 text-[9px]">p:{bp.default_priority}</Badge>}
                       {bp.default_category && <Badge variant="outline" className="mr-1 text-[9px]">{bp.default_category}</Badge>}
@@ -337,6 +366,27 @@ export default function BlueprintsPage() {
                 </div>
               )}
             </div>
+
+            {/* Delivery plan */}
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-3.5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-500/25 bg-cyan-500/10"><GitBranch className="h-4 w-4 text-cyan-200" /></span><div><p className="text-sm font-semibold">Onboarding delivery plan</p><p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">Turn this blueprint into a parent service ticket with accountable child work. Use “per managed device” to create one linked child for every asset discovered during client onboarding.</p></div></div>
+                <Button size="sm" variant="outline" onClick={addChildTemplate} className="border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/10" data-testid="blueprint-add-child-template"><Plus className="mr-1 h-3 w-3" />Add child work</Button>
+              </div>
+              {!form.child_templates.length ? <div className="mt-3 rounded-lg border border-dashed border-cyan-500/20 bg-black/10 px-3 py-3 text-xs text-muted-foreground">This remains a single-ticket blueprint. Add child work to make it a reusable parent-and-child delivery plan.</div> : <div className="mt-3 space-y-3">{form.child_templates.map((child, i) => (
+                <div key={child.id || i} className="rounded-xl border border-white/[0.08] bg-black/[0.13] p-3" data-testid={`blueprint-child-template-${i}`}>
+                  <div className="mb-2 flex items-center justify-between"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">Child work {i + 1}</p><Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-300 hover:text-rose-200" onClick={() => removeChildTemplate(i)} aria-label={`Remove child work ${i + 1}`}><Trash2 className="h-3.5 w-3.5" /></Button></div>
+                  <div className="grid gap-2.5 md:grid-cols-12">
+                    <div className="md:col-span-5"><Label className="text-[10px]">Child ticket title</Label><Input value={child.title} onChange={(e) => updateChildTemplate(i, { title: e.target.value })} placeholder="Managed device enrolment" className="mt-1 h-8 text-xs" /></div>
+                    <div className="md:col-span-3"><Label className="text-[10px]">Priority</Label><Select value={child.priority || "medium"} onValueChange={(value) => updateChildTemplate(i, { priority: value })}><SelectTrigger className="mt-1 h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{PRIORITY_OPTS.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="md:col-span-4"><Label className="text-[10px]">Category</Label><Input value={child.category || ""} onChange={(e) => updateChildTemplate(i, { category: e.target.value })} placeholder="onboarding" className="mt-1 h-8 text-xs" /></div>
+                    <div className="md:col-span-12"><Label className="text-[10px]">Child blueprint / worksheet <span className="font-normal text-muted-foreground">(optional)</span></Label><Select value={child.blueprint_id || "__none"} onValueChange={(value) => updateChildTemplate(i, { blueprint_id: value === "__none" ? "" : value })}><SelectTrigger className="mt-1 h-8 text-xs"><SelectValue placeholder="Use a simple linked child ticket" /></SelectTrigger><SelectContent><SelectItem value="__none">No extra worksheet — simple linked ticket</SelectItem>{bps.filter((bp) => bp.active !== false).map((bp) => <SelectItem key={bp.id} value={bp.id}>{bp.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">A linked blueprint copies its required fields and completion checklist onto this child ticket.</p></div>
+                    <div className="md:col-span-12"><Label className="text-[10px]">Work brief</Label><Textarea rows={2} value={child.description || ""} onChange={(e) => updateChildTemplate(i, { description: e.target.value })} placeholder="Describe what the technician must complete and record." className="mt-1 text-xs" /></div>
+                    <div className="md:col-span-12 flex flex-wrap gap-x-5 gap-y-2 pt-0.5"><label className="flex cursor-pointer items-center gap-2 text-xs"><Switch checked={Boolean(child.per_device)} onCheckedChange={(value) => updateChildTemplate(i, { per_device: value })} /><Monitor className="h-3.5 w-3.5 text-cyan-200" />Create once per managed device</label><label className="flex cursor-pointer items-center gap-2 text-xs"><Switch checked={child.required !== false} onCheckedChange={(value) => updateChildTemplate(i, { required: value })} /><ListChecks className="h-3.5 w-3.5 text-amber-200" />Required for delivery</label></div>
+                  </div>
+                </div>
+              ))}</div>}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -362,6 +412,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
   const [suggesting, setSuggesting] = useState(false);
   const [draft, setDraft] = useState(null);
   const [sourceTix, setSourceTix] = useState([]);
+  const [draftEngine, setDraftEngine] = useState("");
   const [pattern, setPattern] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [pushToAll, setPushToAll] = useState(true);
@@ -404,6 +455,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
       }, { headers });
       setDraft(res.data.draft);
       setSourceTix(res.data.source_tickets || []);
+      setDraftEngine(res.data.ai_model || "");
     } catch (e) {
       toast.error(e.response?.data?.detail || e.message);
       setSuggestOpen(false);
@@ -437,10 +489,8 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
 
   return (
     <div className="space-y-4" data-testid="patterns-panel">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-muted-foreground">
-          Scanned <span className="font-mono text-sky-400">{totalScanned}</span> resolved/closed tickets across your MSP. Showing top {patterns.length} recurring patterns.
-        </div>
+      <div className="flex flex-col gap-3 rounded-xl border border-violet-500/20 bg-violet-500/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-sm font-semibold">Pattern discovery</p><p className="mt-1 text-xs text-muted-foreground">Scanned <span className="font-mono text-sky-300">{totalScanned}</span> resolved and closed tickets across your MSP. Review a generated draft before publishing it to the library.</p></div>
         <div className="flex items-center gap-2">
           <Label className="text-[10px] text-muted-foreground">Min tickets</Label>
           <Input type="number" value={minTix} onChange={(e) => setMinTix(parseInt(e.target.value) || 3)} className="h-7 w-14 text-xs" min={2} max={50} />
@@ -453,7 +503,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
           No recurring patterns detected yet. Resolve more tickets to start seeing patterns.
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 lg:grid-cols-2">
           {patterns.map((p) => (
             <Card key={p.key} className="border-zinc-800 hover:border-violet-500/30 transition-colors" data-testid={`pattern-${p.key}`}>
               <CardContent className="p-4 space-y-3">
@@ -512,7 +562,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="pattern-suggest-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-violet-400" /> AI-drafted Cross-client Blueprint
+              <Sparkles className="w-5 h-5 text-violet-400" /> Cross-client Blueprint Draft
             </DialogTitle>
           </DialogHeader>
           {suggesting ? (
@@ -526,6 +576,7 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
             <div className="space-y-4">
               <div className="rounded-md bg-violet-500/5 border border-violet-500/20 p-3">
                 <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1">Pattern · learned from {sourceTix.length} tickets across {pattern?.client_count} clients</div>
+                {draftEngine && <div className="mb-2 text-[10px] text-muted-foreground">Draft source: {draftEngine}</div>}
                 <div className="flex flex-wrap gap-1 mt-1">
                   {sourceTix.slice(0, 10).map((t) => (
                     <span key={t.id} className="text-[10px] font-mono bg-muted/40 rounded px-1.5 py-0.5">

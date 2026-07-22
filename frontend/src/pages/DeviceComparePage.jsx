@@ -74,19 +74,18 @@ export default function DeviceComparePage() {
   const slots = [...Array(Math.min(4, ids.length + 1))].map((_, i) => ids[i] || "");
 
   return (
-    <div className="p-6 space-y-4" data-testid="device-compare-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <BarChart3 className="w-6 h-6 text-violet-400" />Compare Devices
-        </h1>
+    <div className="space-y-5 p-6" data-testid="device-compare-page">
+      <div className="rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_28%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.20)] md:p-6">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300">Asset intelligence</p>
+        <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><BarChart3 className="h-6 w-6 text-cyan-200" />Compare managed assets</h1>
         <p className="text-sm text-zinc-500">Side-by-side health, specs, and tickets — pick up to 4 devices.</p>
       </div>
 
       {/* Slot pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {slots.map((curId, idx) => (
-          <Card key={idx} className="border-zinc-800">
-            <CardContent className="p-3 flex items-center gap-2">
+          <Card key={idx} className="border-cyan-500/15 bg-cyan-500/[0.025]">
+            <CardContent className="p-3"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-zinc-500">Comparison slot {idx + 1}</p><div className="flex items-center gap-2">
               <Select value={curId} onValueChange={(v) => setIdAt(idx, v)}>
                 <SelectTrigger className="h-8 text-xs flex-1" data-testid={`compare-slot-${idx}`}>
                   <SelectValue placeholder={`Device ${idx + 1}`} />
@@ -100,7 +99,7 @@ export default function DeviceComparePage() {
                   <X className="w-4 h-4" />
                 </Button>
               )}
-            </CardContent>
+            </div></CardContent>
           </Card>
         ))}
       </div>
@@ -111,8 +110,8 @@ export default function DeviceComparePage() {
       ) : loading ? (
         <Card><CardContent className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></CardContent></Card>
       ) : (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Comparison</CardTitle></CardHeader>
+        <Card className="overflow-hidden border-cyan-500/15">
+          <CardHeader className="border-b border-white/[0.06] bg-cyan-500/[0.025] pb-3"><CardTitle className="text-base">Comparison record</CardTitle><p className="text-xs text-zinc-500">Live asset data and derived health signals.</p></CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">

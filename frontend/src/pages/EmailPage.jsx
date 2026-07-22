@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import DOMPurify from "dompurify";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -27,7 +29,9 @@ import {
   Paperclip,
   Clock,
   ArrowUpRight,
-  ArrowDownLeft
+  ArrowDownLeft,
+  MoreHorizontal,
+  ChevronDown
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -40,6 +44,10 @@ const statusConfig = {
 
 export default function EmailPage() {
   const { token, user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedClientId = searchParams.get("client");
+  const shouldComposeForClient = searchParams.get("compose") === "1";
   const [status, setStatus] = useState({ configured: false });
   const [emails, setEmails] = useState([]);
   const [clients, setClients] = useState([]);
@@ -80,6 +88,19 @@ export default function EmailPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!shouldComposeForClient || !requestedClientId || clients.length === 0) return;
+    const client = clients.find(item => item.id === requestedClientId);
+    if (!client) return;
+    setComposeData(current => ({
+      ...current,
+      client_id: client.id,
+      to_addresses: current.to_addresses || client.email || "",
+    }));
+    setIsComposeOpen(true);
+    setSearchParams({}, { replace: true });
+  }, [clients, requestedClientId, setSearchParams, shouldComposeForClient]);
 
   const saveCredentials = async (e) => {
     e.preventDefault();
@@ -150,8 +171,22 @@ export default function EmailPage() {
           <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><Mail className="w-4 h-4 text-sky-300" /></span>
           <div><h1 className="text-2xl font-bold tracking-tight">Email</h1><p className="text-sm text-muted-foreground">Technician mail, client communication, and delivery tracking.</p></div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { window.location.href = "/o365-setup"; }} data-testid="email-intake-link"><Inbox className="w-4 h-4 mr-2" />Email Intake</Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={() => { window.location.href = "/settings?tab=mailbox"; }} data-testid="email-intake-link"><Inbox className="w-4 h-4 mr-2" />Email Intake</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="communications-workspace-tools">
+                <MoreHorizontal className="w-3.5 h-3.5" />
+                Workspace
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => navigate("/notify-channels")}><Send className="mr-2 h-4 w-4" />Slack & Teams webhooks</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/csat-surveys")}><Check className="mr-2 h-4 w-4" />CSAT surveys</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/nps-tracker")}><ArrowUpRight className="mr-2 h-4 w-4" />NPS tracker</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={fetchData}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh

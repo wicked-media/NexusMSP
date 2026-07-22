@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Star, Users, MessageSquare, Loader2, RefreshCw, TrendingUp, ThumbsUp, ThumbsDown } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function CsatSurveysPage() {
   const { token } = useAuth();
@@ -30,19 +31,11 @@ export default function CsatSurveysPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const seedDemo = async () => {
-    try { await axios.post(`${API}/csat/seed-demo`, {}, { headers }); toast.success("Demo data seeded"); fetchData(); }
-    catch { toast.error("Failed"); }
-  };
-
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   if (!dashboard || dashboard.total_responses === 0) return (
     <div className="space-y-5" data-testid="csat-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Star className="w-6 h-6 text-amber-400" />Customer Satisfaction</h1></div>
-        <Button onClick={seedDemo} data-testid="seed-csat-btn">Generate Demo Data</Button>
-      </div>
-      <Card><CardContent className="py-20 text-center text-muted-foreground"><Star className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>No survey responses yet. Send CSAT surveys after ticket resolution or generate demo data.</p></CardContent></Card>
+      <OperationalPageHeader eyebrow="Customer feedback" title="Customer satisfaction" description="Customer-submitted feedback tied to resolved tickets. NexusMSP never populates CSAT dashboards with generated responses." icon={Star} tone="amber" actions={<Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="mr-1 h-4 w-4" />Refresh</Button>} />
+      <Card className="border-dashed border-amber-500/30 bg-amber-500/5"><CardContent className="py-20 text-center text-muted-foreground"><Star className="w-12 h-12 mx-auto mb-3 text-amber-300 opacity-40" /><p className="font-medium text-foreground">No customer responses yet</p><p className="mx-auto mt-2 max-w-md text-sm">Send a CSAT survey from a resolved ticket. Responses are then attributed to the ticket, client, and technician for audit and reporting.</p></CardContent></Card>
     </div>
   );
 
@@ -51,10 +44,7 @@ export default function CsatSurveysPage() {
 
   return (
     <div className="space-y-5" data-testid="csat-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Star className="w-6 h-6 text-amber-400" />Customer Satisfaction</h1><p className="text-muted-foreground mt-1">CSAT scores, trends, and technician performance</p></div>
-        <div className="flex gap-2"><Button variant="outline" onClick={seedDemo}>Seed Demo</Button><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4" /></Button></div>
-      </div>
+      <OperationalPageHeader eyebrow="Customer feedback" title="Customer satisfaction" description="CSAT scores and comments captured from real ticket follow-up surveys." icon={Star} tone="amber" actions={<Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="mr-1 h-4 w-4" />Refresh</Button>} />
 
       {/* Score Hero */}
       <div className="grid grid-cols-4 gap-3">

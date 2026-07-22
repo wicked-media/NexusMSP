@@ -18,8 +18,8 @@ from app.auth import get_current_user
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = "gpt-5.6-terra"
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "x") -> str:
@@ -47,7 +47,7 @@ def _safe_json(text: str) -> dict:
 
 @router.post("/ai/why-on-fire/{entity_type}/{entity_id}")
 async def why_on_fire(entity_type: str, entity_id: str, current_user: dict = Depends(get_current_user)):
-    """Aggregate last 24h of context for a device | ticket | client and ask Claude
+    """Aggregate last 24h of context for a device | ticket | client and ask Nexus AI
     to explain in plain English what's likely happening + 3 next steps."""
     if entity_type not in ("device", "ticket", "client"):
         raise HTTPException(400, "entity_type must be device | ticket | client")

@@ -58,7 +58,7 @@ function FactorBar({ label, value }) {
   );
 }
 
-export default function SentimentDashboardPage() {
+export default function SentimentDashboardPage({ embedded = false }) {
   const { token } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [clients, setClients] = useState([]);
@@ -207,11 +207,11 @@ export default function SentimentDashboardPage() {
   const d = dashboard || {};
   return (
     <div className="space-y-5" data-testid="sentiment-dashboard">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className={`flex items-center ${embedded ? "justify-end" : "justify-between"}`}>
+        {!embedded && <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Heart className="w-8 h-8 text-pink-400" />Client Sentiment</h1>
           <p className="text-muted-foreground">{d.total_clients || 0} clients scored &middot; Avg: {d.avg_score || 0}/100</p>
-        </div>
+        </div>}
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button onClick={analyzeAll} disabled={analyzing} data-testid="analyze-all-sentiment-btn">

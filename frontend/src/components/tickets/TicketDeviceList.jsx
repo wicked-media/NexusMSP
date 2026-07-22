@@ -512,7 +512,7 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
         <DialogContent className="max-w-2xl" data-testid={`diagnose-${device.id}`}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-fuchsia-400" />AI Diagnose — {device.name}</DialogTitle>
-            <DialogDescription className="text-xs">Claude analyses telemetry, events, services & patches and posts the result to the ticket.</DialogDescription>
+            <DialogDescription className="text-xs">Nexus AI analyses telemetry, events, services, and patches, then posts the result to the ticket.</DialogDescription>
           </DialogHeader>
           {diagLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
             diagData && (

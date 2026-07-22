@@ -398,7 +398,7 @@ function OpportunityDrawer({ opp, onClose, onUpdate, headers }) {
               </div>
             </div>
             <div className="p-3 text-sm min-h-[80px] whitespace-pre-wrap" data-testid="growth-pitch-body">
-              {pitch || <span className="text-muted-foreground">Click "Draft email" to generate a tailored pitch using Claude Sonnet.</span>}
+              {pitch || <span className="text-muted-foreground">Click "Draft email" to generate a tailored pitch with Nexus AI.</span>}
             </div>
           </div>
 

@@ -115,10 +115,12 @@ async def ping_active_on_call(current_user: dict = Depends(get_current_user)):
 # ============== WORKSHOP / REPAIR JOBS ==============
 
 @router.get("/workshop/jobs")
-async def get_workshop_jobs(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+async def get_workshop_jobs(status: Optional[str] = None, client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {"job_type": "workshop"}
     if status:
         query["repair_status"] = status
+    if client_id:
+        query["client_id"] = client_id
     jobs = await db.workshop_jobs.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     return jobs
 
@@ -203,6 +205,8 @@ async def update_workshop_status(job_id: str, data: dict, current_user: dict = D
     if new_status == "collected":
         update["collected"] = True
         update["collected_at"] = datetime.now(timezone.utc).isoformat()
+        update["collected_by"] = current_user.get("id") or current_user.get("email")
+        update["collected_by_name"] = current_user.get("name") or current_user.get("email")
     await db.workshop_jobs.update_one({"id": job_id}, {"$set": update})
     # Notify pickup if ready
     if new_status == "ready_for_pickup" and not job.get("pickup_notified"):
@@ -214,7 +218,8 @@ async def update_workshop_status(job_id: str, data: dict, current_user: dict = D
         await _ws_audit(job_id, "status_changed", f"Status changed: {old_status} -> {new_status}", current_user)
     except Exception:
         pass
-    return {"message": f"Status updated to {new_status}"}
+    updated_job = await db.workshop_jobs.find_one({"id": job_id}, {"_id": 0})
+    return {"message": f"Status updated to {new_status}", "job": updated_job}
 
 @router.post("/workshop/jobs/{job_id}/add-part")
 async def add_part_to_job(job_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -315,10 +320,12 @@ async def delete_workshop_job(job_id: str, current_user: dict = Depends(get_curr
 # ============== FIELD JOBS (WISP/INTERNET) ==============
 
 @router.get("/field-jobs")
-async def get_field_jobs(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+async def get_field_jobs(status: Optional[str] = None, client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {"job_type": "field"}
     if status:
         query["field_status"] = status
+    if client_id:
+        query["client_id"] = client_id
     jobs = await db.field_jobs.find(query, {"_id": 0}).sort("scheduled_date", 1).to_list(500)
     return jobs
 
@@ -455,19 +462,24 @@ async def update_field_job(job_id: str, data: dict, current_user: dict = Depends
 
 @router.put("/field-jobs/{job_id}/status")
 async def update_field_job_status(job_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    job = await db.field_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Field job not found")
     new_status = data.get("status")
     update = {"field_status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}
     if new_status == "completed":
         update["completed_at"] = datetime.now(timezone.utc).isoformat()
+        update["completed_by"] = current_user.get("id") or current_user.get("email")
+        update["completed_by_name"] = current_user.get("name") or current_user.get("email")
     await db.field_jobs.update_one({"id": job_id}, {"$set": update})
     try:
         from app.routers.field_enhanced import _fj_audit
-        job = await db.field_jobs.find_one({"id": job_id}, {"_id": 0})
-        old_status = job.get("field_status", "unknown") if job else "unknown"
-        await _fj_audit(job_id, "status_changed", f"Status changed to {new_status}", current_user)
+        old_status = job.get("field_status", "unknown")
+        await _fj_audit(job_id, "status_changed", f"Status changed: {old_status} -> {new_status}", current_user)
     except Exception:
         pass
-    return {"message": f"Status updated to {new_status}"}
+    updated_job = await db.field_jobs.find_one({"id": job_id}, {"_id": 0})
+    return {"message": f"Status updated to {new_status}", "job": updated_job}
 
 @router.delete("/field-jobs/{job_id}")
 async def delete_field_job(job_id: str, current_user: dict = Depends(get_current_user)):

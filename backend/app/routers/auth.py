@@ -8,7 +8,7 @@ import struct
 import time
 import uuid
 from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
+from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, create_token, password_policy_error
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
 
@@ -76,6 +76,7 @@ async def login(credentials: UserLogin):
     
     token = create_token(user_doc['id'], user_doc['email'], user_doc['role'])
     user_doc.pop('password_hash', None)
+    user_doc['avatar'] = cache_busted_avatar_url(user_doc.get('avatar'))
     return {"token": token, "user": user_doc, "requires_2fa": False}
 
 @router.get("/auth/me")

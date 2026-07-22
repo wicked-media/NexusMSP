@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
@@ -41,6 +41,8 @@ export default function TechRosterPage() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,11 +75,14 @@ export default function TechRosterPage() {
   };
 
   const remove = async (tech) => {
-    if (!window.confirm(`Remove ${tech.name} from roster?`)) return;
+    setDeleting(true);
     try {
       await axios.delete(`${API}/tech-roster/${tech.id}`, { headers });
-      toast.success("Removed"); load();
+      toast.success(`${tech.name} removed from on-call coverage`);
+      setDeleteCandidate(null);
+      load();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    finally { setDeleting(false); }
   };
 
   const toggleChannel = (k) => {
@@ -91,25 +96,25 @@ export default function TechRosterPage() {
   techs.forEach((t) => { tiers[t.escalation_tier || 2]?.push(t); });
 
   return (
-    <div className="p-6 space-y-5" data-testid="tech-roster-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <Radio className="w-7 h-7 text-rose-500" />
-            On-Call Roster
-          </h1>
+    <div className="space-y-4" data-testid="tech-roster-page">
+      <div className="flex flex-col gap-4 rounded-xl border border-rose-500/20 bg-gradient-to-r from-rose-500/[0.08] via-zinc-950 to-zinc-950 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-500/25 bg-rose-500/10"><Radio className="h-5 w-5 text-rose-300" /></div>
+          <div>
+          <h2 className="text-base font-semibold tracking-tight text-zinc-100">On-call coverage and escalation</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Technicians available for War Room paging. Tiered escalation fires Tier 1 → 2 → 3 with ack tracking.
           </p>
+          </div>
         </div>
-        <Button onClick={openCreate} variant="outline" className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="tech-roster-add-btn">
-          <Plus className="w-4 h-4 mr-1" /> Add Technician
+        <Button onClick={openCreate} size="sm" className="bg-rose-500 text-white hover:bg-rose-400" data-testid="tech-roster-add-btn">
+          <Plus className="mr-1.5 h-4 w-4" /> Add roster contact
         </Button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid gap-3 md:grid-cols-3">
         {[1, 2, 3].map((tier) => (
-          <Card key={tier} className="border-zinc-800">
+          <Card key={tier} className={`overflow-hidden border-zinc-800 bg-zinc-950/60 ${tier === 1 ? "border-t-2 border-t-rose-400" : tier === 2 ? "border-t-2 border-t-amber-400" : "border-t-2 border-t-cyan-400"}`}>
             <CardContent className="p-4">
               <div className={`text-[10px] uppercase tracking-widest font-semibold mb-3 flex items-center gap-2 ${tier === 1 ? "text-rose-400" : tier === 2 ? "text-amber-400" : "text-sky-400"}`}>
                 <Users className="w-3 h-3" /> Tier {tier} · {tiers[tier].length}
@@ -128,7 +133,7 @@ export default function TechRosterPage() {
                   </div>
                   <div className="flex items-center gap-1">
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(t)} data-testid={`tech-edit-${t.id}`}><Edit2 className="w-3 h-3" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => remove(t)} data-testid={`tech-delete-${t.id}`}><Trash2 className="w-3 h-3" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => setDeleteCandidate(t)} data-testid={`tech-delete-${t.id}`}><Trash2 className="w-3 h-3" /></Button>
                   </div>
                 </div>
               ))}
@@ -169,7 +174,7 @@ export default function TechRosterPage() {
                     <TableCell>{t.on_call ? <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-[9px]">ON-CALL</Badge> : <span className="text-zinc-500 text-xs">—</span>}</TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(t)}><Edit2 className="w-3 h-3" /></Button>
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => remove(t)}><Trash2 className="w-3 h-3" /></Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => setDeleteCandidate(t)}><Trash2 className="w-3 h-3" /></Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -180,9 +185,9 @@ export default function TechRosterPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl" data-testid="tech-roster-dialog">
-          <DialogHeader><DialogTitle>{editing ? "Edit Technician" : "Add Technician"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-rose-500/25 bg-zinc-950 p-0" data-testid="tech-roster-dialog">
+          <DialogHeader className="border-b border-rose-500/20 bg-gradient-to-br from-rose-500/[0.13] via-zinc-950 to-zinc-950 p-5 sm:p-6"><DialogTitle className="flex items-center gap-2 text-xl"><Radio className="h-5 w-5 text-rose-300" />{editing ? "Edit roster contact" : "Add roster contact"}</DialogTitle><DialogDescription>Configure escalation position, active on-call status and the notification channels used for paging. This controls on-call coverage, not the technician’s NexusMSP account access.</DialogDescription></DialogHeader>
+          <div className="space-y-4 p-5 sm:p-6">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Name *</Label>
@@ -256,12 +261,25 @@ export default function TechRosterPage() {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving || !form.name.trim()} variant="outline" className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="tech-form-save">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-              {editing ? "Save" : "Add"}
+          <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={save} disabled={saving || !form.name.trim()} className="bg-rose-500 text-white hover:bg-rose-400" data-testid="tech-form-save">
+              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {editing ? "Save contact" : "Add to roster"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!deleteCandidate} onOpenChange={(isOpen) => !isOpen && setDeleteCandidate(null)}>
+        <DialogContent className="max-w-md border-rose-500/25 bg-zinc-950" data-testid="delete-roster-contact-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-rose-300" />Remove roster contact?</DialogTitle>
+            <DialogDescription><span className="font-medium text-zinc-100">{deleteCandidate?.name}</span> will no longer be selected for War Room paging. This does not delete their NexusMSP team account or historic activity.</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/85">Use this only when the contact should no longer be part of the escalation chain. The removal is retained in the organisation audit history.</div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteCandidate(null)}>Keep contact</Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => remove(deleteCandidate)} data-testid="delete-roster-contact-submit">{deleting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Remove from roster</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -123,13 +123,13 @@ async def export_invoices_csv(data: dict, current_user: dict = Depends(get_curre
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "Invoice #", "Status", "Payment Status", "Client", "Issue Date", "Due Date",
+        "Invoice #", "Invoice Name", "Status", "Payment Status", "Client", "Issue Date", "Due Date",
         "Subtotal", "Discount", "Tax", "Total", "Amount Paid", "Balance", "Notes"
     ])
     for inv in invs:
         balance = round((inv.get("total", 0) or 0) - (inv.get("amount_paid", 0) or 0), 2)
         w.writerow([
-            inv.get("invoice_number", ""), inv.get("status", ""), inv.get("payment_status", ""),
+            inv.get("invoice_number", ""), inv.get("invoice_name", ""), inv.get("status", ""), inv.get("payment_status", ""),
             inv.get("client_name", ""), (inv.get("created_at") or "")[:10], inv.get("due_date") or "",
             inv.get("subtotal", 0), inv.get("discount_amount", 0) or 0,
             inv.get("tax", 0), inv.get("total", 0), inv.get("amount_paid", 0), balance,

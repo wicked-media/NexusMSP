@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,317 +8,178 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { MetricStrip, MetricTile } from "@/components/design-system";
+import { AlertTriangle, CheckCircle2, ExternalLink, Globe, KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { 
-  ShieldCheck, Plus, RefreshCw, Loader2, AlertTriangle, CheckCircle, Clock,
-  Globe, Lock, Key, Building, Package
-} from "lucide-react";
+
+const ENTRY_ENDPOINTS = { licenses: "/licenses", domains: "/domains", ssl: "/ssl-certificates" };
+const EMPTY_FORM = { client_id: "", software_name: "", vendor: "", seats: 1, expiry_date: "", domain_name: "", registrar: "", domain: "", issuer: "", certificate_type: "DV", auto_renew: true };
+
+function expiryState(value) {
+  if (!value) return "unknown";
+  const expiry = new Date(value);
+  if (Number.isNaN(expiry.getTime())) return "unknown";
+  const days = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
+  if (days < 0) return "expired";
+  if (days <= 30) return "expiring_soon";
+  return "active";
+}
+
+function ExpiryBadge({ value }) {
+  const state = expiryState(value);
+  const classes = {
+    active: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
+    expiring_soon: "border-amber-500/25 bg-amber-500/10 text-amber-300",
+    expired: "border-rose-500/25 bg-rose-500/10 text-rose-300",
+    unknown: "border-border bg-muted/50 text-muted-foreground",
+  };
+  return <Badge variant="outline" className={`text-[10px] capitalize ${classes[state]}`}>{state.replaceAll("_", " ")}</Badge>;
+}
 
 export default function ExpiryTrackerPage() {
   const { token } = useAuth();
-  const [warranties, setWarranties] = useState([]);
+  const navigate = useNavigate();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [activeTab, setActiveTab] = useState("warranties");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [assets, setAssets] = useState([]);
   const [licenses, setLicenses] = useState([]);
   const [domains, setDomains] = useState([]);
-  const [sslCerts, setSslCerts] = useState([]);
-  const [dashboard, setDashboard] = useState(null);
+  const [certificates, setCertificates] = useState([]);
   const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("warranties");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [dialogType, setDialogType] = useState("warranty");
-  const [formData, setFormData] = useState({});
+  const [dashboard, setDashboard] = useState(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const fetchData = async () => {
-    setLoading(true);
+  const load = useCallback(async (showToast = false) => {
+    setRefreshing(true);
     try {
-      const [warRes, licRes, domRes, sslRes, dashRes, cliRes] = await Promise.all([
-        axios.get(`${API}/warranties`, { headers }),
+      const [assetsResponse, licensesResponse, domainsResponse, certificatesResponse, dashboardResponse, clientsResponse] = await Promise.all([
+        axios.get(`${API}/assets`, { headers }),
         axios.get(`${API}/licenses`, { headers }),
         axios.get(`${API}/domains`, { headers }),
         axios.get(`${API}/ssl-certificates`, { headers }),
         axios.get(`${API}/expiry-dashboard`, { headers }),
-        axios.get(`${API}/clients`, { headers })
+        axios.get(`${API}/clients`, { headers }),
       ]);
-      setWarranties(warRes.data);
-      setLicenses(licRes.data);
-      setDomains(domRes.data);
-      setSslCerts(sslRes.data);
-      setDashboard(dashRes.data);
-      setClients(cliRes.data);
+      setAssets((assetsResponse.data || []).filter(asset => asset.warranty_expiry || asset.warranty_end));
+      setLicenses(licensesResponse.data || []);
+      setDomains(domainsResponse.data || []);
+      setCertificates(certificatesResponse.data || []);
+      setDashboard(dashboardResponse.data || null);
+      setClients(clientsResponse.data || []);
+      if (showToast) toast.success("Expiry evidence refreshed");
     } catch (error) {
-      toast.error("Failed to fetch data");
+      toast.error(error.response?.data?.detail || "Expiry records could not be loaded");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }, [headers]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openCreate = () => {
+    if (activeTab === "warranties") return;
+    setForm(EMPTY_FORM);
+    setDialogOpen(true);
   };
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const openAddDialog = (type) => {
-    setDialogType(type);
-    setFormData({ client_id: "" });
-    setIsDialogOpen(true);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const createEntry = async () => {
+    const endpoint = ENTRY_ENDPOINTS[activeTab];
+    if (!endpoint) return;
+    const required = activeTab === "licenses" ? [form.software_name, form.vendor] : activeTab === "domains" ? [form.domain_name, form.expiry_date] : [form.domain, form.expiry_date];
+    if (required.some(value => !String(value || "").trim())) {
+      toast.error("Complete the required fields before saving");
+      return;
+    }
+    setSaving(true);
     try {
-      const endpoints = { warranty: "/warranties", license: "/licenses", domain: "/domains", ssl: "/ssl-certificates" };
-      await axios.post(`${API}${endpoints[dialogType]}`, formData, { headers });
-      toast.success("Entry added");
-      setIsDialogOpen(false);
-      fetchData();
+      await axios.post(`${API}${endpoint}`, { ...form, client_id: form.client_id || null }, { headers });
+      toast.success(`${activeTab === "ssl" ? "Certificate" : activeTab.slice(0, -1).replace(/^./, char => char.toUpperCase())} added`);
+      setDialogOpen(false);
+      await load();
     } catch (error) {
-      toast.error("Failed to add entry");
+      toast.error(error.response?.data?.detail || "Record could not be added");
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (type, id) => {
-    if (!confirm("Delete this entry?")) return;
+  const deleteEntry = async (kind, id) => {
+    if (!window.confirm("Remove this expiry record? This cannot be undone.")) return;
     try {
-      const endpoints = { warranty: `/warranties/${id}`, license: `/licenses/${id}`, domain: `/domains/${id}`, ssl: `/ssl-certificates/${id}` };
-      await axios.delete(`${API}${endpoints[type]}`, { headers });
-      toast.success("Entry deleted");
-      fetchData();
+      await axios.delete(`${API}${ENTRY_ENDPOINTS[kind]}/${id}`, { headers });
+      toast.success("Expiry record removed");
+      await load();
     } catch (error) {
-      toast.error("Failed to delete");
+      toast.error(error.response?.data?.detail || "Record could not be removed");
     }
   };
 
-  const getStatusBadge = (status) => {
-    if (status === 'active' || status === 'valid') return <Badge className="bg-green-500"><CheckCircle className="w-3 h-3 mr-1" />{status}</Badge>;
-    if (status === 'expiring_soon') return <Badge className="bg-yellow-500"><AlertTriangle className="w-3 h-3 mr-1" />Expiring Soon</Badge>;
-    return <Badge variant="destructive"><Clock className="w-3 h-3 mr-1" />{status}</Badge>;
-  };
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+
+  const stats = dashboard || { warranties: { expiring_soon: 0 }, licenses: { expiring_soon: 0 }, domains: { expiring_soon: 0 }, ssl_certificates: { expiring_soon: 0 }, total_expiring: 0 };
+  const tabLabels = { warranties: "Warranties", licenses: "Licences", domains: "Domains", ssl: "SSL certificates" };
+  const actionLabel = activeTab === "ssl" ? "Add certificate" : `Add ${activeTab.slice(0, -1)}`;
 
   return (
-    <div className="space-y-6" data-testid="expiry-tracker-page">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expiry Tracker</h1>
-          <p className="text-muted-foreground">Warranties, licenses, domains & SSL certificates</p>
-        </div>
-        <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-      </div>
+    <div className="space-y-5" data-testid="expiry-tracker-page">
+      <OperationalPageHeader
+        eyebrow="Lifecycle governance"
+        title="Expiry Centre"
+        description="One accountable view of asset warranties, software renewals, domain renewals, and SSL certificate evidence. Asset warranties are managed on the inventory record itself."
+        icon={ShieldCheck}
+        tone="amber"
+        actions={<><Button variant="outline" size="sm" onClick={() => load(true)} disabled={refreshing}><RefreshCw className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>{activeTab === "warranties" ? <Button size="sm" onClick={() => navigate("/assets")}><ExternalLink className="mr-1 h-4 w-4" />Open inventory</Button> : <Button size="sm" onClick={openCreate}><Plus className="mr-1 h-4 w-4" />{actionLabel}</Button>}</>}
+      />
 
-      {/* Dashboard Stats */}
-      {dashboard && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card className={dashboard.total_expiring > 0 ? 'border-yellow-500/50' : ''}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${dashboard.total_expiring > 0 ? 'bg-yellow-500/10' : 'bg-green-500/10'}`}>
-                <AlertTriangle className={`w-5 h-5 ${dashboard.total_expiring > 0 ? 'text-yellow-500' : 'text-green-500'}`} />
-              </div>
-              <div><p className="text-2xl font-bold">{dashboard.total_expiring}</p><p className="text-xs text-muted-foreground">Expiring (30 days)</p></div>
-            </CardContent>
-          </Card>
-          <Card><CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><ShieldCheck className="w-5 h-5 text-blue-500" /></div>
-            <div><p className="text-2xl font-bold">{dashboard.warranties.expiring_soon}</p><p className="text-xs text-muted-foreground">Warranties</p></div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Key className="w-5 h-5 text-purple-500" /></div>
-            <div><p className="text-2xl font-bold">{dashboard.licenses.expiring_soon}</p><p className="text-xs text-muted-foreground">Licenses</p></div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><Globe className="w-5 h-5 text-green-500" /></div>
-            <div><p className="text-2xl font-bold">{dashboard.domains.expiring_soon}</p><p className="text-xs text-muted-foreground">Domains</p></div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center"><Lock className="w-5 h-5 text-orange-500" /></div>
-            <div><p className="text-2xl font-bold">{dashboard.ssl_certificates.expiring_soon}</p><p className="text-xs text-muted-foreground">SSL Certs</p></div>
-          </CardContent></Card>
-        </div>
-      )}
+      <MetricStrip columns={5}>
+        <MetricTile label="Due within 30 days" value={stats.total_expiring || 0} accent="amber" icon={<AlertTriangle />} testid="expiry-total" />
+        <MetricTile label="Tracked warranties" value={assets.length} accent="sky" icon={<ShieldCheck />} testid="expiry-warranties" />
+        <MetricTile label="Licence renewals" value={stats.licenses?.expiring_soon || 0} accent="violet" icon={<KeyRound />} testid="expiry-licenses" />
+        <MetricTile label="Domain renewals" value={stats.domains?.expiring_soon || 0} accent="emerald" icon={<Globe />} testid="expiry-domains" />
+        <MetricTile label="SSL renewals" value={stats.ssl_certificates?.expiring_soon || 0} accent="rose" icon={<LockKeyhole />} testid="expiry-ssl" />
+      </MetricStrip>
 
-      {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="warranties"><ShieldCheck className="w-4 h-4 mr-2" />Warranties ({warranties.length})</TabsTrigger>
-            <TabsTrigger value="licenses"><Key className="w-4 h-4 mr-2" />Licenses ({licenses.length})</TabsTrigger>
-            <TabsTrigger value="domains"><Globe className="w-4 h-4 mr-2" />Domains ({domains.length})</TabsTrigger>
-            <TabsTrigger value="ssl"><Lock className="w-4 h-4 mr-2" />SSL ({sslCerts.length})</TabsTrigger>
-          </TabsList>
-          <Button size="sm" onClick={() => openAddDialog(activeTab === 'ssl' ? 'ssl' : activeTab.slice(0, -1) === 'ie' ? activeTab.slice(0,-1) : activeTab.slice(0,-1))}>
-            <Plus className="w-4 h-4 mr-2" />Add
-          </Button>
-        </div>
+        <TabsList className="h-auto flex-wrap justify-start gap-1"><TabsTrigger value="warranties">Asset warranties ({assets.length})</TabsTrigger><TabsTrigger value="licenses">Licences ({licenses.length})</TabsTrigger><TabsTrigger value="domains">Domains ({domains.length})</TabsTrigger><TabsTrigger value="ssl">SSL ({certificates.length})</TabsTrigger></TabsList>
 
-        {loading ? (
-          <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div>
-        ) : (
-          <>
-            <TabsContent value="warranties">
-              <Card><CardContent className="p-0">
-                {warranties.length > 0 ? (
-                  <ScrollArea className="h-[400px]">
-                    <Table>
-                      <TableHeader><TableRow>
-                        <TableHead>Product</TableHead><TableHead>Client</TableHead><TableHead>Vendor</TableHead>
-                        <TableHead>Warranty End</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
-                      </TableRow></TableHeader>
-                      <TableBody>
-                        {warranties.map(w => (
-                          <TableRow key={w.id}>
-                            <TableCell className="font-medium">{w.product_name}</TableCell>
-                            <TableCell>{w.client_name}</TableCell>
-                            <TableCell>{w.vendor}</TableCell>
-                            <TableCell>{w.warranty_end}</TableCell>
-                            <TableCell>{getStatusBadge(w.status)}</TableCell>
-                            <TableCell><Button variant="ghost" size="sm" onClick={() => handleDelete('warranty', w.id)}>Delete</Button></TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                ) : <div className="p-8 text-center text-muted-foreground">No warranties tracked</div>}
-              </CardContent></Card>
-            </TabsContent>
+        <TabsContent value="warranties">
+          <Card>
+            <CardHeader className="flex-row items-start justify-between gap-4 pb-3"><div><CardTitle className="text-base">Asset warranty evidence</CardTitle><p className="mt-1 text-sm text-muted-foreground">Edit warranty details through the corresponding Inventory Asset so serial, ownership, lifecycle, QR labels, and refresh planning remain linked.</p></div><Button variant="outline" size="sm" onClick={() => navigate("/asset-lifecycle")}><ExternalLink className="mr-1 h-4 w-4" />Lifecycle & warranty</Button></CardHeader>
+            <CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Asset</TableHead><TableHead>Client</TableHead><TableHead>Manufacturer</TableHead><TableHead>Serial</TableHead><TableHead>Warranty end</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{assets.length === 0 ? <TableRow><TableCell colSpan={6} className="py-12 text-center text-muted-foreground">No inventory assets with a recorded warranty.</TableCell></TableRow> : assets.map(asset => { const expiry = asset.warranty_expiry || asset.warranty_end; return <TableRow key={asset.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/assets/${asset.id}`)}><TableCell><div className="font-medium">{asset.name}</div><div className="font-mono text-[11px] text-muted-foreground">{asset.asset_tag || "No asset tag"}</div></TableCell><TableCell>{asset.client_name || "Unassigned"}</TableCell><TableCell>{asset.manufacturer || "-"}</TableCell><TableCell className="font-mono text-xs">{asset.serial_number || "-"}</TableCell><TableCell>{expiry}</TableCell><TableCell><ExpiryBadge value={expiry} /></TableCell></TableRow>; })}</TableBody></Table></CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="licenses">
-              <Card><CardContent className="p-0">
-                {licenses.length > 0 ? (
-                  <ScrollArea className="h-[400px]">
-                    <Table>
-                      <TableHeader><TableRow>
-                        <TableHead>Software</TableHead><TableHead>Client</TableHead><TableHead>Type</TableHead>
-                        <TableHead>Seats</TableHead><TableHead>Expiry</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
-                      </TableRow></TableHeader>
-                      <TableBody>
-                        {licenses.map(l => (
-                          <TableRow key={l.id}>
-                            <TableCell className="font-medium">{l.software_name}</TableCell>
-                            <TableCell>{l.client_name}</TableCell>
-                            <TableCell>{l.license_type}</TableCell>
-                            <TableCell>{l.seats_used}/{l.seats}</TableCell>
-                            <TableCell>{l.expiry_date || 'Perpetual'}</TableCell>
-                            <TableCell>{getStatusBadge(l.status)}</TableCell>
-                            <TableCell><Button variant="ghost" size="sm" onClick={() => handleDelete('license', l.id)}>Delete</Button></TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                ) : <div className="p-8 text-center text-muted-foreground">No licenses tracked</div>}
-              </CardContent></Card>
-            </TabsContent>
-
-            <TabsContent value="domains">
-              <Card><CardContent className="p-0">
-                {domains.length > 0 ? (
-                  <ScrollArea className="h-[400px]">
-                    <Table>
-                      <TableHeader><TableRow>
-                        <TableHead>Domain</TableHead><TableHead>Client</TableHead><TableHead>Registrar</TableHead>
-                        <TableHead>Expiry</TableHead><TableHead>Auto Renew</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
-                      </TableRow></TableHeader>
-                      <TableBody>
-                        {domains.map(d => (
-                          <TableRow key={d.id}>
-                            <TableCell className="font-medium">{d.domain_name}</TableCell>
-                            <TableCell>{d.client_name}</TableCell>
-                            <TableCell>{d.registrar || '-'}</TableCell>
-                            <TableCell>{d.expiry_date}</TableCell>
-                            <TableCell>{d.auto_renew ? <CheckCircle className="w-4 h-4 text-green-500" /> : '-'}</TableCell>
-                            <TableCell>{getStatusBadge(d.status)}</TableCell>
-                            <TableCell><Button variant="ghost" size="sm" onClick={() => handleDelete('domain', d.id)}>Delete</Button></TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                ) : <div className="p-8 text-center text-muted-foreground">No domains tracked</div>}
-              </CardContent></Card>
-            </TabsContent>
-
-            <TabsContent value="ssl">
-              <Card><CardContent className="p-0">
-                {sslCerts.length > 0 ? (
-                  <ScrollArea className="h-[400px]">
-                    <Table>
-                      <TableHeader><TableRow>
-                        <TableHead>Domain</TableHead><TableHead>Client</TableHead><TableHead>Type</TableHead>
-                        <TableHead>Issuer</TableHead><TableHead>Expiry</TableHead><TableHead>Status</TableHead><TableHead></TableHead>
-                      </TableRow></TableHeader>
-                      <TableBody>
-                        {sslCerts.map(c => (
-                          <TableRow key={c.id}>
-                            <TableCell className="font-medium">{c.domain}</TableCell>
-                            <TableCell>{c.client_name}</TableCell>
-                            <TableCell>{c.certificate_type}</TableCell>
-                            <TableCell>{c.issuer || '-'}</TableCell>
-                            <TableCell>{c.expiry_date}</TableCell>
-                            <TableCell>{getStatusBadge(c.status)}</TableCell>
-                            <TableCell><Button variant="ghost" size="sm" onClick={() => handleDelete('ssl', c.id)}>Delete</Button></TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                ) : <div className="p-8 text-center text-muted-foreground">No SSL certificates tracked</div>}
-              </CardContent></Card>
-            </TabsContent>
-          </>
-        )}
+        <TabsContent value="licenses"><ExpiryTable rows={licenses} kind="licenses" onDelete={deleteEntry} columns={["Software", "Client", "Vendor", "Seats", "Expiry"]} values={row => [row.software_name, row.client_name, row.vendor, `${row.seats_used || 0}/${row.seats || 0}`, row.expiry_date || "Perpetual"]} /></TabsContent>
+        <TabsContent value="domains"><ExpiryTable rows={domains} kind="domains" onDelete={deleteEntry} columns={["Domain", "Client", "Registrar", "Auto renew", "Expiry"]} values={row => [row.domain_name, row.client_name, row.registrar || "-", row.auto_renew ? "Enabled" : "Off", row.expiry_date]} /></TabsContent>
+        <TabsContent value="ssl"><ExpiryTable rows={certificates} kind="ssl" onDelete={deleteEntry} columns={["Domain", "Client", "Issuer", "Type", "Expiry"]} values={row => [row.domain, row.client_name, row.issuer || "-", row.certificate_type || "DV", row.expiry_date]} /></TabsContent>
       </Tabs>
 
-      {/* Add Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add {dialogType.charAt(0).toUpperCase() + dialogType.slice(1)}</DialogTitle></DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Client</Label>
-              <Select value={formData.client_id} onValueChange={(v) => setFormData({...formData, client_id: v})}>
-                <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
-                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            {dialogType === 'warranty' && (<>
-              <div className="space-y-2"><Label>Product Name *</Label><Input value={formData.product_name || ''} onChange={(e) => setFormData({...formData, product_name: e.target.value})} required /></div>
-              <div className="space-y-2"><Label>Vendor *</Label><Input value={formData.vendor || ''} onChange={(e) => setFormData({...formData, vendor: e.target.value})} required /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Warranty Start</Label><Input type="date" value={formData.warranty_start || ''} onChange={(e) => setFormData({...formData, warranty_start: e.target.value})} /></div>
-                <div className="space-y-2"><Label>Warranty End *</Label><Input type="date" value={formData.warranty_end || ''} onChange={(e) => setFormData({...formData, warranty_end: e.target.value})} required /></div>
-              </div>
-            </>)}
-            {dialogType === 'license' && (<>
-              <div className="space-y-2"><Label>Software Name *</Label><Input value={formData.software_name || ''} onChange={(e) => setFormData({...formData, software_name: e.target.value})} required /></div>
-              <div className="space-y-2"><Label>Vendor *</Label><Input value={formData.vendor || ''} onChange={(e) => setFormData({...formData, vendor: e.target.value})} required /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Seats</Label><Input type="number" value={formData.seats || 1} onChange={(e) => setFormData({...formData, seats: parseInt(e.target.value)})} /></div>
-                <div className="space-y-2"><Label>Expiry Date</Label><Input type="date" value={formData.expiry_date || ''} onChange={(e) => setFormData({...formData, expiry_date: e.target.value})} /></div>
-              </div>
-            </>)}
-            {dialogType === 'domain' && (<>
-              <div className="space-y-2"><Label>Domain Name *</Label><Input value={formData.domain_name || ''} onChange={(e) => setFormData({...formData, domain_name: e.target.value})} placeholder="example.com" required /></div>
-              <div className="space-y-2"><Label>Registrar</Label><Input value={formData.registrar || ''} onChange={(e) => setFormData({...formData, registrar: e.target.value})} /></div>
-              <div className="space-y-2"><Label>Expiry Date *</Label><Input type="date" value={formData.expiry_date || ''} onChange={(e) => setFormData({...formData, expiry_date: e.target.value})} required /></div>
-            </>)}
-            {dialogType === 'ssl' && (<>
-              <div className="space-y-2"><Label>Domain *</Label><Input value={formData.domain || ''} onChange={(e) => setFormData({...formData, domain: e.target.value})} placeholder="*.example.com" required /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Issuer</Label><Input value={formData.issuer || ''} onChange={(e) => setFormData({...formData, issuer: e.target.value})} placeholder="Let's Encrypt" /></div>
-                <div className="space-y-2"><Label>Type</Label>
-                  <Select value={formData.certificate_type || 'DV'} onValueChange={(v) => setFormData({...formData, certificate_type: v})}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="DV">DV</SelectItem><SelectItem value="OV">OV</SelectItem><SelectItem value="EV">EV</SelectItem><SelectItem value="Wildcard">Wildcard</SelectItem></SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2"><Label>Expiry Date *</Label><Input type="date" value={formData.expiry_date || ''} onChange={(e) => setFormData({...formData, expiry_date: e.target.value})} required /></div>
-            </>)}
-            <DialogFooter><Button type="submit">Add</Button></DialogFooter>
-          </form>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl gap-0 overflow-hidden border-amber-500/25 bg-[linear-gradient(145deg,rgba(28,20,8,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="border-b border-amber-400/15 bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.16),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.07),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300">Expiry evidence</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10"><Plus className="h-4 w-4 text-amber-200" /></span>{actionLabel}</DialogTitle><DialogDescription className="mt-2">Record the accountable client, renewal date, and key vendor information. Changes remain in this expiry workspace.</DialogDescription></DialogHeader>
+          <div className="space-y-5 px-6 py-5"><div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Client</Label><Select value={form.client_id || "unassigned"} onValueChange={client_id => setForm(current => ({ ...current, client_id: client_id === "unassigned" ? "" : client_id }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned client</SelectItem>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent></Select></div>
+            {activeTab === "licenses" && <div className="grid gap-4 md:grid-cols-2"><Field label="Software name *"><Input value={form.software_name} onChange={event => setForm(current => ({ ...current, software_name: event.target.value }))} placeholder="Microsoft 365 Business Premium" /></Field><Field label="Vendor *"><Input value={form.vendor} onChange={event => setForm(current => ({ ...current, vendor: event.target.value }))} placeholder="Pax8" /></Field><Field label="Seats"><Input type="number" min="1" value={form.seats} onChange={event => setForm(current => ({ ...current, seats: Number(event.target.value) || 1 }))} /></Field><Field label="Renewal date"><Input type="date" value={form.expiry_date} onChange={event => setForm(current => ({ ...current, expiry_date: event.target.value }))} /></Field></div>}
+            {activeTab === "domains" && <div className="grid gap-4 md:grid-cols-2"><Field label="Domain name *"><Input value={form.domain_name} onChange={event => setForm(current => ({ ...current, domain_name: event.target.value }))} placeholder="example.com" /></Field><Field label="Registrar"><Input value={form.registrar} onChange={event => setForm(current => ({ ...current, registrar: event.target.value }))} placeholder="Cloudflare" /></Field><Field label="Renewal date *"><Input type="date" value={form.expiry_date} onChange={event => setForm(current => ({ ...current, expiry_date: event.target.value }))} /></Field></div>}
+            {activeTab === "ssl" && <div className="grid gap-4 md:grid-cols-2"><Field label="Certificate domain *"><Input value={form.domain} onChange={event => setForm(current => ({ ...current, domain: event.target.value }))} placeholder="*.example.com" /></Field><Field label="Issuer"><Input value={form.issuer} onChange={event => setForm(current => ({ ...current, issuer: event.target.value }))} placeholder="Let's Encrypt" /></Field><Field label="Certificate type"><Select value={form.certificate_type} onValueChange={certificate_type => setForm(current => ({ ...current, certificate_type }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="DV">DV</SelectItem><SelectItem value="OV">OV</SelectItem><SelectItem value="EV">EV</SelectItem><SelectItem value="Wildcard">Wildcard</SelectItem></SelectContent></Select></Field><Field label="Renewal date *"><Input type="date" value={form.expiry_date} onChange={event => setForm(current => ({ ...current, expiry_date: event.target.value }))} /></Field></div>}
+          </div>
+          <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button><Button className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={createEntry} disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save expiry record</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+function Field({ label, children }) { return <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label}</Label>{children}</div>; }
+
+function ExpiryTable({ rows, kind, columns, values, onDelete }) {
+  return <Card><CardContent className="p-0"><Table><TableHeader><TableRow>{columns.map(column => <TableHead key={column}>{column}</TableHead>)}<TableHead>Status</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.length === 0 ? <TableRow><TableCell colSpan={columns.length + 2} className="py-12 text-center text-muted-foreground">No {kind} records.</TableCell></TableRow> : rows.map(row => { const cells = values(row); const expiry = cells[cells.length - 1]; return <TableRow key={row.id}>{cells.map((cell, index) => <TableCell key={`${row.id}-${columns[index]}`} className={index === 0 ? "font-medium" : "text-sm"}>{cell || "-"}</TableCell>)}<TableCell><ExpiryBadge value={expiry === "Perpetual" ? "" : expiry} /></TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" className="text-rose-300 hover:text-rose-200" onClick={() => onDelete(kind, row.id)}><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">Remove</span></Button></TableCell></TableRow>; })}</TableBody></Table></CardContent></Card>;
 }

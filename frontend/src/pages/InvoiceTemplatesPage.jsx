@@ -16,6 +16,7 @@ import {
   FileEdit, Plus, Save, Loader2, Trash2, Star, Eye, GripVertical, Copy,
   LayoutGrid, Wrench, Sparkles, PaintBucket, FileText, Receipt, ScanLine, FileSignature,
   Minus, MoveVertical, Type, Image as ImageIcon, Tag,
+  RefreshCw,
 } from "lucide-react";
 
 const MERGE_TAGS = [
@@ -36,6 +37,12 @@ const PRESET_ICONS = {
   tier_themed: { icon: PaintBucket, gradient: "from-amber-600/30 to-amber-400/20" },
   pro_forma: { icon: FileEdit, gradient: "from-cyan-600/30 to-cyan-400/20" },
   customer_statement: { icon: FileText, gradient: "from-slate-700/30 to-slate-500/20" },
+  msp_monthly_service: { icon: Sparkles, gradient: "from-teal-600/30 to-emerald-400/20" },
+  project_milestone: { icon: FileSignature, gradient: "from-indigo-600/30 to-violet-400/20" },
+  hardware_procurement: { icon: Receipt, gradient: "from-blue-800/30 to-sky-400/20" },
+  renewal_notice: { icon: RefreshCw, gradient: "from-orange-600/30 to-amber-400/20" },
+  technology_proposal: { icon: FileEdit, gradient: "from-sky-600/30 to-cyan-400/20" },
+  qbr_value_review: { icon: LayoutGrid, gradient: "from-violet-700/30 to-purple-400/20" },
 };
 
 export default function InvoiceTemplatesPage() {
@@ -184,30 +191,8 @@ export default function InvoiceTemplatesPage() {
   // ─────────────────────────── Render ───────────────────────────
   return (
     <div className="p-6 space-y-5" data-testid="invoice-templates-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <FileEdit className="w-7 h-7 text-emerald-500" />
-            Invoice Studio
-            <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-400">Block-by-Block Builder</Badge>
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Designer gallery, drag-and-drop blocks, per-block styling, page settings, live PDF preview.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setView(view === "gallery" ? "builder" : "gallery")} data-testid="invoice-studio-toggle-view">
-            {view === "gallery" ? <Wrench className="w-4 h-4 mr-1" /> : <LayoutGrid className="w-4 h-4 mr-1" />}
-            {view === "gallery" ? "My Templates" : "Gallery"}
-          </Button>
-          <Button onClick={createBlank} variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" data-testid="invoice-tpl-new-btn">
-            <Plus className="w-4 h-4 mr-1" /> Blank Template
-          </Button>
-        </div>
-      </div>
-
       {view === "gallery" ? (
-        <GalleryView gallery={gallery} list={list} loading={loading} clonePreset={clonePreset} open={open} remove={remove} duplicate={duplicate} setDefault={setDefault} />
+        <GalleryView gallery={gallery} list={list} loading={loading} clonePreset={clonePreset} open={open} remove={remove} duplicate={duplicate} setDefault={setDefault} token={token} onToggleView={() => setView("builder")} onCreateBlank={createBlank} />
       ) : (
         <BuilderView
           selected={selected} setSelected={setSelected} list={list} catalog={catalog}
@@ -223,23 +208,30 @@ export default function InvoiceTemplatesPage() {
 }
 
 // ════════════════════════════════════════ Gallery View ════════════════════════════════════════
-function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplicate, setDefault }) {
+function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplicate, setDefault, token, onToggleView, onCreateBlank }) {
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const filteredGallery = gallery.filter((preset) => (typeFilter === "all" || preset.doc_type === typeFilter) && `${preset.name} ${preset.description}`.toLowerCase().includes(query.toLowerCase()));
   if (loading) return <div className="p-12 text-center"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <h2 className="text-base font-medium">Designer Gallery</h2>
-          <Badge variant="outline" className="text-[10px]">{gallery.length} presets</Badge>
+      <section className="overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.12] via-background to-cyan-500/[0.08] p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Client-facing documents</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Document design studio</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Start from a proven MSP document system, then tailor the blocks, brand colours, payment language, and layout for your organisation.</p></div>
+          <div className="flex flex-wrap items-center gap-2"><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">{gallery.length}</p><p className="text-[10px] text-muted-foreground">Presets</p></div><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">{list.length}</p><p className="text-[10px] text-muted-foreground">Your designs</p></div><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">4</p><p className="text-[10px] text-muted-foreground">Document types</p></div></div><Button variant="outline" size="sm" onClick={onToggleView} data-testid="invoice-studio-toggle-view"><Wrench className="mr-1.5 h-3.5 w-3.5" />My Templates</Button><Button size="sm" onClick={onCreateBlank} data-testid="invoice-tpl-new-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New template</Button></div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          {gallery.map((p) => {
+      </section>
+
+      <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3"><div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /><h2 className="text-base font-medium">Designer Gallery</h2><Badge variant="outline" className="text-[10px]">{filteredGallery.length} shown</Badge></div><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search designs" className="h-9 sm:w-56" /></div>
+        <div className="mb-4 flex flex-wrap gap-2">{[["all", "All designs"], ["invoice", "Invoices"], ["estimate", "Quotes"], ["statement", "Statements"], ["qbr", "QBRs"]].map(([value, label]) => <Button key={value} size="sm" variant={typeFilter === value ? "default" : "outline"} onClick={() => setTypeFilter(value)}>{label}</Button>)}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filteredGallery.map((p) => {
             const meta = PRESET_ICONS[p.preset_key] || { icon: FileEdit, gradient: "from-emerald-500/20 to-slate-800" };
             const Icon = meta.icon;
             return (
-              <Card key={p.id} className={`relative overflow-hidden cursor-pointer hover:ring-2 hover:ring-emerald-500/40 transition-all bg-gradient-to-br ${meta.gradient}`} onClick={() => clonePreset(p.preset_key)} data-testid={`preset-${p.preset_key}`}>
-                <CardContent className="p-4 h-44 flex flex-col justify-between">
+              <Card key={p.id} className={`relative overflow-hidden transition-all hover:-translate-y-0.5 hover:ring-2 hover:ring-emerald-500/40 bg-gradient-to-br ${meta.gradient}`} data-testid={`preset-${p.preset_key}`}>
+                <CardContent className="p-4 min-h-48 flex flex-col justify-between">
                   <div className="flex items-start justify-between">
                     <Icon className="w-7 h-7 text-white/80" />
                     <Badge variant="outline" className="text-[9px] bg-black/30 border-white/10 text-white">{p.doc_type}</Badge>
@@ -247,14 +239,12 @@ function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplic
                   <div>
                     <div className="font-semibold text-white text-sm">{p.name}</div>
                     <div className="text-[11px] text-white/70 mt-1 line-clamp-2">{p.description}</div>
-                    <Button size="sm" className="mt-3 h-7 text-[11px] bg-emerald-500/80 hover:bg-emerald-500 text-white border-0" data-testid={`clone-${p.preset_key}`}>
-                      <Copy className="w-3 h-3 mr-1" /> Use this design
-                    </Button>
+                    <div className="mt-3 flex gap-2"><Button size="sm" variant="outline" className="h-8 border-white/25 bg-black/15 text-[11px] text-white hover:bg-white/15 hover:text-white" onClick={() => window.open(`${API}/invoice-templates/${p.id}/preview-pdf?token=${encodeURIComponent(token)}`, "_blank", "noopener,noreferrer")} data-testid={`preview-${p.preset_key}`}><Eye className="mr-1 h-3 w-3" />Preview</Button><Button size="sm" className="h-8 text-[11px] bg-emerald-500/80 hover:bg-emerald-500 text-white border-0" onClick={() => clonePreset(p.preset_key)} data-testid={`clone-${p.preset_key}`}><Copy className="w-3 h-3 mr-1" />Use this design</Button></div>
                   </div>
                 </CardContent>
               </Card>
             );
-          })}
+          })}{filteredGallery.length === 0 && <div className="col-span-full rounded-xl border border-dashed border-border/70 px-5 py-10 text-center text-sm text-muted-foreground">No designs match that search.</div>}
         </div>
       </div>
 

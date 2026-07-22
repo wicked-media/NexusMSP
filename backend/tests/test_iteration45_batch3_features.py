@@ -297,52 +297,25 @@ class TestClientBudget:
 # ==================== DARK WEB MONITOR TESTS ====================
 
 class TestDarkWebMonitor:
-    """Dark Web Monitor - Credential exposures"""
+    """Dark Web monitoring must be provider-backed before it is available."""
     
     def test_dark_web_overview(self, headers):
         response = requests.get(f"{BASE_URL}/api/dark-web-monitor/overview", headers=headers)
-        assert response.status_code == 200
+        assert response.status_code == 410
         data = response.json()
-        
-        assert "alerts" in data
-        assert "summary" in data
-        
-        summary = data["summary"]
-        assert "total_exposures" in summary
-        assert "critical" in summary
-        assert "domains_monitored" in summary
-        
-        if data["alerts"]:
-            alert = data["alerts"][0]
-            assert "email" in alert
-            assert "client_name" in alert
-            assert "severity" in alert
+        assert "breach-intelligence provider" in data["detail"]
 
 
 # ==================== PHISHING SIM TESTS ====================
 
 class TestPhishingSim:
-    """Phishing Simulation - Campaigns with click/report rates"""
+    """Phishing simulation must have delivery and tracking before it is available."""
     
     def test_get_campaigns(self, headers):
         response = requests.get(f"{BASE_URL}/api/phishing-sim/campaigns", headers=headers)
-        assert response.status_code == 200
+        assert response.status_code == 410
         data = response.json()
-        
-        assert "campaigns" in data
-        assert "summary" in data
-        
-        summary = data["summary"]
-        assert "total_campaigns" in summary
-        assert "total_emails_sent" in summary
-        assert "avg_click_rate" in summary
-        assert "avg_report_rate" in summary
-        
-        if data["campaigns"]:
-            campaign = data["campaigns"][0]
-            assert "name" in campaign
-            assert "click_rate_pct" in campaign
-            assert "report_rate_pct" in campaign
+        assert "mail-delivery and tracking provider" in data["detail"]
 
 
 # ==================== BACKUP VERIFY TESTS ====================
@@ -445,33 +418,12 @@ class TestExecutiveReports:
 # ==================== GEO MAP TESTS ====================
 
 class TestGeoMap:
-    """Geo Map - Client sites and technicians"""
+    """Geo Map must not claim fabricated GPS information is live."""
     
     def test_geo_map_data(self, headers):
         response = requests.get(f"{BASE_URL}/api/geo-map/data", headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "sites" in data
-        assert "technicians" in data
-        assert "summary" in data
-        
-        # Should have 10 sites
-        assert len(data["sites"]) >= 5
-        
-        # Should have 5 technicians
-        assert len(data["technicians"]) >= 5
-        
-        if data["sites"]:
-            site = data["sites"][0]
-            assert "name" in site
-            assert "device_count" in site
-            assert "status" in site
-        
-        if data["technicians"]:
-            tech = data["technicians"][0]
-            assert "name" in tech
-            assert "status" in tech
+        assert response.status_code == 410
+        assert "Dispatch availability" in response.json()["detail"]
 
 
 # ==================== HARDWARE REFRESH TESTS ====================
@@ -481,17 +433,8 @@ class TestHardwareRefresh:
     
     def test_hardware_refresh_overview(self, headers):
         response = requests.get(f"{BASE_URL}/api/hardware-refresh/overview", headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "devices" in data
-        assert "summary" in data
-        
-        summary = data["summary"]
-        assert "total_tracked" in summary
-        assert "eol_approaching" in summary
-        assert "eol_passed" in summary
-        assert "replacement_budget_needed" in summary
+        assert response.status_code == 410
+        assert "Procurement Planner" in response.json()["detail"]
 
 
 # ==================== ONBOARDING WORKFLOWS TESTS ====================

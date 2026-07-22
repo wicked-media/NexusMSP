@@ -1,98 +1,230 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
-from datetime import datetime, timezone, timedelta
-from app.database import db
+
 from app.auth import get_current_user
+from app.database import db
+
 
 router = APIRouter()
+
+OPEN_TICKET_STATUSES = ["open", "pending", "in_progress", "on_hold", "waiting", "waiting_on_client"]
+
+
+def _as_utc(value):
+    """Return a timezone-aware timestamp for a persisted value, or None."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_sla(ticket: dict, now: datetime) -> dict:
+    """Expose only a stored SLA target; never infer one from ticket priority."""
+    due = _as_utc(ticket.get("sla_due") or ticket.get("sla_due_at"))
+    if due is None:
+        return {
+            "sla_state": "not_assessed",
+            "sla_remaining_seconds": None,
+            "sla_breached": False,
+        }
+    remaining = int((due - now).total_seconds())
+    return {
+        "sla_state": "breached" if remaining < 0 else "measured",
+        "sla_remaining_seconds": max(0, remaining),
+        "sla_breached": remaining < 0,
+        "sla_due": due.isoformat(),
+    }
+
+
+def _presence_from_record(record: dict | None, now: datetime) -> dict:
+    """Use the same heartbeat semantics as Team Chat, while retaining the source."""
+    if not record:
+        return {"presence": "not_reported", "seconds_since_heartbeat": None, "work_item": None}
+
+    seconds = None
+    heartbeat = _as_utc(record.get("last_heartbeat"))
+    if heartbeat:
+        seconds = max(0, int((now - heartbeat).total_seconds()))
+
+    manual_state = record.get("manual_state")
+    if seconds is None or seconds > 300:
+        state = "offline"
+    elif manual_state in {"dnd", "break", "away"}:
+        state = manual_state
+    elif record.get("busy_state"):
+        state = "busy"
+    elif seconds > 45:
+        state = "away"
+    else:
+        state = "active"
+    return {
+        "presence": state,
+        "seconds_since_heartbeat": seconds,
+        "work_item": record.get("busy_state"),
+    }
 
 
 @router.get("/wallboard/data")
 async def get_wallboard_data(current_user: dict = Depends(get_current_user)):
-    """Get all data for the NOC wallboard display."""
+    """Operational wallboard backed by recorded ticket, device and chat evidence."""
     now = datetime.now(timezone.utc)
     today = now.date().isoformat()
 
-    # Ticket stats
     open_tickets = await db.tickets.find(
-        {"status": {"$in": ["open", "in_progress", "waiting_on_client"]}},
-        {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "client_name": 1,
-         "assigned_to_name": 1, "created_at": 1, "ticket_number": 1}
-    ).sort("created_at", -1).to_list(50)
+        {"status": {"$in": OPEN_TICKET_STATUSES}},
+        {
+            "_id": 0,
+            "id": 1,
+            "title": 1,
+            "status": 1,
+            "priority": 1,
+            "client_name": 1,
+            "assigned_to": 1,
+            "assigned_to_name": 1,
+            "assignee_id": 1,
+            "assignee_name": 1,
+            "created_at": 1,
+            "ticket_number": 1,
+            "sla_due": 1,
+            "sla_due_at": 1,
+        },
+    ).sort("created_at", -1).to_list(100)
 
-    critical = [t for t in open_tickets if t.get("priority") == "critical"]
-    high = [t for t in open_tickets if t.get("priority") == "high"]
+    for ticket in open_tickets:
+        ticket.update(_ticket_sla(ticket, now))
+        ticket["assigned_to_name"] = ticket.get("assigned_to_name") or ticket.get("assignee_name")
 
-    # SLA countdown
-    for t in open_tickets:
-        created = t.get("created_at", "")
-        if created:
-            try:
-                ct = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                sla_hours = {"critical": 2, "high": 4, "medium": 8, "low": 24}.get(t.get("priority", "medium"), 8)
-                deadline = ct + timedelta(hours=sla_hours)
-                remaining = (deadline - now).total_seconds()
-                t["sla_remaining_seconds"] = max(0, int(remaining))
-                t["sla_breached"] = remaining < 0
-            except Exception:
-                t["sla_remaining_seconds"] = 0
-                t["sla_breached"] = False
+    critical = sum(1 for ticket in open_tickets if ticket.get("priority") in {"critical", "urgent", "p1"})
+    high = sum(1 for ticket in open_tickets if ticket.get("priority") == "high")
+    measured_slas = sum(1 for ticket in open_tickets if ticket.get("sla_state") != "not_assessed")
+    breached_slas = sum(1 for ticket in open_tickets if ticket.get("sla_breached"))
 
-    # Tech availability
-    techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
+    techs = await db.users.find(
+        {"role": {"$in": ["technician", "admin"]}},
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(100)
+    tech_ids = [tech.get("id") for tech in techs if tech.get("id")]
+    presence_rows = await db.presence_state.find(
+        {"user_id": {"$in": tech_ids}},
+        {"_id": 0, "user_id": 1, "last_heartbeat": 1, "manual_state": 1, "busy_state": 1},
+    ).to_list(200)
+    presence_by_user = {row.get("user_id"): row for row in presence_rows}
+
     tech_status = []
-    for t in techs:
-        active = await db.tickets.count_documents({"assigned_to": t["id"], "status": "in_progress"})
-        total = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
-        tech_status.append({
-            "id": t["id"], "name": t["name"],
-            "active_tickets": active, "total_open": total,
-            "status": "busy" if active >= 3 else "active" if active > 0 else "available",
-        })
+    for tech in techs:
+        tech_id = tech.get("id")
+        active = await db.tickets.count_documents(
+            {
+                "$or": [{"assigned_to": tech_id}, {"assignee_id": tech_id}],
+                "status": "in_progress",
+            }
+        )
+        total = await db.tickets.count_documents(
+            {
+                "$or": [{"assigned_to": tech_id}, {"assignee_id": tech_id}],
+                "status": {"$in": OPEN_TICKET_STATUSES},
+            }
+        )
+        workload = "at_capacity" if active >= 3 else "active" if active else "queued" if total else "clear"
+        tech_status.append(
+            {
+                "id": tech_id,
+                "name": tech.get("name") or "Unnamed technician",
+                "active_tickets": active,
+                "total_open": total,
+                "workload_state": workload,
+                **_presence_from_record(presence_by_user.get(tech_id), now),
+            }
+        )
 
-    # Device health
-    total_devices = await db.devices.count_documents({})
-    online = await db.devices.count_documents({"status": "online"})
-    offline = await db.devices.count_documents({"status": "offline"})
+    device_rows = await db.devices.find(
+        {},
+        {
+            "_id": 0,
+            "status": 1,
+            "last_heartbeat": 1,
+            "agent_version": 1,
+            "trmm_agent_id": 1,
+            "has_agent": 1,
+        },
+    ).to_list(5000)
+    enrolled_devices = [
+        device
+        for device in device_rows
+        if device.get("last_heartbeat") or device.get("agent_version") or device.get("trmm_agent_id") or device.get("has_agent")
+    ]
+    online = sum(1 for device in enrolled_devices if device.get("status") == "online")
+    offline = sum(1 for device in enrolled_devices if device.get("status") == "offline")
+    availability_pct = round((online / len(enrolled_devices)) * 100, 1) if enrolled_devices else None
     alerts = await db.predictive_alerts.count_documents({"status": "active"})
 
-    # Today's stats
     resolved_today = await db.tickets.count_documents({"resolved_at": {"$regex": f"^{today}"}})
-
-    # Recent activity
-    recent_activity = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10)
+    recent_activity = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(8)
 
     return {
         "timestamp": now.isoformat(),
+        "data_sources": {
+            "tickets": "Persisted service records",
+            "sla": "Stored ticket SLA due dates only",
+            "technicians": "Team Chat heartbeat and ticket workload",
+            "devices": "Enrolled agent or linked RMM device records",
+        },
         "tickets": {
-            "open": len(open_tickets), "critical": len(critical), "high": len(high),
+            "open": len(open_tickets),
+            "critical": critical,
+            "high": high,
             "resolved_today": resolved_today,
+            "sla_measured": measured_slas,
+            "sla_breached": breached_slas,
             "queue": open_tickets[:20],
         },
         "technicians": tech_status,
         "devices": {
-            "total": total_devices, "online": online, "offline": offline,
-            "uptime_pct": round((online / max(total_devices, 1)) * 100, 1),
+            "inventory_total": len(device_rows),
+            "enrolled": len(enrolled_devices),
+            "unmonitored": len(device_rows) - len(enrolled_devices),
+            "online": online,
+            "offline": offline,
+            "availability_pct": availability_pct,
             "active_alerts": alerts,
         },
-        "recent_activity": recent_activity[:8],
+        "recent_activity": recent_activity,
     }
 
 
 @router.get("/wallboard/public")
 async def get_public_wallboard():
-    """Public wallboard data (no auth) - limited data for TV display."""
+    """Limited TV wallboard data; device availability only covers enrolled endpoints."""
     now = datetime.now(timezone.utc)
-    open_count = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
-    critical = await db.tickets.count_documents({"priority": "critical", "status": {"$in": ["open", "in_progress"]}})
-    total_devices = await db.devices.count_documents({})
-    online = await db.devices.count_documents({"status": "online"})
+    open_count = await db.tickets.count_documents({"status": {"$in": OPEN_TICKET_STATUSES}})
+    critical = await db.tickets.count_documents(
+        {"priority": {"$in": ["critical", "urgent", "p1"]}, "status": {"$in": OPEN_TICKET_STATUSES}}
+    )
+    device_rows = await db.devices.find(
+        {}, {"_id": 0, "status": 1, "last_heartbeat": 1, "agent_version": 1, "trmm_agent_id": 1, "has_agent": 1}
+    ).to_list(5000)
+    enrolled = [
+        device
+        for device in device_rows
+        if device.get("last_heartbeat") or device.get("agent_version") or device.get("trmm_agent_id") or device.get("has_agent")
+    ]
+    online = sum(1 for device in enrolled if device.get("status") == "online")
     today = now.date().isoformat()
     resolved_today = await db.tickets.count_documents({"resolved_at": {"$regex": f"^{today}"}})
 
     return {
         "timestamp": now.isoformat(),
-        "open_tickets": open_count, "critical_tickets": critical,
+        "open_tickets": open_count,
+        "critical_tickets": critical,
         "resolved_today": resolved_today,
-        "devices_total": total_devices, "devices_online": online,
-        "uptime_pct": round((online / max(total_devices, 1)) * 100, 1),
+        "devices_total": len(device_rows),
+        "devices_enrolled": len(enrolled),
+        "devices_online": online,
+        "availability_pct": round((online / len(enrolled)) * 100, 1) if enrolled else None,
     }

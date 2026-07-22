@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,12 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
-  ClipboardList, Search, Shield, User, Loader2, RefreshCw, AlertTriangle,
+  ClipboardList, Search, Shield, Loader2, RefreshCw, AlertTriangle,
   Clock, TrendingUp, TrendingDown, Filter, Download, Activity,
-  Lock, Ticket, DollarSign, Settings, Zap, Monitor, Users, Globe, ArrowUp, ArrowDown
+  Lock, Ticket, DollarSign, Settings, Zap, Monitor, Users, Globe
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -41,15 +43,6 @@ const SEV_COLORS = {
   info: "bg-blue-500/20 text-blue-400 border-blue-500/30",
 };
 
-function exportCSV(data) {
-  if (!data?.length) { toast.error("No data"); return; }
-  const headers = ["timestamp", "user", "category", "action", "severity", "description", "target", "ip_address"];
-  const csv = [headers.join(","), ...data.map(e => headers.map(h => { const v = e[h] || ""; return typeof v === "string" && v.includes(",") ? `"${v}"` : v; }).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "audit_trail.csv"; a.click();
-  toast.success(`Exported ${data.length} events`);
-}
-
 export default function AuditTrailPage() {
   const { token } = useAuth();
   const [events, setEvents] = useState([]);
@@ -59,7 +52,9 @@ export default function AuditTrailPage() {
   const [catFilter, setCatFilter] = useState("all");
   const [sevFilter, setSevFilter] = useState("all");
   const [daysFilter, setDaysFilter] = useState("30");
-  const headers = { Authorization: `Bearer ${token}` };
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -69,19 +64,43 @@ export default function AuditTrailPage() {
       if (sevFilter !== "all") params.append("severity", sevFilter);
       const [eRes, sRes] = await Promise.all([
         axios.get(`${API}/audit-trail/events?${params}`, { headers }),
-        axios.get(`${API}/audit-trail/summary`, { headers }),
+        axios.get(`${API}/audit-trail/summary?${params}`, { headers }),
       ]);
       setEvents(eRes.data);
       setSummary(sRes.data);
     } catch { toast.error("Failed to load audit trail"); }
     finally { setLoading(false); }
-  }, [token, catFilter, sevFilter, daysFilter]);
+  }, [headers, catFilter, sevFilter, daysFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const filtered = search
     ? events.filter(e => e.user?.toLowerCase().includes(search.toLowerCase()) || e.action?.toLowerCase().includes(search.toLowerCase()) || e.description?.toLowerCase().includes(search.toLowerCase()) || e.target?.toLowerCase().includes(search.toLowerCase()))
     : events;
+  const filtersActive = Boolean(search) || catFilter !== "all" || sevFilter !== "all" || daysFilter !== "30";
+  const clearFilters = () => { setSearch(""); setCatFilter("all"); setSevFilter("all"); setDaysFilter("30"); };
+
+  const exportAudit = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ days: daysFilter });
+      if (catFilter !== "all") params.append("category", catFilter);
+      if (sevFilter !== "all") params.append("severity", sevFilter);
+      if (search.trim()) params.append("search", search.trim());
+      const response = await axios.get(`${API}/audit-trail/export?${params}`, { headers, responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `nexus-audit-trail-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Audit export downloaded");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Audit export could not be created");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Build chart data from summary
   const catChartData = summary?.by_category?.slice(0, 8).map(c => ({ category: c.category, count: c.count })) || [];
@@ -90,68 +109,22 @@ export default function AuditTrailPage() {
 
   return (
     <div className="space-y-5" data-testid="audit-trail-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-white" /></div>
-            Audit Trail
-          </h1>
-          <p className="text-muted-foreground mt-1">Recorded NexusMSP device, ticket, maintenance, and administrative activity</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportCSV(filtered)} data-testid="export-audit-btn"><Download className="w-4 h-4 mr-1" />Export CSV</Button>
-          <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-        </div>
-      </div>
+      <OperationalPageHeader eyebrow="Governance and accountability" title="Audit Trail" description="Administrator-only, read-only operational evidence across tickets, assets, billing, security, and integrations." icon={ClipboardList} tone="amber" actions={<><Button variant="outline" size="sm" onClick={exportAudit} disabled={exporting} data-testid="export-audit-btn">{exporting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}Export CSV</Button><Button variant="outline" size="sm" onClick={fetchData} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button></>} />
 
-      {/* Stats Row */}
+      {/* HeroTile metric strip — shared with Dashboard, Tickets, and Devices */}
       {summary && (
-        <div className="grid grid-cols-6 gap-3">
-          <Card className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Events</p><Activity className="w-4 h-4 text-foreground" /></div>
-              <p className="text-2xl font-bold">{summary.total_events}</p><p className="text-[10px] text-muted-foreground">Persisted events only</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Last 24h</p><Clock className="w-4 h-4 text-blue-400" /></div>
-              <p className="text-2xl font-bold text-blue-400">{summary.last_24h}</p>
-              <div className="flex items-center gap-1 mt-0.5">
-                {summary.trend === "up" ? <ArrowUp className="w-3 h-3 text-red-400" /> : <ArrowDown className="w-3 h-3 text-emerald-400" />}
-                <span className="text-[10px] text-muted-foreground">vs {summary.prev_24h} prev</span>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Critical</p><AlertTriangle className="w-4 h-4 text-red-400" /></div>
-              <p className="text-2xl font-bold text-red-400">{summary.by_severity?.critical || 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Warnings</p><AlertTriangle className="w-4 h-4 text-amber-400" /></div>
-              <p className="text-2xl font-bold text-amber-400">{summary.by_severity?.warning || 0}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/40 col-span-2">
-            <CardContent className="pt-4 pb-3">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Top Users</p>
-              <div className="flex flex-wrap gap-2">
-                {summary.by_user?.slice(0, 5).map(u => (
-                  <Badge key={u.user} variant="outline" className="gap-1 text-[10px]">
-                    <User className="w-2.5 h-2.5" />{u.user}: {u.count}
-                  </Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+          <HeroTile label="Total events" value={summary.total_events} icon={Activity} glow="violet" subtitle={`Last ${summary.window_days || daysFilter} days`} testId="audit-stat-total" />
+          <HeroTile label="Last 24h" value={summary.last_24h} icon={Clock} glow="cyan" subtitle={`${summary.trend === "up" ? "Up" : summary.trend === "down" ? "Down" : "Level"} from previous day`} testId="audit-stat-24h" />
+          <HeroTile label="Critical" value={summary.by_severity?.critical || 0} icon={AlertTriangle} glow={(summary.by_severity?.critical || 0) > 0 ? "rose" : "emerald"} subtitle="Requires review" testId="audit-stat-critical" />
+          <HeroTile label="Warnings" value={summary.by_severity?.warning || 0} icon={AlertTriangle} glow={(summary.by_severity?.warning || 0) > 0 ? "amber" : "emerald"} subtitle="Needs attention" testId="audit-stat-warnings" />
+          <HeroTile label="Active users" value={summary.by_user?.length || 0} icon={Users} glow="emerald" subtitle="Recorded actors" testId="audit-stat-users" />
+          <HeroTile label="Categories" value={summary.by_category?.length || 0} icon={Filter} glow="indigo" subtitle="Activity sources" testId="audit-stat-categories" />
         </div>
       )}
 
       {/* Category Chart + Category Breakdown */}
-      <div className="grid grid-cols-[1fr_350px] gap-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_350px]">
         <Card className="border-border/40">
           <CardHeader className="pb-1"><CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">Events by Category</CardTitle></CardHeader>
           <CardContent>
@@ -184,21 +157,23 @@ export default function AuditTrailPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 items-center">
-        <div className="relative flex-1 max-w-sm"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input placeholder="Search events, users, actions..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" data-testid="audit-search" /></div>
+      <div className="rounded-2xl border border-border/60 bg-card/40 p-3 md:p-4" data-testid="audit-filter-bar">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-semibold">Explore activity</p><p className="text-xs text-muted-foreground">Filter recorded events without losing context.</p></div><div className="flex items-center gap-2"><Badge variant="outline" className="text-xs">{filtered.length} events</Badge>{filtersActive && <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearFilters} data-testid="clear-audit-filters">Clear filters</Button>}</div></div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_150px_130px_120px]">
+        <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input placeholder="Search events, users, actions..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" data-testid="audit-search" /></div>
         <Select value={catFilter} onValueChange={setCatFilter}>
-          <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Categories</SelectItem>{(summary?.categories || []).map(c => <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>)}</SelectContent>
         </Select>
         <Select value={sevFilter} onValueChange={setSevFilter}>
-          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Severity</SelectItem><SelectItem value="critical">Critical</SelectItem><SelectItem value="warning">Warning</SelectItem><SelectItem value="info">Info</SelectItem></SelectContent>
         </Select>
         <Select value={daysFilter} onValueChange={setDaysFilter}>
-          <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="7">Last 7 days</SelectItem><SelectItem value="30">Last 30 days</SelectItem><SelectItem value="90">Last 90 days</SelectItem><SelectItem value="365">Last year</SelectItem></SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground ml-auto">{filtered.length} events</span>
+        </div>
       </div>
 
       {/* Event Timeline */}
@@ -213,7 +188,7 @@ export default function AuditTrailPage() {
               ) : filtered.map(e => {
                 const CatIcon = CAT_ICONS[e.category] || Activity;
                 return (
-                  <div key={e.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-transparent hover:border-border/40 hover:bg-muted/10 transition-all group" data-testid={`audit-${e.id}`}>
+                  <button key={e.id} type="button" onClick={() => setSelectedEvent(e)} className="flex w-full items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-all hover:border-border/40 hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 group" data-testid={`audit-${e.id}`}>
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${CAT_COLORS[e.category]?.split(" ")[0] || "bg-muted/20"}`}>
                       <CatIcon className="w-4 h-4" />
                     </div>
@@ -228,13 +203,14 @@ export default function AuditTrailPage() {
                       <p className="text-[9px] text-muted-foreground/60">{new Date(e.timestamp).toLocaleTimeString()}</p>
                     </div>
                     {e.ip_address && <span className="text-[9px] text-muted-foreground/40 font-mono opacity-0 group-hover:opacity-100 transition-opacity">{e.ip_address}</span>}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </ScrollArea>
         </CardContent>
       </Card>
+      <Dialog open={Boolean(selectedEvent)} onOpenChange={(open) => !open && setSelectedEvent(null)}><DialogContent className="max-w-2xl" data-testid="audit-event-detail"><DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-amber-300" />Audit event detail</DialogTitle></DialogHeader>{selectedEvent && <div className="space-y-4 text-sm"><div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Actor</p><p className="mt-1 font-medium">{selectedEvent.user}</p></div><div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Recorded</p><p className="mt-1">{new Date(selectedEvent.timestamp).toLocaleString()}</p></div><div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Action</p><p className="mt-1 capitalize">{selectedEvent.action?.replace(/_/g, " ")}</p></div><div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Target</p><p className="mt-1 break-all">{selectedEvent.target || "System"}</p></div></div><div className="rounded-lg border border-border/80 bg-muted/10 p-3"><p className="font-medium">{selectedEvent.description}</p><div className="mt-2 flex flex-wrap gap-2"><Badge variant="outline" className={SEV_COLORS[selectedEvent.severity] || SEV_COLORS.info}>{selectedEvent.severity}</Badge><Badge variant="outline">{selectedEvent.category}</Badge><Badge variant="outline">{selectedEvent.source?.replace(/_/g, " ")}</Badge></div></div>{Object.keys(selectedEvent.changes || {}).length > 0 && <div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Recorded changes</p><pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-border/70 bg-muted/20 p-3 text-xs">{JSON.stringify(selectedEvent.changes, null, 2)}</pre></div>}{Object.keys(selectedEvent.metadata || {}).length > 0 && <div><p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Supporting metadata</p><pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-border/70 bg-muted/20 p-3 text-xs">{JSON.stringify(selectedEvent.metadata, null, 2)}</pre></div>}<p className="text-xs text-muted-foreground">Entity: {selectedEvent.entity_type || "system"}{selectedEvent.entity_id ? ` / ${selectedEvent.entity_id}` : ""}</p></div>}</DialogContent></Dialog>
     </div>
   );
 }

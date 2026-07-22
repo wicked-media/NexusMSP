@@ -3,6 +3,7 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import HeroTile from "@/components/HeroTile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Siren, DollarSign, AlertTriangle, Trophy, TrendingUp, RefreshCw,
-  Loader2, Flame, Heart, Server, CalendarCheck, Zap, Crown, Sparkles,
+  Loader2, Flame, Heart, Server, CalendarCheck, Zap, Crown, Sparkles, Activity,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -137,21 +138,10 @@ function CommandView({ api }) {
   );
 }
 
-const TONE = {
-  rose: "border-rose-500/40 bg-rose-500/5 text-rose-400",
-  amber: "border-amber-500/40 bg-amber-500/5 text-amber-400",
-  emerald: "border-emerald-500/40 bg-emerald-500/5 text-emerald-400",
-  sky: "border-sky-500/40 bg-sky-500/5 text-sky-400",
-  violet: "border-violet-500/40 bg-violet-500/5 text-violet-400",
-};
 function StatTile({ label, value, tone = "sky", format }) {
-  const cls = TONE[tone] || TONE.sky;
-  return (
-    <div className={`rounded-xl border p-4 ${cls}`}>
-      <div className="text-[10px] uppercase tracking-widest">{label}</div>
-      <div className="text-3xl font-mono font-bold text-foreground mt-1">{format ? format(value) : value}</div>
-    </div>
-  );
+  const glow = { rose: "rose", amber: "amber", emerald: "emerald", sky: "sky", violet: "violet" }[tone] || "sky";
+  const display = format ? format(value) : value;
+  return <HeroTile label={label} value={display} icon={Activity} glow={glow} animated={typeof display === "number"} />;
 }
 
 /* ─ Automation scheduler ─ */

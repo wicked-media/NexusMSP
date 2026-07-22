@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import ticket_audit
 
 router = APIRouter()
 
@@ -53,10 +54,12 @@ async def get_purchase_orders(status: Optional[str] = None, search: Optional[str
 @router.post("/purchase-orders")
 async def create_purchase_order(data: dict, current_user: dict = Depends(get_current_user)):
     count = await db.purchase_orders.count_documents({})
-    line_items = data.get("line_items", [])
+    line_items = await _normalise_line_item_destinations(data.get("line_items", []))
     for li in line_items:
         li["received_qty"] = 0
         li["status"] = "pending"
+        li["arrival_notified"] = False
+        li.pop("arrival_notification_at", None)
     po = {
         "id": str(uuid.uuid4()),
         "po_number": f"PO-{count + 1001:04d}",
@@ -112,6 +115,8 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
                "subtotal", "tax", "shipping", "total", "notes", "ship_to", "expected_delivery",
                "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name"}
     update = {k: v for k, v in data.items() if k in allowed}
+    if "line_items" in update:
+        update["line_items"] = await _normalise_line_item_destinations(update["line_items"])
     for f in ("subtotal", "tax", "shipping", "total"):
         if f in update:
             update[f] = float(update[f])
@@ -228,23 +233,34 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
         raise HTTPException(status_code=400, detail="Only submitted or partial POs can receive stock")
     received_items = data.get("items", [])
     line_items = po.get("line_items", [])
-    li_map = {}
-    for li in line_items:
-        key = li.get("product_id") or li.get("product_name", "")
-        li_map[key] = li
+    notification_deliveries = []
+    now_iso = datetime.now(timezone.utc).isoformat()
     total_all_received = True
     for ri in received_items:
-        pid = ri.get("product_id")
+        pid = ri.get("product_id", "")
         try:
             recv_qty = int(ri.get("quantity", 0))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Received quantity must be a whole number")
         if recv_qty < 1:
             raise HTTPException(status_code=422, detail="Received quantity must be at least 1")
-        if pid not in li_map:
-            raise HTTPException(status_code=422, detail="Received item is not on this purchase order")
-
-        li = li_map[pid]
+        line_index = ri.get("line_index")
+        if isinstance(line_index, str) and line_index.isdigit():
+            line_index = int(line_index)
+        if isinstance(line_index, int) and 0 <= line_index < len(line_items):
+            li = line_items[line_index]
+            if pid and li.get("product_id") and pid != li.get("product_id"):
+                raise HTTPException(status_code=422, detail="Received item does not match this purchase order line")
+        else:
+            # Backwards-compatible matching for older clients. Prefer an open line so
+            # duplicate products on one PO can still be received correctly.
+            li = next((item for item in line_items if (
+                (pid and item.get("product_id") == pid)
+                or (not pid and item.get("product_name") == ri.get("product_name"))
+            ) and int(item.get("received_qty", 0)) < int(item.get("quantity", 0))), None)
+            if not li:
+                raise HTTPException(status_code=422, detail="Received item is not on this purchase order")
+            line_index = line_items.index(li)
         prev_received = int(li.get("received_qty", 0))
         ordered_qty = int(li.get("quantity", 0))
         remaining_qty = max(0, ordered_qty - prev_received)
@@ -254,6 +270,73 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
         li["status"] = "received" if li["received_qty"] >= ordered_qty else "partial"
         if li["received_qty"] < ordered_qty:
             total_all_received = False
+
+        # A ticket-owned line is only announced once its full quantity has arrived.
+        # This prevents a technician being sent an "arrived" alert for a partial
+        # shipment while retaining the receipt history on the PO line itself.
+        if (
+            li.get("status") == "received"
+            and li.get("destination_type") == "ticket"
+            and not li.get("arrival_notified")
+        ):
+            ticket = await db.tickets.find_one({"id": li.get("destination_ticket_id")}, {"_id": 0})
+            recipient_id = (ticket or {}).get("assigned_to") or li.get("destination_technician_id") or po.get("assigned_to") or "all"
+            recipient_name = (ticket or {}).get("assigned_name") or li.get("destination_technician_name") or po.get("assigned_to_name") or "the service team"
+            ticket_number = (ticket or {}).get("ticket_number") or li.get("destination_ticket_number") or "Linked ticket"
+            ticket_title = (ticket or {}).get("title") or li.get("destination_ticket_title") or ""
+            notification_type = "po_ticket_line_received"
+            already_sent = await db.notifications.find_one({
+                "type": notification_type,
+                "ref_id": po_id,
+                "line_index": line_index,
+            }, {"_id": 0, "id": 1})
+            if not already_sent:
+                await db.notifications.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "user_id": recipient_id,
+                    "title": f"Parts received for {ticket_number}",
+                    "message": f"{li.get('product_name') or 'A purchase order item'} x{ordered_qty} from {po.get('po_number', 'this PO')} is now ready for {ticket_number}{f': {ticket_title}' if ticket_title else ''}.",
+                    "severity": "success",
+                    "type": notification_type,
+                    "ref_type": "purchase_order",
+                    "ref_id": po_id,
+                    "ticket_id": li.get("destination_ticket_id"),
+                    "ticket_number": ticket_number,
+                    "line_index": line_index,
+                    "read": False,
+                    "created_at": now_iso,
+                })
+            li["arrival_notified"] = True
+            li["arrival_notification_at"] = now_iso
+            li["arrival_notification_recipient_id"] = recipient_id
+            note_exists = await db.ticket_comments.find_one({
+                "ticket_id": li.get("destination_ticket_id"),
+                "source": "purchase_order_receipt",
+                "po_id": po_id,
+                "line_index": line_index,
+            }, {"_id": 0, "id": 1})
+            if not note_exists:
+                await db.ticket_comments.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "ticket_id": li.get("destination_ticket_id"),
+                    "user_id": current_user.get("id", "system"),
+                    "user_name": current_user.get("name", "System"),
+                    "content": f"Parts received: {li.get('product_name') or 'Purchase order item'} x{ordered_qty} was receipted from {po.get('po_number', 'this purchase order')} and is ready for this ticket.",
+                    "is_internal": True,
+                    "source": "purchase_order_receipt",
+                    "po_id": po_id,
+                    "po_number": po.get("po_number", ""),
+                    "line_index": line_index,
+                    "received_quantity": ordered_qty,
+                    "created_at": now_iso,
+                })
+            notification_deliveries.append({
+                "ticket_id": li.get("destination_ticket_id"),
+                "ticket_number": ticket_number,
+                "recipient_name": recipient_name,
+                "product_name": li.get("product_name") or "Item",
+            })
+
         product = await db.products.find_one({"id": pid}, {"_id": 0})
         if product:
             stock_controlled_categories = {"hardware", "accessories", "networking", "security"}
@@ -271,8 +354,11 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
                     "id": str(uuid.uuid4()), "product_id": pid,
                     "product_name": product.get("name", ""), "type": "in",
                     "quantity": recv_qty, "previous_stock": old_stock, "new_stock": new_stock,
-                    "reason": f"Received from PO {po['po_number']}",
+                    "reason": f"Received from PO {po['po_number']}" + (f" for {li.get('destination_ticket_number') or 'linked ticket'}" if li.get("destination_type") == "ticket" else ""),
                     "reference": po_id, "po_id": po_id,
+                    "destination_type": li.get("destination_type", "stock"),
+                    "destination_ticket_id": li.get("destination_ticket_id", ""),
+                    "destination_ticket_number": li.get("destination_ticket_number", ""),
                     "created_by": current_user["id"],
                     "created_by_name": current_user.get("name", ""),
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -285,11 +371,30 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
     new_status = "received" if total_all_received else "partial"
     await db.purchase_orders.update_one({"id": po_id}, {"$set": {
         "line_items": line_items, "status": new_status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": now_iso,
     }})
     recv_summary = ", ".join(f"{ri.get('product_name', ri.get('product_id', '?'))} x{ri.get('quantity', 0)}" for ri in received_items if ri.get("quantity", 0) > 0)
     await _log_po_audit(po_id, "stock_received", f"Stock received: {recv_summary}. PO status: {new_status}", current_user)
-    return {"message": f"Stock received. PO status: {new_status}", "status": new_status}
+    for delivery in notification_deliveries:
+        await _log_po_audit(
+            po_id,
+            "ticket_parts_notified",
+            f"{delivery['product_name']} arrived for {delivery['ticket_number']}; notification sent to {delivery['recipient_name']}",
+            current_user,
+        )
+        if delivery["ticket_id"]:
+            await ticket_audit(
+                delivery["ticket_id"],
+                current_user,
+                "parts_received",
+                f"{delivery['product_name']} arrived on {po.get('po_number', 'a purchase order')}; the linked technician was notified.",
+            )
+    notification_message = f" {len(notification_deliveries)} ticket technician{'s' if len(notification_deliveries) != 1 else ''} notified." if notification_deliveries else ""
+    return {
+        "message": f"Stock received. PO status: {new_status}.{notification_message}",
+        "status": new_status,
+        "ticket_notifications": notification_deliveries,
+    }
 
 # ============== PO AUDIT LOG ==============
 
@@ -401,3 +506,40 @@ async def _log_po_audit(po_id: str, action: str, details: str, user: dict):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.po_audit_log.insert_one(log)
+
+
+async def _normalise_line_item_destinations(line_items: list[dict]) -> list[dict]:
+    """Validate and enrich each fulfilment destination before persisting a PO."""
+    normalised = []
+    for raw_line in line_items or []:
+        line = dict(raw_line)
+        destination_type = str(line.get("destination_type") or ("ticket" if line.get("destination_ticket_id") else "stock")).lower()
+        if destination_type not in {"stock", "ticket"}:
+            raise HTTPException(status_code=422, detail="Line item destination must be Stock or Ticket")
+
+        if destination_type == "ticket":
+            ticket_id = str(line.get("destination_ticket_id") or "").strip()
+            if not ticket_id:
+                raise HTTPException(status_code=422, detail="Choose a ticket for each ticket-linked line item")
+            ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+            if not ticket:
+                raise HTTPException(status_code=422, detail="The selected ticket for a line item could not be found")
+            line.update({
+                "destination_type": "ticket",
+                "destination_ticket_id": ticket_id,
+                "destination_ticket_number": ticket.get("ticket_number", ""),
+                "destination_ticket_title": ticket.get("title", ""),
+                "destination_technician_id": ticket.get("assigned_to", ""),
+                "destination_technician_name": ticket.get("assigned_name", ""),
+            })
+        else:
+            line.update({
+                "destination_type": "stock",
+                "destination_ticket_id": "",
+                "destination_ticket_number": "",
+                "destination_ticket_title": "",
+                "destination_technician_id": "",
+                "destination_technician_name": "",
+            })
+        normalised.append(line)
+    return normalised

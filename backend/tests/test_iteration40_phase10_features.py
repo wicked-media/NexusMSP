@@ -275,8 +275,9 @@ class TestRunbooks(TestAuth):
 
 
 # =============================================
-# Feature 7: Password Vault
+# Feature 7: Password Vault (retired; Keeper/Hudu are the credential sources of truth)
 # =============================================
+@pytest.mark.skip(reason="NexusMSP password vault retired in favour of Keeper and Hudu")
 class TestVault(TestAuth):
     """Test Password Vault feature"""
     
@@ -452,8 +453,9 @@ class TestBenchmarking(TestAuth):
         assert "resolution_times" in data
         assert "tech_performance" in data
         assert "overall" in data
-        assert "industry_benchmarks" in data
-        print(f"✓ Benchmarking: SLA compliance {data['overall']['sla_compliance']}% vs industry {data['overall']['industry_sla']}%")
+        assert data["comparison_source"] is None
+        assert "comparison_note" in data
+        print(f"✓ Service performance: SLA compliance {data['overall']['sla_compliance']}%")
 
 
 # =============================================

@@ -1,7 +1,11 @@
-"""Read-only audit trail assembled from persisted NexusMSP activity."""
+"""Read-only, administrator-only audit trail assembled from persisted NexusMSP activity."""
+import csv
+import io
+import json
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from app.auth import get_current_user
 from app.database import db
@@ -11,20 +15,33 @@ router = APIRouter(prefix="/audit-trail", tags=["audit-trail"])
 CATEGORIES = ["auth", "tickets", "billing", "security", "clients", "automation", "monitoring", "devices", "admin", "integrations"]
 
 
+def _require_audit_access(current_user: dict) -> None:
+    """Audit history is sensitive operational evidence and is not a staff feed."""
+    roles = {"admin", "owner", "super_admin"}
+    if current_user.get("role") not in roles and not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Administrator access is required to view the audit trail")
+
+
 def _category(entity_type: str, action: str) -> str:
     value = f"{entity_type} {action}".lower()
+    if any(token in value for token in ("login", "logout", "sign_in", "password", "token", "session", "auth")):
+        return "auth"
     if "ticket" in value:
         return "tickets"
+    if any(token in value for token in ("invoice", "payment", "billing", "purchase_order", "quote")):
+        return "billing"
+    if any(token in value for token in ("security", "defender", "firewall", "encryption", "elevate", "privilege")):
+        return "security"
+    if any(token in value for token in ("integration", "webhook", "microsoft", "xero", "pax8", "yeastar", "unifi")):
+        return "integrations"
+    if any(token in value for token in ("monitor", "alert", "huntress", "dns", "backup", "uptime")):
+        return "monitoring"
     if any(token in value for token in ("device", "agent", "software", "network")):
         return "devices"
     if any(token in value for token in ("maintenance", "workflow", "automation", "patch")):
         return "automation"
-    if any(token in value for token in ("security", "defender", "firewall", "encryption")):
-        return "security"
     if "client" in value:
         return "clients"
-    if any(token in value for token in ("invoice", "payment", "billing")):
-        return "billing"
     return "admin"
 
 
@@ -52,7 +69,8 @@ async def _events() -> list[dict]:
             "action": action, "severity": _severity(action),
             "description": log.get("details") or f"{entity_type.replace('_', ' ')} activity recorded",
             "target": log.get("entity_name") or log.get("entity_id") or "", "ip_address": None,
-            "source": "activity_log",
+            "source": "activity_log", "entity_type": entity_type, "entity_id": log.get("entity_id") or "",
+            "changes": log.get("changes") or {}, "metadata": log.get("metadata") or {},
         })
     for event in device_events:
         action = event.get("event_type") or "device_event"
@@ -61,30 +79,48 @@ async def _events() -> list[dict]:
             "user": event.get("user") or "System", "category": "devices", "action": action,
             "severity": _severity(action, event.get("severity")), "description": event.get("message") or "Device event recorded",
             "target": event.get("device_name") or event.get("device_id") or "", "ip_address": None,
-            "source": "device_event",
+            "source": "device_event", "entity_type": "device", "entity_id": event.get("device_id") or "",
+            "changes": event.get("changes") or {}, "metadata": event.get("metadata") or {},
         })
     return sorted((event for event in events if event.get("timestamp")), key=lambda event: event["timestamp"], reverse=True)
 
 
+def _filter_events(events: list[dict], *, days: int, category: str | None = None, severity: str | None = None,
+                   user: str | None = None, search: str | None = None) -> list[dict]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    filtered = [event for event in events if event["timestamp"] >= cutoff]
+    if category:
+        filtered = [event for event in filtered if event["category"] == category]
+    if severity:
+        filtered = [event for event in filtered if event["severity"] == severity]
+    if user:
+        needle = user.lower()
+        filtered = [event for event in filtered if needle in str(event.get("user") or "").lower()]
+    if search:
+        needle = search.lower()
+        filtered = [
+            event for event in filtered
+            if needle in " ".join(str(event.get(field) or "") for field in ("user", "category", "action", "description", "target", "entity_type")).lower()
+        ]
+    return filtered
+
+
 @router.get("/events")
 async def get_events(
-    category: str = Query(None), severity: str = Query(None), user: str = Query(None),
-    days: int = Query(30, ge=1, le=3650), current_user: dict = Depends(get_current_user),
+    category: str = Query(None), severity: str = Query(None), user: str = Query(None), search: str = Query(None),
+    days: int = Query(30, ge=1, le=3650), limit: int = Query(500, ge=1, le=2000), current_user: dict = Depends(get_current_user),
 ):
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    events = [event for event in await _events() if event["timestamp"] >= cutoff]
-    if category:
-        events = [event for event in events if event["category"] == category]
-    if severity:
-        events = [event for event in events if event["severity"] == severity]
-    if user:
-        events = [event for event in events if user.lower() in event["user"].lower()]
-    return events[:500]
+    _require_audit_access(current_user)
+    return _filter_events(await _events(), days=days, category=category, severity=severity, user=user, search=search)[:limit]
 
 
 @router.get("/summary")
-async def get_summary(current_user: dict = Depends(get_current_user)):
-    events = await _events()
+async def get_summary(
+    category: str = Query(None), severity: str = Query(None), user: str = Query(None), search: str = Query(None),
+    days: int = Query(30, ge=1, le=3650), current_user: dict = Depends(get_current_user),
+):
+    _require_audit_access(current_user)
+    events = _filter_events(await _events(), days=days, category=category, severity=severity, user=user, search=search)
     category_counts, user_counts = {}, {}
     severity_counts = {"info": 0, "warning": 0, "critical": 0}
     for event in events:
@@ -102,4 +138,30 @@ async def get_summary(current_user: dict = Depends(get_current_user)):
         "by_user": sorted(({"user": key, "count": count} for key, count in user_counts.items()), key=lambda item: item["count"], reverse=True)[:10],
         "categories": [category for category in CATEGORIES if category in category_counts],
         "source": "persisted-activity",
+        "window_days": days,
     }
+
+
+@router.get("/export")
+async def export_events(
+    category: str = Query(None), severity: str = Query(None), user: str = Query(None), search: str = Query(None),
+    days: int = Query(30, ge=1, le=3650), current_user: dict = Depends(get_current_user),
+):
+    """Export the exact filtered audit evidence shown in the workspace."""
+    _require_audit_access(current_user)
+    events = _filter_events(await _events(), days=days, category=category, severity=severity, user=user, search=search)
+    output = io.StringIO()
+    fields = ["timestamp", "user", "category", "action", "severity", "description", "target", "source", "entity_type", "entity_id", "ip_address", "changes", "metadata"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for event in events:
+        row = dict(event)
+        row["changes"] = json.dumps(row.get("changes") or {}, sort_keys=True, default=str)
+        row["metadata"] = json.dumps(row.get("metadata") or {}, sort_keys=True, default=str)
+        writer.writerow(row)
+    filename = f"nexus-audit-trail-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

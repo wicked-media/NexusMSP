@@ -130,11 +130,12 @@ export default function MorningChecksPage() {
       `}</style>
 
       {/* Hero Header */}
-      <div className="relative overflow-hidden rounded-2xl border border-border/30" data-testid="morning-checks-hero">
+      <section className="relative overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 md:p-6" data-testid="morning-checks-hero">
         <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/8 via-blue-500/5 to-violet-500/8" />
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, rgba(255,255,255,.15) 0px, rgba(255,255,255,.15) 1px, transparent 1px, transparent 40px)" }} />
-        <div className="relative px-6 py-5 flex items-center justify-between">
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Daily operations</p>
             <h1 className="text-2xl font-bold tracking-tight">{greeting} — <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">Daily NOC Briefing</span></h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               {now.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — Generated {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -153,7 +154,7 @@ export default function MorningChecksPage() {
             </Button>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Email Report Dialog */}
       <Dialog open={emailDialog} onOpenChange={setEmailDialog}>
@@ -217,7 +218,7 @@ export default function MorningChecksPage() {
             </button>
           )}
           {patches_pending > 0 && (
-            <button type="button" onClick={() => navigate("/patch-hub")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-amber-500/10 border-amber-500/20 text-amber-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
+            <button type="button" onClick={() => navigate("/maintenance-scheduler")} className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold bg-amber-500/10 border-amber-500/20 text-amber-400 transition-all hover:scale-[1.03] hover:shadow-lg" style={{ boxShadow: "0 0 12px rgba(0,0,0,0.1)" }}>
               <Shield className="w-3.5 h-3.5" />{patches_pending} Critical Patches<ChevronRight className="w-3 h-3 opacity-50" />
             </button>
           )}
@@ -382,7 +383,7 @@ export default function MorningChecksPage() {
           {/* Quick Stats Row */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <HeroTile label="Unassigned" value={tickets.unassigned} subtitle="Tickets awaiting triage" icon={Ticket} glow={tickets.unassigned > 0 ? "violet" : "emerald"} onClick={() => navigate("/tickets?attention=unassigned")} testId="mc-unassigned-tickets" />
-            <HeroTile label="Critical Patches" value={patches_pending} subtitle="Pending remediation" icon={Shield} glow={patches_pending > 0 ? "amber" : "emerald"} onClick={() => navigate("/patch-hub")} testId="mc-critical-patches" />
+            <HeroTile label="Critical Patches" value={patches_pending} subtitle="Pending remediation" icon={Shield} glow={patches_pending > 0 ? "amber" : "emerald"} onClick={() => navigate("/maintenance-scheduler")} testId="mc-critical-patches" />
             <HeroTile label="Recurring Due" value={recurring_due.length} subtitle="Billing runs to review" icon={DollarSign} glow={recurring_due.length > 0 ? "violet" : "emerald"} onClick={() => navigate("/recurring-invoices")} testId="mc-recurring-due" />
           </div>
 

@@ -1,40 +1,247 @@
-from fastapi import APIRouter, Depends
-from datetime import datetime, timezone, timedelta
-import uuid, os, json
-from app.database import db
+"""Evidence-backed device condition assessment.
+
+This router deliberately does not estimate failure dates from a single device
+snapshot.  It turns fresh, agent-reported telemetry into transparent threshold
+conditions and leaves forecasting, confidence and prevention metrics empty
+until a provider supplies the historical model data needed to support them.
+"""
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+
 from app.auth import get_current_user
+from app.database import db
+
 
 router = APIRouter()
 
-async def _get_ai_chat(session_id: str, system_msg: str):
-    from app.services.ai_provider import LlmChat
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
-    provider = (cfg or {}).get("provider", "anthropic")
-    model = (cfg or {}).get("model", "claude-sonnet-4-5-20250929")
-    chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
-    chat.with_model(provider, model)
-    return chat
+# A record must identify an agent/provider source before it can contribute to
+# a health score or an operational alert.  This keeps pre-migration demo rows,
+# manually-created asset records and stale unproven rows out of the console.
+TRUSTED_TELEMETRY_SOURCES = {"nexus-agent", "rmm-agent", "agent", "api-agent", "provider"}
 
-# Health scoring weights
-HEALTH_WEIGHTS = {
-    "cpu_usage": 0.2, "memory_usage": 0.2, "disk_usage": 0.25,
-    "uptime_days": 0.15, "ticket_frequency": 0.2,
-}
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _number(value: Any, *, minimum: float = 0, maximum: float = 100) -> float | None:
+    """Return a bounded observed number, never an implicit zero."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < minimum or numeric > maximum:
+        return None
+    return round(numeric, 2)
+
+
+def _first_number(record: dict, keys: tuple[str, ...], *, maximum: float = 100) -> float | None:
+    for key in keys:
+        value = _number(record.get(key), maximum=maximum)
+        if value is not None:
+            return value
+    return None
+
+
+def _telemetry_source(device: dict) -> str | None:
+    source = str(device.get("telemetry_source") or device.get("source") or "").strip().lower()
+    if source in TRUSTED_TELEMETRY_SOURCES:
+        return source
+    # The Nexus Agent mirrors its enrollment ID even if an older device row
+    # pre-dates the explicit source field.
+    if device.get("nexus_agent_id"):
+        return "nexus-agent"
+    # The generic authenticated heartbeat endpoint may not add a source label,
+    # but a recorded heartbeat is still a traceable agent observation.
+    if device.get("last_heartbeat"):
+        return "api-agent"
+    return None
+
+
+def _observed_telemetry(device: dict, recent_ticket_count: int | None = None) -> dict:
+    """Normalise only telemetry that is explicitly present on a trusted row."""
+    source = _telemetry_source(device)
+    telemetry: dict[str, Any] = {}
+    missing: list[str] = []
+
+    if not source:
+        return {
+            "source": None,
+            "observed_at": None,
+            "telemetry": telemetry,
+            "missing_signals": ["agent-backed telemetry source"],
+            "evidence_state": "not_assessed",
+        }
+
+    metric_specs = {
+        "cpu_usage": (("cpu_usage", "cpu_load"), "CPU usage"),
+        "memory_usage": (("memory_usage", "memory_pct", "ram_usage"), "memory usage"),
+        "disk_usage": (("disk_usage", "disk_pct"), "disk usage"),
+        "temperature": (("cpu_temp", "temperature"), "temperature"),
+    }
+    for output_key, (keys, label) in metric_specs.items():
+        value = _first_number(device, keys)
+        if value is None:
+            missing.append(label)
+        else:
+            telemetry[output_key] = value
+
+    uptime_days = _first_number(device, ("uptime_days",), maximum=36500)
+    if uptime_days is None:
+        uptime_seconds = _first_number(device, ("uptime_sec", "uptime_seconds"), maximum=3_153_600_000)
+        uptime_hours = _first_number(device, ("uptime_hours",), maximum=876000)
+        if uptime_seconds is not None:
+            uptime_days = round(uptime_seconds / 86400, 2)
+        elif uptime_hours is not None:
+            uptime_days = round(uptime_hours / 24, 2)
+    if uptime_days is None:
+        missing.append("uptime")
+    else:
+        telemetry["uptime_days"] = uptime_days
+
+    if recent_ticket_count is not None:
+        telemetry["recent_ticket_count"] = recent_ticket_count
+
+    observed_metrics = [key for key in ("cpu_usage", "memory_usage", "disk_usage", "temperature") if key in telemetry]
+    return {
+        "source": source,
+        "observed_at": device.get("last_heartbeat") or device.get("last_seen") or device.get("updated_at"),
+        "telemetry": telemetry,
+        "missing_signals": missing,
+        "evidence_state": "assessed" if observed_metrics else "not_assessed",
+    }
+
+
+def _ticket_is_recent(ticket: dict, *, days: int = 30) -> bool:
+    value = ticket.get("created_at") or ticket.get("opened_at")
+    if not value:
+        return False
+    try:
+        if isinstance(value, datetime):
+            timestamp = value
+        else:
+            timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp >= datetime.now(timezone.utc) - timedelta(days=days)
+    except (TypeError, ValueError):
+        return False
+
+
+def _assessment_from_observation(device: dict, observation: dict) -> dict:
+    """Create a deterministic condition assessment from observed signals."""
+    telemetry = observation["telemetry"]
+    if observation["evidence_state"] != "assessed":
+        return {
+            "device_id": device.get("id", ""),
+            "device_name": device.get("hostname") or device.get("name") or "Unnamed device",
+            "client_name": device.get("client_name", ""),
+            "health_score": None,
+            "status": "not_assessed",
+            "telemetry": telemetry,
+            "predictions": [],
+            "assessment_kind": "agent_threshold_assessment",
+            "evidence_state": "not_assessed",
+            "missing_signals": observation["missing_signals"],
+            "message": "No agent-backed CPU, memory, disk, or temperature telemetry is available for this device.",
+        }
+
+    score = 100
+    conditions: list[dict] = []
+
+    def add_condition(condition_type: str, component: str, description: str, severity: str, recommendation: str, deduction: int) -> None:
+        nonlocal score
+        score -= deduction
+        conditions.append({
+            "type": condition_type,
+            "component": component,
+            "description": description,
+            "severity": severity,
+            "recommendation": recommendation,
+            "condition_kind": "observed_threshold",
+            "detected_at": observation["observed_at"] or _now(),
+            "evidence_source": observation["source"],
+        })
+
+    disk = telemetry.get("disk_usage")
+    if disk is not None:
+        if disk > 90:
+            add_condition("disk_capacity", "Storage", f"Observed disk usage is {disk:g}%.", "critical", "Free capacity or expand storage, then verify the next agent check-in.", 35)
+        elif disk > 80:
+            add_condition("disk_capacity", "Storage", f"Observed disk usage is {disk:g}%.", "high", "Review storage growth and schedule capacity remediation.", 20)
+
+    cpu = telemetry.get("cpu_usage")
+    if cpu is not None:
+        if cpu > 90:
+            add_condition("cpu_pressure", "CPU", f"Observed CPU usage is {cpu:g}%.", "high", "Inspect the active process load and confirm whether the next check-in remains elevated.", 25)
+        elif cpu > 80:
+            add_condition("cpu_pressure", "CPU", f"Observed CPU usage is {cpu:g}%.", "medium", "Review process load and corroborate the condition with a second check-in.", 12)
+
+    memory = telemetry.get("memory_usage")
+    if memory is not None:
+        if memory > 90:
+            add_condition("memory_pressure", "Memory", f"Observed memory usage is {memory:g}%.", "high", "Inspect memory-consuming processes and confirm the condition at the next check-in.", 20)
+        elif memory > 85:
+            add_condition("memory_pressure", "Memory", f"Observed memory usage is {memory:g}%.", "medium", "Review the active workload before planning a memory change.", 12)
+
+    temperature = telemetry.get("temperature")
+    if temperature is not None:
+        if temperature > 75:
+            add_condition("thermal", "CPU / chassis", f"Observed temperature is {temperature:g}°C.", "high", "Check cooling, airflow, and sensor validity before making a hardware decision.", 15)
+        elif temperature > 65:
+            add_condition("thermal", "CPU / chassis", f"Observed temperature is {temperature:g}°C.", "medium", "Review cooling and corroborate the next reported temperature.", 8)
+
+    tickets = telemetry.get("recent_ticket_count")
+    if isinstance(tickets, int) and tickets > 3:
+        add_condition("recurring_incidents", "Service history", f"{tickets} linked tickets were created in the last 30 days.", "medium", "Review the linked ticket history for a common root cause.", min(20, tickets * 3))
+
+    score = max(0, min(100, score))
+    status = "healthy" if score >= 70 else "warning" if score >= 40 else "critical"
+    return {
+        "device_id": device.get("id", ""),
+        "device_name": device.get("hostname") or device.get("name") or "Unnamed device",
+        "client_name": device.get("client_name", ""),
+        "health_score": score,
+        "status": status,
+        "telemetry": telemetry,
+        # Kept for API compatibility. These are observed conditions, not
+        # forecasts or promises of a future failure date.
+        "predictions": conditions,
+        "assessment_kind": "agent_threshold_assessment",
+        "evidence_state": "assessed",
+        "evidence_source": observation["source"],
+        "observed_at": observation["observed_at"],
+        "missing_signals": observation["missing_signals"],
+        "analyzed_at": _now(),
+        "message": "Assessment uses the latest agent-reported thresholds. Failure-date forecasting requires validated historical provider data.",
+    }
+
+
+def _trusted_health(record: dict) -> bool:
+    return record.get("evidence_state") == "assessed" and str(record.get("source") or record.get("evidence_source") or "").lower() in TRUSTED_TELEMETRY_SOURCES
+
+
+def _trusted_alert(record: dict) -> bool:
+    return str(record.get("source") or record.get("evidence_source") or "").lower() in TRUSTED_TELEMETRY_SOURCES and record.get("condition_kind") == "observed_threshold"
 
 
 @router.get("/predictive/dashboard")
 async def predictive_dashboard(current_user: dict = Depends(get_current_user)):
-    """Get predictive maintenance dashboard data."""
-    alerts = await db.predictive_alerts.find({}, {"_id": 0}).sort("predicted_failure_date", 1).to_list(100)
-    active_alerts = [a for a in alerts if a.get("status") == "active"]
-    resolved_alerts = [a for a in alerts if a.get("status") == "resolved"]
-
-    # Device health scores
-    health_scores = await db.device_health.find({}, {"_id": 0}).sort("health_score", 1).to_list(200)
-    critical_devices = [d for d in health_scores if d.get("health_score", 100) < 40]
+    """Return only agent/provider-backed device condition assessments."""
+    health_rows = await db.device_health.find({}, {"_id": 0}).sort("health_score", 1).to_list(500)
+    health_scores = [row for row in health_rows if _trusted_health(row)]
+    alerts_rows = await db.predictive_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    alerts = [row for row in alerts_rows if _trusted_alert(row)]
+    active_alerts = [row for row in alerts if row.get("status") == "active"]
+    resolved_alerts = [row for row in alerts if row.get("status") == "resolved"]
+    critical_devices = [row for row in health_scores if isinstance(row.get("health_score"), (int, float)) and row["health_score"] < 40]
+    values = [row["health_score"] for row in health_scores if isinstance(row.get("health_score"), (int, float))]
 
     return {
         "active_alerts": len(active_alerts),
@@ -43,379 +250,203 @@ async def predictive_dashboard(current_user: dict = Depends(get_current_user)):
         "total_monitored": len(health_scores),
         "alerts": active_alerts[:20],
         "at_risk_devices": critical_devices[:10],
-        "avg_health": round(sum(d.get("health_score", 100) for d in health_scores) / max(len(health_scores), 1), 1),
+        "avg_health": round(sum(values) / len(values), 1) if values else None,
+        "evidence_state": "assessed" if health_scores else "not_assessed",
+        "message": "No agent-backed device assessments are available yet." if not health_scores else "Health scores are based on the latest agent-reported thresholds.",
     }
 
 
 @router.get("/predictive/device/{device_id}")
 async def get_device_prediction(device_id: str, current_user: dict = Depends(get_current_user)):
-    """Get predictive analysis for a specific device."""
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
-        return {"error": "Device not found"}
+        raise HTTPException(status_code=404, detail="Device not found")
 
     health = await db.device_health.find_one({"device_id": device_id}, {"_id": 0})
-    alerts = await db.predictive_alerts.find({"device_id": device_id, "status": "active"}, {"_id": 0}).to_list(10)
-    history = await db.device_health_history.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(30)
-
+    if not _trusted_health(health or {}):
+        health = _assessment_from_observation(device, _observed_telemetry(device))
+    alert_rows = await db.predictive_alerts.find({"device_id": device_id, "status": "active"}, {"_id": 0}).to_list(50)
+    history_rows = await db.device_health_history.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(30)
     return {
         "device": device,
-        "health": health or {"health_score": 100, "status": "healthy"},
-        "alerts": alerts,
-        "health_history": history,
+        "health": health,
+        "alerts": [row for row in alert_rows if _trusted_alert(row)],
+        "health_history": [row for row in history_rows if _trusted_health(row)],
+        "evidence_state": health.get("evidence_state", "not_assessed"),
     }
 
 
 @router.post("/predictive/analyze/{device_id}")
 async def analyze_device(device_id: str, current_user: dict = Depends(get_current_user)):
-    """AI-powered predictive analysis for a device."""
+    """Assess real agent telemetry; never fabricate an analysis for an asset row."""
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
-        return {"error": "Device not found"}
+        raise HTTPException(status_code=404, detail="Device not found")
+    ticket_rows = await db.tickets.find({"device_id": device_id}, {"_id": 0, "created_at": 1, "opened_at": 1}).sort("created_at", -1).to_list(100)
+    recent_ticket_count = sum(1 for ticket in ticket_rows if _ticket_is_recent(ticket))
+    assessment = _assessment_from_observation(device, _observed_telemetry(device, recent_ticket_count))
+    if assessment["evidence_state"] != "assessed":
+        return assessment
 
-    # Get recent tickets for this device
-    tickets = await db.tickets.find(
-        {"device_id": device_id}, {"_id": 0, "title": 1, "priority": 1, "created_at": 1, "status": 1}
-    ).sort("created_at", -1).to_list(10)
-
-    # Simulate telemetry (in real RMM, this comes from agents)
-    import random
-    telemetry = {
-        "cpu_usage": device.get("cpu_usage", random.randint(20, 90)),
-        "memory_usage": device.get("memory_usage", random.randint(30, 85)),
-        "disk_usage": device.get("disk_usage", random.randint(40, 95)),
-        "uptime_days": device.get("uptime_days", random.randint(1, 365)),
-        "temperature": device.get("temperature", random.randint(35, 80)),
-        "recent_ticket_count": len(tickets),
-    }
-
-    # Calculate health score
-    score = 100
-    if telemetry["cpu_usage"] > 80:
-        score -= 15
-    if telemetry["cpu_usage"] > 90:
-        score -= 10
-    if telemetry["memory_usage"] > 85:
-        score -= 15
-    if telemetry["disk_usage"] > 80:
-        score -= 20
-    if telemetry["disk_usage"] > 90:
-        score -= 15
-    if telemetry["temperature"] > 70:
-        score -= 10
-    if telemetry["recent_ticket_count"] > 3:
-        score -= telemetry["recent_ticket_count"] * 5
-    score = max(0, min(100, score))
-
-    status = "healthy" if score >= 70 else "warning" if score >= 40 else "critical"
-
-    # Generate predictions
-    predictions = []
-    if telemetry["disk_usage"] > 80:
-        days_to_full = max(1, int((100 - telemetry["disk_usage"]) / 0.5))
-        predictions.append({
-            "type": "disk_failure", "component": "Storage",
-            "description": f"Disk at {telemetry['disk_usage']}% - predicted full in ~{days_to_full} days",
-            "predicted_date": (datetime.now(timezone.utc) + timedelta(days=days_to_full)).isoformat(),
-            "severity": "critical" if telemetry["disk_usage"] > 90 else "high",
-            "recommendation": "Clean up disk space or replace drive",
-        })
-    if telemetry["temperature"] > 65:
-        predictions.append({
-            "type": "thermal", "component": "CPU/System",
-            "description": f"Temperature at {telemetry['temperature']}C - risk of thermal throttling",
-            "severity": "high" if telemetry["temperature"] > 75 else "medium",
-            "recommendation": "Check cooling system, clean dust, improve airflow",
-        })
-    if telemetry["memory_usage"] > 85:
-        predictions.append({
-            "type": "memory", "component": "RAM",
-            "description": f"Memory consistently at {telemetry['memory_usage']}% - performance degradation likely",
-            "severity": "medium",
-            "recommendation": "Identify memory-heavy processes or upgrade RAM",
-        })
-    if telemetry["recent_ticket_count"] > 3:
-        predictions.append({
-            "type": "recurring_issues", "component": "System",
-            "description": f"{telemetry['recent_ticket_count']} tickets in recent period - indicates systemic issue",
-            "severity": "high",
-            "recommendation": "Root cause analysis needed - possible hardware failure",
-        })
-
-    # Store health data
     health_doc = {
-        "device_id": device_id,
-        "device_name": device.get("hostname", device.get("name", "")),
-        "client_name": device.get("client_name", ""),
-        "health_score": score,
-        "status": status,
-        "telemetry": telemetry,
-        "predictions": predictions,
-        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        **assessment,
+        "source": assessment["evidence_source"],
+        "updated_by": current_user.get("id") or current_user.get("email") or "",
     }
     await db.device_health.update_one({"device_id": device_id}, {"$set": health_doc}, upsert=True)
-
-    # Store history point
     await db.device_health_history.insert_one({
         "device_id": device_id,
-        "health_score": score, "telemetry": telemetry,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "health_score": assessment["health_score"],
+        "telemetry": assessment["telemetry"],
+        "evidence_state": "assessed",
+        "source": assessment["evidence_source"],
+        "timestamp": assessment["analyzed_at"],
     })
 
-    # Create alerts for critical predictions
-    for pred in predictions:
-        if pred["severity"] in ["critical", "high"]:
-            alert_id = str(uuid.uuid4())[:8]
-            await db.predictive_alerts.update_one(
-                {"device_id": device_id, "type": pred["type"], "status": "active"},
-                {"$set": {
-                    "id": alert_id, "device_id": device_id,
-                    "device_name": device.get("hostname", ""),
-                    "client_name": device.get("client_name", ""),
-                    "type": pred["type"], "component": pred["component"],
-                    "description": pred["description"], "severity": pred["severity"],
-                    "recommendation": pred["recommendation"],
-                    "predicted_failure_date": pred.get("predicted_date", ""),
-                    "status": "active",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }},
-                upsert=True,
-            )
+    active_types = {condition["type"] for condition in assessment["predictions"] if condition["severity"] in {"critical", "high"}}
+    for condition in assessment["predictions"]:
+        if condition["type"] not in active_types:
+            continue
+        await db.predictive_alerts.update_one(
+            {"device_id": device_id, "type": condition["type"], "status": "active", "source": assessment["evidence_source"]},
+            {"$set": {
+                "device_id": device_id,
+                "device_name": assessment["device_name"], "client_name": assessment["client_name"],
+                "type": condition["type"], "component": condition["component"],
+                "description": condition["description"], "severity": condition["severity"],
+                "recommendation": condition["recommendation"], "condition_kind": "observed_threshold",
+                "evidence_source": assessment["evidence_source"], "source": assessment["evidence_source"],
+                "status": "active", "created_at": _now(), "last_observed_at": assessment.get("observed_at"),
+            }, "$setOnInsert": {"id": str(uuid.uuid4())}},
+            upsert=True,
+        )
 
+    # A recovered observed condition should not remain active after a verified
+    # re-assessment.  This only touches alerts created by this workflow.
+    await db.predictive_alerts.update_many(
+        {"device_id": device_id, "source": assessment["evidence_source"], "status": "active", "type": {"$nin": list(active_types)}},
+        {"$set": {"status": "cleared", "cleared_at": _now(), "cleared_by": "agent reassessment"}},
+    )
     return health_doc
 
 
 @router.post("/predictive/analyze-all")
 async def analyze_all_devices(current_user: dict = Depends(get_current_user)):
-    """Analyze all devices for predictive maintenance."""
-    devices = await db.devices.find({}, {"_id": 0, "id": 1, "hostname": 1}).to_list(100)
+    devices = await db.devices.find({}, {"_id": 0, "id": 1, "hostname": 1}).to_list(500)
     results = []
-    for d in devices[:30]:  # Limit to avoid timeout
+    for device in devices[:100]:
         try:
-            r = await analyze_device(d["id"], current_user)
-            results.append({"device_id": d["id"], "name": d.get("hostname", ""), "score": r.get("health_score", 100)})
+            result = await analyze_device(device["id"], current_user)
+            results.append({
+                "device_id": device["id"], "name": device.get("hostname", ""),
+                "status": result.get("status"), "evidence_state": result.get("evidence_state"),
+                "score": result.get("health_score"),
+            })
         except Exception:
-            results.append({"device_id": d["id"], "error": True})
-    return {"analyzed": len(results), "results": results}
+            results.append({"device_id": device["id"], "name": device.get("hostname", ""), "status": "error", "evidence_state": "not_assessed"})
+    assessed = [result for result in results if result.get("evidence_state") == "assessed"]
+    return {
+        "analyzed": len(assessed),
+        "not_assessed": len(results) - len(assessed),
+        "results": results,
+        "message": "Only devices with agent-backed telemetry were assessed.",
+    }
 
 
 @router.put("/predictive/alert/{alert_id}/resolve")
 async def resolve_alert(alert_id: str, current_user: dict = Depends(get_current_user)):
-    """Resolve a predictive maintenance alert."""
+    existing = await db.predictive_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not existing or not _trusted_alert(existing):
+        raise HTTPException(status_code=404, detail="Agent-backed condition alert not found")
     await db.predictive_alerts.update_one({"id": alert_id}, {"$set": {
-        "status": "resolved",
-        "resolved_at": datetime.now(timezone.utc).isoformat(),
-        "resolved_by": current_user.get("name", ""),
+        "status": "resolved", "resolved_at": _now(),
+        "resolved_by": current_user.get("name") or current_user.get("email") or current_user.get("id", ""),
     }})
     return {"message": "Alert resolved"}
 
 
-# ============================================================
-# Predictive Failure (merged from predictive_failure.py)
-# ============================================================
-import random as _rand
-_pf_rand = _rand.SystemRandom()
+# Predictive Failure -----------------------------------------------------------------
+
+def _trusted_failure_prediction(record: dict) -> bool:
+    source = str(record.get("source") or record.get("evidence_source") or "").lower()
+    return source in TRUSTED_TELEMETRY_SOURCES and bool(record.get("prediction")) and bool(record.get("created_at"))
 
 
 @router.get("/predictive-failure/overview")
 async def predictive_failure_overview(current_user: dict = Depends(get_current_user)):
-    predictions = await db.failure_predictions.find({}, {"_id": 0}).sort("predicted_failure_date", 1).to_list(100)
-    if not predictions:
-        predictions = await _seed_failure_predictions()
+    """Return provider-backed forecasts only; legacy generated rows are ignored."""
+    rows = await db.failure_predictions.find({}, {"_id": 0}).sort("predicted_failure_date", 1).to_list(500)
+    predictions = [row for row in rows if _trusted_failure_prediction(row)]
+    summary = {
+        "total_predictions": len(predictions),
+        "critical": sum(1 for row in predictions if row.get("risk_level") == "critical"),
+        "high": sum(1 for row in predictions if row.get("risk_level") == "high"),
+        "medium": sum(1 for row in predictions if row.get("risk_level") == "medium"),
+        "prevented_this_month": None,
+        "accuracy_pct": None,
+        "evidence_state": "provider_backed" if predictions else "not_configured",
+    }
     return {
         "predictions": predictions,
-        "summary": {
-            "total_predictions": len(predictions),
-            "critical": len([p for p in predictions if p.get("risk_level") == "critical"]),
-            "high": len([p for p in predictions if p.get("risk_level") == "high"]),
-            "medium": len([p for p in predictions if p.get("risk_level") == "medium"]),
-            "prevented_this_month": _pf_rand.randint(3, 8),
-            "accuracy_pct": 87.3,
-        },
+        "summary": summary,
+        "message": "No provider-backed failure forecasts are configured. NexusMSP will show observed agent conditions in Device Monitoring until a validated predictive provider is connected." if not predictions else "Forecasts are supplied by the recorded provider source.",
     }
 
 
-async def _seed_failure_predictions():
-    devices = await db.devices.find({"type": {"$in": ["server", "workstation"]}}, {"_id": 0, "id": 1, "name": 1, "client_name": 1, "type": 1}).to_list(50)
-    preds = []
-    templates = [
-        ("SMART: Reallocated sectors increasing", "disk_failure", "critical", 3),
-        ("Fan speed dropping, thermal throttling detected", "hardware_failure", "high", 14),
-        ("Battery degradation at 23% capacity", "battery_failure", "medium", 30),
-        ("RAM ECC errors increasing exponentially", "memory_failure", "critical", 7),
-        ("PSU voltage fluctuations detected", "psu_failure", "high", 10),
-        ("SSD write cycles at 89% of rated endurance", "ssd_wear", "medium", 60),
-        ("Network adapter CRC errors trending up", "nic_failure", "medium", 21),
-        ("CPU temperature baseline shifted +15C", "cooling_failure", "high", 5),
-    ]
-    for desc, ftype, risk, days in templates:
-        d = _pf_rand.choice(devices) if devices else {"id": "?", "name": "UNKNOWN", "client_name": "Unknown"}
-        p = {
-            "id": f"pf-{uuid.uuid4().hex[:8]}", "device_id": d.get("id"),
-            "device_name": d.get("name"), "client_name": d.get("client_name"),
-            "prediction": desc, "failure_type": ftype, "risk_level": risk,
-            "confidence_pct": _pf_rand.randint(72, 96),
-            "predicted_failure_date": (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d"),
-            "days_until_failure": days,
-            "data_points_analyzed": _pf_rand.randint(500, 5000),
-            "recommended_action": f"Schedule replacement within {days} days",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+# Predictive Maintenance -------------------------------------------------------------
+
+def _maintenance_assessment(device: dict) -> dict:
+    observation = _observed_telemetry(device)
+    assessment = _assessment_from_observation(device, observation)
+    if assessment["evidence_state"] != "assessed":
+        return {
+            "risk_score": None, "risk_level": "not_assessed", "risk_factors": [],
+            "recommendations": ["Enroll the endpoint with a reporting agent and wait for a telemetry check-in."],
+            "predicted_failure_window": None, "predicted_failure_date": None, "confidence": None,
+            "assessment_kind": "agent_threshold_assessment", "evidence_state": "not_assessed",
+            "missing_signals": assessment["missing_signals"],
         }
-        preds.append(p)
-        await db.failure_predictions.insert_one(p)
-    return [{k: v for k, v in p.items() if k != "_id"} for p in preds]
-
-
-# ============================================================
-# Predictive Maintenance (merged from predictive_maintenance.py)
-# ============================================================
-from fastapi import HTTPException
-
-
-def _calculate_failure_risk(device: dict) -> dict:
-    risk_score = 0
-    risk_factors = []
-    recommendations = []
-
-    age_days = 0
-    if device.get("created_at"):
-        try:
-            created = datetime.fromisoformat(device["created_at"]) if isinstance(device["created_at"], str) else device["created_at"]
-            age_days = (datetime.now(timezone.utc) - (created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created)).days
-        except Exception:
-            age_days = 365
-
-    if age_days > 1825:
-        risk_score += 35
-        risk_factors.append("Device is over 5 years old - beyond typical lifecycle")
-        recommendations.append("Plan hardware replacement within 3 months")
-    elif age_days > 1095:
-        risk_score += 20
-        risk_factors.append("Device is over 3 years old - entering high-risk period")
-        recommendations.append("Schedule preventive maintenance check")
-    elif age_days > 730:
-        risk_score += 10
-        risk_factors.append("Device is over 2 years old")
-
-    device_type = device.get("device_type", "").lower()
-    if device_type in ["server", "nas", "storage"]:
-        risk_score += 10
-        risk_factors.append("Server/storage devices have higher failure rates under load")
-        recommendations.append("Verify RAID health and backup status")
-
-    if device.get("status") == "offline":
-        risk_score += 15
-        risk_factors.append("Device is currently offline - may indicate hardware issue")
-        recommendations.append("Investigate offline status immediately")
-
-    os_name = (device.get("os_name") or device.get("os") or "").lower()
-    if "windows 7" in os_name or "windows 8" in os_name or "xp" in os_name:
-        risk_score += 15
-        risk_factors.append("Running outdated/unsupported OS")
-        recommendations.append("Upgrade to supported operating system")
-
-    alert_count = device.get("alert_count", 0)
-    if alert_count > 10:
-        risk_score += 20
-        risk_factors.append(f"High alert count ({alert_count}) indicates recurring issues")
-        recommendations.append("Review and resolve recurring alerts")
-    elif alert_count > 5:
-        risk_score += 10
-        risk_factors.append(f"Moderate alert count ({alert_count})")
-
-    cpu_usage = device.get("cpu_usage", 0)
-    ram_usage = device.get("ram_usage", 0)
-    disk_usage = device.get("disk_usage", 0)
-
-    if disk_usage > 90:
-        risk_score += 20
-        risk_factors.append(f"Critical disk usage at {disk_usage}%")
-        recommendations.append("Free disk space or expand storage immediately")
-    elif disk_usage > 80:
-        risk_score += 10
-        risk_factors.append(f"High disk usage at {disk_usage}%")
-        recommendations.append("Plan disk cleanup or storage expansion")
-
-    if cpu_usage > 90:
-        risk_score += 10
-        risk_factors.append(f"CPU consistently running at {cpu_usage}%")
-        recommendations.append("Investigate high CPU processes")
-
-    if ram_usage > 90:
-        risk_score += 10
-        risk_factors.append(f"RAM usage at {ram_usage}%")
-        recommendations.append("Consider RAM upgrade")
-
-    risk_score = min(risk_score, 100)
-
-    if risk_score >= 70:
-        risk_level = "critical"
-        predicted_days = _pf_rand.randint(7, 30)
-    elif risk_score >= 50:
-        risk_level = "high"
-        predicted_days = _pf_rand.randint(30, 90)
-    elif risk_score >= 30:
-        risk_level = "medium"
-        predicted_days = _pf_rand.randint(90, 180)
+    score = max(0, 100 - int(assessment["health_score"]))
+    if score >= 60:
+        level = "critical"
+    elif score >= 30:
+        level = "high"
+    elif score > 0:
+        level = "medium"
     else:
-        risk_level = "low"
-        predicted_days = _pf_rand.randint(180, 365)
-
-    if not recommendations:
-        recommendations.append("Device is in good health - continue regular monitoring")
-
+        level = "low"
     return {
-        "risk_score": risk_score,
-        "risk_level": risk_level,
-        "risk_factors": risk_factors,
-        "recommendations": recommendations,
-        "predicted_failure_window": f"{predicted_days} days",
-        "predicted_failure_date": (datetime.now(timezone.utc) + timedelta(days=predicted_days)).strftime("%Y-%m-%d"),
-        "confidence": min(95, 60 + len(risk_factors) * 5),
+        "risk_score": score,
+        "risk_level": level,
+        "risk_factors": [condition["description"] for condition in assessment["predictions"]],
+        "recommendations": [condition["recommendation"] for condition in assessment["predictions"]] or ["No threshold conditions were observed in the latest agent check-in."],
+        "predicted_failure_window": None,
+        "predicted_failure_date": None,
+        "confidence": None,
+        "assessment_kind": "agent_threshold_assessment",
+        "evidence_state": "assessed",
+        "missing_signals": assessment["missing_signals"],
+        "telemetry": assessment["telemetry"],
     }
 
 
 @router.get("/predictive-maintenance/dashboard")
 async def get_predictive_maintenance_dashboard(current_user: dict = Depends(get_current_user)):
     devices = await db.devices.find({}, {"_id": 0}).to_list(500)
-
     analyses = []
-    critical_count = 0
-    high_count = 0
-    medium_count = 0
-    low_count = 0
-
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "not_assessed": 0}
     for device in devices:
-        analysis = _calculate_failure_risk(device)
+        analysis = _maintenance_assessment(device)
+        counts[analysis["risk_level"]] += 1
         analyses.append({
-            "device_id": device["id"],
-            "device_name": device.get("name", "Unknown"),
-            "client_name": device.get("client_name", ""),
-            "device_type": device.get("device_type", ""),
-            "status": device.get("status", "unknown"),
-            **analysis,
+            "device_id": device.get("id", ""), "device_name": device.get("name") or device.get("hostname") or "Unnamed device",
+            "client_name": device.get("client_name", ""), "device_type": device.get("device_type", ""),
+            "status": device.get("status", "unknown"), **analysis,
         })
-        if analysis["risk_level"] == "critical":
-            critical_count += 1
-        elif analysis["risk_level"] == "high":
-            high_count += 1
-        elif analysis["risk_level"] == "medium":
-            medium_count += 1
-        else:
-            low_count += 1
-
-    analyses.sort(key=lambda x: x["risk_score"], reverse=True)
-
+    analyses.sort(key=lambda item: item["risk_score"] if item["risk_score"] is not None else -1, reverse=True)
     return {
-        "total_devices": len(devices),
-        "risk_summary": {
-            "critical": critical_count,
-            "high": high_count,
-            "medium": medium_count,
-            "low": low_count,
-        },
-        "devices": analyses[:50],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_devices": len(devices), "risk_summary": counts, "devices": analyses[:50],
+        "generated_at": _now(), "message": "This view reports current agent threshold conditions, not estimated failure dates.",
     }
 
 
@@ -424,22 +455,14 @@ async def get_predictive_maintenance_device(device_id: str, current_user: dict =
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-
-    analysis = _calculate_failure_risk(device)
-    alerts = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(20)
-    tickets = await db.tickets.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(10)
-
+    alert_rows = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(20)
+    ticket_rows = await db.tickets.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(10)
     return {
         "device": {
-            "id": device["id"],
-            "name": device.get("name", ""),
-            "client_name": device.get("client_name", ""),
-            "device_type": device.get("device_type", ""),
-            "os": device.get("os_name") or device.get("os", ""),
-            "status": device.get("status", ""),
+            "id": device["id"], "name": device.get("name") or device.get("hostname") or "",
+            "client_name": device.get("client_name", ""), "device_type": device.get("device_type", ""),
+            "os": device.get("os_name") or device.get("os", ""), "status": device.get("status", ""),
         },
-        "prediction": analysis,
-        "recent_alerts": len(alerts),
-        "recent_tickets": len(tickets),
-        "maintenance_history": [],
+        "prediction": _maintenance_assessment(device),
+        "recent_alerts": len(alert_rows), "recent_tickets": len(ticket_rows), "maintenance_history": [],
     }

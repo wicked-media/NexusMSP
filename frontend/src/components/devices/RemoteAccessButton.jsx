@@ -10,13 +10,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
-  Play, RefreshCw, ChevronDown, Server, Monitor, Settings, ExternalLink,
+  Play, RefreshCw, ChevronDown, Monitor, Settings, ExternalLink,
   XCircle, MonitorSmartphone,
 } from "lucide-react";
 import { API, useAuth } from "@/App";
 
 const PROVIDER_LABEL = {
-  trmm: "Tactical RMM (MeshCentral)",
   rustdesk: "RustDesk",
   meshcentral: "MeshCentral",
   splashtop: "Splashtop",
@@ -27,7 +26,6 @@ const PROVIDER_LABEL = {
 };
 
 const PROVIDER_ICON = {
-  trmm: Server,
   rustdesk: MonitorSmartphone,
   meshcentral: Monitor,
 };
@@ -39,7 +37,7 @@ const PROVIDER_ICON = {
  * this device. When multiple providers are available, opens a dropdown so the
  * tech can choose. Falls back to a "Configure" CTA when nothing is set up.
  */
-export default function RemoteAccessButton({ device, status, onLaunchRustDesk, onLaunchTrmm, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
+export default function RemoteAccessButton({ device, status, onLaunchRustDesk, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -71,13 +69,10 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
   const isOffline = status === "offline";
 
   // Determine which providers actually apply to THIS device right now.
-  const trmmCfg = providers.find(p => p.id === "trmm");
   const rdCfg = providers.find(p => p.id === "rustdesk");
   const splashtopCfg = providers.find(p => p.id === "splashtop");
-  const otherCfg = providers.filter(p => !["trmm", "rustdesk"].includes(p.id));
+  const otherCfg = providers.filter(p => !["trmm", "rustdesk", "splashtop"].includes(p.id));
 
-  const trmmReady = !!trmmCfg && !!device?.trmm_agent_id;
-  const trmmLinkable = !!trmmCfg && !device?.trmm_agent_id;
   const rdReady = !!rdCfg && !!device?.rustdesk_id;
   const splashtopId = device?.remote_provider_ids?.splashtop || device?.splashtop_id || device?.splashtop_uuid;
   const splashtopReady = !!splashtopCfg && !!splashtopId;
@@ -95,7 +90,6 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
       setSession(res.data);
       setPendingProvider(null);
       if (pendingProvider === "rustdesk") onLaunchRustDesk?.();
-      if (pendingProvider === "trmm") onLaunchTrmm?.();
       if (pendingProvider === "splashtop") toast.info(res.data.message);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Unable to start remote session");
@@ -111,11 +105,10 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
     } catch { toast.error("Unable to close the remote session record"); }
   };
 
-  // Pick a primary path — TRMM-FIRST always
+  // Use only configured, supported remote providers. The old TRMM path was
+  // retired with the legacy agent and must never appear as a working option.
   let primary = null;
-  if (trmmReady) primary = { id: "trmm", label: compact ? "Remote" : "Remote (TRMM)", action: () => requestProvider("trmm") };
-  else if (trmmCfg && !device?.trmm_agent_id) primary = { id: "trmm-link", label: compact ? "Link & Remote" : "Link TRMM agent", action: onLaunchTrmm };
-  else if (rdReady) primary = { id: "rustdesk", label: compact ? "Remote" : "Remote (RustDesk)", action: () => requestProvider("rustdesk") };
+  if (rdReady) primary = { id: "rustdesk", label: compact ? "Remote" : "Remote (RustDesk)", action: () => requestProvider("rustdesk") };
   else if (splashtopReady) primary = { id: "splashtop", label: compact ? "Remote" : "Remote (Splashtop)", action: () => requestProvider("splashtop") };
   else if (otherCfg.length === 1) primary = { id: otherCfg[0].id, label: compact ? "Remote" : `Remote (${otherCfg[0].name})`, action: () => toast.info(`${otherCfg[0].name} provider — open from Settings → Remote Providers`) };
 
@@ -158,8 +151,8 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
     );
   }
 
-  // Offline indicator (still allow dropdown for queued actions / TRMM scheduling)
-  if (isOffline && primary?.id !== "trmm-link") {
+  // Remote sessions are only available when the endpoint is live.
+  if (isOffline) {
     return (
       <Button size="sm" variant="outline" disabled className={sizeCls} data-testid={`${testid}-offline`}>
         <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Offline
@@ -169,12 +162,9 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
 
   // Render: primary button + dropdown if multiple options or fallback choices exist
   const hasAlternatives = (
-    (trmmReady && (rdReady || splashtopReady)) ||
-    (trmmReady && otherCfg.length > 0) ||
-    (rdReady && (otherCfg.length > 0 || trmmCfg || splashtopReady)) ||
+    (rdReady && (otherCfg.length > 0 || splashtopReady)) ||
     splashtopReady ||
-    otherCfg.length > 0 ||
-    trmmLinkable
+    otherCfg.length > 0
   );
 
   const PrimaryIcon = PROVIDER_ICON[primary?.id] || Play;
@@ -208,19 +198,6 @@ export default function RemoteAccessButton({ device, status, onLaunchRustDesk, o
           <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground">Remote providers</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {trmmCfg && (
-              <DropdownMenuItem
-                onClick={() => requestProvider("trmm")}
-                disabled={busy}
-                data-testid={`${testid}-opt-trmm`}
-              >
-                <Server className="w-4 h-4 mr-2 text-emerald-500" />
-                <div className="flex-1">
-                  <div className="text-sm">Tactical RMM</div>
-                  <div className="text-[10px] text-muted-foreground">{device?.trmm_agent_id ? "Linked agent · MeshCentral" : "Link an agent first"}</div>
-                </div>
-              </DropdownMenuItem>
-            )}
             {rdCfg && (
               <DropdownMenuItem
                 onClick={() => requestProvider("rustdesk")}

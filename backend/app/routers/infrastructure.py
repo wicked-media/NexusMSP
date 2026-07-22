@@ -53,46 +53,7 @@ async def get_proxmox_vms(server_id: Optional[str] = None, status: Optional[str]
         query["server_id"] = server_id
     if status:
         query["status"] = status
-    vms = await db.proxmox_vms.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
-    # Return demo data if no VMs in database
-    if not vms:
-        import random
-        vm_templates = [
-            {"name": "DC-PRIMARY", "os": "Windows Server 2022", "type": "vm", "vcpu": 4, "ram_gb": 16, "disk_gb": 120, "status": "running"},
-            {"name": "WEB-SERVER-01", "os": "Ubuntu 22.04", "type": "vm", "vcpu": 2, "ram_gb": 8, "disk_gb": 80, "status": "running"},
-            {"name": "SQL-DB-01", "os": "Windows Server 2019", "type": "vm", "vcpu": 8, "ram_gb": 32, "disk_gb": 500, "status": "running"},
-            {"name": "FILE-SERVER", "os": "Windows Server 2022", "type": "vm", "vcpu": 2, "ram_gb": 8, "disk_gb": 2000, "status": "running"},
-            {"name": "EXCHANGE-01", "os": "Windows Server 2019", "type": "vm", "vcpu": 4, "ram_gb": 16, "disk_gb": 250, "status": "stopped"},
-            {"name": "BACKUP-SRV", "os": "Ubuntu 24.04", "type": "vm", "vcpu": 2, "ram_gb": 4, "disk_gb": 4000, "status": "running"},
-            {"name": "DEV-CONTAINER", "os": "Debian 12", "type": "lxc", "vcpu": 1, "ram_gb": 2, "disk_gb": 20, "status": "running"},
-            {"name": "MONITORING", "os": "Ubuntu 22.04", "type": "lxc", "vcpu": 1, "ram_gb": 4, "disk_gb": 50, "status": "running"},
-        ]
-        pve_nodes = ["node-1", "node-2", "node-3"]
-        clients_list = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
-        demo_vms = []
-        for i, t in enumerate(vm_templates):
-            c = clients_list[i % len(clients_list)] if clients_list else {"id": "", "name": ""}
-            vm = {
-                "id": f"vm-{100+i}",
-                "vmid": 100 + i,
-                "node_id": pve_nodes[i % len(pve_nodes)],
-                "node_name": f"pve-node0{(i % 3) + 1}",
-                "client_id": c["id"],
-                "client_name": c.get("name", ""),
-                **t,
-                "cpu_usage": round(random.uniform(5, 85), 1),
-                "memory_usage": round(random.uniform(20, 90), 1),
-                "disk_usage": round(random.uniform(15, 75), 1),
-                "uptime_seconds": random.randint(3600, 2592000),
-                "ip_address": f"10.0.{i+1}.{random.randint(2,200)}",
-                "backup_enabled": random.choice([True, True, True, False]),
-                "last_backup": (datetime.now(timezone.utc).isoformat() if random.random() > 0.3 else None),
-                "backup_schedule": random.choice(["daily", "weekly", "none"]),
-                "tags": random.sample(["production", "development", "staging", "critical", "monitoring"], random.randint(1, 3)),
-            }
-            demo_vms.append(vm)
-        return demo_vms
-    return vms
+    return await db.proxmox_vms.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
 
 @router.get("/proxmox/dashboard")
 async def get_proxmox_dashboard(current_user: dict = Depends(get_current_user)):
@@ -268,15 +229,33 @@ async def delete_vendor(vendor_id: str, current_user: dict = Depends(get_current
 
 @router.get("/expiry-dashboard")
 async def get_expiry_dashboard(current_user: dict = Depends(get_current_user)):
-    """Get all expiring items across warranties, licenses, domains, SSL certs"""
-    from datetime import timedelta
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    soon = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-    
-    expiring_warranties = await db.warranties.count_documents({"warranty_end": {"$lte": soon, "$gte": today}})
-    expiring_licenses = await db.software_licenses.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
-    expiring_domains = await db.domains.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
-    expiring_ssl = await db.ssl_certificates.count_documents({"expiry_date": {"$lte": soon, "$gte": today}})
+    """Get expiring operational records from their authoritative collections.
+
+    Warranty evidence is stored on an Inventory Asset. Licences, domains, and
+    certificates remain their own managed records.
+    """
+    today = datetime.now(timezone.utc).date()
+    soon = today + timedelta(days=30)
+
+    warranty_assets = await db.assets.find(
+        {"$or": [{"warranty_expiry": {"$exists": True, "$ne": ""}}, {"warranty_end": {"$exists": True, "$ne": ""}}]},
+        {"_id": 0, "warranty_expiry": 1, "warranty_end": 1},
+    ).to_list(10000)
+    expiring_warranties = 0
+    for asset in warranty_assets:
+        raw_expiry = asset.get("warranty_expiry") or asset.get("warranty_end")
+        try:
+            expiry = datetime.fromisoformat(str(raw_expiry).replace("Z", "+00:00")).date()
+        except (TypeError, ValueError):
+            continue
+        if today <= expiry <= soon:
+            expiring_warranties += 1
+
+    today_text = today.isoformat()
+    soon_text = soon.isoformat()
+    expiring_licenses = await db.software_licenses.count_documents({"expiry_date": {"$lte": soon_text, "$gte": today_text}})
+    expiring_domains = await db.domains.count_documents({"expiry_date": {"$lte": soon_text, "$gte": today_text}})
+    expiring_ssl = await db.ssl_certificates.count_documents({"expiry_date": {"$lte": soon_text, "$gte": today_text}})
     
     return {
         "warranties": {"expiring_soon": expiring_warranties},
@@ -289,7 +268,10 @@ async def get_expiry_dashboard(current_user: dict = Depends(get_current_user)):
 # ============== SEED DATA ==============
 
 @router.post("/seed")
-async def seed_data():
+async def seed_data(current_user: dict = Depends(get_current_user)):
+    """Retired: production environments must never manufacture operating data."""
+    raise HTTPException(status_code=410, detail="Demo data generation is retired. Connect a provider or create records through the normal workflow.")
+
     existing_clients = await db.clients.count_documents({})
     if existing_clients > 0:
         return {"message": "Data already seeded"}

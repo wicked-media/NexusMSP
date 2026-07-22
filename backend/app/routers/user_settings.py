@@ -10,7 +10,7 @@ import hmac
 import struct
 import time
 from app.database import db
-from app.auth import get_current_user, hash_password, verify_password, password_policy_error
+from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, password_policy_error
 
 router = APIRouter()
 
@@ -38,6 +38,7 @@ async def get_my_profile(current_user: dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.pop("password_hash", None)
+    user["avatar"] = cache_busted_avatar_url(user.get("avatar"))
     # Fetch gamification profile
     gam = await db.gamification.find_one({"user_id": current_user["id"]}, {"_id": 0})
     user["gamification"] = gam

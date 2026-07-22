@@ -31,6 +31,7 @@ import {
   CheckCircle2, WifiOff, Users, TrendingUp, AlertCircle, XCircle, ExternalLink, RefreshCw,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 function pct(v) { return typeof v === "number" ? v.toFixed(1) : "—"; }
 function ago(iso) { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : "—"; } catch { return "—"; } }
@@ -493,7 +494,7 @@ function InstallerBuilder({ open, onClose }) {
       <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
-          <DialogDescription>Build a client-bound Windows ZIP with the NexusMSP Agent and its unique enrollment token.</DialogDescription>
+          <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield posture telemetry, automatic Nexus Canary provisioning, secure Client Chat, and Nexus Elevate support.</DialogDescription>
         </DialogHeader>
         {!result ? (
           <div className="space-y-3">
@@ -513,6 +514,12 @@ function InstallerBuilder({ open, onClose }) {
               <a href={result.download_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 underline" data-testid="installer-download-link">
                 <FileDown className="w-3 h-3" />{result.filename}
               </a>
+              <p className="mt-2 text-[10px] text-zinc-400">Package cadence: heartbeat every {result.heartbeat_secs || 60}s; command poll every {result.poll_secs || 10}s.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded border border-cyan-400/20 bg-cyan-400/[0.04] p-3 text-xs text-cyan-50"><div className="flex items-center gap-1.5 font-medium"><CheckCircle2 className="h-3.5 w-3.5 text-cyan-300" />Nexus Agent service</div><p className="mt-1 leading-relaxed text-cyan-100/70">Enrolment, telemetry, approved commands, and automatic updates.</p></div>
+              <div className={`rounded border p-3 text-xs ${result.includes_nexus_shield ? "border-violet-500/25 bg-violet-500/[0.05] text-violet-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_shield ? <ShieldCheck className="h-3.5 w-3.5 text-violet-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_shield ? "Nexus Shield + Canary" : "Nexus Shield unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_shield ? "Posture telemetry starts at first check-in; one Canary sensor is automatically queued for each Windows endpoint." : "This installer predates the Nexus Shield deployment profile."}</p></div>
+              <div className={`rounded border p-3 text-xs ${result.includes_nexus_elevate ? "border-emerald-500/25 bg-emerald-500/[0.05] text-emerald-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_elevate ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_elevate ? "Client Chat + Nexus Elevate" : "Client companion unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_elevate ? "Client chat and the auditable administrator-access request flow are bundled." : "Build the Nexus Client Chat companion before generating a deployment package."}</p></div>
             </div>
             {isLocalInstaller && (
               <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
@@ -661,6 +668,8 @@ export default function NexusAgentCenterPage() {
   const [statsError, setStatsError] = useState("");
   const navigate = useNavigate();
   const canOperate = canExecuteAgentCommands(user);
+  const role = String(user?.role || "").toLowerCase();
+  const canManageSettings = Boolean(user?.is_admin || role === "admin" || role === "owner");
 
   useEffect(() => {
     const load = () => axios.get(`${API}/nexus-agent/stats`, { headers })
@@ -673,7 +682,24 @@ export default function NexusAgentCenterPage() {
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 p-6 space-y-5" data-testid="nexus-agent-center">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <OperationalPageHeader
+        eyebrow="Managed assets"
+        title="Nexus Agent"
+        description="Monitor agent-backed endpoints, create audited installers, and run approved fleet actions from one operational control room."
+        icon={Server}
+        tone="emerald"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => navigate("/devices?source=nexus-agent")} data-testid="goto-devices-btn">
+            <Server className="w-3 h-3 mr-1" />Open in Devices
+          </Button>
+          {canOperate && (
+            <Button size="sm" onClick={() => setInstallerOpen(true)} data-testid="open-installer-builder">
+              <Plus className="w-3 h-3 mr-1" />Generate Installer
+            </Button>
+          )}
+        </>}
+      />
+      <div className="hidden">
         <div>
           <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
             <Server className="w-5 h-5 text-cyan-400" />NexusOps Agent · Fleet Control Room
@@ -699,7 +725,7 @@ export default function NexusAgentCenterPage() {
         <HeroTile label="Agents Online" value={stats.online_agents || 0} icon={Activity} glow="emerald" testId="hero-agents-online" />
         <HeroTile label="Agents Offline" value={stats.offline_agents || 0} icon={WifiOff} glow={stats.offline_agents ? "rose" : "zinc"} testId="hero-agents-offline" />
         <HeroTile label="Enrolled Agents" value={stats.total_agents || 0} icon={Server} glow="cyan" testId="hero-agents-total" />
-        <HeroTile label="Assessed Endpoints" value={stats.assessed_devices || 0} subtitle={`of ${stats.managed_devices || 0} managed`} icon={ShieldCheck} glow="violet" testId="hero-endpoints-assessed" />
+        <HeroTile label="Security Assessed" value={stats.assessed_devices || 0} subtitle={`of ${stats.agent_devices || 0} agent-linked`} icon={ShieldCheck} glow="violet" testId="hero-endpoints-assessed" />
         <HeroTile label="Pending Updates" value={stats.pending_updates || 0} icon={RefreshCw} glow={stats.pending_updates ? "amber" : "zinc"} testId="hero-updates-pending" />
         <HeroTile label="Commands Queued" value={stats.pending_commands || 0} icon={Terminal} glow={stats.pending_commands ? "amber" : "violet"} testId="hero-agents-pending" />
       </div>
@@ -726,7 +752,7 @@ export default function NexusAgentCenterPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <RecentEnrollments />
-        {canOperate && <SettingsCard canEdit />}
+        {canManageSettings && <SettingsCard canEdit />}
       </div>
 
       {canOperate && <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} />}

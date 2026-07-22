@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
 import {
   Users, TrendingUp, AlertTriangle, Target, RefreshCw, Loader2,
   BarChart3, Clock, Monitor, Zap, ArrowUp, ArrowDown
@@ -53,21 +54,14 @@ export default function CapacityPlannerPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
           { label: "Technicians", value: c.technicians, icon: Users, color: "text-blue-400" },
           { label: "Tickets/Tech", value: c.tickets_per_tech, icon: Target, color: "text-amber-400" },
           { label: "Devices/Tech", value: c.devices_per_tech, icon: Monitor, color: "text-cyan-400" },
           { label: "Total Devices", value: c.total_devices, icon: BarChart3, color: "text-purple-400" },
           { label: "Total Clients", value: c.total_clients, icon: Users, color: "text-emerald-400" },
-        ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`text-2xl font-bold ${st.color}`}>{st.value}</p>
-            </CardContent>
-          </Card>
-        ))}
+        ].map((st, index) => <HeroTile key={st.label} label={st.label} value={st.value} icon={st.icon} glow={["sky", "amber", "cyan", "violet", "emerald"][index]} />)}
       </div>
 
       {/* Utilization Gauge */}

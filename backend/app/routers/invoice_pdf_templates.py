@@ -291,6 +291,66 @@ DESIGNER_PRESETS = [
             "totals": {"enabled": False},
         },
     },
+    {
+        "preset_key": "msp_monthly_service",
+        "name": "MSP Monthly Service",
+        "description": "Purpose-built recurring service invoice with coverage summary, payment methods, and a calm executive finish.",
+        "doc_type": "invoice", "layout": "executive", "density": "spacious",
+        "primary_color": "#0F766E", "accent_color": "#14B8A6",
+        "page": _default_page(),
+        "block_overrides": {
+            "header_banner": {"enabled": True, "content": "MANAGED SERVICES INVOICE"},
+            "payment_methods": {"enabled": True}, "thank_you": {"enabled": True, "content": "Thank you for trusting {{company_name}} with your technology."},
+        },
+    },
+    {
+        "preset_key": "project_milestone",
+        "name": "Project Milestone",
+        "description": "A structured project invoice for deposit, milestone, or completion billing with clear commercial terms.",
+        "doc_type": "invoice", "layout": "modern", "density": "standard",
+        "primary_color": "#4338CA", "accent_color": "#818CF8",
+        "page": _default_page(),
+        "block_overrides": {
+            "header_banner": {"enabled": True, "content": "PROJECT MILESTONE INVOICE"},
+            "payment_terms": {"enabled": True, "content": "Milestone payment due within {{terms_days}} days."}, "signature": {"enabled": True},
+        },
+    },
+    {
+        "preset_key": "hardware_procurement",
+        "name": "Hardware Procurement",
+        "description": "Clear hardware and licensing invoice with serial-ready line items, tax detail, and payment instructions.",
+        "doc_type": "invoice", "layout": "classic", "density": "standard",
+        "primary_color": "#1E3A8A", "accent_color": "#38BDF8",
+        "page": _default_page(),
+        "block_overrides": {"tax_breakdown": {"enabled": True}, "bank_details": {"enabled": True}, "qr_pay": {"enabled": True}},
+    },
+    {
+        "preset_key": "renewal_notice",
+        "name": "Renewal Notice",
+        "description": "Professional renewal-ready invoice for subscriptions, licences, and annual managed service commitments.",
+        "doc_type": "invoice", "layout": "minimal", "density": "standard",
+        "primary_color": "#9A3412", "accent_color": "#F97316",
+        "page": _default_page(),
+        "block_overrides": {"header_banner": {"enabled": True, "content": "SERVICE RENEWAL"}, "thank_you": {"enabled": True, "content": "Your continued partnership is valued."}},
+    },
+    {
+        "preset_key": "technology_proposal",
+        "name": "Technology Proposal",
+        "description": "Sales-ready estimate with polished scope, value, payment terms, and acceptance signature blocks.",
+        "doc_type": "estimate", "layout": "executive", "density": "spacious",
+        "primary_color": "#0369A1", "accent_color": "#22D3EE",
+        "page": _default_page(),
+        "block_overrides": {"header_banner": {"enabled": True, "content": "TECHNOLOGY PROPOSAL"}, "signature": {"enabled": True}, "payment_terms": {"enabled": True}},
+    },
+    {
+        "preset_key": "qbr_value_review",
+        "name": "QBR Value Review",
+        "description": "Client-facing quarterly review layout for outcomes, recommendations, and strategic technology value.",
+        "doc_type": "qbr", "layout": "executive", "density": "spacious",
+        "primary_color": "#4C1D95", "accent_color": "#A78BFA",
+        "page": _default_page(),
+        "block_overrides": {"header_banner": {"enabled": True, "content": "QUARTERLY BUSINESS REVIEW"}, "savings_summary": {"enabled": True}, "thank_you": {"enabled": True, "content": "Next review: align technology investment with business outcomes."}},
+    },
 ]
 
 
@@ -321,11 +381,14 @@ def _build_preset_doc(preset: dict, created_by: str = "system") -> dict:
 
 
 async def _ensure_presets_seeded():
-    """Idempotent: insert any preset templates that don't yet exist."""
+    """Idempotently seed presets and clean duplicate read-only gallery entries."""
     for p in DESIGNER_PRESETS:
-        existing = await db.invoice_pdf_templates.find_one({"id": f"tpl-{p['preset_key']}"}, {"_id": 0, "id": 1})
-        if not existing:
+        preset_id = f"tpl-{p['preset_key']}"
+        matches = await db.invoice_pdf_templates.find({"preset_key": p["preset_key"], "is_preset": True}, {"_id": 1}).sort("_id", 1).to_list(20)
+        if not matches:
             await db.invoice_pdf_templates.insert_one(_build_preset_doc(p))
+        elif len(matches) > 1:
+            await db.invoice_pdf_templates.delete_many({"_id": {"$in": [item["_id"] for item in matches[1:]]}})
 
 
 # ───────────────────────────────────── Gallery + CRUD ─────────────────────────────────────

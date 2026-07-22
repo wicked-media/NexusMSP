@@ -2,7 +2,10 @@
   display: flex;
   align-items: center;
   gap: .85rem;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
+  contain: inline-size;
   overflow: hidden;
   padding: .55rem .8rem;
   border: 1px solid hsl(var(--border) / .55);
@@ -12,7 +15,7 @@
 
 .nx-live-ticker__label { display: inline-flex; align-items: center; gap: .35rem; flex: 0 0 auto; color: #a7f3d0; font-size: .68rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .nx-live-ticker__pulse { width: .42rem; height: .42rem; border-radius: 999px; background: #34d399; box-shadow: 0 0 0 .18rem rgb(52 211 153 / .14); animation: nxTickerPulse 1.6s ease-in-out infinite; }
-.nx-live-ticker__viewport { min-width: 0; flex: 1; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); }
+.nx-live-ticker__viewport { min-width: 0; max-width: 100%; flex: 1; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); }
 .nx-live-ticker__track { display: flex; width: max-content; gap: .7rem; animation: nxTickerScroll 42s linear infinite; }
 .nx-live-ticker__viewport:hover .nx-live-ticker__track { animation-play-state: paused; }
 .nx-live-ticker__item { display: inline-flex; align-items: center; gap: .42rem; white-space: nowrap; border: 1px solid hsl(var(--border) / .45); border-radius: .55rem; padding: .35rem .6rem; font-size: .72rem; color: hsl(var(--foreground)); background: hsl(var(--background) / .36); transition: border-color .2s, background .2s; }

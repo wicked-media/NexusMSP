@@ -158,7 +158,8 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
   // Check if this item or any child is active
   const isActive = location.pathname === item.path;
   const isChildActive = hasChildren && item.children.some(c => location.pathname === c.path);
-  const isHighlighted = isActive || isChildActive;
+  const isWorkspaceActive = item.workspacePaths?.some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const isHighlighted = isActive || isChildActive || isWorkspaceActive;
 
   // Aggregate badge count: own + any child paths
   const ownCount = counts[item.path] || 0;
@@ -183,7 +184,7 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
             data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
           >
             {item.icon && (
-              <span className="relative flex-shrink-0">
+              <span className={`relative flex-shrink-0 nexus-sidebar-workspace-icon ${isHighlighted ? "is-active" : ""} ${badgeCount > 0 ? "has-attention" : ""}`}>
                 <item.icon className={`${collapsed ? 'w-[18px] h-[18px]' : 'w-4 h-4'}`} />
                 {collapsed && badgeCount > 0 && (
                   <NavBadge count={badgeCount} className="absolute -top-1.5 -right-1.5" />
@@ -367,7 +368,9 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   }, [location.pathname]);
 
   // Filter nav groups by enabled modules
-  const visibleGroups = navGroups.filter(g => enabledModules.includes(g.id));
+  // Help remains available during module migrations so technicians always have
+  // access to documentation, even for accounts saved before this group existed.
+  const visibleGroups = navGroups.filter(g => enabledModules.includes(g.id) || g.id === "help");
 
   return (
     <TooltipProvider delayDuration={0}>

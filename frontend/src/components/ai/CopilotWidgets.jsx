@@ -65,7 +65,7 @@ export function TicketCopilotButton({ ticketId, onResult }) {
           <div className="space-y-3 min-h-[200px]">
             {running ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground">
-                <Loader2 className="w-5 h-5 mr-2 animate-spin" />Claude is thinking…
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />Nexus AI is working…
               </div>
             ) : structured?.next_step ? (
               <div className="space-y-2">

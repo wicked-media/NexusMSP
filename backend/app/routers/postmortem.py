@@ -25,7 +25,7 @@ Return ONLY valid JSON:
         from app.services.ai_provider import LlmChat, UserMessage
         api_key = os.environ.get("OPENAI_API_KEY")
         chat = LlmChat(api_key=api_key, session_id=f"pm-{uuid.uuid4().hex[:6]}", system_message=system)
-        chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+        chat.with_model("openai", "gpt-5.6-terra")
         prompt = f"Incident: {ticket.get('title','')}\nPriority: {ticket.get('priority','')}\nClient: {ticket.get('client_name','')}\nCreated: {ticket.get('created_at','')}\nResolved: {ticket.get('resolved_at','')}\nDescription: {ticket.get('description','')}\nNotes:\n{notes_text}"
         resp = await chat.send_message(UserMessage(text=prompt))
         text = resp.strip() if isinstance(resp, str) else str(resp)

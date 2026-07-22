@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,8 @@ import {
   Zap, Clock, Settings, ChevronRight, Copy, ToggleLeft, ToggleRight, BookOpen, Search, ExternalLink, ThumbsUp, Pencil
 } from "lucide-react";
 
+const RUNBOOK_TABS = ["automation", "templates", "logs"];
+
 export default function RunbooksPage() {
   const { token } = useAuth();
   const [runbooks, setRunbooks] = useState([]);
@@ -28,9 +30,20 @@ export default function RunbooksPage() {
   const [form, setForm] = useState({ name: "", description: "", trigger: {}, conditions: [], actions: [] });
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [editingKnowledgeRunbook, setEditingKnowledgeRunbook] = useState(null);
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState(() => searchParams.get("tab") === "knowledge" ? "knowledge" : "automation");
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState(() => RUNBOOK_TABS.includes(requestedTab) ? requestedTab : "automation");
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+
+  useEffect(() => {
+    if (requestedTab === "knowledge") {
+      navigate("/documentation-hub?tab=library", { replace: true });
+      return;
+    }
+    const nextTab = RUNBOOK_TABS.includes(requestedTab) ? requestedTab : "automation";
+    setTab((currentTab) => currentTab === nextTab ? currentTab : nextTab);
+  }, [navigate, requestedTab]); // Keep legacy knowledge links in the consolidated documentation workspace.
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -161,20 +174,13 @@ export default function RunbooksPage() {
 
   return (
     <div className="space-y-5" data-testid="runbooks-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Workflow className="w-8 h-8 text-violet-400" />Runbooks</h1>
-          <p className="text-muted-foreground">{knowledgeRunbooks.length} knowledge procedures &middot; {runbooks.length} automation runbooks</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          {tab !== "knowledge" && <Button onClick={() => setShowCreate(true)} data-testid="create-runbook-btn"><Plus className="w-4 h-4 mr-1" />New Automation</Button>}
-        </div>
+      <div className="rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_28%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.20)] md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300">Automation workspace</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Workflow className="h-6 w-6 text-cyan-200" />Runbooks</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Build, test and govern repeatable operational automation. Knowledge procedures now live in the dedicated Knowledge &amp; Docs workspace.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" className="h-9" onClick={fetchAll}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button><Button className="h-9 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => setShowCreate(true)} data-testid="create-runbook-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New runbook</Button></div></div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2">
-        {[["knowledge", "Knowledge"], ["automation", "Automation"], ["templates", "Templates"], ["logs", "Logs"]].map(([value, label]) => (
+        {[["automation", "Automation"], ["templates", "Templates"], ["logs", "Execution logs"]].map(([value, label]) => (
           <Button key={value} variant={tab === value ? "default" : "outline"} size="sm" onClick={() => selectTab(value)}>{label}</Button>
         ))}
       </div>

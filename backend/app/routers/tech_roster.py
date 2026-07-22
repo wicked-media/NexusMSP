@@ -15,6 +15,7 @@ import uuid
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import log_activity
 
 router = APIRouter()
 
@@ -70,6 +71,11 @@ async def create_technician(data: dict, current_user: dict = Depends(get_current
         **clean,
     }
     await db.tech_roster.insert_one(doc)
+    await log_activity(
+        current_user, "roster_contact_created", "tech_roster", doc["id"], doc.get("name", "Roster contact"),
+        "Added contact to on-call coverage.",
+        metadata={"tier": doc.get("escalation_tier"), "on_call": doc.get("on_call"), "channels": doc.get("preferred_channels", [])},
+    )
     doc.pop("_id", None)
     return doc
 
@@ -79,17 +85,30 @@ async def update_technician(tech_id: str, data: dict, current_user: dict = Depen
     clean = _sanitize(data)
     if not clean:
         return {"success": True, "no_change": True}
+    before = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Tech not found")
     clean["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.tech_roster.update_one({"id": tech_id}, {"$set": clean})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Tech not found")
     doc = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+    changed = {key: value for key, value in clean.items() if key != "updated_at" and before.get(key) != value}
+    if changed:
+        await log_activity(
+            current_user, "roster_contact_updated", "tech_roster", tech_id, doc.get("name", "Roster contact"),
+            "Updated on-call coverage details.", changes=changed,
+        )
     return doc
 
 
 @router.delete("/tech-roster/{tech_id}")
 async def delete_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
-    res = await db.tech_roster.delete_one({"id": tech_id})
-    if res.deleted_count == 0:
+    target = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+    if not target:
         raise HTTPException(404, "Tech not found")
+    res = await db.tech_roster.delete_one({"id": tech_id})
+    await log_activity(
+        current_user, "roster_contact_removed", "tech_roster", tech_id, target.get("name", "Roster contact"),
+        "Removed contact from on-call coverage.",
+        metadata={"tier": target.get("escalation_tier"), "on_call": target.get("on_call"), "channels": target.get("preferred_channels", [])},
+    )
     return {"success": True}

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer, Pencil, Building2, Search } from "lucide-react";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer, Pencil, Building2, Search, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -46,11 +46,6 @@ export default function DeviceDetailPage() {
   const [connectLoading, setConnectLoading] = useState(false);
   const [diskHealth, setDiskHealth] = useState([]);
   const [rdLiveStatus, setRdLiveStatus] = useState(null);
-  const [trmmAgents, setTrmmAgents] = useState([]);
-  const [trmmConfigured, setTrmmConfigured] = useState(false);
-  const [trmmLinkOpen, setTrmmLinkOpen] = useState(false);
-  const [trmmAgentSelect, setTrmmAgentSelect] = useState("");
-  const [trmmRemoteBusy, setTrmmRemoteBusy] = useState(false);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
   const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
   const [deviceEditorBusy, setDeviceEditorBusy] = useState(false);
@@ -58,52 +53,16 @@ export default function DeviceDetailPage() {
   const [deviceEditor, setDeviceEditor] = useState({ name: "", client_id: "", assigned_user: "", location: "" });
   const [softwareSearch, setSoftwareSearch] = useState("");
 
-  // Fetch TRMM status + agents (best effort)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await axios.get(`${API}/trmm/status`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }));
-        if (cancelled) return;
-        const cfg = !!status?.data?.configured;
-        setTrmmConfigured(cfg);
-        if (cfg) {
-          const a = await axios.get(`${API}/trmm/agents`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: [] }));
-          if (!cancelled) setTrmmAgents(a.data || []);
-        }
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [token]);
-
-  const startTrmmRemote = async () => {
-    if (!data?.device?.trmm_agent_id) { setTrmmLinkOpen(true); return; }
-    setTrmmRemoteBusy(true);
+  const openLiveSupport = async () => {
     try {
-      const res = await axios.get(`${API}/trmm/agents/${data.device.trmm_agent_id}/remote-url`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.data?.success && res.data?.urls) {
-        const url = res.data.urls.control || res.data.urls.terminal || res.data.urls.file || Object.values(res.data.urls).find(v => typeof v === "string");
-        if (url) {
-          window.open(url, "_blank", "noopener,noreferrer");
-          toast.success("Opening MeshCentral remote session…");
-        } else { toast.error("No remote URL returned by TRMM"); }
-      } else { toast.error(res.data?.message || "Could not start remote session"); }
-    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-    finally { setTrmmRemoteBusy(false); }
-  };
-
-  const linkTrmmAgent = async () => {
-    if (!trmmAgentSelect) { toast.error("Pick a TRMM agent"); return; }
-    const agent = trmmAgents.find(a => (a.agent_id || a.id) === trmmAgentSelect);
-    try {
-      await axios.post(`${API}/devices/${deviceId}/link-trmm-agent`, {
-        agent_id: agent?.agent_id || trmmAgentSelect,
-        hostname: agent?.hostname || "",
-      }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success("TRMM agent linked");
-      setTrmmLinkOpen(false);
-      fetchDetail();
-    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+      const response = await axios.post(`${API}/live-chat/devices/${deviceId}/open`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      const sessionId = response.data?.session?.id;
+      if (!sessionId) throw new Error("No support session returned");
+      toast.success("Live support session opened");
+      navigate(`/live-chat?session=${encodeURIComponent(sessionId)}`);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Live support could not be opened for this asset");
+    }
   };
 
   const fetchDetail = useCallback(async () => {
@@ -297,13 +256,15 @@ export default function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 xl:justify-end">
+          <Button size="sm" onClick={openLiveSupport} className="bg-emerald-600 hover:bg-emerald-500" data-testid="start-device-live-chat"><MessageSquare className="mr-1 h-4 w-4" />Start live chat</Button>
+          <Button size="sm" variant="outline" className="border-sky-500/30 text-sky-300 hover:bg-sky-500/10" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)} data-testid="create-device-ticket"><Ticket className="mr-1 h-4 w-4" />New ticket</Button>
+          {dev.client_id && <Button size="sm" variant="outline" onClick={() => navigate(`/clients?client=${encodeURIComponent(dev.client_id)}`)} data-testid="open-device-client"><Building2 className="mr-1 h-4 w-4" />Open client</Button>}
           <Button variant="outline" size="sm" onClick={openDeviceEditor} data-testid="edit-device-identity"><Pencil className="mr-1 h-4 w-4" />Edit</Button>
           <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
           <RemoteAccessButton
             device={dev}
             status={rdLiveStatus || dev.status}
-            busy={connectLoading || trmmRemoteBusy}
-            onLaunchTrmm={startTrmmRemote}
+            busy={connectLoading}
             onLaunchRustDesk={startRemoteAccess}
             testid="remote-access-btn"
           />
@@ -1185,46 +1146,6 @@ export default function DeviceDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* TRMM Link Dialog */}
-      <Dialog open={trmmLinkOpen} onOpenChange={setTrmmLinkOpen}>
-        <DialogContent className="max-w-md" data-testid="trmm-link-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Server className="w-5 h-5 text-emerald-500" />Link Tactical RMM agent</DialogTitle>
-            <DialogDescription>Pick the TRMM agent that matches <span className="text-foreground">{dev?.name}</span>.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Label>TRMM agent</Label>
-            <select
-              value={trmmAgentSelect}
-              onChange={(e) => setTrmmAgentSelect(e.target.value)}
-              className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
-              data-testid="trmm-link-select"
-            >
-              <option value="">— Select an agent —</option>
-              {trmmAgents.map(a => (
-                <option key={a.agent_id || a.id} value={a.agent_id || a.id}>
-                  {a.hostname} · {a.client || "—"} · {a.status}
-                </option>
-              ))}
-            </select>
-            {trmmAgents.length === 0 && (
-              <p className="text-xs text-muted-foreground">No agents loaded yet — make sure TRMM is configured in Settings.</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTrmmLinkOpen(false)}>Cancel</Button>
-            <Button
-              variant="outline"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              disabled={!trmmAgentSelect}
-              onClick={linkTrmmAgent}
-              data-testid="trmm-link-confirm-btn"
-            >
-              Link agent
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <MaintenanceWindowDialog
         open={patchWindowOpen}
         onClose={() => setPatchWindowOpen(false)}

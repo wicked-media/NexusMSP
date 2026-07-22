@@ -1,10 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Loader2, UserCog } from "lucide-react";
 
-const TABS = [
-  { id: "command", label: "Team Command", icon: UserCog, page: () => import("./TechCommandCenter") },
-];
+const TechCommandCenter = lazy(() => import("./TechCommandCenter"));
 const LEGACY_TAB_DESTINATIONS = {
   technicians: { tab: "command", view: "directory" },
   utilization: { tab: "command", view: "capacity" },
@@ -13,10 +10,7 @@ const LEGACY_TAB_DESTINATIONS = {
   leaderboard: { tab: "command", view: "leaderboard" },
 };
 
-const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
-
 export default function TeamHubPage() {
-  const [activeTab, setActiveTab] = useState("command");
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -29,49 +23,11 @@ export default function TeamHubPage() {
       setSearchParams(nextParams, { replace: true });
       return;
     }
-    if (tab && TABS.some(item => item.id === tab) && tab !== activeTab) setActiveTab(tab);
-  }, [activeTab, searchParams, setSearchParams]);
-
-  const selectTab = tab => {
-    setActiveTab(tab);
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("tab", tab);
-    setSearchParams(nextParams);
-  };
-
-  const Active = lazyMap[activeTab];
+  }, [searchParams, setSearchParams]);
 
   return (
-    <div className="min-h-screen">
-      <div className="border-b border-border bg-gradient-to-br from-card via-card to-violet-500/[0.04]">
-        <div className="hidden">
-          <h1 className="text-2xl font-semibold tracking-tight">Team Hub</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Command center, roster, utilization, skills and leaderboard — all the team views.</p>
-        </div>
-        <nav className="hidden" aria-label="Team Hub sections">
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const active = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => selectTab(t.id)}
-                data-testid={`team-hub-tab-${t.id}`}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${
-                  active ? "bg-violet-500/12 text-violet-200 border border-violet-500/25 shadow-sm" : "text-muted-foreground border border-transparent hover:text-foreground hover:bg-muted/50 hover:border-border"
-                }`}
-              >
-                <Icon className="w-4 h-4" />{t.label}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
-      <div>
-        <Suspense fallback={<div className="p-12 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>}>
-          <Active />
-        </Suspense>
-      </div>
-    </div>
+    <Suspense fallback={<div className="p-12 text-sm text-muted-foreground">Loading Team Command…</div>}>
+      <TechCommandCenter />
+    </Suspense>
   );
 }

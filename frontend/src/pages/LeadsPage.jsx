@@ -14,10 +14,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Plus, Search, RefreshCw, Loader2, Sparkles, Flame, Filter as FilterIcon,
-  Funnel, KanbanSquare, BarChart3, Table as TableIcon, ChevronRight, Ticket, GitMerge, MoreVertical
+  Funnel, KanbanSquare, BarChart3, Table as TableIcon, ChevronRight, Ticket, GitMerge, MoreVertical, Mail, Trophy
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 import InitialsAvatar from "../components/leads/InitialsAvatar";
 import LeadScoreBadge from "../components/leads/LeadScoreBadge";
@@ -33,6 +34,8 @@ import CreateTicketFromLeadDialog from "../components/leads/CreateTicketFromLead
 import ForecastWidget from "../components/leads/ForecastWidget";
 import { VelocityMeter, SourceAttributionPie } from "../components/leads/InsightsWidgets";
 import { STATUS_CONFIG, PIPELINE_STAGES, money, timeAgo } from "../components/leads/leadHelpers";
+import CampaignsPage from "./CampaignsPage";
+import LoyaltyDashboardPage from "./LoyaltyDashboardPage";
 
 const EMPTY_FORM = {
   company_name: "", contact_name: "", email: "", phone: "", website: "", title: "",
@@ -43,7 +46,7 @@ export default function LeadsPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState("pipeline");
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "pipeline");
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
   const [scores, setScores] = useState({});
@@ -85,8 +88,23 @@ export default function LeadsPage() {
     const leadId = searchParams.get("lead");
     if (!leadId) return;
     setDrawerLeadId(leadId);
-    setSearchParams({}, { replace: true });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("lead");
+    setSearchParams(nextParams, { replace: true });
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    const validTabs = ["pipeline", "kanban", "directory", "insights", "campaigns", "renewals"];
+    if (requestedTab && validTabs.includes(requestedTab) && requestedTab !== tab) setTab(requestedTab);
+  }, [searchParams, tab]);
+
+  const selectTab = (nextTab) => {
+    setTab(nextTab);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("tab", nextTab);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -161,17 +179,14 @@ export default function LeadsPage() {
 
   return (
     <div className="p-6 space-y-4" data-testid="leads-page">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-violet-300" />
-            Lead Studio
-          </h1>
-          <p className="text-xs text-muted-foreground">Pipeline · scoring · forecasts · proposals · tickets.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/o365-setup")} data-testid="leads-email-intake">
+      <OperationalPageHeader
+        eyebrow="Revenue operations"
+        title="Lead Studio"
+        description="Capture, qualify, nurture, and convert opportunities with a shared pipeline, scoring, forecasts, proposals, and ticket hand-off."
+        icon={Sparkles}
+        tone="emerald"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=mailbox")} data-testid="leads-email-intake">
             <Funnel className="w-3.5 h-3.5 mr-1" />Email Intake
           </Button>
           <Button variant="outline" size="sm" onClick={() => setPasteOpen(true)} data-testid="leads-quick-add">
@@ -180,11 +195,11 @@ export default function LeadsPage() {
           <Button variant="outline" size="sm" onClick={load} data-testid="leads-refresh">
             <RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh
           </Button>
-          <Button size="sm" className="bg-violet-600 hover:bg-violet-500" onClick={() => { setEditingLead(null); setForm(EMPTY_FORM); setShowCreate(true); }} data-testid="leads-new-btn">
+          <Button size="sm" onClick={() => { setEditingLead(null); setForm(EMPTY_FORM); setShowCreate(true); }} data-testid="leads-new-btn">
             <Plus className="w-3.5 h-3.5 mr-1" />New Lead
           </Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -199,13 +214,15 @@ export default function LeadsPage() {
       <HotLeadsStrip onOpen={setDrawerLeadId} />
 
       {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={selectTab}>
         <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto">
           {[
             { v: "pipeline", l: "Pipeline", Icon: Funnel },
             { v: "kanban", l: "Kanban", Icon: KanbanSquare },
             { v: "directory", l: "Directory", Icon: TableIcon },
             { v: "insights", l: "Insights", Icon: BarChart3 },
+            { v: "campaigns", l: "Campaigns", Icon: Mail },
+            { v: "renewals", l: "Renewals", Icon: Trophy },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
               className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider"
@@ -235,6 +252,14 @@ export default function LeadsPage() {
           <ForecastWidget />
           <VelocityMeter />
           <SourceAttributionPie />
+        </TabsContent>
+
+        <TabsContent value="campaigns" className="mt-4">
+          <CampaignsPage embedded />
+        </TabsContent>
+
+        <TabsContent value="renewals" className="mt-4">
+          <LoyaltyDashboardPage embedded />
         </TabsContent>
 
         <TabsContent value="directory" className="mt-4 space-y-3">

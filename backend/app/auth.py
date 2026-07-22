@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 import re
-from app.database import db, security, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
+from app.database import db, security, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS, AVATARS_DIR
 
 
 def hash_password(password: str) -> str:
@@ -43,12 +43,34 @@ def create_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def cache_busted_avatar_url(avatar_url: str | None) -> str | None:
+    """Return a fresh public URL for locally-hosted technician avatars.
+
+    Avatar files deliberately retain a stable filename per technician. Adding a
+    file-version query parameter prevents browsers from reusing a cached image
+    after a technician replaces their profile photo.
+    """
+    prefix = "/api/uploads/avatars/"
+    if not avatar_url or not avatar_url.startswith(prefix) or "?" in avatar_url:
+        return avatar_url
+
+    filename = avatar_url[len(prefix):]
+    if not filename or "/" in filename or "\\" in filename:
+        return avatar_url
+
+    avatar_file = AVATARS_DIR / filename
+    if not avatar_file.is_file():
+        return avatar_url
+    return f"{avatar_url}?v={avatar_file.stat().st_mtime_ns}"
+
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        user["avatar"] = cache_busted_avatar_url(user.get("avatar"))
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

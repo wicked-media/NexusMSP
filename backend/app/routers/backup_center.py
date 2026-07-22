@@ -2,7 +2,7 @@
 Merges the previous backup_dashboard.py, backup_compliance.py, and backup_verify.py.
 All original endpoint paths are preserved so frontend integrations stay intact.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
@@ -221,25 +221,99 @@ async def get_backup_compliance(user=Depends(get_current_user)):
 async def backup_verify_overview(current_user: dict = Depends(get_current_user)):
     tests = await db.backup_verifications.find({}, {"_id": 0}).sort("tested_at", -1).to_list(100)
     passed = len([t for t in tests if t.get("result") == "pass"])
+    failed = len([t for t in tests if t.get("result") in {"fail", "failed"}])
+    pending = len([t for t in tests if t.get("result") in {"pending", "scheduled"}])
+    measured_restore_times = [
+        float(test["restore_time_minutes"])
+        for test in tests
+        if test.get("result") in {"pass", "fail", "failed"} and test.get("restore_time_minutes") is not None
+    ]
     return {
         "tests": tests,
         "summary": {
             "total_tests": len(tests),
             "passed": passed,
-            "failed": len(tests) - passed,
-            "pass_rate_pct": round(passed / len(tests) * 100, 1) if tests else 0,
+            "failed": failed,
+            "pending": pending,
+            "pass_rate_pct": round(passed / max(passed + failed, 1) * 100, 1) if passed or failed else 0,
             "last_test_run": tests[0].get("tested_at") if tests else None,
-            "avg_restore_time_min": round(
-                sum(t.get("restore_time_minutes", 0) for t in tests) / max(len(tests), 1), 1
-            ) if tests else 0,
+            "avg_restore_time_min": round(sum(measured_restore_times) / len(measured_restore_times), 1) if measured_restore_times else None,
         },
     }
 
 
 @router.post("/backup-verify/run")
 async def run_verification(data: dict, current_user: dict = Depends(get_current_user)):
+    """Create an auditable restore-verification request for the backup team."""
+    client_id = str(data.get("client_id") or "")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Choose the customer whose recovery evidence is being tested")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Selected client was not found")
+    now = datetime.now(timezone.utc).isoformat()
+    test_id = f"bv-{uuid.uuid4().hex[:8]}"
+    record = {
+        "id": test_id,
+        "client_id": client_id,
+        "client_name": client.get("company_name") or client.get("name") or "Customer",
+        "backup_type": data.get("backup_type") or "Recovery test",
+        "backup_solution": data.get("backup_solution") or "Acronis",
+        "result": "pending",
+        "status": "scheduled",
+        "requested_at": now,
+        "tested_at": now,
+        "requested_by": current_user.get("id") or current_user.get("email"),
+        "requested_by_name": current_user.get("name") or current_user.get("email"),
+        "notes": data.get("notes") or "Restore verification requested from NexusMSP Backup Centre.",
+    }
+    await db.backup_verifications.insert_one(record)
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()), "action": "backup_verification_requested", "entity_type": "backup_verification",
+        "entity_id": test_id, "entity_name": record["client_name"], "user_id": current_user.get("id", ""),
+        "user_name": record["requested_by_name"], "details": f"{record['backup_type']} scheduled for {record['client_name']}", "created_at": now,
+        "changes": {"status": {"old": None, "new": "scheduled"}},
+        "metadata": {"client_id": client_id, "backup_solution": record["backup_solution"], "backup_type": record["backup_type"]},
+    })
     return {
         "status": "scheduled",
-        "test_id": f"bv-{uuid.uuid4().hex[:8]}",
-        "message": "Backup verification test scheduled",
+        "test_id": test_id,
+        "message": "Backup verification request recorded and scheduled",
     }
+
+
+@router.put("/backup-verify/{test_id}")
+async def complete_verification(test_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Record the measured outcome of a completed restore verification."""
+    existing = await db.backup_verifications.find_one({"id": test_id}, {"_id": 0})
+    if not existing:
+        return {"status": "not_found", "message": "Verification request not found"}
+    result = str(data.get("result") or "").lower()
+    if result not in {"pass", "fail"}:
+        return {"status": "invalid", "message": "Result must be pass or fail"}
+    try:
+        restore_time = float(data.get("restore_time_minutes", 0) or 0)
+    except (TypeError, ValueError):
+        return {"status": "invalid", "message": "Restore time must be a number"}
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "result": result,
+        "status": "completed",
+        "restore_time_minutes": restore_time,
+        "data_integrity_check": str(data.get("data_integrity_check") or "not_recorded"),
+        "notes": str(data.get("notes") or existing.get("notes") or ""),
+        "tested_at": now,
+        "completed_at": now,
+        "completed_by": current_user.get("id") or current_user.get("email"),
+        "completed_by_name": current_user.get("name") or current_user.get("email"),
+    }
+    await db.backup_verifications.update_one({"id": test_id}, {"$set": update})
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()), "action": "backup_verification_completed", "entity_type": "backup_verification",
+        "entity_id": test_id, "entity_name": existing.get("client_name") or "Backup verification",
+        "user_id": current_user.get("id", ""), "user_name": update["completed_by_name"],
+        "details": f"Restore verification recorded as {result} ({restore_time:g} minutes)", "created_at": now,
+        "changes": {"result": {"old": existing.get("result"), "new": result}, "status": {"old": existing.get("status"), "new": "completed"}},
+        "metadata": {"restore_time_minutes": restore_time, "data_integrity_check": update["data_integrity_check"], "client_id": existing.get("client_id")},
+    })
+    return {"status": "completed", "result": result, "message": "Restore verification outcome recorded"}

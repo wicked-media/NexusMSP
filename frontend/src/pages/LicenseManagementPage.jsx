@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   Layers, DollarSign, AlertTriangle, TrendingUp, Search, Plus, RefreshCw,
   Loader2, BarChart3, Users, ChevronDown, ChevronUp, Lightbulb, Trash2,
@@ -24,6 +25,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 
 const COLORS = ["#3B82F6", "#22C55E", "#EAB308", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316", "#14B8A6", "#6366F1"];
 const chartStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };
+const emptyLicenceForm = { product_name: "", vendor: "", client_name: "", client_id: "", purchased: 10, used: 0, unit_cost: 15, renewal_date: "", auto_renew: true, billing_cycle: "monthly", license_type: "per_user" };
 
 export default function LicenseManagementPage() {
   const { token } = useAuth();
@@ -35,12 +37,20 @@ export default function LicenseManagementPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [addDialog, setAddDialog] = useState(false);
   const [editLic, setEditLic] = useState(null);
-  const [form, setForm] = useState({ product_name: "", vendor: "", client_name: "", purchased: 10, used: 0, unit_cost: 15, renewal_date: "", auto_renew: true, billing_cycle: "monthly", license_type: "per_user" });
+  const [form, setForm] = useState(emptyLicenceForm);
+  const [clientOptions, setClientOptions] = useState([]);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    try { const r = await axios.get(`${API}/license-management/overview`, { headers }); setData(r.data); }
+    try {
+      const [overview, clientResponse] = await Promise.all([
+        axios.get(`${API}/license-management/overview`, { headers }),
+        axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      setData(overview.data);
+      setClientOptions(clientResponse.data || []);
+    }
     catch { toast.error("Failed to load license data"); }
     finally { setLoading(false); }
   }, [token]);
@@ -68,6 +78,7 @@ export default function LicenseManagementPage() {
   if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   const { summary, licenses, vendor_breakdown, client_breakdown, expiring_soon, optimization_suggestions } = data;
+  const hasEvidence = data.evidence_state === "evidence_available";
   const vendors = [...new Set(licenses.map(l => l.vendor))].sort();
   const clients = [...new Set(licenses.map(l => l.client_name))].sort();
 
@@ -82,22 +93,20 @@ export default function LicenseManagementPage() {
 
   return (
     <div className="space-y-5" data-testid="license-management-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center"><Layers className="w-5 h-5 text-white" /></div>
-            License Management
-          </h1>
-          <p className="text-muted-foreground mt-1">Track, optimize, and manage software licenses across all clients</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => { setEditLic(null); setForm({ product_name: "", vendor: "", client_name: "", purchased: 10, used: 0, unit_cost: 15, renewal_date: "", auto_renew: true, billing_cycle: "monthly", license_type: "per_user" }); setAddDialog(true); }} data-testid="add-license-btn"><Plus className="w-4 h-4 mr-1" />Add License</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Billing and subscriptions"
+        title="Licence register"
+        description="Track technician-confirmed or provider-synchronised licences. Cost, seat, and renewal insights are calculated only from recorded source data."
+        icon={Layers}
+        tone="sky"
+        actions={<><Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button><Button onClick={() => { setEditLic(null); setForm(emptyLicenceForm); setAddDialog(true); }} data-testid="add-license-btn"><Plus className="w-4 h-4 mr-1" />Add confirmed licence</Button></>}
+      />
+
+      {!hasEvidence && <Card className="border-dashed border-sky-500/30 bg-sky-500/5"><CardContent className="flex flex-col gap-2 py-8 text-center sm:items-center"><Layers className="h-8 w-8 text-sky-300" /><div><p className="font-semibold">No confirmed licence inventory yet</p><p className="mt-1 max-w-xl text-sm text-muted-foreground">Add licences from an invoice, CSP portal, or verified supplier record. NexusMSP will not create sample seats, costs, renewals, or savings.</p></div><Button size="sm" onClick={() => { setEditLic(null); setForm(emptyLicenceForm); setAddDialog(true); }}><Plus className="mr-1 h-4 w-4" />Add first confirmed licence</Button></CardContent></Card>}
+      {summary.legacy_unverified > 0 && <Card className="border-amber-500/30 bg-amber-500/5"><CardContent className="py-3 text-sm text-amber-100">{summary.legacy_unverified} pre-migration record{summary.legacy_unverified === 1 ? " is" : "s are"} excluded until a technician confirms the details. This avoids treating old generated entries as customer evidence.</CardContent></Card>}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-6 gap-3">
+      {hasEvidence && <div className="grid grid-cols-6 gap-3">
         {[
           { label: "Total Licenses", value: summary.total_licenses, icon: Layers, color: "text-blue-400" },
           { label: "Utilization", value: `${summary.utilization_pct}%`, icon: BarChart3, color: summary.utilization_pct >= 80 ? "text-emerald-400" : "text-amber-400", sub: <Progress value={summary.utilization_pct} className="mt-1.5 h-1.5" /> },
@@ -114,21 +123,22 @@ export default function LicenseManagementPage() {
             </CardContent>
           </Card>
         ))}
-      </div>
+      </div>}
 
-      {/* Optimization Suggestions */}
+      {/* Evidence-backed review prompts */}
       {optimization_suggestions?.length > 0 && (
         <Card className="border-amber-500/20 bg-amber-500/5">
           <CardContent className="pt-4 pb-3">
-            <div className="flex items-center gap-2 mb-2"><Lightbulb className="w-4 h-4 text-amber-400" /><span className="text-sm font-bold text-amber-400">Cost Optimization Suggestions</span></div>
+            <div className="flex items-center gap-2 mb-2"><Lightbulb className="w-4 h-4 text-amber-400" /><span className="text-sm font-bold text-amber-400">Cost and renewal review</span></div>
             <div className="grid grid-cols-3 gap-3">
               {optimization_suggestions.map((s, i) => (
                 <div key={i} className="p-3 rounded-lg bg-background/50 border border-border/30">
                   <p className="text-sm font-medium">{s.message}</p>
                   <div className="flex items-center justify-between mt-2">
-                    <Badge className={s.priority === "high" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}>{s.priority}</Badge>
-                    <span className="text-sm font-bold text-emerald-400">Save ${s.savings.toLocaleString()}/mo</span>
+                    <Badge className="bg-amber-500/20 text-amber-400">{s.priority}</Badge>
+                    {s.savings !== null && <span className="text-sm font-bold text-emerald-400">Review up to ${s.savings.toLocaleString()}/mo</span>}
                   </div>
+                  {s.evidence && <p className="mt-2 text-[11px] text-muted-foreground">{s.evidence}</p>}
                 </div>
               ))}
             </div>
@@ -136,7 +146,7 @@ export default function LicenseManagementPage() {
         </Card>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      {hasEvidence && <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid grid-cols-5 w-full">
           <TabsTrigger value="overview" data-testid="lic-tab-overview"><BarChart3 className="w-3 h-3 mr-1" />Overview</TabsTrigger>
           <TabsTrigger value="all" data-testid="lic-tab-all"><Layers className="w-3 h-3 mr-1" />All Licenses ({licenses.length})</TabsTrigger>
@@ -292,21 +302,21 @@ export default function LicenseManagementPage() {
             </Table></CardContent></Card>
           )}
         </TabsContent>
-      </Tabs>
+      </Tabs>}
 
       {/* Add/Edit Dialog */}
       <Dialog open={addDialog} onOpenChange={setAddDialog}>
         <DialogContent className="max-w-lg" aria-describedby="lic-dialog-desc">
           <DialogHeader>
-            <DialogTitle>{editLic ? "Edit License" : "Add License"}</DialogTitle>
-            <DialogDescription id="lic-dialog-desc">{editLic ? "Update license details" : "Add a new software license to track"}</DialogDescription>
+            <DialogTitle>{editLic ? "Confirm or update licence" : "Add confirmed licence"}</DialogTitle>
+            <DialogDescription id="lic-dialog-desc">{editLic ? "Saving confirms these details as a technician-reviewed register entry and records the change in the audit trail." : "Enter values from a verified supplier, invoice, or provider portal. This creates an auditable manual register entry."}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Product Name *</Label><Input value={form.product_name} onChange={e => setForm({ ...form, product_name: e.target.value })} placeholder="Microsoft 365 Business" /></div>
               <div><Label className="text-xs">Vendor *</Label><Input value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="Microsoft" /></div>
             </div>
-            <div><Label className="text-xs">Client *</Label><Input value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} placeholder="Acme Corp" /></div>
+            <div><Label className="text-xs">Client *</Label><Input list="licence-client-options" value={form.client_name} onChange={e => { const client = clientOptions.find(item => item.name === e.target.value); setForm({ ...form, client_name: e.target.value, client_id: client?.id || "" }); }} placeholder="Start typing a client name" /><datalist id="licence-client-options">{clientOptions.map(client => <option key={client.id} value={client.name} />)}</datalist></div>
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">Purchased Seats</Label><Input type="number" value={form.purchased} onChange={e => setForm({ ...form, purchased: parseInt(e.target.value) || 0 })} /></div>
               <div><Label className="text-xs">Used Seats</Label><Input type="number" value={form.used} onChange={e => setForm({ ...form, used: parseInt(e.target.value) || 0 })} /></div>
@@ -331,7 +341,7 @@ export default function LicenseManagementPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialog(false)}>Cancel</Button>
-            <Button onClick={handleSave} data-testid="save-license-btn">{editLic ? "Update" : "Add License"}</Button>
+            <Button onClick={handleSave} data-testid="save-license-btn">{editLic ? "Confirm changes" : "Save confirmed licence"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

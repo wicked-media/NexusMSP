@@ -1,8 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 import uuid
-import random as _random_mod
-random = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
 
@@ -98,7 +96,7 @@ async def scan_compliance(client_id: str, framework: str = "cis", current_user: 
             passed += 1
         results.append({**ctrl, "status": status, "evidence": evidence})
 
-    score = round((passed / evaluated) * 100) if evaluated else 0
+    score = round((passed / evaluated) * 100) if evaluated else None
 
     # Save report
     report_id = str(uuid.uuid4())[:8]
@@ -111,6 +109,7 @@ async def scan_compliance(client_id: str, framework: str = "cis", current_user: 
         "controls": results,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "scanned_by": current_user.get("name", ""),
+        "evidence_state": "assessed" if evaluated else "not_assessed",
     }
     await db.compliance_reports.insert_one(report)
     report.pop("_id", None)
@@ -132,56 +131,95 @@ async def get_frameworks(current_user: dict = Depends(get_current_user)):
 # ============================================================
 @router.get("/compliance-frameworks/overview")
 async def frameworks_overview(current_user: dict = Depends(get_current_user)):
-    frameworks = await db.compliance_frameworks.find({}, {"_id": 0}).to_list(50)
-    if not frameworks:
-        frameworks = await _seed_frameworks_catalog()
+    """Summarise only evidence captured by real client scans.
+
+    Earlier versions seeded random framework scores. Those figures could look
+    credible but were not compliance evidence, so this endpoint now derives
+    its scores from the latest persisted scan for each client/framework pair.
+    """
+    scans = await db.compliance_reports.find({}, {"_id": 0}).sort("scanned_at", -1).to_list(2000)
+    latest_by_context: dict[tuple[str, str], dict] = {}
+    for scan in scans:
+        key = (str(scan.get("client_id") or ""), str(scan.get("framework") or ""))
+        if key not in latest_by_context:
+            latest_by_context[key] = scan
+    latest_scans = list(latest_by_context.values())
+    frameworks = []
+    for framework_id, definition in COMPLIANCE_FRAMEWORKS.items():
+        matched = [scan for scan in latest_scans if scan.get("framework") == framework_id]
+        evidence_rows = []
+        for scan in matched:
+            passed_value = max(int(scan.get("passed") or 0), 0)
+            total_value = max(int(scan.get("total") or len(definition["controls"])), 0)
+            # Legacy scans did not persist `evaluated`. Their recorded total is
+            # the only defensible denominator, rather than showing 0% or an
+            # impossible percentage on an executive dashboard.
+            evaluated_value = scan.get("evaluated")
+            evaluated_value = total_value if evaluated_value is None else max(int(evaluated_value or 0), 0)
+            evidence_rows.append((passed_value, evaluated_value, total_value))
+        evaluated = sum(row[1] for row in evidence_rows)
+        passed = sum(row[0] for row in evidence_rows)
+        total = sum(row[2] for row in evidence_rows)
+        data_quality_issue = any(passed_value > evaluated_value for passed_value, evaluated_value, _ in evidence_rows)
+        frameworks.append({
+            "id": framework_id,
+            "name": definition["name"],
+            "total_controls": len(definition["controls"]),
+            "controls_met": passed,
+            "evidence_controls": evaluated,
+            "evidence_coverage_pct": round((evaluated / max(total, 1)) * 100) if matched else 0,
+            # Do not silently clamp malformed evidence to 100%. A missing score
+            # is more honest and directs the technician to validate the scan.
+            "compliance_pct": round((passed / evaluated) * 100) if evaluated and not data_quality_issue else None,
+            "clients_assessed": len({scan.get("client_id") for scan in matched if scan.get("client_id")}),
+            "latest_assessed_at": max((scan.get("scanned_at") or "" for scan in matched), default=None),
+            "evidence_state": "data_quality_issue" if data_quality_issue else "evidence_available" if matched else "not_assessed",
+            "data_quality_issue": data_quality_issue,
+        })
+    client_latest: dict[str, list[dict]] = {}
+    for scan in latest_scans:
+        client_latest.setdefault(str(scan.get("client_id") or ""), []).append(scan)
+    client_scores = [
+        sum(float(scan["score"]) for scan in rows if isinstance(scan.get("score"), (int, float)))
+        / sum(1 for scan in rows if isinstance(scan.get("score"), (int, float)))
+        for client_id, rows in client_latest.items()
+        if client_id and any(isinstance(scan.get("score"), (int, float)) for scan in rows)
+    ]
     return {
         "frameworks": frameworks,
         "summary": {
             "total_frameworks": len(frameworks),
-            "avg_compliance_pct": round(sum(f.get("compliance_pct", 0) for f in frameworks) / max(len(frameworks), 1), 1),
+            "avg_compliance_pct": round(sum(client_scores) / len(client_scores), 1) if client_scores else None,
             "total_controls": sum(f.get("total_controls", 0) for f in frameworks),
             "controls_met": sum(f.get("controls_met", 0) for f in frameworks),
+            "evidence_scans": len(latest_scans),
+            "clients_assessed": len(client_scores),
+            "compliant_clients": sum(1 for score in client_scores if score >= 85),
+            "partially_compliant": sum(1 for score in client_scores if 0 < score < 85),
         },
     }
 
 
 @router.get("/compliance-frameworks/{framework_id}")
 async def get_framework_detail(framework_id: str, current_user: dict = Depends(get_current_user)):
-    fw = await db.compliance_frameworks.find_one({"id": framework_id}, {"_id": 0})
-    if not fw:
-        return {"error": "Not found"}
-    return fw
-
-
-async def _seed_frameworks_catalog():
-    fws = [
-        {"name": "NIST 800-171", "controls": [("AC - Access Control", 22, 18), ("AU - Audit", 9, 7), ("CM - Config Mgmt", 9, 6), ("IA - Identification", 11, 9), ("IR - Incident Response", 3, 3), ("MA - Maintenance", 6, 4), ("MP - Media Protection", 9, 7), ("PE - Physical", 6, 5), ("PS - Personnel", 2, 2), ("RA - Risk Assessment", 3, 2), ("SC - System Comms", 16, 11), ("SI - System Integrity", 7, 5)]},
-        {"name": "CIS Controls v8", "controls": [("Inventory & Control of Enterprise Assets", 5, 4), ("Inventory of Software Assets", 7, 5), ("Data Protection", 14, 10), ("Secure Config of Assets", 12, 8), ("Account Management", 6, 5), ("Access Control Management", 8, 6), ("Continuous Vulnerability Mgmt", 7, 5), ("Audit Log Management", 12, 9), ("Email & Browser Protections", 7, 5), ("Malware Defenses", 7, 6), ("Data Recovery", 5, 4), ("Network Infrastructure", 8, 5)]},
-        {"name": "SOC 2 Type II", "controls": [("CC1 - Control Environment", 4, 4), ("CC2 - Communication", 3, 3), ("CC3 - Risk Assessment", 4, 3), ("CC5 - Control Activities", 3, 2), ("CC6 - Logical Access", 8, 6), ("CC7 - System Operations", 5, 4), ("CC8 - Change Management", 3, 2), ("CC9 - Risk Mitigation", 2, 2), ("A1 - Availability", 3, 2), ("C1 - Confidentiality", 2, 2), ("PI1 - Privacy", 8, 5)]},
-        {"name": "HIPAA", "controls": [("Administrative Safeguards", 12, 9), ("Physical Safeguards", 4, 3), ("Technical Safeguards", 5, 4), ("Organizational Requirements", 4, 3), ("Breach Notification", 3, 3)]},
-    ]
-    frameworks = []
-    for fw_data in fws:
-        controls = []
-        total_c = 0
-        met_c = 0
-        for cat_name, total, met in fw_data["controls"]:
-            total_c += total
-            met_c += met
-            controls.append({"category": cat_name, "total": total, "met": met, "pct": round(met / total * 100, 1)})
-        fw = {
-            "id": f"cf-{uuid.uuid4().hex[:8]}", "name": fw_data["name"],
-            "total_controls": total_c, "controls_met": met_c,
-            "compliance_pct": round(met_c / total_c * 100, 1),
-            "categories": controls,
-            "last_assessed": (datetime.now(timezone.utc) - timedelta(days=random.randint(1, 30))).isoformat(),
-            "next_assessment": (datetime.now(timezone.utc) + timedelta(days=random.randint(30, 90))).isoformat(),
-            "clients_applicable": random.randint(3, 12),
-        }
-        frameworks.append(fw)
-        await db.compliance_frameworks.insert_one(fw)
-    return [{k: v for k, v in f.items() if k != "_id"} for f in frameworks]
+    definition = COMPLIANCE_FRAMEWORKS.get(framework_id)
+    if not definition:
+        raise HTTPException(status_code=404, detail="Compliance framework not found")
+    scans = await db.compliance_reports.find({"framework": framework_id}, {"_id": 0}).sort("scanned_at", -1).to_list(500)
+    latest_by_client: dict[str, dict] = {}
+    for scan in scans:
+        client_id = str(scan.get("client_id") or "")
+        if client_id and client_id not in latest_by_client:
+            latest_by_client[client_id] = scan
+    latest = list(latest_by_client.values())
+    return {
+        "id": framework_id,
+        "name": definition["name"],
+        "controls": definition["controls"],
+        "clients_assessed": len(latest),
+        "latest_scans": latest,
+        "evidence_state": "evidence_available" if latest else "not_assessed",
+    }
 
 
 # ============================================================
@@ -190,42 +228,48 @@ async def _seed_frameworks_catalog():
 @router.get("/compliance-generator/frameworks")
 async def get_generator_frameworks(current_user: dict = Depends(get_current_user)):
     return [
-        {"id": "fw-hipaa", "name": "HIPAA", "controls": 45, "description": "Health Insurance Portability and Accountability Act"},
-        {"id": "fw-soc2", "name": "SOC 2 Type II", "controls": 64, "description": "Service Organization Control 2"},
-        {"id": "fw-cis", "name": "CIS Controls v8", "controls": 153, "description": "Center for Internet Security Controls"},
-        {"id": "fw-essential8", "name": "Essential Eight", "controls": 8, "description": "Australian Signals Directorate Essential Eight"},
-        {"id": "fw-nist", "name": "NIST CSF 2.0", "controls": 106, "description": "National Institute of Standards Cybersecurity Framework"},
+        {"id": framework_id, "name": definition["name"], "controls": len(definition["controls"]), "description": "Evidence-backed report available after a client scan"}
+        for framework_id, definition in COMPLIANCE_FRAMEWORKS.items()
     ]
 
 
 @router.get("/compliance-generator/reports")
 async def get_generated_reports(current_user: dict = Depends(get_current_user)):
-    reports = await db.compliance_generated_reports.find({}, {"_id": 0}).sort("generated_at", -1).to_list(50)
-    if not reports:
-        now = datetime.now(timezone.utc)
-        reports = [
-            {"id": "cr-001", "client_name": "Global Finance Ltd", "framework": "SOC 2 Type II", "score": 87, "controls_passed": 56, "controls_total": 64, "generated_at": (now - timedelta(days=7)).isoformat(), "generated_by": "Alex Thompson", "status": "completed"},
-            {"id": "cr-002", "client_name": "HealthCare Plus", "framework": "HIPAA", "score": 72, "controls_passed": 32, "controls_total": 45, "generated_at": (now - timedelta(days=14)).isoformat(), "generated_by": "Sarah Chen", "status": "completed"},
-            {"id": "cr-003", "client_name": "Acme Corporation", "framework": "CIS Controls v8", "score": 81, "controls_passed": 124, "controls_total": 153, "generated_at": (now - timedelta(days=3)).isoformat(), "generated_by": "Alex Thompson", "status": "completed"},
-        ]
-        for r in reports:
-            await db.compliance_generated_reports.insert_one(r)
-        reports = [dict((k, v) for k, v in r.items() if k != "_id") for r in reports]
-    return reports
+    return await db.compliance_generated_reports.find(
+        {"source": "evidence_scan"}, {"_id": 0}
+    ).sort("generated_at", -1).to_list(50)
 
 
 @router.post("/compliance-generator/generate")
 async def generate_compliance_report(data: dict, current_user: dict = Depends(get_current_user)):
+    scan_id = str(data.get("scan_id") or "").strip()
+    if not scan_id:
+        raise HTTPException(status_code=400, detail="Run an evidence scan before generating a compliance report")
+    scan = await db.compliance_reports.find_one({"id": scan_id}, {"_id": 0})
+    if not scan:
+        raise HTTPException(status_code=404, detail="Compliance evidence scan not found")
+    controls = scan.get("controls") or []
     report = {
         "id": f"cr-{uuid.uuid4().hex[:8]}",
-        "client_name": data.get("client_name"),
-        "framework": data.get("framework"),
-        "score": random.randint(65, 95),
-        "controls_passed": random.randint(30, 60),
-        "controls_total": random.randint(45, 153),
+        "source": "evidence_scan",
+        "scan_id": scan["id"],
+        "client_id": scan.get("client_id"),
+        "client_name": scan.get("client_name"),
+        "framework": scan.get("framework_name") or scan.get("framework"),
+        "framework_id": scan.get("framework"),
+        "title": f"{scan.get('framework_name') or scan.get('framework')} evidence report",
+        "score": scan.get("score") if isinstance(scan.get("score"), (int, float)) else None,
+        "evidence_score": scan.get("evidence_score") if isinstance(scan.get("evidence_score"), (int, float)) else None,
+        "evidence_coverage_pct": scan.get("coverage_pct", 0),
+        "controls_passed": scan.get("passed", 0),
+        "controls_evaluated": scan.get("evaluated", 0),
+        "controls_total": scan.get("total", len(controls)),
+        "control_snapshot": controls,
+        "scanned_at": scan.get("scanned_at"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_by": current_user.get("name"),
-        "status": "completed",
+        "evidence_state": scan.get("evidence_state", "not_assessed"),
+        "status": "completed" if int(scan.get("evaluated") or 0) else "evidence_gaps",
     }
     await db.compliance_generated_reports.insert_one(report)
     report.pop("_id", None)

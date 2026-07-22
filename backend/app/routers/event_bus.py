@@ -84,6 +84,7 @@ async def mark_viewing_ticket(ticket_id: str, current_user: dict = Depends(get_c
     _ticket_viewers[ticket_id][current_user["id"]] = {
         "user_id": current_user["id"],
         "user_name": current_user["name"],
+        "avatar_url": current_user.get("avatar"),
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     

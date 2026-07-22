@@ -1,13 +1,28 @@
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { Send, MessageSquare, Mail, PhoneCall, Loader2, User, Zap, LockKeyhole } from "lucide-react";
+import { Send, MessageSquare, Mail, PhoneCall, Loader2, Zap, LockKeyhole } from "lucide-react";
 import DOMPurify from "dompurify";
 import { formatDistanceToNow } from "date-fns";
+
+function MessageAvatar({ item, name, tone = "amber" }) {
+  const avatarUrl = item.avatar_url || item.user_avatar || item.author_avatar || item.avatar;
+  const initials = (name || "?").split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
+  const toneClass = tone === "sky"
+    ? "border-sky-400/30 bg-sky-500/15 text-sky-200"
+    : "border-amber-400/30 bg-amber-400/15 text-amber-100";
+  return (
+    <Avatar className={`h-6 w-6 shrink-0 border ${toneClass}`}>
+      <AvatarImage src={avatarUrl} alt={name || "Technician"} className="object-cover" />
+      <AvatarFallback className="bg-transparent text-[9px] font-semibold">{initials}</AvatarFallback>
+    </Avatar>
+  );
+}
 
 /**
  * Conversation tab for the Ticket Detail view.
@@ -19,6 +34,7 @@ export default function TicketConversationTab({
   emailForm, setEmailForm, handleSendEmail, emailSignature, clientContacts,
   smsForm, setSmsForm, handleSendSms, applySmsTemplate, smsTemplates, smsConfig, smsSending,
   ticketNotes, ticketEmails, ticketSms,
+  recordLabel = "ticket",
 }) {
   const allItems = [
     ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
@@ -42,13 +58,13 @@ export default function TicketConversationTab({
               { value: "email", label: "Email client", icon: Mail },
               { value: "sms", label: "SMS", icon: PhoneCall },
             ].map(({ value, label, icon: Icon }) => (
-              <Button key={value} type="button" variant="ghost" size="sm" onClick={() => setConversationType(value)} className={`h-8 gap-1.5 px-2.5 text-xs ${conversationType === value ? "bg-violet-500/[0.18] text-violet-100 hover:bg-violet-500/[0.22]" : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200"}`} data-testid={value === "note" ? "conversation-type-select" : undefined}>
+              <Button key={value} type="button" variant="ghost" size="sm" onClick={() => setConversationType(value)} className={`h-8 gap-1.5 px-2.5 text-xs ${conversationType === value ? "bg-cyan-500/[0.16] text-cyan-100 hover:bg-cyan-500/[0.22]" : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200"}`} data-testid={value === "note" ? "conversation-type-select" : undefined}>
                 <Icon className="h-3.5 w-3.5" />{label}
               </Button>
             ))}
           </div>
           <span className={`text-[11px] ${conversationType === "note" ? "text-amber-300" : conversationType === "email" ? "text-sky-300" : "text-emerald-300"}`}>
-            {conversationType === "note" ? "Visible to your team only" : conversationType === "email" ? "Sent and tracked on this ticket" : "Sent through MobileMessage"}
+            {conversationType === "note" ? "Visible to your team only" : conversationType === "email" ? `Sent and tracked on this ${recordLabel}` : "Sent through MobileMessage"}
           </span>
         </div>
       </div>
@@ -143,7 +159,7 @@ export default function TicketConversationTab({
                 {sigEffLen} chars · {Math.max(1, Math.ceil(sigEffLen / 160))} segment{sigEffLen > 160 ? "s" : ""}
               </span>
             </Label>
-            <Textarea value={smsForm.message} onChange={e => setSmsForm({ ...smsForm, message: e.target.value })} placeholder="Hi, update on your ticket..." rows={4} maxLength={1600} data-testid="sms-message-input" />
+            <Textarea value={smsForm.message} onChange={e => setSmsForm({ ...smsForm, message: e.target.value })} placeholder={`Hi, update on your ${recordLabel}...`} rows={4} maxLength={1600} data-testid="sms-message-input" />
             {smsConfig.append_signature && smsConfig.signature && !smsForm.message.toLowerCase().includes(smsConfig.signature.toLowerCase()) && (
               <p className="text-[10px] text-muted-foreground mt-1">
                 Signature auto-appended: <span className="font-mono text-emerald-400">"{smsConfig.signature}"</span>
@@ -162,7 +178,7 @@ export default function TicketConversationTab({
 
       {/* Unified Conversation Timeline */}
       <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-black/[0.10]" style={{ resize: "vertical", overflow: "auto", height: "500px", minHeight: "240px" }}>
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/[0.07] bg-[#111318]/95 px-3 py-2 backdrop-blur"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Ticket activity</span><span className="text-[10px] text-zinc-600">{allItems.length} item{allItems.length === 1 ? "" : "s"}</span></div>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/[0.07] bg-[#111318]/95 px-3 py-2 backdrop-blur"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{recordLabel} activity</span><span className="text-[10px] text-zinc-600">{allItems.length} item{allItems.length === 1 ? "" : "s"}</span></div>
         {allItems.length === 0 ? (
           <p className="text-center py-10 text-sm text-muted-foreground">No activity yet. Add an internal note or send the first update.</p>
         ) : allItems.map(item => {
@@ -177,7 +193,8 @@ export default function TicketConversationTab({
                     ) : (
                       <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
                     )}
-                    <User className="w-3 h-3" /><span className="text-sm font-medium">{item.user_name}</span>
+                    <MessageAvatar item={item} name={item.user_name || item.author || "Technician"} />
+                    <span className="text-sm font-medium">{item.user_name || item.author || "Technician"}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                 </div>
@@ -194,7 +211,8 @@ export default function TicketConversationTab({
               <div key={`email-${item.id}`} className="p-3 rounded-lg mb-2 border bg-blue-500/[0.03] border-blue-500/20" data-testid={`email-${item.id}`}>
                 <div className="flex justify-between mb-1">
                   <div className="flex items-center gap-2">
-                    <Mail className="w-3 h-3 text-blue-400" />
+                  <Mail className="w-3 h-3 text-blue-400" />
+                  {item.direction !== "inbound" && <MessageAvatar item={item} name={item.from_name || item.user_name || "Technician"} tone="sky" />}
                     <span className="text-sm font-medium">{item.subject}</span>
                     <Badge variant="outline" className="text-blue-400 text-[10px] h-4">Email</Badge>
                   </div>

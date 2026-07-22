@@ -36,8 +36,10 @@ async def _get_sso_config():
 @router.get("/settings/microsoft-sso")
 async def get_sso_settings(current_user: dict = Depends(get_current_user)):
     config = await _get_sso_config()
-    if config and config.get("client_secret"):
-        config["client_secret"] = "********"
+    if config:
+        # Never return credential material to the browser, even to administrators.
+        config["client_secret_set"] = bool(config.get("client_secret"))
+        config["client_secret"] = ""
     return config or {
         "type": "microsoft_sso",
         "enabled": False,
@@ -45,6 +47,7 @@ async def get_sso_settings(current_user: dict = Depends(get_current_user)):
         "client_id": "",
         "client_secret": "",
         "redirect_uri": "",
+        "calendar_redirect_uri": "",
         "auto_create_users": True,
         "default_role": "tech",
     }
@@ -55,11 +58,12 @@ async def update_sso_settings(data: dict, current_user: dict = Depends(get_curre
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
-    # Preserve existing secret if masked
-    if data.get("client_secret") == "********":
+    # An empty form field means "keep the stored secret". Credentials are write-only.
+    if data.get("client_secret") in ("", "********", None):
         existing = await _get_sso_config()
         if existing:
             data["client_secret"] = existing.get("client_secret", "")
+    data.pop("client_secret_set", None)
     data["type"] = "microsoft_sso"
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({"type": "microsoft_sso"}, {"$set": data}, upsert=True)

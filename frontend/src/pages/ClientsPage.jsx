@@ -8,15 +8,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
   Search, Building2, Users, HardDrive, Ticket, DollarSign, AlertTriangle,
   Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles, Timer, Zap,
   Activity, ChevronRight, Send, RefreshCw, Filter, X, TrendingUp, TrendingDown,
-  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink
+  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal, ChevronDown, BarChart3, Scale, Globe
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
@@ -26,9 +27,10 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import { ClientProfilePictureUploader, ClientCoverImage } from "@/components/clients/ClientProfileAssets";
 import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
+import ClientAccountAlerts from "@/components/clients/ClientAccountAlerts";
+import ClientActivityFeed from "@/components/clients/ClientActivityFeed";
 import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStrip";
 import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
-import ClientTierBadge from "@/components/clients/ClientTierBadge";
 import ClientPulseWall from "@/components/clients/ClientPulseWall";
 import ClientUniverseMap from "@/components/clients/ClientUniverseMap";
 import {
@@ -42,6 +44,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
 import { useWidgetGrid } from "@/hooks/useWidgetGrid";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const ClientResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -98,6 +101,7 @@ function IntegrationChip({ type, active }) {
     pax8: { label: "PX8", color: "text-indigo-400 border-indigo-500/40", tip: "Pax8 / Microsoft CSP" },
     m365: { label: "365", color: "text-blue-400 border-blue-500/40", tip: "Microsoft 365" },
     rmm: { label: "RMM", color: "text-emerald-400 border-emerald-500/40", tip: "RMM agent installed" },
+    yeastar: { label: "PBX", color: "text-cyan-400 border-cyan-500/40", tip: "Yeastar PBX linked" },
     suped: { label: "SUP", color: "text-fuchsia-400 border-fuchsia-500/40", tip: "Suped DMARC" },
     cipp: { label: "CIPP", color: "text-orange-400 border-orange-500/40", tip: "CIPP — M365 management" },
   };
@@ -187,8 +191,71 @@ function TopMetric({ label, value, trend, color = "indigo" }) {
   return <MetricTile label={label} value={value} trend={trend} accent={accentMap[color] || "violet"} testid={`clients-metric-${label.toLowerCase().replace(/\s+/g, "-")}`} />;
 }
 
+function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const matches = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return clients
+      .filter((client) => !needle || `${client.name || ""} ${client.industry || ""} ${client.email || ""}`.toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [clients, query]);
+
+  const chooseClient = (client) => {
+    onSelect(client.id);
+    setQuery("");
+    setExpanded(false);
+  };
+
+  return (
+    <section className="border-b border-border/70 bg-background/30 px-6 py-4" aria-label="Client finder">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><Search className="h-4 w-4 text-primary" /></span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Open a client</p>
+            <p className="text-xs text-muted-foreground">Find any account without leaving this workspace.</p>
+          </div>
+        </div>
+        <div className="relative min-w-0 flex-1 lg:max-w-3xl">
+          <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onFocus={() => setExpanded(true)}
+            onBlur={() => window.setTimeout(() => setExpanded(false), 120)}
+            onChange={(event) => { setQuery(event.target.value); setExpanded(true); }}
+            placeholder="Search clients by name, industry, or primary email..."
+            className="h-11 border-border/80 bg-background pl-10 pr-24 shadow-sm"
+            data-testid="client-quick-search-input"
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:block">{clients.length} clients</span>
+          {expanded && (
+            <div className="absolute z-50 mt-2 max-h-[360px] w-full overflow-y-auto rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl" data-testid="client-quick-search-results">
+              {matches.length ? matches.map((client) => {
+                const active = client.id === activeClientId;
+                return (
+                  <button key={client.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseClient(client)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted/55"}`} data-testid={`client-quick-search-result-${client.id}`}>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-xs font-semibold text-primary">{client.name?.slice(0, 2).toUpperCase() || "CL"}</span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-foreground">{client.name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{[client.industry, client.email].filter(Boolean).join(" - ") || "Client profile"}</span></span>
+                    <span className={`shrink-0 text-[10px] uppercase tracking-wide ${active ? "text-primary" : "text-muted-foreground"}`}>{active ? "Open" : "View"}</span>
+                  </button>
+                );
+              }) : <div className="px-4 py-9 text-center text-sm text-muted-foreground">No client matches "{query}".</div>}
+            </div>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground lg:max-w-48">Start typing, then select an account to open its live profile.</p>
+      </div>
+    </section>
+  );
+}
+
 export default function ClientsPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const clientIdFromUrl = searchParams.get("client");
   const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
@@ -213,8 +280,10 @@ export default function ClientsPage() {
     try {
       const res = await axios.get(`${API}/clients-enriched`, { headers });
       setData(res.data || { summary: null, clients: [] });
-      if (!selectedId && res.data?.clients?.length) {
-        setSelectedId(res.data.clients[0].id);
+      if (res.data?.clients?.length) {
+        const requestedClient = res.data.clients.find(client => client.id === clientIdFromUrl);
+        if (requestedClient) setSelectedId(requestedClient.id);
+        else if (!selectedId) setSelectedId(res.data.clients[0].id);
       }
     } catch {
       toast.error("Failed to load clients");
@@ -309,19 +378,43 @@ export default function ClientsPage() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 flex flex-col" data-testid="clients-page">
-        {/* Portfolio metric strip */}
-        <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-900/60">
-        <MetricStrip columns={4}>
-          <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : "managed portfolio"} color="indigo" />
-          <TopMetric label="Assessed Endpoints" value={s.assessed_endpoints || 0} trend="Nexus Agent evidence" color="sky" />
-          <TopMetric label="Patch Exposure" value={s.patch_pending || 0} trend={(s.patch_pending || 0) > 0 ? "updates need review" : "no agent-reported updates"} color={(s.patch_pending || 0) > 0 ? "amber" : "emerald"} />
-          <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
-        </MetricStrip>
+        <div className="px-6 pt-6">
+          <OperationalPageHeader
+            eyebrow="Client operations"
+            title="Clients"
+            description="Manage account health, service tiers, subscriptions, risks, documents, and client communications from one operational workspace."
+            icon={Building2}
+            tone="violet"
+            actions={<>
+              <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-clients-btn"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5" data-testid="clients-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />Workspace<ChevronDown className="h-3 w-3 opacity-60" /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => navigate("/client-insights")} className="gap-2.5"><BarChart3 className="h-4 w-4 text-violet-300" />Client insights</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/client-compare")} className="gap-2.5"><Scale className="h-4 w-4 text-sky-300" />Compare clients</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/client-portal-admin")} className="gap-2.5"><Users className="h-4 w-4 text-emerald-300" />Portal users</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/client-portal")} className="gap-2.5"><Globe className="h-4 w-4 text-cyan-300" />Client portal</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button size="sm" onClick={() => setCreateDialog(true)} data-testid="new-client-btn"><Plus className="w-4 h-4 mr-1" />New client</Button>
+            </>}
+          />
         </div>
+        <div className="px-6 py-5 border-b border-zinc-900/60">
+          <MetricStrip columns={4}>
+            <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : "managed portfolio"} color="indigo" />
+            <TopMetric label="Assessed Endpoints" value={s.assessed_endpoints || 0} trend="Nexus Agent evidence" color="sky" />
+            <TopMetric label="Patch Exposure" value={s.patch_pending || 0} trend={(s.patch_pending || 0) > 0 ? "updates need review" : "no agent-reported updates"} color={(s.patch_pending || 0) > 0 ? "amber" : "emerald"} />
+            <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
+          </MetricStrip>
+        </div>
+        <ClientQuickSearch clients={data.clients || []} activeClientId={selectedId} onSelect={setSelectedId} />
 
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1">
           {/* Master list */}
-          <aside className="w-full md:w-[40%] lg:w-[32%] border-r border-zinc-800 flex flex-col bg-zinc-950">
+          {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[40%] lg:w-[32%]">
             <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-zinc-500 shrink-0" />
@@ -333,9 +426,6 @@ export default function ClientsPage() {
                   className="h-8 bg-transparent border-0 focus-visible:ring-0 focus-visible:border-0 px-1 text-sm"
                   data-testid="clients-search-input"
                 />
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setCreateDialog(true)} data-testid="new-client-btn">
-                  <Plus className="w-4 h-4" />
-                </Button>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Select value={lifecycleFilter} onValueChange={setLifecycleFilter}>
@@ -367,6 +457,7 @@ export default function ClientsPage() {
                     <SelectItem value="pax8">Pax8 linked</SelectItem>
                     <SelectItem value="m365">M365 linked</SelectItem>
                     <SelectItem value="rmm">RMM active</SelectItem>
+                    <SelectItem value="yeastar">Yeastar PBX linked</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={tierFilter} onValueChange={setTierFilter}>
@@ -415,10 +506,10 @@ export default function ClientsPage() {
                 ))
               )}
             </div>
-          </aside>
+          </aside>}
 
           {/* Detail pane */}
-          <main className="flex-1 bg-zinc-900/30 overflow-y-auto relative">
+          <main className={`relative overflow-y-auto bg-zinc-900/30 ${selectedClient ? "w-full" : "flex-1"}`}>
             {!selectedClient ? (
               <div className="p-4 space-y-4" data-testid="client-studio-home">
                 <div className="flex items-center justify-between">
@@ -530,7 +621,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
         {!grid.hiddenWidgets.has("nba") && (
           <div key="nba" className="nx-widget-card">
             <grid.HideBtn id="nba" />
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full">
+            <div className="h-full rounded-2xl border border-border/70 bg-[linear-gradient(135deg,rgba(29,78,216,0.08),rgba(9,12,18,0.82))] p-4 shadow-sm">
               <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-indigo-400" />Next Best Action
               </div>
@@ -547,7 +638,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
         {!grid.hiddenWidgets.has("quick") && (
           <div key="quick" className="nx-widget-card">
             <grid.HideBtn id="quick" />
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full">
+            <div className="h-full rounded-2xl border border-border/70 bg-[linear-gradient(135deg,rgba(45,212,191,0.07),rgba(9,12,18,0.82))] p-4 shadow-sm">
               <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
                 <Zap className="w-3 h-3 text-amber-400" />Quick Actions
               </div>
@@ -565,7 +656,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
         {!grid.hiddenWidgets.has("health") && (
           <div key="health" className="nx-widget-card">
             <grid.HideBtn id="health" />
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full overflow-auto">
+            <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-card/45 p-4 shadow-sm">
               <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center justify-between">
                 <span>Health Score Breakdown</span>
                 {healthDetail && <span className="text-zinc-400 font-mono">{healthDetail.health_score}/100</span>}
@@ -605,7 +696,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
         {!grid.hiddenWidgets.has("activity") && (
           <div key="activity" className="nx-widget-card">
             <grid.HideBtn id="activity" />
-            <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full overflow-auto">
+            <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-card/45 p-4 shadow-sm">
               <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1">
                 <Activity className="w-3 h-3" />Recent Activity
               </div>
@@ -615,7 +706,7 @@ function ClientOverviewGrid({ client, activity, healthDetail }) {
                 <div className="space-y-2">
                   {activity.slice(0, 8).map((a, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : a.type?.startsWith("device") ? "bg-cyan-400" : "bg-amber-400"}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : a.type === "email" ? (a.status === "sent" || a.status === "received" ? "bg-violet-400" : "bg-rose-400") : a.type?.startsWith("device") ? "bg-cyan-400" : "bg-amber-400"}`} />
                       <span className="text-zinc-300 flex-1 truncate">{a.title}{a.device_name ? <span className="text-zinc-500"> · {a.device_name}</span> : null}</span>
                       {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
                       <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
@@ -635,7 +726,34 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
   const [briefingOpen, setBriefingOpen] = useState(false);
+  const [ticketHistory, setTicketHistory] = useState([]);
+  const [ticketHistoryLoading, setTicketHistoryLoading] = useState(false);
+  const [serviceJobHistory, setServiceJobHistory] = useState({ workshop: [], field: [] });
+  const [serviceJobHistoryLoading, setServiceJobHistoryLoading] = useState(false);
   useEffect(() => { setClientLocal(clientProp); }, [clientProp]);
+  useEffect(() => {
+    if (!clientProp?.id) return;
+    setTicketHistoryLoading(true);
+    axios.get(`${API}/tickets?client_id=${encodeURIComponent(clientProp.id)}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(response => setTicketHistory((response.data || []).sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))))
+      .catch(() => setTicketHistory([]))
+      .finally(() => setTicketHistoryLoading(false));
+  }, [clientProp?.id, token]);
+  useEffect(() => {
+    if (!clientProp?.id) return;
+    setServiceJobHistoryLoading(true);
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      axios.get(`${API}/workshop/jobs?client_id=${encodeURIComponent(clientProp.id)}`, { headers }),
+      axios.get(`${API}/field-jobs?client_id=${encodeURIComponent(clientProp.id)}`, { headers }),
+    ])
+      .then(([workshop, field]) => setServiceJobHistory({
+        workshop: (workshop.data || []).sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)),
+        field: (field.data || []).sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)),
+      }))
+      .catch(() => setServiceJobHistory({ workshop: [], field: [] }))
+      .finally(() => setServiceJobHistoryLoading(false));
+  }, [clientProp?.id, token]);
   const client = clientLocal || clientProp;
   const mrrData = client.mrr_trend || [];
   const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
@@ -643,19 +761,22 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
   const applyClientPatch = (patch) => setClientLocal(c => ({ ...c, ...patch }));
 
   return (
-    <div className="flex flex-col h-full" data-testid="client-detail-pane">
+    <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5" data-testid="client-detail-pane">
       {/* Cover banner */}
-      <div className="px-6 pt-4">
-        <ClientCoverImage client={client} onUpdated={applyClientPatch} />
-      </div>
+      <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]">
+        <ClientCoverImage client={client} onUpdated={applyClientPatch}>
+          <ClientAccountAlerts client={client} />
+        </ClientCoverImage>
 
       {/* Header */}
-      <div className="px-6 pb-3 -mt-4 flex items-start gap-4">
-        <ClientProfilePictureUploader client={client} onUpdated={applyClientPatch} size={88} />
-        <div className="flex-1 min-w-0 pt-2">
+      <div className="relative -mt-12 grid grid-cols-1 gap-5 px-5 pb-5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-end">
+        <div className="shrink-0 self-start rounded-2xl bg-background/95 p-1.5 text-center shadow-xl ring-1 ring-white/10">
+          <ClientProfilePictureUploader client={client} onUpdated={applyClientPatch} size={88} />
+          <p className="mt-1.5 text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Business logo</p>
+        </div>
+        <div className="min-w-0 flex-1 pt-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-semibold tracking-tight">{client.name}</h1>
-            <ClientTierBadge tier={client.tier} vip={client.vip} />
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{client.name}</h1>
             <ClientServiceTierChip client={client} isAdmin={isAdmin} onUpdated={applyClientPatch} />
             <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{(client.lifecycle || "active").replace("_", " ")}</span>
             <button
@@ -669,13 +790,13 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
                 } catch { toast.error("Failed to toggle VIP"); }
               }}
               data-testid="vip-toggle-btn"
-              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-bold transition-colors ${client.vip ? "border-amber-400/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-zinc-700 text-zinc-500 hover:border-amber-400/40 hover:text-amber-300"}`}
+              className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold uppercase tracking-wide transition-colors ${client.vip ? "border-amber-400/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-zinc-700 text-zinc-500 hover:border-amber-400/40 hover:text-amber-300"}`}
               title={client.vip ? "Remove VIP status" : "Mark as VIP"}
             >
               ⭐ VIP
             </button>
           </div>
-          <div className="flex items-center gap-4 text-[11px] text-zinc-500 font-mono mt-1 flex-wrap">
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
             {client.industry && <span>{client.industry}</span>}
             {client.email && <span className="flex items-center gap-1"><Mail className="w-2.5 h-2.5" />{client.email}</span>}
             {client.phone && <span className="flex items-center gap-1"><Phone className="w-2.5 h-2.5" />{client.phone}</span>}
@@ -686,20 +807,24 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
               </a>
             )}
           </div>
-          <div className="flex items-center gap-1 mt-2 flex-wrap">
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
             <IntegrationChip type="rmm" active={client.integrations.rmm} />
             <IntegrationChip type="acronis" active={client.integrations.acronis} />
             <IntegrationChip type="pax8" active={client.integrations.pax8} />
             <IntegrationChip type="m365" active={client.integrations.m365} />
-            {client.last_activity && <span className="text-[10px] text-zinc-500 ml-2 font-mono">last activity {formatDistanceToNow(new Date(client.last_activity), { addSuffix: true })}</span>}
+            <IntegrationChip type="yeastar" active={client.integrations.yeastar} />
+            {client.last_activity && <span className="ml-1 text-[10px] text-muted-foreground">Last activity {formatDistanceToNow(new Date(client.last_activity), { addSuffix: true })}</span>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <HealthDial score={client.health_score} size={56} />
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-black/20 px-2.5 py-1.5">
+            <div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Service health</p><p className="mt-0.5 text-xs text-foreground">Live account score</p></div>
+            <HealthDial score={client.health_score} size={54} />
+          </div>
           {onClose && (
             <button
               type="button"
-              className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:border-indigo-500/40 hover:text-indigo-300 hover:bg-indigo-500/10 flex items-center gap-1"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs text-muted-foreground hover:border-primary/35 hover:bg-muted/50 hover:text-foreground"
               onClick={onClose}
               data-testid="back-to-studio-home-btn"
               title="Back to Studio Home"
@@ -709,7 +834,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           )}
           <button
             type="button"
-            className="text-[10px] px-2 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs text-foreground hover:border-primary/35 hover:bg-muted/50"
             onClick={() => setBriefingOpen(true)}
             data-testid="ai-briefing-btn"
           >
@@ -717,7 +842,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </button>
           <button
             type="button"
-            className="text-[10px] px-2 py-1 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 text-xs text-amber-100 hover:bg-amber-500/20"
             onClick={() => window.open(`${API}/clients/${client.id}/health-certificate.pdf?token=${encodeURIComponent(token)}`, "_blank")}
             data-testid={`health-cert-btn-${client.id}`}
           >
@@ -725,15 +850,22 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </button>
         </div>
       </div>
+      </section>
       <AccountBriefingDialog clientId={client.id} open={briefingOpen} onClose={() => setBriefingOpen(false)} />
 
       {/* Quick Actions strip */}
-      <div className="px-6 pb-3 border-b border-zinc-800">
-        <ClientQuickActionsStrip client={client} />
-      </div>
+      <section className="rounded-2xl border border-border/70 bg-card/35 p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Account actions</p><p className="mt-1 text-sm text-muted-foreground">Start a traceable client action without leaving this profile.</p></div>
+          <span className="text-[10px] text-muted-foreground">Every action remains linked to {client.name}</span>
+        </div>
+        <ClientQuickActionsStrip client={client} onOpenWarRoom={() => setTab("warroom")} />
+      </section>
 
       {/* Quick metrics strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 px-6 py-4 border-b border-zinc-800">
+      <section className="rounded-2xl border border-border/70 bg-card/25 p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Account pulse</p><p className="mt-1 text-sm text-muted-foreground">Commercial, service and asset context at a glance.</p></div></div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <HeroTile
           label="Monthly Recurring"
           value={`$${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
@@ -772,10 +904,11 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           testId="client-overdue-tile"
         />
       </div>
+      </section>
 
       {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
-        <TabsList className="h-auto rounded-none border-b border-zinc-800 bg-transparent p-0 justify-start gap-1 px-6">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/25 shadow-sm">
+        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-muted/15 p-2">
           {[
             { v: "overview", l: "Overview" },
             { v: "studio", l: "Studio ✨" },
@@ -795,12 +928,13 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
             { v: "cipp", l: "M365 / CIPP" },
             { v: "activity", l: "Activity" },
           ].map(t => (
-            <TabsTrigger key={t.v} value={t.v} className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs tracking-wide uppercase font-medium shadow-none" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
+            <TabsTrigger key={t.v} value={t.v} className="shrink-0 rounded-lg border border-transparent px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground shadow-none data-[state=active]:border-primary/20 data-[state=active]:bg-primary/10 data-[state=active]:text-primary" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
           ))}
         </TabsList>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <TabsContent value="overview" className="mt-0 space-y-3">
+            <ClientActivityFeed activity={activity} limit={8} compact title="Client activity" description="Your at-a-glance feed for recorded tickets, correspondence, billing, assets, change work, and account audit events." />
             <ClientOverviewGrid client={client} activity={activity} healthDetail={healthDetail} />
           </TabsContent>
 
@@ -831,9 +965,64 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </TabsContent>
 
           <TabsContent value="tickets" className="mt-0">
+            <div className="mb-3 overflow-hidden rounded-xl border border-cyan-500/15 bg-[linear-gradient(135deg,rgba(12,25,33,0.58),rgba(11,13,18,0.92))]">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+                <div><p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300">Client service history</p><p className="mt-1 text-sm text-zinc-400">Support tickets, workshop repairs and field work retained together for operational review and audit.</p></div>
+                <Link to={`/tickets?clientId=${client.id}`}><Button variant="outline" size="sm" className="h-9 border-cyan-500/25 bg-cyan-500/[0.06] text-cyan-100 hover:bg-cyan-500/[0.14]"><Ticket className="mr-1.5 h-3.5 w-3.5" />Open full queue</Button></Link>
+              </div>
+              <div className="divide-y divide-white/[0.06]">
+                {ticketHistoryLoading ? <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading ticket history</div> : ticketHistory.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No ticket history has been recorded for this client.</div> : ticketHistory.slice(0, 30).map(ticket => {
+                  const closed = ["closed", "resolved"].includes(String(ticket.status || "").toLowerCase());
+                  return <Link key={ticket.id} to={`/tickets?ticket=${encodeURIComponent(ticket.id)}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/[0.035]">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${closed ? "bg-emerald-400" : ticket.priority === "critical" ? "bg-rose-400" : "bg-cyan-400"}`} />
+                    <span className="w-20 shrink-0 font-mono text-[11px] text-zinc-400">{ticket.ticket_number || ticket.id?.slice(0, 8)}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{ticket.title || "Untitled ticket"}</span>
+                    <Badge variant="outline" className={`shrink-0 text-[9px] uppercase ${closed ? "border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-300" : "border-cyan-500/25 bg-cyan-500/[0.07] text-cyan-300"}`}>{closed ? "Closed" : String(ticket.status || "Open").replace("_", " ")}</Badge>
+                    <span className="hidden text-right text-[10px] text-zinc-500 sm:block">{closed && ticket.closed_by_name ? <><span className="block">Closed by {ticket.closed_by_name}</span><span>{ticket.closed_at ? new Date(ticket.closed_at).toLocaleDateString() : ""}</span></> : ticket.updated_at ? new Date(ticket.updated_at).toLocaleDateString() : ""}</span>
+                  </Link>;
+                })}
+              </div>
+            </div>
+            <div className="mb-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/35">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+                <div><p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300">Linked service jobs</p><p className="mt-1 text-sm text-zinc-400">Workshop and on-site work created against this client. Conversations and audit history remain with each job.</p></div>
+                <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500"><span>{serviceJobHistory.workshop.length} workshop</span><span className="text-zinc-700">|</span><span>{serviceJobHistory.field.length} field</span></div>
+              </div>
+              {serviceJobHistoryLoading ? <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading linked service jobs</div> : serviceJobHistory.workshop.length + serviceJobHistory.field.length === 0 ? <div className="py-8 text-center text-sm text-zinc-500">No linked workshop or field jobs have been recorded for this client yet.</div> : <div className="divide-y divide-white/[0.06]">
+                {serviceJobHistory.workshop.map(job => {
+                  const complete = ["collected", "cancelled"].includes(String(job.repair_status || "").toLowerCase());
+                  return <Link key={`workshop-${job.id}`} to={`/tickets?service_type=workshop&service_job=${encodeURIComponent(job.id)}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/[0.035]" title="Open this workshop job">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${complete ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    <Badge variant="outline" className="shrink-0 border-amber-500/25 bg-amber-500/[0.07] text-[9px] uppercase text-amber-300">Workshop</Badge>
+                    <span className="w-20 shrink-0 font-mono text-[11px] text-zinc-400">{job.job_number || job.id?.slice(0, 8)}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{[job.device_brand, job.device_model].filter(Boolean).join(" ") || job.device_type || job.fault_description || "Workshop repair"}</span>
+                    <Badge variant="outline" className={`shrink-0 text-[9px] uppercase ${complete ? "border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-300" : "border-amber-500/25 bg-amber-500/[0.07] text-amber-300"}`}>{String(job.repair_status || "checked in").replaceAll("_", " ")}</Badge>
+                    <span className="hidden text-right text-[10px] text-zinc-500 sm:block">{job.updated_at ? new Date(job.updated_at).toLocaleDateString() : ""}</span>
+                  </Link>;
+                })}
+                {serviceJobHistory.field.map(job => {
+                  const complete = ["completed", "cancelled"].includes(String(job.field_status || "").toLowerCase());
+                  return <Link key={`field-${job.id}`} to={`/tickets?service_type=field&service_job=${encodeURIComponent(job.id)}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/[0.035]" title="Open this field job">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${complete ? "bg-emerald-400" : "bg-cyan-400"}`} />
+                    <Badge variant="outline" className="shrink-0 border-cyan-500/25 bg-cyan-500/[0.07] text-[9px] uppercase text-cyan-300">Field</Badge>
+                    <span className="w-20 shrink-0 font-mono text-[11px] text-zinc-400">{job.job_number || job.id?.slice(0, 8)}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{job.description || job.job_category || "Field service job"}</span>
+                    <Badge variant="outline" className={`shrink-0 text-[9px] uppercase ${complete ? "border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-300" : "border-cyan-500/25 bg-cyan-500/[0.07] text-cyan-300"}`}>{String(job.field_status || "scheduled").replaceAll("_", " ")}</Badge>
+                    <span className="hidden text-right text-[10px] text-zinc-500 sm:block">{job.scheduled_date || (job.updated_at ? new Date(job.updated_at).toLocaleDateString() : "")}</span>
+                  </Link>;
+                })}
+              </div>}
+            </div>
             <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
               <Ticket className="w-8 h-8 mx-auto mb-3 opacity-40" />
               Deep ticket view — <Link className="text-indigo-400 hover:underline" to={`/tickets?clientId=${client.id}`}>open full Tickets page</Link>
+            </div>}
+            <div className="rounded-xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(8,47,73,0.28),rgba(9,9,11,0.96))] p-4" data-testid="client-voice-service-card">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><Phone className="h-4 w-4 text-cyan-300" /><span className="font-medium">Voice / Yeastar PBX</span></div>
+                <Badge variant="outline" className={client.integrations.yeastar ? (client.voice?.status === "online" ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300") : "text-zinc-500"}>{client.integrations.yeastar ? (client.voice?.status === "online" ? "Online" : "Needs review") : "Not linked"}</Badge>
+              </div>
+              {client.integrations.yeastar ? <div className="mb-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg border border-white/[0.06] bg-black/15 p-2"><p className="text-lg font-semibold">{client.voice?.pbx_count || 0}</p><p className="text-[9px] uppercase tracking-wider text-zinc-500">PBXs</p></div><div className="rounded-lg border border-white/[0.06] bg-black/15 p-2"><p className="text-lg font-semibold">{client.voice?.extension_count || 0}</p><p className="text-[9px] uppercase tracking-wider text-zinc-500">Extensions</p></div><div className="rounded-lg border border-white/[0.06] bg-black/15 p-2"><p className="text-lg font-semibold text-emerald-300">{client.voice?.billable_extension_count || 0}</p><p className="text-[9px] uppercase tracking-wider text-zinc-500">Billable</p></div></div> : <p className="mb-3 text-xs text-zinc-500">No PBX is attached to this client. Linking one keeps extensions, billing, and activity isolated to this account.</p>}
+              <Link to={`/voice?tab=pbxs&clientId=${encodeURIComponent(client.id)}`} className="inline-flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200 hover:underline">{client.integrations.yeastar ? "Open this client’s PBXs" : "Link a PBX in Voice"} <ChevronRight className="h-3 w-3" /></Link>
             </div>
           </TabsContent>
 
@@ -904,6 +1093,14 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
               </div>
               <p className="text-[11px] text-zinc-500">{client.asset_count} agents ({client.assets_online} online)</p>
             </div>
+            <div className="rounded-xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/[0.08] via-zinc-950 to-zinc-950 p-4 shadow-[0_16px_36px_rgba(8,145,178,0.08)] [&>a]:hidden [&>p.mt-2]:hidden [&>div.mt-3.grid]:hidden" data-testid="client-voice-service-card">
+              <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Phone className="h-4 w-4 text-cyan-300" /><span className="font-medium text-zinc-100">Voice services</span></div>
+                <Badge variant="outline" className={client.voice?.linked ? (client.voice?.status === "online" ? "border-emerald-400/30 text-emerald-300" : "border-amber-400/30 text-amber-300") : "border-zinc-700 text-zinc-500"}>{client.voice?.linked ? (client.voice?.status === "online" ? "Online" : "Needs review") : "Not linked"}</Badge>
+              </div>
+              {client.voice?.linked ? <div className="mt-3"><p className="text-[11px] text-zinc-400">{client.voice.pbx_count} PBX{client.voice.pbx_count === 1 ? "" : "s"} linked / {client.voice.online_count} online</p><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2"><p className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Extensions</p><p className="mt-1 font-semibold text-zinc-100">{client.voice.extension_count}</p></div><div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2"><p className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Billable</p><p className="mt-1 font-semibold text-cyan-200">{client.voice.billable_extension_count}</p></div></div><Link to={`/voice?tab=pbxs&clientId=${encodeURIComponent(client.id)}`} className="mt-3 inline-flex items-center text-xs font-medium text-cyan-300 transition-colors hover:text-cyan-100">Open linked PBXs <span aria-hidden="true" className="ml-1">→</span></Link></div> : <div className="mt-2.5"><p className="text-[11px] leading-relaxed text-zinc-500">Link this client to a Yeastar PBX to govern extensions and prepare recurring billing.</p><Link to={`/voice?tab=pbxs&clientId=${encodeURIComponent(client.id)}`} className="mt-3 inline-flex items-center text-xs font-medium text-cyan-300 transition-colors hover:text-cyan-100">Link a PBX <span aria-hidden="true" className="ml-1">→</span></Link></div>}
+              {client.voice?.linked ? <><p className="mt-2 text-[11px] text-zinc-400">{client.voice.pbx_count} PBX{client.voice.pbx_count === 1 ? "" : "s"} linked · {client.voice.online_count} online</p><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2"><p className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Extensions</p><p className="mt-1 font-semibold text-zinc-100">{client.voice.extension_count}</p></div><div className="rounded-lg border border-white/5 bg-black/20 px-2.5 py-2"><p className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Billable</p><p className="mt-1 font-semibold text-cyan-200">{client.voice.billable_extension_count}</p></div></div></> : <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">Link this client to a Yeastar PBX to govern extensions and prepare recurring billing.</p>}
+              <Link to="/voice" className="text-xs text-cyan-400 hover:underline">Manage in Voice workspace →</Link>
+            </div>
           </TabsContent>
 
           <TabsContent value="cipp" className="mt-0">
@@ -911,10 +1108,11 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </TabsContent>
 
           <TabsContent value="activity" className="mt-0">
-            <div className="space-y-1">
+            <ClientActivityFeed activity={activity} title="Client activity and audit feed" description="Every row is linked to its operational record where one exists. Entries are sourced from persisted tickets, communications, billing, assets, change records, and audit logs." />
+            <div className="hidden space-y-1">
               {activity.map((a, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs py-2 border-b border-zinc-900">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : a.type === "email" ? (a.status === "sent" || a.status === "received" ? "bg-violet-400" : "bg-rose-400") : "bg-amber-400"}`} />
                   <span className="uppercase tracking-wider text-[10px] text-zinc-500 w-16 font-mono">{a.type.replace("_", " ")}</span>
                   <span className="text-zinc-300 flex-1 truncate">{a.title}</span>
                   {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
@@ -1166,7 +1364,7 @@ function CippTenantPanel({ client }) {
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-amber-400" />
             <span className="font-medium">M365 Hygiene</span>
-            {hygiene?.grade && (
+            {hygiene?.grade && typeof hygiene.score === "number" && (
               <span className={`text-[10px] uppercase tracking-widest font-mono px-1.5 py-0.5 rounded border ${
                 hygiene.score >= 75 ? "text-emerald-400 border-emerald-500/30" :
                 hygiene.score >= 50 ? "text-amber-400 border-amber-500/30" :
@@ -1186,20 +1384,22 @@ function CippTenantPanel({ client }) {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-4">
             <div className="flex flex-col items-center justify-center">
-              <HealthDial score={hygiene.score || 0} size={120} />
+              {typeof hygiene.score === "number" ? <HealthDial score={hygiene.score} size={120} /> : <div className="flex h-[120px] w-[120px] items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/5 px-4 text-center text-xs text-amber-200">Evidence coverage<br />{hygiene.evidence_coverage_pct || 0}%</div>}
+              {typeof hygiene.score !== "number" && <div className="mt-1 text-center text-[10px] text-amber-300">No tenant score until coverage reaches 60%</div>}
               <div className="text-[10px] text-zinc-500 font-mono mt-2">{hygiene.total_users} users · {hygiene.counts?.enabled_users || 0} active</div>
             </div>
             <div className="space-y-3">
               {/* dim breakdown */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {hygiene.breakdown && Object.entries(hygiene.breakdown).map(([k, v]) => {
-                  const pct = v.max ? (v.earned / v.max) * 100 : 0;
-                  const color = pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500";
+                  const assessed = v.status === "assessed" && typeof v.earned === "number";
+                  const pct = assessed && v.max ? (v.earned / v.max) * 100 : 0;
+                  const color = !assessed ? "bg-zinc-700" : pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500";
                   return (
                     <div key={k} className="text-xs" data-testid={`hygiene-dim-${k}`}>
                       <div className="flex justify-between">
                         <span className="text-zinc-500 uppercase tracking-wider text-[9px]">{k.replace(/_/g, " ")}</span>
-                        <span className="text-[9px] font-mono text-zinc-400">{v.earned}/{v.max}</span>
+                        <span className="text-[9px] font-mono text-zinc-400">{assessed ? `${v.earned}/${v.max}` : "unassessed"}</span>
                       </div>
                       <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
                         <div className={`h-full ${color}`} style={{ width: `${pct}%`, transition: "width 600ms" }} />
@@ -1217,14 +1417,14 @@ function CippTenantPanel({ client }) {
                       <div key={i} className="flex items-start gap-2 text-xs">
                         <span className={`w-1 h-1 rounded-full mt-1.5 shrink-0 ${r.severity === "critical" ? "bg-rose-400" : r.severity === "warning" ? "bg-amber-400" : "bg-zinc-500"}`} />
                         <span className="text-zinc-300 flex-1">{r.factor}</span>
-                        <span className="text-[10px] text-zinc-500 font-mono shrink-0">{r.impact}</span>
+                        {typeof r.impact === "number" && <span className="text-[10px] text-zinc-500 font-mono shrink-0">{r.impact}</span>}
                       </div>
                     ))}
                   </div>
                 </div>
               )}
               {/* upsell hint */}
-              {hygiene.score < 70 && (
+              {typeof hygiene.score === "number" && hygiene.score < 70 && (
                 <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
                   💡 Upsell opportunity: bundle MFA enforcement, license cleanup, and offboarding hygiene as a Security Posture Package.
                 </div>

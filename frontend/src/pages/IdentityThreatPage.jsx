@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { Loader2, Users, Shield, ShieldAlert, AlertTriangle, Lock, Unlock, Globe, Eye, Search, RefreshCw, Key, MapPin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -57,6 +58,7 @@ function _normaliseHuntressIdentity(inc) {
 
 export default function IdentityThreatPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -73,7 +75,9 @@ export default function IdentityThreatPage() {
         axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: { configured: false } })),
       ]);
       let payload = socRes.data;
-      if (huntStatusRes.data?.configured && Array.isArray(huntRes.data) && huntRes.data.length > 0) {
+      const huntressConfigured = huntStatusRes.data?.configured === true;
+      setHuntressActive(huntressConfigured);
+      if (huntressConfigured && Array.isArray(huntRes.data) && huntRes.data.length > 0) {
         const huntIdentity = huntRes.data.filter(_isHuntressIdentity).map(_normaliseHuntressIdentity);
         if (huntIdentity.length > 0) {
           const merged = [...huntIdentity, ...(payload?.threats || [])];
@@ -89,7 +93,6 @@ export default function IdentityThreatPage() {
             },
             mock_data: false,
           };
-          setHuntressActive(true);
         }
       }
       setData(payload);
@@ -118,6 +121,18 @@ export default function IdentityThreatPage() {
         </div>
       </div>
 
+      {!huntressActive && (
+        <Card className="border-amber-500/25 bg-amber-500/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <div>
+              <p className="text-sm font-medium">Identity telemetry is not connected</p>
+              <p className="text-xs text-muted-foreground">Connect Huntress to show provider-backed identity incidents. NexusMSP does not generate identity threat data.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations")}>Open integrations</Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="pt-3 pb-2"><p className="text-[10px] text-muted-foreground">Total Threats</p><p className="text-2xl font-bold">{s.total}</p></CardContent></Card>
         <Card className="border-red-500/20"><CardContent className="pt-3 pb-2"><p className="text-[10px] text-muted-foreground">Critical</p><p className="text-2xl font-bold text-red-400">{s.critical}</p></CardContent></Card>
@@ -134,7 +149,13 @@ export default function IdentityThreatPage() {
         <Table>
           <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>User</TableHead><TableHead>Details</TableHead><TableHead>Source IP</TableHead><TableHead>Location</TableHead><TableHead>MFA</TableHead><TableHead>Severity</TableHead><TableHead>Status</TableHead><TableHead>Detected</TableHead></TableRow></TableHeader>
           <TableBody>
-            {filtered.map(t => (
+            {filtered.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} className="py-12 text-center text-sm text-muted-foreground">
+                  {huntressActive ? "No provider-backed identity incidents match the current filters." : "Connect an identity telemetry provider to review identity incidents here."}
+                </TableCell>
+              </TableRow>
+            ) : filtered.map(t => (
               <TableRow key={t.id} className={t.severity === "critical" ? "bg-red-500/5" : ""} data-testid={`idt-${t.id}`}>
                 <TableCell>
                   <div className="flex items-center gap-1">

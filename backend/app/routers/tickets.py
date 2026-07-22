@@ -8,6 +8,7 @@ import logging
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.avatar_enrichment import attach_user_avatars
 from app.models import *
 
 logger = logging.getLogger(__name__)
@@ -30,8 +31,9 @@ async def get_tickets(
     if client_id:
         query["client_id"] = client_id
     
-    # If no specific status filter, exclude closed tickets older than 24h
-    if not status:
+    # The general queue hides old closed tickets, but a client-specific lookup is
+    # an audit view and must retain the customer's complete ticket history.
+    if not status and not client_id:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         query["$or"] = [
             {"status": {"$nin": ["closed"]}},
@@ -39,6 +41,7 @@ async def get_tickets(
         ]
     
     tickets = await db.tickets.find(query, {"_id": 0}).to_list(1000)
+    await attach_user_avatars(tickets, id_fields=("assigned_to",), output_field="assignee_avatar")
     for t in tickets:
         for field in ['created_at', 'updated_at', 'sla_due']:
             if isinstance(t.get(field), str):
@@ -71,6 +74,7 @@ async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_us
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    await attach_user_avatars([ticket], id_fields=("assigned_to",), output_field="assignee_avatar")
     return ticket
 
 @router.post("/tickets", response_model=Ticket)
@@ -227,10 +231,24 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
 @router.put("/tickets/{ticket_id}")
 async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
     old_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    ticket_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    ticket_data['updated_at'] = now_iso
     # Auto-close: when marked as resolved, automatically set to closed
-    if ticket_data.get("status") == "resolved":
+    resolution_requested = ticket_data.get("status") == "resolved"
+    if resolution_requested:
         ticket_data["status"] = "closed"
+    # A closure is an audit event, not simply a queue state. Retain who closed
+    # it, when it happened, and that it was resolved through the normal flow.
+    if ticket_data.get("status") == "closed" and old_ticket and old_ticket.get("status") != "closed":
+        ticket_data.update({
+            "resolved_at": old_ticket.get("resolved_at") or now_iso,
+            "closed_at": now_iso,
+            "resolved_by": old_ticket.get("resolved_by") or current_user.get("id") or current_user.get("email"),
+            "resolved_by_name": old_ticket.get("resolved_by_name") or current_user.get("name") or current_user.get("email"),
+            "closed_by": current_user.get("id") or current_user.get("email"),
+            "closed_by_name": current_user.get("name") or current_user.get("email"),
+            "resolution_status": "resolved_and_closed" if resolution_requested else "closed",
+        })
     # Blueprint gate: if ticket has a require_completion blueprint, block close/resolve until
     # required checklist items are done and required fields are filled.
     if ticket_data.get("status") in ("resolved", "closed") and old_ticket and old_ticket.get("blueprint_require_completion"):
@@ -299,7 +317,10 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
                     await db.tickets.update_one({"id": ticket_id}, {"$set": {"csat_sent": True, "csat_sent_at": datetime.now(timezone.utc).isoformat()}})
         except Exception as e:
             logger.warning(f"Auto-CSAT failed for {ticket_id}: {e}")
-    return {"message": "Ticket updated"}
+    # Return the persisted record so every client surface immediately reflects
+    # lifecycle automation (in particular resolved -> closed) without a stale UI state.
+    updated_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    return {"message": "Ticket updated", "ticket": updated_ticket}
 
 @router.post("/tickets/{ticket_id}/devices")
 async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Depends(get_current_user)):
@@ -397,7 +418,7 @@ async def get_ticket_comments(ticket_id: str, current_user: dict = Depends(get_c
     comments = await db.ticket_comments.find(
         {"ticket_id": ticket_id}, {"_id": 0}
     ).sort("created_at", -1).to_list(500)
-    return comments
+    return await attach_user_avatars(comments)
 
 @router.post("/tickets/{ticket_id}/comments")
 async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user: dict = Depends(get_current_user)):
@@ -409,6 +430,7 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
         "ticket_id": ticket_id,
         "user_id": current_user['id'],
         "user_name": current_user['name'],
+        "avatar_url": current_user.get("avatar"),
         "content": comment_data.get("content", ""),
         "is_internal": comment_data.get("is_internal", False),
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -627,6 +649,11 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         ticket_email.body if ticket_email.body_type == "html" else f"<pre>{ticket_email.body}</pre>",
         category="ticket_replies",
         cc_addresses=ticket_email.cc_addresses,
+        client_id=ticket.get("client_id"),
+        related_type="ticket",
+        related_id=ticket_id,
+        initiated_by=current_user.get("id"),
+        initiated_by_name=current_user.get("name"),
     )
     ticket_email.status = delivery.get("status", "failed")
     ticket_email.message_id = delivery.get("email_id")

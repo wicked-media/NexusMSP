@@ -1,59 +1,47 @@
-"""Client Studio — interlocked client context aggregation + strategic surfaces.
+"""Evidence-backed client workspace endpoints.
 
-Everything anchored on client_id. One /360-context call hydrates devices, subscriptions,
-contracts, invoices, tickets, stakeholders, compliance, achievements, and recent activity.
-
-Endpoints (all /api):
-  GET    /client-studio/{id}/360-context        Aggregated everything for one client
-  GET    /client-studio/{id}/expansion          AI upsell opportunities
-  GET    /client-studio/{id}/renewal-forecast   Renewal probability + reasoning
-  GET    /client-studio/{id}/account-briefing   30-sec brief for sales calls
-  POST   /client-studio/{id}/account-plan       Save/update strategic account plan
-  GET    /client-studio/{id}/account-plan
-  POST   /client-studio/{id}/account-plan/generate  AI-drafted 90-day plan
-
-  GET    /client-studio/{id}/stakeholders       List
-  POST   /client-studio/{id}/stakeholders       Create
-  PUT    /client-studio/stakeholders/{sid}      Update
-  DELETE /client-studio/stakeholders/{sid}      Delete
-
-  GET    /client-studio/{id}/achievements       Computed badges (no DB writes)
-  GET    /client-studio/{id}/activity-heatmap   30/90/365-day calendar heatmap
-  GET    /client-studio/{id}/hours-burndown     Retainer hours vs purchased
-  GET    /client-studio/{id}/contracts          Contract watch list
-  GET    /client-studio/{id}/lifecycle          Lifecycle milestones
-  GET    /client-studio/{id}/churn-radar        6-axis radar
-  POST   /client-studio/{id}/vip                Toggle VIP flag
-  GET    /client-studio/{id}/scorecard          MSP scorecard JSON
-  GET    /client-studio/{id}/compliance         Compliance status (HIPAA/SOC2/E8)
-
-  GET    /client-studio/universe                Universe map nodes + clustering
-  GET    /client-studio/pulse                   Pulse Wall tiles
-  GET    /client-studio/my-accounts             For account managers
-  GET    /client-studio/renewal-watch           Accounts with renewal in 90d + churn signals
-  POST   /client-studio/recompute-tiers         Auto-recompute tiers from MRR (cron-style)
+Client Studio presents recorded commercial and service data.  It intentionally
+does not forecast renewal, sentiment, revenue uplift, compliance, or churn
+when the required provider or technician evidence is absent.
 """
-from fastapi import APIRouter, Depends, HTTPException
-from app.database import db
-from app.auth import get_current_user
+
 from datetime import datetime, timezone, timedelta
-from typing import Optional
-import hashlib
+from typing import Any
 import uuid
 
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth import get_current_user
+from app.database import db
+
+
 router = APIRouter(tags=["Client Studio"])
+TRUSTED_SENTIMENT_SOURCES = {"manual", "survey", "csat", "nps", "provider", "integration"}
 
 
-def _seeded(seed: str, salt: str, lo: int, hi: int) -> int:
-    h = int(hashlib.md5(f"{seed}:{salt}".encode()).hexdigest()[:8], 16)
-    return lo + (h % max(1, hi - lo + 1))
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Tier derivation (single source of truth)
-# ──────────────────────────────────────────────────────────────────────────────
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _date(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
 def derive_tier(mrr: float, active_services: int = 0) -> str:
-    """Bronze < $500 · Silver $500-1.5K · Gold $1.5K-5K · Platinum $5K-15K · Diamond $15K+"""
+    """Suggested tier from recorded recurring commercial value only."""
     if mrr >= 15000:
         return "diamond"
     if mrr >= 5000:
@@ -65,106 +53,90 @@ def derive_tier(mrr: float, active_services: int = 0) -> str:
     return "bronze"
 
 
-async def compute_client_metrics(client_id: str):
-    """Return MRR, active services, devices count, open tickets etc."""
-    contracts = await db.contracts.find({"client_id": client_id, "status": "active"}, {"_id": 0}).to_list(200)
-    mrr = sum(float(c.get("value", 0) or 0) for c in contracts)
-    subs = await db.subscriptions.count_documents({"client_id": client_id, "status": "active"})
-    devices = await db.devices.count_documents({"client_id": client_id})
-    open_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}})
-    return {"mrr": mrr, "subs": subs, "devices": devices, "open_tickets": open_tickets, "contracts": len(contracts)}
-
-
-def _health_from_metrics(m: dict, sentiment: int = 75) -> int:
-    score = 60
-    if m["mrr"] > 5000:
-        score += 10
-    if m["mrr"] > 15000:
-        score += 5
-    if m["open_tickets"] == 0:
-        score += 10
-    elif m["open_tickets"] > 10:
-        score -= 15
-    elif m["open_tickets"] > 5:
-        score -= 7
-    if m["devices"] > 30:
-        score += 5
-    if sentiment >= 80:
-        score += 10
-    elif sentiment < 50:
-        score -= 15
-    return max(0, min(100, score))
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 360 Context — the interlock king
-# ──────────────────────────────────────────────────────────────────────────────
-@router.get("/client-studio/{client_id}/360-context")
-async def client_360(client_id: str, current_user: dict = Depends(get_current_user)):
+async def _client_or_404(client_id: str) -> dict:
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
-        raise HTTPException(404, "Client not found")
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
 
+
+async def _sentiment(client_id: str) -> float | None:
+    record = await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0})
+    source = str((record or {}).get("source") or "").lower()
+    score = _number((record or {}).get("score"))
+    return score if source in TRUSTED_SENTIMENT_SOURCES and score is not None else None
+
+
+async def compute_client_metrics(client_id: str) -> dict:
+    contracts = await db.contracts.find({"client_id": client_id, "status": "active"}, {"_id": 0}).to_list(200)
+    mrr = 0.0
+    for contract in contracts:
+        value = _number(contract.get("monthly_value"))
+        if value is None:
+            value = _number(contract.get("mrr"))
+        if value is None:
+            value = _number(contract.get("recurring_amount"))
+        if value is not None:
+            mrr += value
+    subscriptions = await db.subscriptions.count_documents({"client_id": client_id, "status": "active"})
+    devices = await db.devices.count_documents({"client_id": client_id})
+    total_tickets = await db.tickets.count_documents({"client_id": client_id})
+    open_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}})
+    return {"mrr": round(mrr, 2), "subscriptions": subscriptions, "devices": devices, "total_tickets": total_tickets, "open_tickets": open_tickets, "contracts": len(contracts)}
+
+
+def _health(metrics: dict, sentiment: float | None) -> float | None:
+    """A small, documented score from two observed dimensions; never a default."""
+    dimensions: list[float] = []
+    if metrics.get("total_tickets", 0) > 0:
+        dimensions.append(float(max(0, 100 - metrics["open_tickets"] * 8)))
+    if sentiment is not None:
+        dimensions.append(float(max(0, min(100, sentiment))))
+    return round(sum(dimensions) / len(dimensions)) if len(dimensions) >= 2 else None
+
+
+def _risk_label(score: float | None) -> str:
+    if score is None:
+        return "Not assessed"
+    if score >= 75:
+        return "Low"
+    if score >= 55:
+        return "Medium"
+    return "High"
+
+
+@router.get("/client-studio/{client_id}/360-context")
+async def client_360(client_id: str, current_user: dict = Depends(get_current_user)):
+    client = await _client_or_404(client_id)
     metrics = await compute_client_metrics(client_id)
-    tier = client.get("tier") or derive_tier(metrics["mrr"], metrics["subs"])
-
-    sentiment = (await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0}) or {}).get("score", 75)
-    health = _health_from_metrics(metrics, sentiment)
-
+    sentiment = await _sentiment(client_id)
+    tier = client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"])
     devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "name": 1, "device_type": 1, "status": 1, "os_name": 1, "os": 1, "cpu_usage": 1, "ram_usage": 1, "disk_usage": 1}).to_list(500)
     contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(50)
-    subs = await db.subscriptions.find({"client_id": client_id}, {"_id": 0}).to_list(50)
-    tickets_open = await db.tickets.find({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "ticket_number": 1}).sort("created_at", -1).to_list(20)
+    subscriptions = await db.subscriptions.find({"client_id": client_id}, {"_id": 0}).to_list(50)
+    tickets = await db.tickets.find({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "ticket_number": 1}).sort("created_at", -1).to_list(20)
     invoices = await db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("issue_date", -1).to_list(20)
     stakeholders = await db.client_stakeholders.find({"client_id": client_id}, {"_id": 0}).to_list(50)
     notes = await db.client_notes.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
-
-    # Attach tier to each device so the device view shows it (no schema change required)
-    for d in devices:
-        d["tier"] = tier
-    for s in subs:
-        s["tier"] = tier
-    for c in contracts:
-        c["tier"] = tier
-    for t in tickets_open:
-        t["tier"] = tier
-        t["vip"] = bool(client.get("vip"))
-
+    for record in [*devices, *contracts, *subscriptions, *tickets]:
+        record["tier"] = tier
     return {
-        "client": {**client, "tier": tier, "health_score": health, "mrr": metrics["mrr"], "arr": metrics["mrr"] * 12,
-                    "device_count": metrics["devices"], "open_ticket_count": metrics["open_tickets"],
-                    "subscription_count": metrics["subs"], "contract_count": metrics["contracts"],
-                    "sentiment": sentiment, "vip": bool(client.get("vip"))},
-        "devices": devices,
-        "contracts": contracts,
-        "subscriptions": subs,
-        "open_tickets": tickets_open,
-        "invoices": invoices,
-        "stakeholders": stakeholders,
-        "recent_notes": notes,
+        "client": {**client, "tier": tier, "health_score": _health(metrics, sentiment), "health_evidence_state": "assessed" if _health(metrics, sentiment) is not None else "not_assessed", "mrr": metrics["mrr"], "arr": metrics["mrr"] * 12, "device_count": metrics["devices"], "open_ticket_count": metrics["open_tickets"], "subscription_count": metrics["subscriptions"], "contract_count": metrics["contracts"], "sentiment": sentiment, "vip": bool(client.get("vip"))},
+        "devices": devices, "contracts": contracts, "subscriptions": subscriptions, "open_tickets": tickets,
+        "invoices": invoices, "stakeholders": stakeholders, "recent_notes": notes,
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Universe Map + Pulse Wall + My Accounts + Renewal Watch
-# ──────────────────────────────────────────────────────────────────────────────
 @router.get("/client-studio/universe")
 async def universe(current_user: dict = Depends(get_current_user)):
     clients = await db.clients.find({}, {"_id": 0}).to_list(500)
-    nodes = []
-    industries = set()
-    for c in clients:
-        m = await compute_client_metrics(c["id"])
-        sent = (await db.sentiment_scores.find_one({"client_id": c["id"]}, {"_id": 0}) or {}).get("score", 75)
-        tier = c.get("tier") or derive_tier(m["mrr"], m["subs"])
-        ind = c.get("industry", "other") or "other"
-        industries.add(ind)
-        nodes.append({
-            "id": c["id"], "name": c.get("name", "—"), "industry": ind, "tier": tier,
-            "mrr": m["mrr"], "devices": m["devices"], "open_tickets": m["open_tickets"],
-            "sentiment": sent, "health": _health_from_metrics(m, sent),
-            "vip": bool(c.get("vip")),
-        })
+    nodes, industries = [], set()
+    for client in clients:
+        metrics = await compute_client_metrics(client["id"])
+        sentiment = await _sentiment(client["id"])
+        industry = client.get("industry") or "other"
+        industries.add(industry)
+        nodes.append({"id": client["id"], "name": client.get("name", "Client"), "industry": industry, "tier": client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"]), "mrr": metrics["mrr"], "devices": metrics["devices"], "open_tickets": metrics["open_tickets"], "sentiment": sentiment, "health": _health(metrics, sentiment), "vip": bool(client.get("vip"))})
     return {"nodes": nodes, "industries": sorted(industries)}
 
 
@@ -172,487 +144,304 @@ async def universe(current_user: dict = Depends(get_current_user)):
 async def pulse_wall(current_user: dict = Depends(get_current_user)):
     clients = await db.clients.find({}, {"_id": 0}).to_list(500)
     tiles = []
-    for c in clients:
-        m = await compute_client_metrics(c["id"])
-        sent = (await db.sentiment_scores.find_one({"client_id": c["id"]}, {"_id": 0}) or {}).get("score", 75)
-        tier = c.get("tier") or derive_tier(m["mrr"], m["subs"])
-        health = _health_from_metrics(m, sent)
-        # Stable 12-point sparklines
-        spark_health = [max(30, min(100, health + (_seeded(c["id"], f"hs{i}", 0, 20) - 10))) for i in range(12)]
-        spark_tickets = [_seeded(c["id"], f"tk{i}", 0, max(m["open_tickets"] * 2, 5)) for i in range(12)]
-        tiles.append({
-            "id": c["id"], "name": c.get("name", "—"), "industry": c.get("industry", "other"),
-            "tier": tier, "vip": bool(c.get("vip")),
-            "mrr": m["mrr"], "devices": m["devices"], "open_tickets": m["open_tickets"],
-            "sentiment": sent, "health": health,
-            "spark_health": spark_health, "spark_tickets": spark_tickets,
-        })
-    tiles.sort(key=lambda t: (-int(t["vip"]), -t["mrr"]))
+    for client in clients:
+        metrics = await compute_client_metrics(client["id"])
+        sentiment = await _sentiment(client["id"])
+        snapshots = await db.health_snapshots_client.find({"client_id": client["id"], "health_score": {"$type": "number"}}, {"_id": 0, "health_score": 1}).sort("date", -1).limit(12).to_list(12)
+        tiles.append({"id": client["id"], "name": client.get("name", "Client"), "industry": client.get("industry") or "other", "tier": client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"]), "vip": bool(client.get("vip")), "mrr": metrics["mrr"], "devices": metrics["devices"], "open_tickets": metrics["open_tickets"], "sentiment": sentiment, "health": _health(metrics, sentiment), "spark_health": [row["health_score"] for row in reversed(snapshots) if isinstance(row.get("health_score"), (int, float))], "spark_tickets": []})
+    tiles.sort(key=lambda item: (-int(item["vip"]), -item["mrr"]))
     return {"tiles": tiles, "total": len(tiles)}
 
 
 @router.get("/client-studio/my-accounts")
 async def my_accounts(current_user: dict = Depends(get_current_user)):
-    uid = current_user.get("id") or current_user.get("email")
-    rows = await db.clients.find({"$or": [{"assigned_to": uid}, {"account_manager_id": uid}, {"owner_id": uid}]}, {"_id": 0}).to_list(200)
-    out = []
-    for c in rows:
-        m = await compute_client_metrics(c["id"])
-        tier = c.get("tier") or derive_tier(m["mrr"], m["subs"])
-        sent = (await db.sentiment_scores.find_one({"client_id": c["id"]}, {"_id": 0}) or {}).get("score", 75)
+    identifier = current_user.get("id") or current_user.get("email")
+    rows = await db.clients.find({"$or": [{"assigned_to": identifier}, {"account_manager_id": identifier}, {"owner_id": identifier}]}, {"_id": 0}).to_list(200)
+    accounts = []
+    for client in rows:
+        metrics = await compute_client_metrics(client["id"])
+        sentiment = await _sentiment(client["id"])
         alerts = []
-        if m["open_tickets"] > 5:
-            alerts.append({"kind": "tickets", "msg": f"{m['open_tickets']} open tickets"})
-        if sent < 60:
-            alerts.append({"kind": "sentiment", "msg": "Sentiment below 60"})
-        out.append({
-            "id": c["id"], "name": c["name"], "tier": tier, "mrr": m["mrr"],
-            "health": _health_from_metrics(m, sent),
-            "vip": bool(c.get("vip")),
-            "alerts": alerts,
-        })
-    out.sort(key=lambda r: (-len(r["alerts"]), -r["mrr"]))
-    return {"accounts": out, "count": len(out)}
+        if metrics["open_tickets"] > 5:
+            alerts.append({"kind": "tickets", "msg": f"{metrics['open_tickets']} open tickets"})
+        if sentiment is not None and sentiment < 60:
+            alerts.append({"kind": "sentiment", "msg": "Recorded sentiment is below 60"})
+        accounts.append({"id": client["id"], "name": client.get("name", "Client"), "tier": client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"]), "mrr": metrics["mrr"], "health": _health(metrics, sentiment), "vip": bool(client.get("vip")), "alerts": alerts})
+    return {"accounts": sorted(accounts, key=lambda item: (-len(item["alerts"]), -item["mrr"])), "count": len(accounts)}
 
 
 @router.get("/client-studio/renewal-watch")
 async def renewal_watch(current_user: dict = Depends(get_current_user)):
-    now = datetime.now(timezone.utc)
-    horizon = now + timedelta(days=90)
+    now, horizon = datetime.now(timezone.utc), datetime.now(timezone.utc) + timedelta(days=90)
     contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
-    flagged = []
-    for c in contracts:
-        renewal = c.get("renewal_date") or c.get("end_date")
-        try:
-            r_dt = datetime.fromisoformat(str(renewal).replace("Z", "+00:00")) if renewal else None
-            if r_dt and r_dt.tzinfo is None:
-                r_dt = r_dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            r_dt = None
-        if not r_dt or r_dt > horizon or r_dt < now:
+    watch = []
+    for contract in contracts:
+        renewal = _date(contract.get("renewal_date") or contract.get("end_date"))
+        if not renewal or renewal < now or renewal > horizon:
             continue
-        client = await db.clients.find_one({"id": c.get("client_id")}, {"_id": 0})
+        client = await db.clients.find_one({"id": contract.get("client_id")}, {"_id": 0})
         if not client:
             continue
-        m = await compute_client_metrics(client["id"])
-        sent = (await db.sentiment_scores.find_one({"client_id": client["id"]}, {"_id": 0}) or {}).get("score", 75)
+        metrics = await compute_client_metrics(client["id"])
+        sentiment = await _sentiment(client["id"])
         signals = []
-        if sent < 60:
-            signals.append("Low sentiment")
-        if m["open_tickets"] > 8:
-            signals.append("High ticket volume")
-        days_to = (r_dt - now).days
-        flagged.append({
-            "client_id": client["id"], "client_name": client["name"],
-            "contract_id": c.get("id"), "value": c.get("value", 0),
-            "renewal_date": r_dt.strftime("%Y-%m-%d"),
-            "days_to_renewal": days_to,
-            "risk_signals": signals,
-            "risk_level": "high" if signals else "medium" if days_to < 30 else "low",
-            "suggested_action": "Schedule QBR now" if signals else "Send renewal pack" if days_to < 30 else "Watch",
-        })
-    flagged.sort(key=lambda r: (r["risk_level"] != "high", r["days_to_renewal"]))
-    return {"at_risk": flagged}
+        if sentiment is not None and sentiment < 60:
+            signals.append("Recorded sentiment is below 60")
+        if metrics["open_tickets"] > 8:
+            signals.append(f"{metrics['open_tickets']} open tickets")
+        days = (renewal - now).days
+        risk = "high" if signals else "medium" if days < 30 else "low"
+        watch.append({"client_id": client["id"], "client_name": client.get("name", "Client"), "contract_id": contract.get("id"), "value": _number(contract.get("monthly_value")) or _number(contract.get("mrr")) or _number(contract.get("recurring_amount")) or 0, "renewal_date": renewal.strftime("%Y-%m-%d"), "days_to_renewal": days, "risk_signals": signals, "risk_level": risk, "suggested_action": "Review recorded risk signals" if signals else "Prepare renewal review"})
+    return {"at_risk": sorted(watch, key=lambda item: (item["risk_level"] != "high", item["days_to_renewal"]))}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# AI surfaces
-# ──────────────────────────────────────────────────────────────────────────────
 @router.get("/client-studio/{client_id}/expansion")
 async def expansion(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(500)
-    subs = await db.subscriptions.find({"client_id": client_id, "status": "active"}, {"_id": 0}).to_list(50)
-    sub_names = {(s.get("product_name") or s.get("name") or "").lower() for s in subs}
-    opps = []
-    endpoints = len([d for d in devices if d.get("device_type") in ("workstation", "laptop", "server")])
-    servers = len([d for d in devices if d.get("device_type") == "server"])
-
-    if endpoints and "endpoint security" not in " ".join(sub_names):
-        arr = endpoints * 12 * 25
-        opps.append({"id": "opp-edr", "title": "Pitch Managed EDR / Endpoint Security",
-                     "reason": f"{endpoints} endpoints with no Endpoint Security subscription.",
-                     "arr_uplift": arr, "confidence": 90, "icon": "🛡️"})
-    if endpoints and "backup" not in " ".join(sub_names):
-        arr = endpoints * 12 * 12
-        opps.append({"id": "opp-backup", "title": "Add Managed Backup (Acronis)",
-                     "reason": f"{endpoints} endpoints without an attached backup subscription.",
-                     "arr_uplift": arr, "confidence": 88, "icon": "💾"})
-    if servers and "vulnerability" not in " ".join(sub_names):
-        opps.append({"id": "opp-vuln", "title": "Vulnerability Scanning subscription",
-                     "reason": f"{servers} servers with no recurring vuln scanning.",
-                     "arr_uplift": servers * 12 * 75, "confidence": 80, "icon": "🔍"})
-    if "phish" not in " ".join(sub_names):
-        opps.append({"id": "opp-phish", "title": "Phishing Sim & Awareness Training",
-                     "reason": "Security awareness program not detected.",
-                     "arr_uplift": _seeded(client_id, "phish", 800, 3500), "confidence": 75, "icon": "🎣"})
-    if "dark web" not in " ".join(sub_names):
-        opps.append({"id": "opp-dark", "title": "Dark Web Monitoring",
-                     "reason": "No credential exposure monitoring active.",
-                     "arr_uplift": _seeded(client_id, "dark", 400, 1500), "confidence": 65, "icon": "🌐"})
-
-    total = sum(o["arr_uplift"] for o in opps)
-    return {"opportunities": opps, "total_arr_uplift": total}
+    await _client_or_404(client_id)
+    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "device_type": 1}).to_list(500)
+    subscriptions = await db.subscriptions.find({"client_id": client_id, "status": "active"}, {"_id": 0, "product_name": 1, "name": 1}).to_list(100)
+    names = " ".join((row.get("product_name") or row.get("name") or "").lower() for row in subscriptions)
+    endpoints = sum(1 for device in devices if device.get("device_type") in {"workstation", "laptop", "server"})
+    servers = sum(1 for device in devices if device.get("device_type") == "server")
+    opportunities = []
+    if endpoints and "endpoint security" not in names:
+        opportunities.append({"id": "coverage-endpoint-security", "title": "Review endpoint-security coverage", "reason": f"{endpoints} recorded endpoints and no matching active subscription were found.", "arr_uplift": None, "confidence": None, "icon": "security", "pricing_state": "requires_rate_card"})
+    if endpoints and "backup" not in names:
+        opportunities.append({"id": "coverage-backup", "title": "Review backup coverage", "reason": f"{endpoints} recorded endpoints and no matching active subscription were found.", "arr_uplift": None, "confidence": None, "icon": "backup", "pricing_state": "requires_rate_card"})
+    if servers and "vulnerability" not in names:
+        opportunities.append({"id": "coverage-vulnerability", "title": "Review server vulnerability coverage", "reason": f"{servers} recorded servers and no matching active subscription were found.", "arr_uplift": None, "confidence": None, "icon": "assessment", "pricing_state": "requires_rate_card"})
+    return {"opportunities": opportunities, "total_arr_uplift": None, "evidence_state": "subscription_coverage_comparison"}
 
 
 @router.get("/client-studio/{client_id}/renewal-forecast")
 async def renewal_forecast(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    m = await compute_client_metrics(client_id)
-    sent = (await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0}) or {}).get("score", 75)
-    health = _health_from_metrics(m, sent)
-    contract = await db.contracts.find_one({"client_id": client_id, "status": "active"}, {"_id": 0})
-    base = 70
-    if health >= 85:
-        base += 20
-    elif health >= 70:
-        base += 10
-    elif health < 50:
-        base -= 25
-    if m["open_tickets"] > 10:
-        base -= 15
-    if sent < 60:
-        base -= 15
-    if contract and contract.get("auto_renew"):
-        base += 5
-    probability = max(5, min(98, base))
+    await _client_or_404(client_id)
+    metrics = await compute_client_metrics(client_id)
+    sentiment = await _sentiment(client_id)
     reasoning = []
-    if sent >= 80:
-        reasoning.append(f"High CSAT ({sent})")
-    elif sent < 60:
-        reasoning.append(f"Low sentiment ({sent})")
-    if m["open_tickets"] <= 3:
-        reasoning.append("Low ticket volume")
-    elif m["open_tickets"] > 8:
-        reasoning.append(f"{m['open_tickets']} open tickets")
-    if m["mrr"] >= 5000:
-        reasoning.append("Strategic account ($)")
-    return {"probability": probability, "reasoning": reasoning, "verdict": "Likely renew" if probability >= 75 else "Watch" if probability >= 50 else "At risk"}
+    if sentiment is not None:
+        reasoning.append(f"Recorded sentiment: {sentiment:g}/100")
+    else:
+        reasoning.append("No verified sentiment source is connected")
+    reasoning.append(f"Open tickets: {metrics['open_tickets']}")
+    return {"probability": None, "reasoning": reasoning, "verdict": "Not assessed", "evidence_state": "insufficient_renewal_history"}
 
 
 @router.get("/client-studio/{client_id}/account-briefing")
 async def account_briefing(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    m = await compute_client_metrics(client_id)
-    sent = (await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0}) or {}).get("score", 75)
-    tier = client.get("tier") or derive_tier(m["mrr"], m["subs"])
-    recent_tickets = await db.tickets.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
-    bullets = [
-        f"**Tier**: {tier.title()} · **MRR**: ${m['mrr']:,.0f}",
-        f"**Devices**: {m['devices']} · **Subscriptions**: {m['subs']} · **Open tickets**: {m['open_tickets']}",
-        f"**Sentiment**: {sent}/100" + (" 🚨" if sent < 60 else " ✅" if sent >= 80 else ""),
-    ]
-    if recent_tickets:
-        last = recent_tickets[0]
-        bullets.append(f"**Last ticket**: #{last.get('ticket_number') or last.get('id','')[:6]} — {last.get('title','—')}")
+    client = await _client_or_404(client_id)
+    metrics = await compute_client_metrics(client_id)
+    sentiment = await _sentiment(client_id)
+    tier = client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"])
+    recent = await db.tickets.find({"client_id": client_id}, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "created_at": 1}).sort("created_at", -1).limit(1).to_list(1)
+    briefing = [f"Tier: {tier.title()} | Recorded MRR: ${metrics['mrr']:,.0f}", f"Devices: {metrics['devices']} | Active subscriptions: {metrics['subscriptions']} | Open tickets: {metrics['open_tickets']}", f"Sentiment: {sentiment:g}/100" if sentiment is not None else "Sentiment: not assessed"]
+    if recent:
+        ticket = recent[0]
+        briefing.append(f"Latest ticket: #{ticket.get('ticket_number') or ticket.get('id', '')} - {ticket.get('title') or 'Untitled'}")
     if client.get("vip"):
-        bullets.append("⭐ **VIP account** — handle with priority.")
-    return {
-        "briefing": bullets,
-        "summary": f"{client['name']} is a {tier.title()}-tier account with ${m['mrr']:,.0f} MRR, {m['devices']} endpoints, and {m['open_tickets']} open tickets. Sentiment: {sent}/100.",
-    }
+        briefing.append("VIP flag is enabled")
+    return {"briefing": briefing, "summary": f"{client.get('name', 'Client')} has ${metrics['mrr']:,.0f} recorded MRR, {metrics['devices']} devices, and {metrics['open_tickets']} open tickets."}
 
 
 @router.get("/client-studio/{client_id}/account-plan")
 async def get_account_plan(client_id: str, current_user: dict = Depends(get_current_user)):
-    plan = await db.client_account_plans.find_one({"client_id": client_id}, {"_id": 0})
-    return plan or {"client_id": client_id, "goals": [], "risks": [], "opportunities": [], "people": [], "next_actions": []}
+    return await db.client_account_plans.find_one({"client_id": client_id}, {"_id": 0}) or {"client_id": client_id, "goals": [], "risks": [], "opportunities": [], "people": [], "next_actions": []}
 
 
 @router.post("/client-studio/{client_id}/account-plan")
 async def save_account_plan(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    payload = {**(data or {}), "client_id": client_id, "updated_at": datetime.now(timezone.utc).isoformat(),
-               "updated_by": current_user.get("name") or current_user.get("email")}
+    await _client_or_404(client_id)
+    payload = {**(data or {}), "client_id": client_id, "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
     await db.client_account_plans.update_one({"client_id": client_id}, {"$set": payload}, upsert=True)
-    return {"saved": True}
+    return {"saved": True, "updated_at": payload["updated_at"]}
 
 
 @router.post("/client-studio/{client_id}/account-plan/generate")
 async def generate_account_plan(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    m = await compute_client_metrics(client_id)
-    exp = await expansion(client_id, current_user)
-    plan = {
-        "client_id": client_id,
-        "goals": [
-            f"Grow {client['name']} ARR to ${(m['mrr'] * 12 * 1.25):,.0f} in 90 days",
-            f"Reduce open ticket count from {m['open_tickets']} to <3",
-            "Lock in renewal with auto-renew clause",
-        ],
-        "risks": [
-            "Renewal in next 90 days — confirm budget" if m["mrr"] > 0 else "No active contract on file",
-            f"Open ticket volume ({m['open_tickets']})" if m["open_tickets"] > 5 else "Ticket volume healthy",
-        ],
-        "opportunities": [{"title": o["title"], "value": o["arr_uplift"]} for o in exp["opportunities"][:3]],
-        "people": [],
-        "next_actions": [
-            "Schedule QBR within 14 days",
-            "Send proposal for top expansion opportunity",
-            "Confirm primary champion + decision-maker",
-        ],
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "updated_by": current_user.get("name") or current_user.get("email"),
-        "generated_by_ai": True,
-    }
+    client = await _client_or_404(client_id)
+    metrics = await compute_client_metrics(client_id)
+    coverage = await expansion(client_id, current_user)
+    plan = {"client_id": client_id, "goals": ["Confirm documented commercial and service objectives", "Review open service work with the client"], "risks": [f"{metrics['open_tickets']} open tickets" if metrics["open_tickets"] else "No open tickets are recorded", "No verified renewal prediction is available"], "opportunities": [{"title": item["title"], "value": None} for item in coverage["opportunities"]], "people": [], "next_actions": ["Schedule a client review", "Confirm the primary decision maker", "Price any approved coverage gaps from the rate card"], "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", ""), "generation_mode": "evidence_seed", "generated_by_ai": False, "client_name": client.get("name", "Client")}
     await db.client_account_plans.update_one({"client_id": client_id}, {"$set": plan}, upsert=True)
-    plan.pop("_id", None)
     return plan
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Stakeholders
-# ──────────────────────────────────────────────────────────────────────────────
 @router.get("/client-studio/{client_id}/stakeholders")
 async def list_stakeholders(client_id: str, current_user: dict = Depends(get_current_user)):
-    rows = await db.client_stakeholders.find({"client_id": client_id}, {"_id": 0}).to_list(100)
-    return rows
+    return await db.client_stakeholders.find({"client_id": client_id}, {"_id": 0}).to_list(100)
 
 
 @router.post("/client-studio/{client_id}/stakeholders")
 async def create_stakeholder(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    if not (data or {}).get("name"):
-        raise HTTPException(400, "name required")
-    s = {
-        "id": str(uuid.uuid4()),
-        "client_id": client_id,
-        "name": data["name"],
-        "title": data.get("title", ""),
-        "email": data.get("email", ""),
-        "phone": data.get("phone", ""),
-        "role": data.get("role", "influencer"),  # decision_maker | champion | influencer | blocker | gatekeeper
-        "relationship_strength": int(data.get("relationship_strength", 50)),
-        "sentiment": int(data.get("sentiment", 70)),
-        "notes": data.get("notes", ""),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.client_stakeholders.insert_one(s)
-    s.pop("_id", None)
-    return s
+    await _client_or_404(client_id)
+    if not str((data or {}).get("name") or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    strength = max(0, min(100, int(data.get("relationship_strength", 50))))
+    sentiment = _number(data.get("sentiment"))
+    stakeholder = {"id": str(uuid.uuid4()), "client_id": client_id, "name": str(data["name"]).strip(), "title": data.get("title", ""), "email": data.get("email", ""), "phone": data.get("phone", ""), "role": data.get("role", "influencer"), "relationship_strength": strength, "sentiment": sentiment, "notes": data.get("notes", ""), "source": "manual", "created_at": _now(), "created_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
+    await db.client_stakeholders.insert_one(stakeholder)
+    return stakeholder
 
 
 @router.put("/client-studio/stakeholders/{sid}")
 async def update_stakeholder(sid: str, data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {k: v for k, v in (data or {}).items() if k in ("name", "title", "email", "phone", "role", "relationship_strength", "sentiment", "notes")}
-    res = await db.client_stakeholders.update_one({"id": sid}, {"$set": allowed})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Stakeholder not found")
+    allowed = {key: value for key, value in (data or {}).items() if key in {"name", "title", "email", "phone", "role", "relationship_strength", "sentiment", "notes"}}
+    if "relationship_strength" in allowed:
+        allowed["relationship_strength"] = max(0, min(100, int(allowed["relationship_strength"])))
+    if "sentiment" in allowed:
+        allowed["sentiment"] = _number(allowed["sentiment"])
+    allowed.update({"updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")})
+    result = await db.client_stakeholders.update_one({"id": sid}, {"$set": allowed})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Stakeholder not found")
     return {"updated": True}
 
 
 @router.delete("/client-studio/stakeholders/{sid}")
 async def delete_stakeholder(sid: str, current_user: dict = Depends(get_current_user)):
-    res = await db.client_stakeholders.delete_one({"id": sid})
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Stakeholder not found")
+    result = await db.client_stakeholders.delete_one({"id": sid})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Stakeholder not found")
     return {"deleted": True}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Achievements / Lifecycle / Heatmap / Churn / Burndown / Contracts / Scorecard / Compliance / VIP
-# ──────────────────────────────────────────────────────────────────────────────
 @router.get("/client-studio/{client_id}/achievements")
 async def achievements(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    out = []
-    # Anniversary
-    created = client.get("created_at")
-    try:
-        created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00")) if created else None
-        if created_dt and created_dt.tzinfo is None:
-            created_dt = created_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        created_dt = None
-    if created_dt:
-        years = max(0, int((datetime.now(timezone.utc) - created_dt).days / 365))
+    client = await _client_or_404(client_id)
+    achievements_list = []
+    created = _date(client.get("created_at"))
+    if created:
+        years = (datetime.now(timezone.utc) - created).days // 365
         if years >= 1:
-            out.append({"id": "yr", "title": f"{years} year anniversary 🎉", "icon": "🎂", "earned_at": (created_dt + timedelta(days=365 * years)).isoformat()})
-    # Tickets resolved
-    closed = await db.tickets.count_documents({"client_id": client_id, "status": "closed"})
+            achievements_list.append({"id": "anniversary", "title": f"{years} year anniversary", "icon": "\\U0001F389", "earned_at": (created + timedelta(days=365 * years)).isoformat()})
+    closed = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["closed", "resolved"]}})
     if closed >= 100:
-        out.append({"id": "100t", "title": "100+ tickets resolved", "icon": "🎯"})
-    elif closed >= 50:
-        out.append({"id": "50t", "title": "50+ tickets resolved", "icon": "🥉"})
-    elif closed >= 10:
-        out.append({"id": "10t", "title": "10+ tickets resolved", "icon": "🥄"})
-    # Active devices
+        achievements_list.append({"id": "resolved-100", "title": "100+ tickets resolved", "icon": "\\U0001F3C6"})
     devices = await db.devices.count_documents({"client_id": client_id})
     if devices >= 50:
-        out.append({"id": "fleet", "title": f"{devices}-device fleet", "icon": "🚢"})
-    # MRR milestones
-    m = await compute_client_metrics(client_id)
-    if m["mrr"] >= 15000:
-        out.append({"id": "diamond", "title": "Diamond tier 💎", "icon": "💎"})
-    elif m["mrr"] >= 5000:
-        out.append({"id": "platinum", "title": "Platinum tier", "icon": "🥇"})
+        achievements_list.append({"id": "fleet-50", "title": f"{devices}-device fleet", "icon": "\\U0001F5A5"})
     if client.get("vip"):
-        out.append({"id": "vip", "title": "VIP account ⭐", "icon": "⭐"})
-    return {"achievements": out}
+        achievements_list.append({"id": "vip", "title": "VIP account", "icon": "\\u2B50"})
+    return {"achievements": achievements_list}
 
 
 @router.get("/client-studio/{client_id}/lifecycle")
 async def lifecycle(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
+    client = await _client_or_404(client_id)
     milestones = []
     if client.get("created_at"):
-        milestones.append({"id": "m-create", "label": "Account created", "icon": "🌱", "at": client["created_at"]})
+        milestones.append({"id": "account-created", "label": "Account created", "icon": "\\U0001F331", "at": client["created_at"]})
     first_ticket = await db.tickets.find_one({"client_id": client_id}, {"_id": 0}, sort=[("created_at", 1)])
     if first_ticket:
-        milestones.append({"id": "m-first-ticket", "label": "First ticket logged", "icon": "🎫", "at": first_ticket.get("created_at")})
+        milestones.append({"id": "first-ticket", "label": "First ticket logged", "icon": "\\U0001F3AB", "at": first_ticket.get("created_at")})
     first_invoice = await db.invoices.find_one({"client_id": client_id}, {"_id": 0}, sort=[("issue_date", 1)])
     if first_invoice:
-        milestones.append({"id": "m-first-invoice", "label": "First invoice issued", "icon": "💸", "at": first_invoice.get("issue_date")})
+        milestones.append({"id": "first-invoice", "label": "First invoice issued", "icon": "\\U0001F9FE", "at": first_invoice.get("issue_date")})
     contract = await db.contracts.find_one({"client_id": client_id, "status": "active"}, {"_id": 0})
     if contract:
-        milestones.append({"id": "m-contract", "label": "Contract signed", "icon": "📜", "at": contract.get("start_date") or contract.get("created_at")})
-        if contract.get("renewal_date") or contract.get("end_date"):
-            milestones.append({"id": "m-renewal", "label": "Upcoming renewal", "icon": "🔁", "at": contract.get("renewal_date") or contract.get("end_date"), "future": True})
-    return {"milestones": sorted(milestones, key=lambda x: x.get("at") or "")}
+        milestones.append({"id": "active-contract", "label": "Active contract", "icon": "\\U0001F4C4", "at": contract.get("start_date") or contract.get("created_at")})
+        renewal = contract.get("renewal_date") or contract.get("end_date")
+        if renewal:
+            milestones.append({"id": "contract-renewal", "label": "Recorded contract renewal", "icon": "\\U0001F504", "at": renewal, "future": True})
+    return {"milestones": sorted(milestones, key=lambda item: item.get("at") or "")}
 
 
 @router.get("/client-studio/{client_id}/churn-radar")
 async def churn_radar(client_id: str, current_user: dict = Depends(get_current_user)):
-    m = await compute_client_metrics(client_id)
-    sent = (await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0}) or {}).get("score", 75)
-    # 6 axes, each 0–100 where higher = better
-    axes = [
-        {"axis": "Sentiment", "value": sent},
-        {"axis": "Ticket calm", "value": max(0, 100 - m["open_tickets"] * 8)},
-        {"axis": "MRR strength", "value": min(100, int((m["mrr"] / 15000) * 100))},
-        {"axis": "Engagement", "value": _seeded(client_id, "eng", 50, 95)},
-        {"axis": "Contract tenure", "value": _seeded(client_id, "ten", 40, 95)},
-        {"axis": "NPS proxy", "value": _seeded(client_id, "nps", 55, 95)},
-    ]
-    overall = round(sum(a["value"] for a in axes) / len(axes))
-    return {"axes": axes, "overall_health": overall, "risk_label": "Low" if overall >= 75 else "Medium" if overall >= 55 else "High"}
+    await _client_or_404(client_id)
+    metrics = await compute_client_metrics(client_id)
+    sentiment = await _sentiment(client_id)
+    axes = []
+    if sentiment is not None:
+        axes.append({"axis": "Sentiment", "value": sentiment, "source": "recorded_sentiment"})
+    if metrics["total_tickets"]:
+        axes.append({"axis": "Ticket calm", "value": max(0, 100 - metrics["open_tickets"] * 8), "source": "recorded_tickets"})
+    overall = round(sum(axis["value"] for axis in axes) / len(axes)) if len(axes) >= 2 else None
+    return {"axes": axes, "overall_health": overall, "risk_label": _risk_label(overall), "evidence_state": "assessed" if overall is not None else "not_assessed"}
 
 
 @router.get("/client-studio/{client_id}/activity-heatmap")
 async def activity_heatmap(client_id: str, days: int = 90, current_user: dict = Depends(get_current_user)):
+    days = max(1, min(days, 365))
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    cutoff_str = cutoff.isoformat()
-    bucket = {}
-    async for t in db.tickets.find({"client_id": client_id, "created_at": {"$gte": cutoff_str}}, {"_id": 0, "created_at": 1}):
-        d = (t.get("created_at") or "")[:10]
-        bucket[d] = bucket.get(d, 0) + 1
-    out = []
+    buckets: dict[str, int] = {}
+    async for ticket in db.tickets.find({"client_id": client_id, "created_at": {"$gte": cutoff.isoformat()}}, {"_id": 0, "created_at": 1}):
+        stamp = str(ticket.get("created_at") or "")[:10]
+        if stamp:
+            buckets[stamp] = buckets.get(stamp, 0) + 1
     today = datetime.now(timezone.utc)
-    for i in range(days):
-        d = (today - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
-        out.append({"date": d, "count": bucket.get(d, 0)})
-    return {"days": out, "max": max((x["count"] for x in out), default=0)}
+    values = [{"date": (today - timedelta(days=days - 1 - index)).strftime("%Y-%m-%d"), "count": buckets.get((today - timedelta(days=days - 1 - index)).strftime("%Y-%m-%d"), 0)} for index in range(days)]
+    return {"days": values, "max": max((item["count"] for item in values), default=0), "evidence_state": "recorded_tickets"}
 
 
 @router.get("/client-studio/{client_id}/hours-burndown")
 async def hours_burndown(client_id: str, current_user: dict = Depends(get_current_user)):
     contract = await db.contracts.find_one({"client_id": client_id, "status": "active", "$or": [{"type": "retainer"}, {"hours_block": {"$gt": 0}}]}, {"_id": 0})
-    purchased = float((contract or {}).get("hours_block", 40) or 40)
+    purchased = _number((contract or {}).get("hours_block"))
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    cutoff_str = cutoff.isoformat()
-    pipeline = [
-        {"$match": {"client_id": client_id, "started_at": {"$gte": cutoff_str}, "billable": True}},
-        {"$group": {"_id": None, "minutes": {"$sum": "$minutes"}}},
-    ]
-    agg = await db.time_entries.aggregate(pipeline).to_list(1)
-    minutes = (agg[0]["minutes"] if agg else 0) or 0
-    used = round(minutes / 60.0, 1)
-    remaining = max(0.0, purchased - used)
-    pct = round((used / purchased) * 100, 1) if purchased else 0
-    # Daily burn
-    daily = []
-    for i in range(30):
-        d = (datetime.now(timezone.utc) - timedelta(days=29 - i)).strftime("%Y-%m-%d")
-        daily.append({"date": d, "hours": round(_seeded(client_id, f"hb{i}", 0, max(1, int(used / 30 * 3))) / 1.0, 1)})
-    return {"purchased": purchased, "used": used, "remaining": remaining, "pct": pct, "daily": daily}
+    daily_map: dict[str, float] = {}
+    async for entry in db.time_entries.find({"client_id": client_id, "started_at": {"$gte": cutoff.isoformat()}, "billable": True}, {"_id": 0, "started_at": 1, "minutes": 1, "hours": 1}):
+        stamp = str(entry.get("started_at") or "")[:10]
+        hours = _number(entry.get("hours"))
+        if hours is None:
+            minutes = _number(entry.get("minutes"))
+            hours = minutes / 60 if minutes is not None else None
+        if stamp and hours is not None:
+            daily_map[stamp] = daily_map.get(stamp, 0) + hours
+    daily = [{"date": (datetime.now(timezone.utc) - timedelta(days=29 - index)).strftime("%Y-%m-%d"), "hours": round(daily_map.get((datetime.now(timezone.utc) - timedelta(days=29 - index)).strftime("%Y-%m-%d"), 0), 1)} for index in range(30)]
+    used = round(sum(item["hours"] for item in daily), 1)
+    return {"purchased": purchased, "used": used if purchased is not None else None, "remaining": round(max(0, purchased - used), 1) if purchased is not None else None, "pct": round(used / purchased * 100, 1) if purchased and purchased > 0 else None, "daily": daily, "evidence_state": "assessed" if purchased is not None else "not_configured"}
 
 
 @router.get("/client-studio/{client_id}/contracts")
 async def contract_watch(client_id: str, current_user: dict = Depends(get_current_user)):
     contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(50)
     now = datetime.now(timezone.utc)
-    out = []
-    for c in contracts:
-        days_to = None
-        renewal = c.get("renewal_date") or c.get("end_date")
-        try:
-            r_dt = datetime.fromisoformat(str(renewal).replace("Z", "+00:00")) if renewal else None
-            if r_dt and r_dt.tzinfo is None:
-                r_dt = r_dt.replace(tzinfo=timezone.utc)
-            if r_dt:
-                days_to = (r_dt - now).days
-        except Exception:
-            pass
-        out.append({**c, "days_to_renewal": days_to})
-    out.sort(key=lambda c: c.get("days_to_renewal") if c.get("days_to_renewal") is not None else 999)
-    return {"contracts": out}
+    values = []
+    for contract in contracts:
+        renewal = _date(contract.get("renewal_date") or contract.get("end_date"))
+        values.append({**contract, "days_to_renewal": (renewal - now).days if renewal else None})
+    return {"contracts": sorted(values, key=lambda item: item["days_to_renewal"] if item["days_to_renewal"] is not None else 999999)}
 
 
 @router.get("/client-studio/{client_id}/scorecard")
 async def scorecard(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
-    m = await compute_client_metrics(client_id)
-    sent = (await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0}) or {}).get("score", 75)
-    health = _health_from_metrics(m, sent)
-    closed = await db.tickets.count_documents({"client_id": client_id, "status": "closed"})
-    return {
-        "client_id": client_id,
-        "client_name": client["name"],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "metrics": [
-            {"label": "Health Score", "value": f"{health}/100"},
-            {"label": "MRR", "value": f"${m['mrr']:,.0f}"},
-            {"label": "Active Devices", "value": m["devices"]},
-            {"label": "Open Tickets", "value": m["open_tickets"]},
-            {"label": "Resolved Tickets", "value": closed},
-            {"label": "Sentiment", "value": f"{sent}/100"},
-            {"label": "Subscriptions", "value": m["subs"]},
-        ],
-    }
+    client = await _client_or_404(client_id)
+    metrics = await compute_client_metrics(client_id)
+    sentiment = await _sentiment(client_id)
+    health = _health(metrics, sentiment)
+    closed = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["closed", "resolved"]}})
+    return {"client_id": client_id, "client_name": client.get("name", "Client"), "generated_at": _now(), "metrics": [{"label": "Health Score", "value": f"{health}/100" if health is not None else "Not assessed"}, {"label": "Recorded MRR", "value": f"${metrics['mrr']:,.0f}"}, {"label": "Active Devices", "value": metrics["devices"]}, {"label": "Open Tickets", "value": metrics["open_tickets"]}, {"label": "Resolved Tickets", "value": closed}, {"label": "Sentiment", "value": f"{sentiment:g}/100" if sentiment is not None else "Not assessed"}, {"label": "Subscriptions", "value": metrics["subscriptions"]}]}
 
 
 @router.get("/client-studio/{client_id}/compliance")
 async def compliance(client_id: str, current_user: dict = Depends(get_current_user)):
-    frameworks = [
-        {"name": "Essential 8", "score": _seeded(client_id, "e8", 55, 95), "icon": "🇦🇺"},
-        {"name": "HIPAA", "score": _seeded(client_id, "hi", 60, 92), "icon": "⚕️"},
-        {"name": "SOC 2", "score": _seeded(client_id, "s2", 50, 90), "icon": "🛡️"},
-        {"name": "ISO 27001", "score": _seeded(client_id, "iso", 55, 88), "icon": "🌐"},
-        {"name": "NIST CSF", "score": _seeded(client_id, "ns", 60, 92), "icon": "🏛️"},
-    ]
-    return {"frameworks": frameworks, "overall_score": round(sum(f["score"] for f in frameworks) / len(frameworks))}
+    scans = await db.compliance_reports.find({"client_id": client_id}, {"_id": 0}).sort("scanned_at", -1).to_list(200)
+    latest: dict[str, dict] = {}
+    for scan in scans:
+        framework = str(scan.get("framework_name") or scan.get("framework") or "")
+        if framework and framework not in latest:
+            latest[framework] = scan
+    frameworks = [{"name": name, "score": scan.get("score") if isinstance(scan.get("score"), (int, float)) else None, "icon": "compliance", "evidence_state": scan.get("evidence_state", "not_assessed"), "scanned_at": scan.get("scanned_at")} for name, scan in latest.items()]
+    numeric_scores = [row["score"] for row in frameworks if isinstance(row.get("score"), (int, float))]
+    return {"frameworks": frameworks, "overall_score": round(sum(numeric_scores) / len(numeric_scores)) if numeric_scores else None, "evidence_state": "assessed" if numeric_scores else "not_assessed"}
 
 
 @router.post("/client-studio/{client_id}/vip")
 async def toggle_vip(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    vip = bool((data or {}).get("vip"))
-    res = await db.clients.update_one({"id": client_id}, {"$set": {"vip": vip, "updated_at": datetime.now(timezone.utc).isoformat()}})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Client not found")
-    return {"id": client_id, "vip": vip}
+    result = await db.clients.update_one({"id": client_id}, {"$set": {"vip": bool((data or {}).get("vip")), "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"id": client_id, "vip": bool((data or {}).get("vip"))}
 
 
 @router.post("/client-studio/recompute-tiers")
 async def recompute_tiers(current_user: dict = Depends(get_current_user)):
-    """Auto-derive tier from current MRR for every client. Idempotent."""
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "tier": 1}).to_list(2000)
+    """Record suggested tiers without overwriting a technician-managed client type."""
+    clients = await db.clients.find({}, {"_id": 0, "id": 1}).to_list(2000)
     updated = 0
-    for c in clients:
-        m = await compute_client_metrics(c["id"])
-        new_tier = derive_tier(m["mrr"], m["subs"])
-        if c.get("tier") != new_tier:
-            await db.clients.update_one({"id": c["id"]}, {"$set": {"tier": new_tier, "tier_recomputed_at": datetime.now(timezone.utc).isoformat()}})
-            updated += 1
-    return {"updated": updated, "total": len(clients)}
+    for client in clients:
+        metrics = await compute_client_metrics(client["id"])
+        result = await db.clients.update_one({"id": client["id"]}, {"$set": {"computed_tier": derive_tier(metrics["mrr"], metrics["subscriptions"]), "tier_recomputed_at": _now()}})
+        updated += int(bool(getattr(result, "matched_count", 0)))
+    return {"updated": updated, "total": len(clients), "mode": "suggested_tier_only"}

@@ -106,14 +106,14 @@ class TestMicrosoftSSOSettings:
         }
         requests.put(f"{BASE_URL}/api/settings/microsoft-sso", json=test_config, headers=headers)
         
-        # Fetch and verify secret is masked
+        # Fetch and verify secret material is never returned
         response = requests.get(f"{BASE_URL}/api/settings/microsoft-sso", headers=headers)
         assert response.status_code == 200
         data = response.json()
         
-        # Secret should be masked
-        assert data.get("client_secret") == "********", f"Expected masked secret, got: {data.get('client_secret')}"
-        print("Client secret is properly masked")
+        assert data.get("client_secret") == "", "Client secret must not be returned"
+        assert data.get("client_secret_set") is True, "Stored-secret state should still be reported"
+        print("Client secret is write-only")
     
     def test_sso_status_enabled_when_configured(self, auth_token):
         """SSO status should return enabled: true when tenant_id, client_id set and enabled=true"""

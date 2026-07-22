@@ -12,7 +12,9 @@ async def get_billing_dashboard_metrics(user=Depends(get_current_user)):
     now = datetime.now(timezone.utc)
 
     # --- Fetch all invoices ---
-    all_invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    # Split-billing source records are audit-only; their payer invoices carry
+    # the live receivable and must be the sole source of billing metrics.
+    all_invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     all_pos = await db.purchase_orders.find({}, {"_id": 0}).to_list(5000)
 
     # --- MRR / ARR ---

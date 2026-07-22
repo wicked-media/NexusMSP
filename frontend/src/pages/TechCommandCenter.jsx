@@ -2,7 +2,7 @@
  * Team Command Center — native, format-consistent rebuild.
  * Matches the Devices Command Center / Clients module aesthetic.
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -10,6 +10,7 @@ import TechRosterPage from "./TechRosterPage";
 import SkillsMatrixPage from "./SkillsMatrixPage";
 import LeaderboardPage from "./LeaderboardPage";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -27,7 +29,7 @@ import {
   Crown, Lock, Unlock, History, Target, ChevronRight, RefreshCw,
   TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
   Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
-  CheckCircle2, XCircle, Clock,
+  CheckCircle2, XCircle, Clock, Upload,
 } from "lucide-react";
 
 // ---------- Constants ----------
@@ -114,6 +116,8 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
   const [filterTitle, setFilterTitle] = useState("all");
   const [filterStatus, setFilterStatus] = useState("active");
   const [editing, setEditing] = useState(null);
+  const [archiving, setArchiving] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const techs = useMemo(() => capacity?.techs || [], [capacity?.techs]);
 
   const titles = useMemo(() => Array.from(new Set(techs.map(t => t.job_title).filter(Boolean))), [techs]);
@@ -130,6 +134,14 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
       return true;
     });
   }, [techs, filterTitle, filterStatus, search]);
+
+  const restore = async tech => {
+    try {
+      await axios.post(`${API}/technicians/${tech.id}/restore`, {}, { headers });
+      toast.success(`${tech.name} restored and able to sign in`);
+      onChanged?.();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not restore technician"); }
+  };
 
   return (
     <div className="space-y-4" data-testid="directory-tab">
@@ -162,43 +174,46 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(t => (
-            <TechCard key={t.id} tech={t} onEdit={() => setEditing(t)} headers={headers} onChanged={onChanged} />
+            <TechCard
+              key={t.id}
+              tech={t}
+              onEdit={() => setEditing(t)}
+              onArchive={() => setArchiving(t)}
+              onRestore={() => restore(t)}
+              onDelete={() => setDeleting(t)}
+            />
           ))}
         </div>
       )}
 
       <EditTechDialog tech={editing} onClose={() => setEditing(null)} headers={headers} presets={presets} roleOptions={roleOptions} onChanged={onChanged} />
+      <ArchiveTechnicianDialog tech={archiving} onClose={() => setArchiving(null)} headers={headers} onCompleted={onChanged} />
+      <DeleteArchivedTechnicianDialog tech={deleting} onClose={() => setDeleting(null)} headers={headers} onCompleted={onChanged} />
     </div>
   );
 }
 
-function TechCard({ tech, onEdit, headers, onChanged }) {
+function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
   const wl = tech.workload || {};
   const stateClass = STATE_COLORS[wl.state] || STATE_COLORS.active;
-
-  const archive = async () => {
-    if (!window.confirm(`Archive ${tech.name}?`)) return;
-    try {
-      await axios.post(`${API}/technicians/${tech.id}/archive`, {}, { headers });
-      toast.success(`${tech.name} archived`);
-      onChanged?.();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
+  const archived = !!tech.archived;
 
   return (
-    <Card className="bg-zinc-950/60 border-zinc-800 hover:border-violet-500/40 transition-colors" data-testid={`tech-card-${tech.id}`}>
+    <Card className={`bg-zinc-950/60 border-zinc-800 transition-colors ${archived ? "border-amber-500/25 opacity-85" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
-            <div className="w-12 h-12 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500 flex items-center justify-center text-white font-bold">
-              {(tech.name || "?").slice(0, 2).toUpperCase()}
-            </div>
+            <Avatar className="h-12 w-12 rounded-md border border-violet-400/25 bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500 text-white shadow-sm shadow-violet-500/20">
+              <AvatarImage src={tech.avatar} alt={`${tech.name || "Technician"} profile photo`} className="object-cover" />
+              <AvatarFallback className="rounded-md bg-transparent text-sm font-bold text-white">{(tech.name || "?").slice(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
             {tech.on_call_status && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-zinc-950 animate-pulse" />}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-medium text-zinc-100 truncate">{tech.name}</span>
               {tech.is_admin && <Crown className="w-3 h-3 text-amber-400" />}
+              {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-200">Archived</Badge>}
             </div>
             <div className="text-[11px] text-zinc-500 font-mono truncate">{tech.job_title || "Technician"}</div>
             <div className="text-[10px] text-zinc-500 truncate">{tech.email}</div>
@@ -215,17 +230,113 @@ function TechCard({ tech, onEdit, headers, onChanged }) {
           <div><div className="text-base font-bold text-emerald-300 font-mono">{tech.on_call_status ? "ON" : "—"}</div><div className="text-[9px] uppercase tracking-widest text-zinc-500">on-call</div></div>
         </div>
 
-        <div className="mt-3 flex items-center gap-1">
-          <Button size="sm" variant="ghost" className="h-7 text-[10px] flex-1" onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="w-3 h-3 mr-1" />Edit</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-400" onClick={archive} data-testid={`tech-archive-${tech.id}`}><Archive className="w-3 h-3" /></Button>
-        </div>
+        {archived ? (
+          <div className="mt-3 flex items-center gap-1">
+            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px] text-emerald-300 hover:bg-emerald-500/10" onClick={onRestore} data-testid={`tech-restore-${tech.id}`}><RotateCcw className="mr-1 h-3 w-3" />Restore</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={onDelete} data-testid={`tech-delete-${tech.id}`}><Trash2 className="mr-1 h-3 w-3" />Delete</Button>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-1">
+            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-300 hover:bg-amber-500/10" onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
+function ArchiveTechnicianDialog({ tech, onClose, headers, onCompleted }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setReason(""); setBusy(false); }, [tech]);
+  if (!tech) return null;
+
+  const archive = async () => {
+    setBusy(true);
+    try {
+      await axios.post(`${API}/technicians/${tech.id}/archive`, { reason: reason.trim() }, { headers });
+      toast.success(`${tech.name} archived. Their records remain available for audit.`);
+      onCompleted?.();
+      onClose();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not archive technician"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={!!tech} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-xl border-amber-500/25 bg-zinc-950 p-0 overflow-hidden" data-testid="archive-tech-dialog">
+        <div className="border-b border-amber-500/20 bg-gradient-to-br from-amber-500/[0.13] via-zinc-950 to-zinc-950 p-5">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg"><Archive className="h-5 w-5 text-amber-300" />Archive {tech.name}?</DialogTitle>
+            <DialogDescription className="max-w-lg">Archive is the safe offboarding action. It immediately blocks sign-in without removing the technician's history, ticket activity or audit records.</DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="space-y-4 p-5">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"><Lock className="mb-2 h-4 w-4 text-rose-300" /><p className="text-xs font-medium text-zinc-100">Access stopped</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-500">The account can no longer sign in.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"><History className="mb-2 h-4 w-4 text-cyan-300" /><p className="text-xs font-medium text-zinc-100">Records retained</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Existing work stays visible and attributable.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"><RotateCcw className="mb-2 h-4 w-4 text-emerald-300" /><p className="text-xs font-medium text-zinc-100">Reversible</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Restore from the archived directory at any time.</p></div>
+          </div>
+          <div>
+            <Label className="text-xs">Offboarding note <span className="text-zinc-500">(optional, retained in audit history)</span></Label>
+            <Textarea className="mt-1.5 min-h-20" value={reason} onChange={event => setReason(event.target.value)} placeholder="e.g. Left the organisation on 19 July; active work reassigned to Service Desk." data-testid="archive-tech-reason" />
+          </div>
+        </div>
+        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4">
+          <Button variant="ghost" onClick={onClose}>Keep active</Button>
+          <Button onClick={archive} disabled={busy} className="bg-amber-500 text-zinc-950 hover:bg-amber-400" data-testid="archive-tech-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive account</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteArchivedTechnicianDialog({ tech, onClose, headers, onCompleted }) {
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setConfirmation(""); setBusy(false); }, [tech]);
+  if (!tech) return null;
+  const confirmationPhrase = `DELETE ${tech.email}`;
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await axios.delete(`${API}/technicians/${tech.id}`, { headers });
+      toast.success(`${tech.name}'s archived account was permanently deleted`);
+      onCompleted?.();
+      onClose();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not delete technician"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={!!tech} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-lg border-rose-500/30 bg-zinc-950" data-testid="delete-archived-tech-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-rose-300" />Permanently delete archived account?</DialogTitle>
+          <DialogDescription>This removes the account record. Archive is the preferred option for departures because it preserves the full staff history.</DialogDescription>
+        </DialogHeader>
+        <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/90">
+          Ticket and audit events remain attributed to the historic technician name, but this person can no longer be restored as an account.
+        </div>
+        <div>
+          <Label className="text-xs">Type <span className="font-mono text-rose-200">{confirmationPhrase}</span> to confirm</Label>
+          <Input className="mt-1.5 font-mono text-xs" value={confirmation} onChange={event => setConfirmation(event.target.value)} placeholder={confirmationPhrase} data-testid="delete-tech-confirmation" />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="destructive" disabled={busy || confirmation !== confirmationPhrase} onClick={remove} data-testid="delete-tech-submit">{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Delete archived account</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---------- ADD USER (direct create) DIALOG ----------
-function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions = ROLE_OPTIONS }) {
+function AddUserDialog({ open, onClose, onCreated, onManageRoles, headers, presets, roleOptions = ROLE_OPTIONS }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "", job_title: "L1 Technician", role: "technician", hourly_rate: 75, password: "", is_admin: false });
   const [busy, setBusy] = useState(false);
   const [adminConfirmOpen, setAdminConfirmOpen] = useState(false);
@@ -249,9 +360,19 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions
     setForm({ ...form, role: value, is_admin: false });
   };
 
+  const selectedRole = roleOptions.find(role => role.value === form.role) || ROLE_OPTIONS[0];
+  const emailLocalPart = form.email.split("@", 1)[0].trim().toLowerCase();
+  const passwordChecks = [
+    { label: "12 or more characters", complete: form.password.length >= 12 },
+    { label: "Uses three character types", complete: [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter(pattern => pattern.test(form.password)).length >= 3 },
+    { label: "Does not include the email name", complete: !!form.password && (!emailLocalPart || emailLocalPart.length < 3 || !form.password.toLowerCase().includes(emailLocalPart)) },
+  ];
+  const passwordChecksPassed = passwordChecks.filter(check => check.complete).length;
+  const passwordReady = passwordChecksPassed === passwordChecks.length;
+
   const submit = async () => {
-    if (!form.name.trim() || !form.email.trim() || form.password.length < 12) {
-      toast.error("Name, email and an initial password of at least 12 characters are required");
+    if (!form.name.trim() || !form.email.trim() || !passwordReady) {
+      toast.error("Complete the required member details and all password policy checks");
       return;
     }
     setBusy(true);
@@ -270,17 +391,27 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg" data-testid="add-user-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><UserPlus className="w-5 h-5 text-emerald-400" />Add User</DialogTitle>
-          <DialogDescription>Create a tech account immediately. They can sign in with the password you set.</DialogDescription>
+      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-emerald-500/25 bg-zinc-950 p-0" data-testid="add-user-dialog">
+        <DialogHeader className="border-b border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.14] via-zinc-950 to-zinc-950 p-5 sm:p-6">
+          <DialogTitle className="flex items-center gap-2 text-xl"><UserPlus className="h-5 w-5 text-emerald-300" />Provision team member</DialogTitle>
+          <DialogDescription className="max-w-2xl">Create a secure, auditable NexusMSP account. Access is applied from the selected role and permission preset as soon as the account is created.</DialogDescription>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">1. Identity</p><p className="mt-1 text-[11px] text-zinc-400">Who is joining the team.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">2. Access</p><p className="mt-1 text-[11px] text-zinc-400">Role, title and permissions.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">3. Secure sign-in</p><p className="mt-1 text-[11px] text-zinc-400">Initial credentials meet policy.</p></div>
+          </div>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-4 p-5 sm:p-6">
+          <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Member details</p><p className="mt-1 text-xs text-zinc-500">Use the address that will receive team notifications and be used for sign-in. A profile photo can be added from Manage after the account is created.</p></div>
+            <div className="grid gap-3 sm:grid-cols-2">
             <div><Label className="text-xs">Full name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Jane Smith" data-testid="add-user-name" /></div>
             <div><Label className="text-xs">Email *</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="jane@nexusops.io" data-testid="add-user-email" /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+            </div>
+          </section>
+          <section className="rounded-xl border border-violet-500/20 bg-violet-500/[0.035] p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-sm font-semibold text-zinc-100">Access and work profile</p><p className="mt-1 text-xs text-zinc-500">Role describes the operational remit; job title applies the starting permission preset.</p></div><Button type="button" size="sm" variant="outline" className="h-8 border-violet-500/35 text-xs text-violet-200 hover:bg-violet-500/10" onClick={() => { onClose(); onManageRoles?.(); }}>Manage roles</Button></div>
+            <div className="grid gap-3 sm:grid-cols-2">
             <div><Label className="text-xs">Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+64 21 …" data-testid="add-user-phone" /></div>
             <div>
               <Label className="text-xs">Access role</Label>
@@ -291,8 +422,12 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+            </div>
+            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Command."}</p></div>
+          </section>
+          <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4">
+            <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Work profile and secure first sign-in</p><p className="mt-1 text-xs text-zinc-500">Choose the starting permission preset, set the billable rate, then create a unique temporary password.</p></div>
+            <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label className="text-xs">Job title (drives permission preset)</Label>
               <Select value={form.job_title} onValueChange={v => setForm({ ...form, job_title: v })}>
@@ -307,17 +442,19 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions
           <div>
             <Label className="text-xs">Initial password *</Label>
             <Input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 12 characters" data-testid="add-user-password" />
-            <p className="mt-1 text-[10px] text-zinc-500">Set a unique temporary password, then have the technician change it after their first sign-in.</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">{passwordChecks.map(check => <div key={check.label} className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-[10px] ${check.complete ? "border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-100" : "border-zinc-800 bg-zinc-950/45 text-zinc-500"}`}><CheckCircle2 className={`h-3.5 w-3.5 shrink-0 ${check.complete ? "text-emerald-300" : "text-zinc-600"}`} />{check.label}</div>)}</div>
+            <p className={`mt-3 text-[11px] ${passwordReady ? "text-emerald-300" : "text-zinc-500"}`}>{passwordReady ? "Password meets the current NexusMSP policy." : `${passwordChecksPassed} of ${passwordChecks.length} password policy checks complete.`}</p>
           </div>
           <div className="flex items-start justify-between gap-4 rounded-lg border border-violet-500/20 bg-violet-500/[0.05] p-3">
             <div><p className="text-xs font-semibold text-zinc-100">Administrator access</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Create standard technician accounts by default. Administrator access is permanent and should only be granted deliberately.</p></div>
             <Button size="sm" variant="outline" onClick={() => { setAdminAcknowledged(false); setAdminConfirmOpen(true); }} className={form.is_admin ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10" : "border-violet-500/40 text-violet-200 hover:bg-violet-500/10"}>{form.is_admin ? "Enabled" : "Grant"}</Button>
-          </div>
+            </div>
+          </section>
         </div>
-        <DialogFooter>
+        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={busy} variant="outline" className="text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" data-testid="add-user-submit">
-            {busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}Create User
+          <Button onClick={submit} disabled={busy} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400" data-testid="add-user-submit">
+            {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}Create team member
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -339,7 +476,7 @@ function AddUserDialog({ open, onClose, onCreated, headers, presets, roleOptions
 }
 
 // ---------- INVITE USER DIALOG ----------
-function InviteDialog({ open, onClose, onSent, headers, presets, roleOptions = ROLE_OPTIONS }) {
+function InviteDialog({ open, onClose, onSent, onManageRoles, headers, presets, roleOptions = ROLE_OPTIONS }) {
   const [form, setForm] = useState({ name: "", email: "", role: "technician", job_title: "L1 Technician", hourly_rate: 75, message: "" });
   const [busy, setBusy] = useState(false);
 
@@ -348,7 +485,7 @@ function InviteDialog({ open, onClose, onSent, headers, presets, roleOptions = R
   }, [open]);
 
   const send = async () => {
-    if (!form.name.trim() || !form.email.trim()) { toast.error("Name and email required"); return; }
+    if (!form.name.trim() || !/^\S+@\S+\.\S+$/.test(form.email.trim())) { toast.error("Enter a full name and valid work email address"); return; }
     setBusy(true);
     try {
       const r = await axios.post(`${API}/technicians/invite`, form, { headers });
@@ -360,44 +497,43 @@ function InviteDialog({ open, onClose, onSent, headers, presets, roleOptions = R
     finally { setBusy(false); }
   };
 
+  const selectedRole = roleOptions.find(role => role.value === form.role) || ROLE_OPTIONS[0];
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg" data-testid="invite-user-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-cyan-400" />Invite via Email</DialogTitle>
-          <DialogDescription>Send an email invite. The recipient sets their own password from the link.</DialogDescription>
+      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-cyan-500/25 bg-zinc-950 p-0" data-testid="invite-user-dialog">
+        <DialogHeader className="border-b border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.14] via-zinc-950 to-zinc-950 p-5 sm:p-6">
+          <DialogTitle className="flex items-center gap-2 text-xl"><Mail className="h-5 w-5 text-cyan-300" />Invite team member</DialogTitle>
+          <DialogDescription className="max-w-2xl">Send a secure, time-limited invitation. The recipient creates their own password, while the selected role and work profile are recorded before access is activated.</DialogDescription>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-cyan-500/20 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">1. Identity</p><p className="mt-1 text-[11px] text-zinc-400">Verify who the invitation is for.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">2. Access</p><p className="mt-1 text-[11px] text-zinc-400">Apply the right starting role.</p></div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">3. Acceptance</p><p className="mt-1 text-[11px] text-zinc-400">Recipient chooses their password.</p></div>
+          </div>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label className="text-xs">Full name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Jane Smith" data-testid="invite-name" /></div>
-            <div><Label className="text-xs">Email *</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="jane@nexusops.io" data-testid="invite-email" /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Access role</Label>
-              <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
-                <SelectTrigger data-testid="invite-role"><SelectValue /></SelectTrigger>
-                <SelectContent>{roleOptions.filter(o => o.value !== "admin").map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-              </Select>
+        <div className="space-y-4 p-5 sm:p-6">
+          <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+            <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Recipient details</p><p className="mt-1 text-xs text-zinc-500">Use their business email. The invitation is addressed to this identity and its delivery status is retained for audit.</p></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div><Label className="text-xs">Full name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Jane Smith" data-testid="invite-name" /></div>
+              <div><Label className="text-xs">Email *</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="jane@nexusops.io" data-testid="invite-email" /></div>
             </div>
-            <div>
-              <Label className="text-xs">Job title</Label>
-              <Select value={form.job_title} onValueChange={v => setForm({ ...form, job_title: v })}>
-                <SelectTrigger data-testid="invite-title"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-              </Select>
+          </section>
+          <section className="rounded-xl border border-violet-500/20 bg-violet-500/[0.035] p-4">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-zinc-100">Access and work profile</p><p className="mt-1 text-xs text-zinc-500">Invitations cannot grant administrator access. Use direct provisioning when elevation must be acknowledged.</p></div><Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-[11px] text-violet-200 hover:bg-violet-500/10" onClick={() => { onClose(); onManageRoles?.(); }}><Shield className="mr-1.5 h-3.5 w-3.5" />Manage roles</Button></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div><Label className="text-xs">Access role</Label><Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}><SelectTrigger data-testid="invite-role"><SelectValue /></SelectTrigger><SelectContent>{roleOptions.filter(o => o.value !== "admin").map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs">Job title</Label><Select value={form.job_title} onValueChange={v => setForm({ ...form, job_title: v })}><SelectTrigger data-testid="invite-title"><SelectValue /></SelectTrigger><SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} data-testid="invite-rate" /></div>
             </div>
-          </div>
-          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/80">
-            Administrator access is not available through email invitations. Create administrator accounts directly from Team Command so the elevation is acknowledged and audited.
-          </div>
-          <div><Label className="text-xs">Personal message (optional)</Label><Textarea rows={3} value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Welcome to the team!" data-testid="invite-message" /></div>
+            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Command."}</p></div>
+          </section>
+          <section className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-4"><Label className="text-sm font-semibold text-zinc-100">Welcome message <span className="text-xs font-normal text-zinc-500">(optional)</span></Label><p className="mt-1 text-xs text-zinc-500">Add a concise note the technician will see alongside their secure sign-in link.</p><Textarea rows={4} className="mt-3" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Welcome to the team. Please complete your profile and review the service desk handover before your first shift." data-testid="invite-message" /></section>
+          <div className="flex items-start gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-3 text-xs leading-relaxed text-cyan-50/85"><History className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />The invitation, delivery outcome, acceptance, and any cancellation are retained in the team audit history.</div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={send} disabled={busy} variant="outline" className="text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10" data-testid="invite-submit">
-            {busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}Send Invite
-          </Button>
+          <Button onClick={send} disabled={busy} className="bg-cyan-400 text-zinc-950 hover:bg-cyan-300" data-testid="invite-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send secure invitation</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -412,6 +548,9 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
   const [adminAcknowledged, setAdminAcknowledged] = useState(false);
   const [adminAction, setAdminAction] = useState(null);
   const [pendingRole, setPendingRole] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
 
   useEffect(() => {
     if (tech) setForm({
@@ -425,6 +564,8 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
     setAdminAcknowledged(false);
     setAdminAction(null);
     setPendingRole(null);
+    setAvatarUrl(tech?.avatar || "");
+    setAvatarUploading(false);
   }, [tech]);
 
   if (!tech || !form) return null;
@@ -456,6 +597,33 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
     if (value !== "admin" && hasAdministratorAccess) return requestAdministratorChange("revoke", value);
     setForm({ ...form, role: value });
   };
+  const uploadAvatar = async event => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose a PNG, JPG, WebP, or GIF image");
+      input.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Choose an image smaller than 10 MB");
+      input.value = "";
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      const response = await axios.post(`${API}/technicians/${tech.id}/avatar`, payload, {
+        headers: { ...headers, "Content-Type": "multipart/form-data" },
+      });
+      setAvatarUrl(response.data?.avatar_url || "");
+      toast.success(`${tech.name}'s profile photo updated`);
+      onChanged?.();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not upload profile photo"); }
+    finally { setAvatarUploading(false); input.value = ""; }
+  };
   const workload = tech.workload || {};
   const statusLabel = workload.state ? `${workload.state} · ${workload.utilisation ?? workload.utilization ?? 0}% utilised` : "No live workload signal";
 
@@ -466,6 +634,10 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
           <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5 text-violet-400" />Manage {tech.name}</DialogTitle>
           <DialogDescription>Update team profile and work access. Personal preferences, signatures and notifications stay in My Workspace.</DialogDescription>
         </DialogHeader>
+        <div className="flex flex-col gap-4 rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.08] to-zinc-950/30 p-4 sm:flex-row sm:items-center">
+          <Avatar className="h-16 w-16 shrink-0 rounded-2xl border-2 border-violet-400/30 bg-violet-500/10 shadow-lg shadow-violet-500/10"><AvatarImage src={avatarUrl} alt={`${tech.name} profile photo`} className="object-cover" /><AvatarFallback className="rounded-2xl bg-violet-500/10 text-lg font-bold text-violet-100">{tech.name?.split(" ").map(part => part[0]).join("") || "T"}</AvatarFallback></Avatar>
+          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-zinc-100">Profile photo</p><p className="mt-1 text-xs leading-relaxed text-zinc-400">Shown on Team Command, ticket activity, comments, chat presence, and other technician work records.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadAvatar} data-testid="team-avatar-file" /><Button type="button" size="sm" variant="outline" className="border-violet-500/40 text-violet-100 hover:bg-violet-500/10" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="team-avatar-upload-btn">{avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{avatarUploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}</Button><span className="text-[11px] text-zinc-500">PNG, JPG, WebP, or GIF · up to 10 MB</span></div></div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs">
           <div><p className="text-zinc-500">Live workload</p><p className="mt-1 font-medium text-zinc-200 capitalize">{statusLabel}</p></div>
           <div><p className="text-zinc-500">Open tickets</p><p className="mt-1 font-medium text-zinc-200">{workload.open_tickets ?? workload.open ?? 0}</p></div>
@@ -535,6 +707,8 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
 function InvitesTab({ headers }) {
   const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [cancelling, setCancelling] = useState(null);
+  const [actionId, setActionId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -548,47 +722,53 @@ function InvitesTab({ headers }) {
   useEffect(() => { load(); }, [load]);
 
   const cancel = async (id) => {
-    if (!window.confirm("Cancel this invite?")) return;
+    setActionId(id);
     try {
       await axios.delete(`${API}/technicians/invites/${id}`, { headers });
       toast.success("Invite cancelled");
+      setCancelling(null);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setActionId(null); }
   };
 
   const resend = async (id) => {
+    setActionId(id);
     try {
       await axios.post(`${API}/technicians/invites/${id}/resend`, {}, { headers });
       toast.success("Invite resent");
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setActionId(null); }
   };
 
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>;
 
   return (
-    <div className="space-y-2" data-testid="invites-tab">
+    <div className="space-y-3" data-testid="invites-tab">
       {invites.length === 0 ? (
-        <Card><CardContent className="py-8 text-center text-sm text-zinc-500">No pending invitations.</CardContent></Card>
+        <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.06] via-zinc-950 to-zinc-950"><CardContent className="flex flex-col items-center py-10 text-center"><div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10"><Mail className="h-5 w-5 text-cyan-300" /></div><p className="mt-3 text-sm font-semibold text-zinc-100">No active invitations</p><p className="mt-1 max-w-md text-xs leading-relaxed text-zinc-500">When you invite a technician, delivery, acceptance and expiry are tracked here for a complete access record.</p></CardContent></Card>
       ) : invites.map(inv => (
-        <Card key={inv.id} className="border-zinc-800" data-testid={`invite-${inv.id}`}>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-md bg-cyan-500/20 flex items-center justify-center"><Mail className="w-5 h-5 text-cyan-400" /></div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+        <Card key={inv.id} className="border-zinc-800 bg-zinc-950/55 transition-colors hover:border-cyan-500/30" data-testid={`invite-${inv.id}`}>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10"><Mail className="h-4 w-4 text-cyan-300" /></div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{inv.name}</span>
-                <Badge variant="outline" className="text-[9px] uppercase">{inv.role || "technician"}</Badge>
-                <Badge variant="outline" className={`text-[9px] uppercase ${inv.status === "pending" ? "text-amber-300 border-amber-500/40" : "text-zinc-400"}`}>{inv.status}</Badge>
+                <Badge variant="outline" className="border-violet-500/35 text-[9px] uppercase text-violet-200">{inv.role || "technician"}</Badge>
+                <Badge variant="outline" className={`text-[9px] uppercase ${inv.status === "pending" ? "border-amber-500/40 bg-amber-500/[0.08] text-amber-200" : "border-zinc-700 text-zinc-400"}`}>{inv.status}</Badge>
               </div>
               <div className="text-[10px] text-zinc-500 font-mono">
                 {inv.email} · invited by {inv.invited_by} · expires {inv.expires_at ? formatDistanceToNow(new Date(inv.expires_at), { addSuffix: true }) : "—"}
               </div>
             </div>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => resend(inv.id)} data-testid={`invite-resend-${inv.id}`}><Send className="w-3 h-3 mr-1" />Resend</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-rose-400" onClick={() => cancel(inv.id)} data-testid={`invite-cancel-${inv.id}`}><XCircle className="w-3 h-3" /></Button>
+            {inv.status === "pending" && <div className="flex shrink-0 items-center gap-1"><Button size="sm" variant="outline" className="h-8 border-cyan-500/35 text-xs text-cyan-100 hover:bg-cyan-500/10" disabled={actionId === inv.id} onClick={() => resend(inv.id)} data-testid={`invite-resend-${inv.id}`}>{actionId === inv.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Resend</Button><Button size="sm" variant="ghost" className="h-8 text-xs text-rose-300 hover:bg-rose-500/10" disabled={actionId === inv.id} onClick={() => setCancelling(inv)} data-testid={`invite-cancel-${inv.id}`}><XCircle className="mr-1.5 h-3.5 w-3.5" />Cancel</Button></div>}
           </CardContent>
         </Card>
       ))}
+      <Dialog open={!!cancelling} onOpenChange={open => !open && setCancelling(null)}>
+        <DialogContent className="max-w-md border-rose-500/25 bg-zinc-950" data-testid="cancel-invite-dialog"><DialogHeader><DialogTitle className="flex items-center gap-2"><XCircle className="h-5 w-5 text-rose-300" />Cancel this invitation?</DialogTitle><DialogDescription>The sign-in link for <span className="font-medium text-zinc-200">{cancelling?.email}</span> will immediately stop working. This action is retained in the team audit history.</DialogDescription></DialogHeader><div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/85">You can send a new invitation later if the technician still needs access.</div><DialogFooter><Button variant="ghost" onClick={() => setCancelling(null)}>Keep invitation</Button><Button variant="destructive" disabled={actionId === cancelling?.id} onClick={() => cancel(cancelling.id)} data-testid="cancel-invite-submit">{actionId === cancelling?.id && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Cancel invitation</Button></DialogFooter></DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -686,10 +866,29 @@ function CapacityTab({ capacity }) {
 function AccessRoleSettings({ headers, roleOptions, onSaved }) {
   const [roles, setRoles] = useState(roleOptions);
   const [busy, setBusy] = useState(false);
+  const [newRole, setNewRole] = useState({ label: "", description: "" });
 
   useEffect(() => { setRoles(roleOptions); }, [roleOptions]);
 
   const update = (value, field, nextValue) => setRoles(current => current.map(role => role.value === value ? { ...role, [field]: nextValue } : role));
+  const addRole = () => {
+    const label = newRole.label.trim();
+    const description = newRole.description.trim();
+    if (label.length < 2) { toast.error("Give the new role a name of at least 2 characters"); return; }
+    if (description.length > 180) { toast.error("Keep the role description to 180 characters or fewer"); return; }
+    if (roles.some(role => role.label.trim().toLowerCase() === label.toLowerCase())) { toast.error("Each access role needs a unique name"); return; }
+    const stem = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "team_role";
+    let value = `custom_${stem}`;
+    let suffix = 2;
+    while (roles.some(role => role.value === value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
+    setRoles(current => [...current, { value, id: value, label, description, custom: true, protected: false }]);
+    setNewRole({ label: "", description: "" });
+  };
+  const retireRole = value => {
+    const role = roles.find(item => item.value === value);
+    if (!role?.custom) return;
+    setRoles(current => current.filter(item => item.value !== value));
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -699,27 +898,34 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
       const next = (response.data?.roles || []).map(role => ({ value: role.id, ...role }));
       setRoles(next);
       onSaved?.(next);
-      toast.success("Access role names saved");
+      toast.success("Access role catalogue saved");
     } catch (error) { toast.error(error.response?.data?.detail || "Could not save access roles"); }
     finally { setBusy(false); }
   };
 
   return (
     <Card className="border-violet-500/20 bg-violet-500/[0.03]">
-      <CardHeader className="pb-2 flex flex-row items-start justify-between gap-4">
-        <div><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4 text-violet-300" />Access roles</CardTitle><p className="mt-1 text-xs text-zinc-500">Rename the roles shown throughout NexusMSP. Their underlying access IDs remain stable so permissions and automations continue to work.</p></div>
-        <Button size="sm" onClick={save} disabled={busy} variant="outline" className="shrink-0 border-violet-500/40 text-violet-200 hover:bg-violet-500/10">{busy && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}Save roles</Button>
+      <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+        <div><CardTitle className="flex items-center gap-2 text-base"><Shield className="h-4 w-4 text-violet-300" />Access role catalogue</CardTitle><p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-500">Rename standard roles or add your own operational roles. Role IDs stay stable for automation and auditing; only the protected administrator role can grant platform-wide administrator access.</p></div>
+        <Button size="sm" onClick={save} disabled={busy} className="shrink-0 bg-violet-500 text-white hover:bg-violet-400">{busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Save roles</Button>
       </CardHeader>
-      <CardContent className="grid gap-3 lg:grid-cols-2">
-        {roles.map(role => (
-          <div key={role.value} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">{role.value}</span>{role.value === "admin" && <Badge variant="outline" className="border-rose-500/35 text-[9px] text-rose-300">Protected</Badge>}</div>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-2">
+          {roles.map(role => (
+            <div key={role.value} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">{role.value}</span><div className="flex items-center gap-1">{role.custom && <Badge variant="outline" className="border-cyan-500/35 text-[9px] text-cyan-200">Custom</Badge>}{role.value === "admin" && <Badge variant="outline" className="border-rose-500/35 text-[9px] text-rose-300">Protected</Badge>}</div></div>
             <Label className="text-xs">Display name</Label>
             <Input className="mt-1 h-8 text-sm" value={role.label} onChange={event => update(role.value, "label", event.target.value)} />
             <Label className="mt-2 block text-xs">Purpose</Label>
             <Input className="mt-1 h-8 text-xs" value={role.description || ""} onChange={event => update(role.value, "description", event.target.value)} placeholder="What this role is for" />
-          </div>
-        ))}
+              {role.custom && <div className="mt-3 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={() => retireRole(role.value)}><Trash2 className="mr-1 h-3 w-3" />Remove custom role</Button></div>}
+            </div>
+          ))}
+        </div>
+        <div className="rounded-xl border border-dashed border-violet-500/35 bg-zinc-950/45 p-4">
+          <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Add organisation role</p><p className="mt-1 text-xs text-zinc-500">Use this for operational labels such as Project Delivery Lead, Account Manager or Field Engineer. Choose a job title to apply the appropriate starting permissions.</p></div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] md:items-end"><div><Label className="text-xs">Role name</Label><Input className="mt-1" value={newRole.label} onChange={event => setNewRole(current => ({ ...current, label: event.target.value }))} placeholder="Field Engineer" data-testid="new-access-role-name" /></div><div><Label className="text-xs">Purpose <span className="text-zinc-500">(optional)</span></Label><Input className="mt-1" value={newRole.description} onChange={event => setNewRole(current => ({ ...current, description: event.target.value }))} placeholder="Owns onsite delivery and site handover work." data-testid="new-access-role-description" /></div><Button type="button" onClick={addRole} variant="outline" className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10" data-testid="add-access-role"><UserPlus className="mr-1.5 h-4 w-4" />Add role</Button></div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -1158,24 +1364,14 @@ export default function TechCommandCenter() {
     <div className="space-y-5 p-6" data-testid="tech-command-center">
       {isOperationalView && <>
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Team Command Center
-          </h1>
-          <p className="text-sm text-zinc-500">Directory · Invites · Capacity · Permissions · Drift · JIT · Audit</p>
-        </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="h-8 text-xs text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn">
-            <Mail className="w-3 h-3 mr-1" />Invite
-          </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" onClick={() => setAddOpen(true)} data-testid="header-add-btn">
-            <UserPlus className="w-3 h-3 mr-1" />Add User
-          </Button>
-          <Button size="sm" variant="ghost" onClick={loadCapacity} className="h-8 text-xs"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
-        </div>
-      </div>
-
+      <OperationalPageHeader
+        eyebrow="Team operations"
+        title="Team Command Center"
+        description="Directory, invitations, capacity, permissions, access drift, just-in-time elevation, and audit controls."
+        icon={Sparkles}
+        tone="violet"
+        actions={<><Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn"><Mail className="mr-1.5 h-4 w-4" />Invite</Button><Button size="sm" onClick={() => setAddOpen(true)} data-testid="header-add-btn"><UserPlus className="mr-1.5 h-4 w-4" />Add user</Button><Button size="sm" variant="outline" onClick={loadCapacity}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button></>}
+      />
       {/* HeroTile metric strip — same shape as Devices */}
       <MetricStrip columns={6}>
         <MetricTile label="Total techs" value={summary.total} accent="violet" icon={<Users className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-total" />
@@ -1189,13 +1385,13 @@ export default function TechCommandCenter() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-4 p-0 h-auto overflow-x-auto">
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-x-4 gap-y-1 rounded-none border-b border-zinc-800 bg-transparent p-0 shadow-none">
           {COMMAND_TAB_GROUPS.map((group, groupIndex) => (
             <div key={group.label} className={`flex items-center gap-1 shrink-0 ${groupIndex ? "border-l border-zinc-800 pl-4" : ""}`}>
               <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600 px-1">{group.label}</span>
               {group.tabs.map(t => (
                 <TabsTrigger key={t.v} value={t.v}
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
+                  className="rounded-none border-b-2 border-transparent px-3 py-2 text-xs uppercase tracking-wider text-zinc-500 shadow-none transition-colors hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
                   data-testid={`tcc-tab-${t.v}`}>
                   <t.Icon className="w-3 h-3 mr-1" />{t.l}
                 </TabsTrigger>
@@ -1217,8 +1413,8 @@ export default function TechCommandCenter() {
         <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
       </Tabs>
 
-      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} headers={headers} presets={presets} roleOptions={roleOptions} />
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
     </div>
   );
 }

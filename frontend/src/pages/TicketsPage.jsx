@@ -17,7 +17,6 @@ import {
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidget";
-import TicketCategorisationWidget from "@/components/tickets/TicketCategorisationWidget";
 import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
@@ -43,6 +42,7 @@ import {
 import { TicketTimelineTab } from "@/components/ai/TicketTimelineTab";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +67,14 @@ import {
   Download, BellRing, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar,
   Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
-  Settings2, AlertTriangle
+  Settings2, AlertTriangle, Pencil
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
 import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
+import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import { collectionFromResponse, matchTicketByReference, ticketToolAvailability } from "@/lib/ticketWorkspaceHelpers";
+import "@/styles/dashboard-ticker.css";
 import {
   LOCAL_PREVIEW_CLIENTS, LOCAL_PREVIEW_DEVICES, LOCAL_PREVIEW_NOTE_COUNTS,
   LOCAL_PREVIEW_PRODUCTS, LOCAL_PREVIEW_SCRIPTS, LOCAL_PREVIEW_SERVICES,
@@ -130,7 +132,7 @@ export default function TicketsPage() {
 
   // Ticket details use a stable layout. Core information and tools cannot be hidden by a saved preference.
   const panelVisible = {
-    serviceTier: true, categorisation: true, aiAnalysis: true, related: true,
+    serviceTier: true, aiAnalysis: true, related: true,
     enrichment: true, copilot: true, burndown: true, workflow: true,
     cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
@@ -196,9 +198,9 @@ export default function TicketsPage() {
   const [fieldJobs, setFieldJobs] = useState([]);
   const [fieldStats, setFieldStats] = useState({});
   const [wsDialog, setWsDialog] = useState(false);
-  const [wsForm, setWsForm] = useState({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+  const [wsForm, setWsForm] = useState({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
   const [fjDialog, setFjDialog] = useState(false);
-  const [fjForm, setFjForm] = useState({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
+  const [fjForm, setFjForm] = useState({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
   const [viewWsJob, setViewWsJob] = useState(null);
   const [viewFjJob, setViewFjJob] = useState(null);
   const [wsPartDialog, setWsPartDialog] = useState(false);
@@ -230,6 +232,11 @@ export default function TicketsPage() {
   // Workshop enrichment state
   const [wsNotes, setWsNotes] = useState([]);
   const [wsNewNote, setWsNewNote] = useState("");
+  const [wsConversationType, setWsConversationType] = useState("note");
+  const [wsConversation, setWsConversation] = useState({ notes: [], emails: [], sms: [] });
+  const [wsConversationNote, setWsConversationNote] = useState("");
+  const [wsEmailForm, setWsEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
+  const [wsSmsForm, setWsSmsForm] = useState({ to: "", message: "", template_key: "" });
   const [wsPhotos, setWsPhotos] = useState([]);
   const [wsPhotoUploading, setWsPhotoUploading] = useState(false);
   const [wsChecklist, setWsChecklist] = useState([]);
@@ -245,12 +252,19 @@ export default function TicketsPage() {
   const [wsInvoiceDialog, setWsInvoiceDialog] = useState(false);
   const [wsInvoiceList, setWsInvoiceList] = useState([]);
   const [wsIntakeDialog, setWsIntakeDialog] = useState(false);
-  const [wsIntakeForm, setWsIntakeForm] = useState({ condition_on_arrival: "", accessories_received: [], customer_password: "", warranty_status: "unknown", warranty_expiry: "", customer_email: "" });
+  const [wsIntakeForm, setWsIntakeForm] = useState({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", condition_on_arrival: "", accessories_received: [], customer_password: "", warranty_status: "unknown", warranty_expiry: "" });
+  const [wsHeaderEdit, setWsHeaderEdit] = useState(false);
+  const [wsHeaderDraft, setWsHeaderDraft] = useState("");
   const [wsTemplateDialog, setWsTemplateDialog] = useState(false);
   const [wsTemplates, setWsTemplates] = useState({});
   // Field job enrichment state
   const [fjNotes, setFjNotes] = useState([]);
   const [fjNewNote, setFjNewNote] = useState("");
+  const [fjConversationType, setFjConversationType] = useState("note");
+  const [fjConversation, setFjConversation] = useState({ notes: [], emails: [], sms: [] });
+  const [fjConversationNote, setFjConversationNote] = useState("");
+  const [fjEmailForm, setFjEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
+  const [fjSmsForm, setFjSmsForm] = useState({ to: "", message: "", template_key: "" });
   const [fjPhotos, setFjPhotos] = useState([]);
   const [fjPhotoUploading, setFjPhotoUploading] = useState(false);
   const [fjChecklist, setFjChecklist] = useState([]);
@@ -268,6 +282,8 @@ export default function TicketsPage() {
   const [fjMatForm, setFjMatForm] = useState({ material: "", quantity: 1, unit: "meters", unit_cost: 0 });
   const [fjSiteInfo, setFjSiteInfo] = useState({});
   const [fjSiteDialog, setFjSiteDialog] = useState(false);
+  const [fjHeaderEdit, setFjHeaderEdit] = useState(false);
+  const [fjHeaderDraft, setFjHeaderDraft] = useState("");
   const [fjJobHistory, setFjJobHistory] = useState([]);
   const [fjNotifyDialog, setFjNotifyDialog] = useState(false);
   const [fjNotifyForm, setFjNotifyForm] = useState({ email: "", subject: "", message: "" });
@@ -281,6 +297,7 @@ export default function TicketsPage() {
   const [clientContacts, setClientContacts] = useState([]);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+
 
   const createRunbookFromTicket = async () => {
     if (!viewingTicket) return;
@@ -384,6 +401,21 @@ export default function TicketsPage() {
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
+  // Keep the attention ticker current without reloading the supporting form data
+  // or interrupting a technician while they work in the queue.
+  useEffect(() => {
+    const refreshAttentionFeed = async () => {
+      try {
+        const response = await axios.get(`${API}/tickets`, { headers });
+        setTickets(localPreviewCollection(collectionFromResponse(response.data, ["tickets"]), LOCAL_PREVIEW_TICKETS));
+      } catch {
+        // The queue remains usable with the last successful ticket snapshot.
+      }
+    };
+    const interval = window.setInterval(refreshAttentionFeed, 60_000);
+    return () => window.clearInterval(interval);
+  }, [headers]);
+
   // Deep-link: ?ticket=INC-1234 auto-opens that ticket once tickets are loaded
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
@@ -430,6 +462,7 @@ export default function TicketsPage() {
         device_id: linkedDevice.id,
         client_id: linkedDevice.client_id || prev.client_id,
         title: prev.title || `Support request - ${linkedDevice.name || linkedDevice.hostname || "device"}`,
+        description: prev.description || `Created from Managed Assets for ${linkedDevice.name || linkedDevice.hostname || "this device"}.`,
       }));
       setIsCreateOpen(true);
     }
@@ -539,8 +572,8 @@ export default function TicketsPage() {
       due_date: formData.due_date || null,
     };
     try {
-      await axios.post(`${API}/tickets`, payload, { headers });
-      toast.success("Ticket created");
+      const created = (await axios.post(`${API}/tickets`, payload, { headers })).data;
+      toast.success(`Ticket ${created.ticket_number || ""} created`.trim());
       setIsCreateOpen(false);
       setFormData({
         title: "", description: "", client_id: "", priority: "medium", category: "support",
@@ -549,7 +582,8 @@ export default function TicketsPage() {
         device_id: "",
         cc: [], watchers: []
       });
-      fetchTickets();
+      await fetchTickets();
+      if (created?.id) await fetchTicketDetail(created);
     } catch { toast.error("Failed to create ticket"); }
   };
 
@@ -582,9 +616,11 @@ export default function TicketsPage() {
 
   const handleUpdateTicket = async (field, value) => {
     try {
-      await axios.put(`${API}/tickets/${viewingTicket.id}`, { [field]: value }, { headers });
-      setViewingTicket(prev => ({ ...prev, [field]: value }));
-      fetchTickets();
+      const response = await axios.put(`${API}/tickets/${viewingTicket.id}`, { [field]: value }, { headers });
+      const resolvedToClosed = field === "status" && value === "resolved";
+      setViewingTicket(prev => ({ ...prev, [field]: resolvedToClosed ? "closed" : value, ...(response.data?.ticket || {}) }));
+      await fetchTickets();
+      if (resolvedToClosed) toast.success("Ticket resolved, closed and retained in client history");
     } catch { toast.error("Failed to update ticket"); }
   };
 
@@ -880,13 +916,29 @@ export default function TicketsPage() {
     try {
       const res = await axios.post(`${API}/workshop/jobs`, wsForm, { headers });
       toast.success(`Workshop job ${res.data.job_number} created`);
-      setWsDialog(false); setWsForm({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
-      fetchTickets();
+      setWsDialog(false); setWsForm({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
+      await fetchTickets();
+      if (res.data?.id) await fetchWsJobDetail(res.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
   const handleWsStatus = async (jobId, status) => {
-    try { await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchTickets(); if (viewWsJob?.id === jobId) { const r = await axios.get(`${API}/workshop/jobs/${jobId}`, { headers }); setViewWsJob(r.data); } } catch { toast.error("Failed"); }
+    try {
+      const response = await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers });
+      toast.success(status === "collected" ? "Workshop job collected and completion recorded" : `Status: ${status.replaceAll("_", " ")}`);
+      await fetchTickets();
+      if (viewWsJob?.id === jobId) setViewWsJob(response.data?.job || viewWsJob);
+    } catch { toast.error("Failed"); }
+  };
+
+  const openTicketInvoiceWorkflow = () => {
+    if (!viewingTicket) return;
+    setPushToExisting("");
+    setInvoicesList([]);
+    axios.get(`${API}/invoices`, { headers })
+      .then(r => setInvoicesList(collectionFromResponse(r.data, ["invoices", "items"])))
+      .catch(() => toast.error("Could not load existing invoices. You can still create a new draft."));
+    setIsPushInvoiceOpen(true);
   };
 
   const handleWsTimer = async (jobId, action) => {
@@ -908,32 +960,104 @@ export default function TicketsPage() {
     try {
       const res = await axios.post(`${API}/field-jobs`, fjForm, { headers });
       toast.success(`Field job ${res.data.job_number} created`);
-      setFjDialog(false); setFjForm({ customer_name: "", customer_phone: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
-      fetchTickets();
+      setFjDialog(false); setFjForm({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
+      await fetchTickets();
+      if (res.data?.id) await fetchFjJobDetail(res.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
   const handleFjStatus = async (jobId, status) => {
-    try { await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers }); toast.success(`Status: ${status}`); fetchTickets(); if (viewFjJob?.id === jobId) { const r = await axios.get(`${API}/field-jobs/${jobId}`, { headers }); setViewFjJob(r.data); } } catch { toast.error("Failed"); }
+    try {
+      const response = await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers });
+      toast.success(status === "completed" ? "Field job completed and completion recorded" : `Status: ${status.replaceAll("_", " ")}`);
+      await fetchTickets();
+      if (viewFjJob?.id === jobId) setViewFjJob(response.data?.job || viewFjJob);
+    } catch { toast.error("Failed"); }
   };
 
   const handleFjChecklist = async (jobId, checklist) => {
     try { await axios.put(`${API}/field-jobs/${jobId}`, { checklist }, { headers }); } catch {}
   };
 
+  const refreshJobConversation = async (kind, jobId) => {
+    const res = await axios.get(`${API}/${kind}-jobs/${jobId}/conversation`, { headers });
+    const conversation = {
+      notes: collectionFromResponse(res.data, ["notes"]),
+      emails: collectionFromResponse(res.data, ["emails"]),
+      sms: collectionFromResponse(res.data, ["sms", "messages"]),
+    };
+    if (kind === "workshop") setWsConversation(conversation);
+    else setFjConversation(conversation);
+  };
+
+  const handleJobConversationNote = async (kind, job, content, setContent) => {
+    if (!content.trim()) return;
+    try {
+      await axios.post(`${API}/${kind}-jobs/${job.id}/conversation/note`, { content }, { headers });
+      setContent("");
+      await refreshJobConversation(kind, job.id);
+      toast.success("Internal note added");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to add note"); }
+  };
+
+  const handleJobConversationEmail = async (kind, job, form, setForm) => {
+    if (!form.to?.trim()) { toast.error("Add at least one recipient before sending"); return; }
+    try {
+      await axios.post(`${API}/${kind}-jobs/${job.id}/conversation/email`, {
+        to_addresses: form.to.split(",").map(address => address.trim()).filter(Boolean),
+        cc: form.cc ? form.cc.split(",").map(address => address.trim()).filter(Boolean) : [],
+        bcc: form.bcc ? form.bcc.split(",").map(address => address.trim()).filter(Boolean) : [],
+        subject: form.subject,
+        body: form.body,
+        body_type: form.body?.includes("<") ? "html" : "text",
+      }, { headers });
+      setForm(previous => ({ ...previous, body: "" }));
+      await refreshJobConversation(kind, job.id);
+      toast.success("Email sent and recorded");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to send email"); }
+  };
+
+  const handleJobConversationSms = async (kind, job, form, setForm) => {
+    if (!form.to?.trim() || !form.message?.trim()) { toast.error("Phone number and message are required"); return; }
+    setSmsSending(true);
+    try {
+      await axios.post(`${API}/${kind}-jobs/${job.id}/conversation/sms`, { to: form.to, message: form.message }, { headers });
+      setForm(previous => ({ ...previous, message: "", template_key: "" }));
+      await refreshJobConversation(kind, job.id);
+      toast.success("SMS sent and recorded");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to send SMS"); }
+    finally { setSmsSending(false); }
+  };
+
+  const applyJobSmsTemplate = (key, setForm) => {
+    const template = smsTemplates.find(item => item.key === key);
+    if (!template) return;
+    setForm(previous => ({ ...previous, template_key: key, message: template.body || previous.message }));
+  };
+
   // ============ WORKSHOP ENRICHMENT HANDLERS ============
 
   const fetchWsJobDetail = async (job) => {
     setViewWsJob(job);
+    setWsConversationType("note");
+    setWsConversation({ notes: [], emails: [], sms: [] });
+    setWsConversationNote("");
+    setWsEmailForm({ to: job.customer_email || "", cc: "", bcc: "", subject: `Update: ${job.job_number || "Workshop job"}`, body: "" });
+    setWsSmsForm({ to: job.customer_phone || "", message: "", template_key: "" });
     setWsNotes([]); setWsPhotos([]); setWsChecklist([]); setWsAuditLog([]); setWsQuote(null); setWsRepairHistory([]);
     try {
-      const [notesRes, photosRes, clRes, auditRes, quoteRes, histRes] = await Promise.all([
+      const linkedClient = clients.find(client => client.id === job.client_id || client.name === job.customer_name || client.company_name === job.customer_name);
+      const [notesRes, photosRes, clRes, auditRes, quoteRes, histRes, conversationRes, contactsRes, smsTemplatesRes, smsConfigRes] = await Promise.all([
         axios.get(`${API}/workshop/jobs/${job.id}/notes`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workshop/jobs/${job.id}/photos`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workshop/jobs/${job.id}/checklist`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workshop/jobs/${job.id}/audit-log`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workshop/jobs/${job.id}/quote`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/workshop/jobs/${job.id}/repair-history`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workshop-jobs/${job.id}/conversation`, { headers }).catch(() => ({ data: { notes: [], emails: [], sms: [] } })),
+        linkedClient ? axios.get(`${API}/clients/${linkedClient.id}/contacts`, { headers }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+        axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
       ]);
       setWsNotes(notesRes.data || []);
       setWsPhotos(photosRes.data || []);
@@ -941,13 +1065,24 @@ export default function TicketsPage() {
       setWsAuditLog(auditRes.data || []);
       setWsQuote(quoteRes.data);
       setWsRepairHistory(histRes.data || []);
+      setWsConversation({ notes: conversationRes.data?.notes || [], emails: conversationRes.data?.emails || [], sms: conversationRes.data?.sms || [] });
+      setClientContacts(collectionFromResponse(contactsRes.data, ["contacts"]));
+      setSmsTemplates(collectionFromResponse(smsTemplatesRes.data, ["templates"]));
+      if (smsConfigRes.data) setSmsConfig({ signature: smsConfigRes.data.signature || "", append_signature: smsConfigRes.data.append_signature !== false });
       setWsIntakeForm({
+        customer_name: job.customer_name || "",
+        customer_phone: job.customer_phone || "",
+        customer_email: job.customer_email || "",
+        device_type: job.device_type || "",
+        device_brand: job.device_brand || "",
+        device_model: job.device_model || "",
+        serial_number: job.serial_number || "",
+        fault_description: job.fault_description || "",
         condition_on_arrival: job.condition_on_arrival || "",
         accessories_received: job.accessories_received || [],
         customer_password: job.customer_password || "",
         warranty_status: job.warranty_status || "unknown",
         warranty_expiry: job.warranty_expiry || "",
-        customer_email: job.customer_email || "",
       });
     } catch { /* silent */ }
   };
@@ -1072,11 +1207,35 @@ export default function TicketsPage() {
   const handleSaveWsIntake = async () => {
     if (!viewWsJob) return;
     try {
+      await axios.put(`${API}/workshop/jobs/${viewWsJob.id}`, wsIntakeForm, { headers });
       await axios.put(`${API}/workshop/jobs/${viewWsJob.id}/intake`, wsIntakeForm, { headers });
       setViewWsJob(prev => ({ ...prev, ...wsIntakeForm }));
       setWsIntakeDialog(false);
-      toast.success("Intake info saved");
+      toast.success("Service record updated");
     } catch { toast.error("Failed to save"); }
+  };
+
+  const handleSaveWsHeader = async () => {
+    const fault_description = wsHeaderDraft.trim();
+    if (!viewWsJob || !fault_description || fault_description === viewWsJob.fault_description) { setWsHeaderEdit(false); return; }
+    try {
+      await axios.put(`${API}/workshop/jobs/${viewWsJob.id}`, { fault_description }, { headers });
+      setViewWsJob(prev => ({ ...prev, fault_description }));
+      setWsIntakeForm(prev => ({ ...prev, fault_description }));
+      toast.success("Workshop title updated");
+    } catch { toast.error("Failed to update workshop title"); }
+    finally { setWsHeaderEdit(false); }
+  };
+
+  const handleSaveFjHeader = async () => {
+    const description = fjHeaderDraft.trim();
+    if (!viewFjJob || !description || description === viewFjJob.description) { setFjHeaderEdit(false); return; }
+    try {
+      await axios.put(`${API}/field-jobs/${viewFjJob.id}`, { description }, { headers });
+      setViewFjJob(prev => ({ ...prev, description }));
+      toast.success("Field job title updated");
+    } catch { toast.error("Failed to update field job title"); }
+    finally { setFjHeaderEdit(false); }
   };
 
   const handleDownloadWsPdf = async () => {
@@ -1107,9 +1266,15 @@ export default function TicketsPage() {
 
   const fetchFjJobDetail = async (job) => {
     setViewFjJob(job);
+    setFjConversationType("note");
+    setFjConversation({ notes: [], emails: [], sms: [] });
+    setFjConversationNote("");
+    setFjEmailForm({ to: job.customer_email || "", cc: "", bcc: "", subject: `Update: ${job.job_number || "Field job"}`, body: "" });
+    setFjSmsForm({ to: job.customer_phone || "", message: "", template_key: "" });
     setFjNotes([]); setFjPhotos([]); setFjChecklist([]); setFjAuditLog([]); setFjQuote(null); setFjEquipment([]); setFjMaterials([]); setFjSiteInfo({}); setFjJobHistory([]);
     try {
-      const [notesRes, photosRes, clRes, auditRes, quoteRes, equipRes, matRes, siteRes, histRes] = await Promise.all([
+      const linkedClient = clients.find(client => client.id === job.client_id || client.name === job.customer_name || client.company_name === job.customer_name);
+      const [notesRes, photosRes, clRes, auditRes, quoteRes, equipRes, matRes, siteRes, histRes, conversationRes, contactsRes, smsTemplatesRes, smsConfigRes] = await Promise.all([
         axios.get(`${API}/field-jobs/${job.id}/notes`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/field-jobs/${job.id}/photos`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/field-jobs/${job.id}/enhanced-checklist`, { headers }).catch(() => ({ data: [] })),
@@ -1119,6 +1284,10 @@ export default function TicketsPage() {
         axios.get(`${API}/field-jobs/${job.id}/materials`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/field-jobs/${job.id}/site-info`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/field-jobs/${job.id}/job-history`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/field-jobs/${job.id}/conversation`, { headers }).catch(() => ({ data: { notes: [], emails: [], sms: [] } })),
+        linkedClient ? axios.get(`${API}/clients/${linkedClient.id}/contacts`, { headers }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+        axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
       ]);
       setFjNotes(notesRes.data || []);
       setFjPhotos(photosRes.data || []);
@@ -1129,6 +1298,10 @@ export default function TicketsPage() {
       setFjMaterials(matRes.data || []);
       setFjSiteInfo(siteRes.data || {});
       setFjJobHistory(histRes.data || []);
+      setFjConversation({ notes: conversationRes.data?.notes || [], emails: conversationRes.data?.emails || [], sms: conversationRes.data?.sms || [] });
+      setClientContacts(collectionFromResponse(contactsRes.data, ["contacts"]));
+      setSmsTemplates(collectionFromResponse(smsTemplatesRes.data, ["templates"]));
+      if (smsConfigRes.data) setSmsConfig({ signature: smsConfigRes.data.signature || "", append_signature: smsConfigRes.data.append_signature !== false });
     } catch { /* silent */ }
   };
 
@@ -1368,6 +1541,7 @@ export default function TicketsPage() {
     setSearchParams(next, { replace: true });
   };
 
+
   // AI Analysis
   const handleAiAnalysis = async () => {
     if (!viewingTicket) return;
@@ -1404,6 +1578,27 @@ export default function TicketsPage() {
     } catch { toast.error("Failed to run script"); }
   };
 
+  // Client profiles and activity feeds can open a specific service job directly.
+  // Keep the detail workflow inside Tickets so technicians retain the unified queue.
+  useEffect(() => {
+    const jobId = searchParams.get("service_job");
+    const jobType = searchParams.get("service_type");
+    if (!jobId || !jobType || loading || viewWsJob || viewFjJob) return;
+    const source = jobType === "workshop" ? workshopJobs : jobType === "field" ? fieldJobs : [];
+    const job = source.find(item => item.id === jobId);
+    if (!job) return;
+    setTopTab("tickets");
+    setTypeFilter(jobType === "workshop" ? "workshop" : "cabling_wisp");
+    if (jobType === "workshop") fetchWsJobDetail(job);
+    else fetchFjJobDetail(job);
+    const next = new URLSearchParams(searchParams);
+    next.delete("service_job");
+    next.delete("service_type");
+    setSearchParams(next, { replace: true });
+    // fetchWsJobDetail/fetchFjJobDetail intentionally run only when a requested job is present.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldJobs, loading, searchParams, viewFjJob, viewWsJob, workshopJobs]);
+
   if (loading) return <PageShell><div className="flex items-center justify-center h-64 text-zinc-500"><Loader2 className="w-8 h-8 animate-spin" /></div></PageShell>;
 
   // ============ DETAIL VIEW ============
@@ -1430,8 +1625,10 @@ export default function TicketsPage() {
           onResolve={() => handleUpdateTicket("status", "resolved")}
           onStatusChange={(s) => handleUpdateTicket("status", s)}
           onOpenTools={() => setToolsOpen(true)}
+          onInvoice={openTicketInvoiceWorkflow}
           onChangeCustomer={(updated) => updated && setViewingTicket(updated)}
           onTitleSave={(t) => { if (t && t !== viewingTicket.title) handleUpdateTicket("title", t); }}
+          onDescriptionSave={(d) => { if (d !== (viewingTicket.description || "")) handleUpdateTicket("description", d); }}
           onMutate={async () => {
             try {
               const r = await axios.get(`${API}/tickets/${viewingTicket.id}`, { headers });
@@ -1579,7 +1776,7 @@ export default function TicketsPage() {
               content: <>
                 <TicketToolAction icon={ShoppingCart} title="Add product" description="Record hardware, licences, or labour used on this ticket." onClick={() => setIsAddItemOpen(true)} />
                 <TicketToolAction icon={Package} title="Apply service kit" description="Add a reusable bundle of products and tasks." onClick={() => setIsKitPickerOpen(true)} />
-                <TicketToolAction icon={Receipt} title="Push to invoice" description="Create or update an invoice from completed work." state="attention" onClick={() => setIsPushInvoiceOpen(true)} />
+                <TicketToolAction icon={Receipt} title="Create or update invoice" description="Review unbilled work and send it to a new or existing draft." state="attention" onClick={openTicketInvoiceWorkflow} />
                 <TicketToolAction icon={Download} title="Download PDF" description="Export the ticket conversation and work summary." onClick={handleDownloadPdf} />
               </>,
             },
@@ -1608,9 +1805,9 @@ export default function TicketsPage() {
         {/* Title + Compact Progress side-by-side (saves vertical space) */}
         <div className="grid grid-cols-1 gap-4">
           {/* LEFT — request summary (title and customer live in the console header) */}
-          <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(120deg,rgba(59,130,246,0.07),rgba(17,19,24,0.35)_44%,transparent)] shadow-[0_12px_36px_rgba(0,0,0,0.14)]">
+          <Card className="overflow-hidden border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.11),transparent_32%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.06),transparent_25%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_12px_36px_rgba(0,0,0,0.14)]">
             <CardHeader className="border-b border-white/[0.06] pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><span className="h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]" />Case brief</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Case brief</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="max-w-5xl text-sm leading-6 text-zinc-300 whitespace-pre-wrap">{viewingTicket.description || "No request details have been recorded yet."}</p>
@@ -1987,21 +2184,12 @@ export default function TicketsPage() {
                 />
               </div>
             )}
-            {panelVisible.categorisation && (
-              <div key="categorisation" className="min-w-0">
-                <TicketCategorisationWidget
-                  ticket={viewingTicket}
-                  token={token}
-                  onUpdated={(updated) => setViewingTicket(t => ({ ...t, ...updated }))}
-                />
-              </div>
-            )}
             <div key="statusCard" className="min-w-0">
-              <Card className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.13),transparent_40%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
+              <Card className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_40%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.07),transparent_28%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
               <CardContent className="space-y-4 p-4">
                 <div className="flex items-start justify-between gap-3 border-b border-white/[0.07] pb-3">
-                  <div><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-violet-300">Ticket controls</p><p className="mt-1 text-xs text-zinc-500">Ownership, urgency and classification</p></div>
-                  <div className={`mt-0.5 h-2 w-2 rounded-full ${viewingTicket.priority === "critical" ? "bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.9)]" : viewingTicket.priority === "high" ? "bg-amber-400" : "bg-violet-400"}`} />
+                  <div><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-300">Ticket controls</p><p className="mt-1 text-xs text-zinc-500">Ownership, urgency and service routing</p></div>
+                  <div className={`mt-0.5 h-2 w-2 rounded-full ${viewingTicket.priority === "critical" ? "bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.9)]" : viewingTicket.priority === "high" ? "bg-amber-400" : "bg-cyan-400"}`} />
                 </div>
                 <div className="grid grid-cols-1 gap-3">
                 <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Priority</Label>
@@ -2154,7 +2342,7 @@ export default function TicketsPage() {
           open={isPushInvoiceOpen} onOpenChange={setIsPushInvoiceOpen}
           ticketProducts={ticketProducts} invoicesList={invoicesList}
           pushToExisting={pushToExisting} setPushToExisting={setPushToExisting}
-          handlePushToInvoice={handlePushToInvoice}
+          handlePushToInvoice={handlePushToInvoice} ticket={viewingTicket}
         />
 
         {/* VIP Whisper Rail — shows rich context on the requester */}
@@ -2181,18 +2369,19 @@ export default function TicketsPage() {
     return (
       <div className="space-y-4" data-testid="ws-job-detail">
         {/* Workshop job header */}
-        <div className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/[0.13] via-background to-background overflow-hidden" data-testid="ws-job-header">
-          <div className="flex items-start gap-4 p-5 flex-wrap">
-            <Button variant="ghost" size="sm" className="mt-0.5 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setViewWsJob(null)} data-testid="ws-back"><ArrowLeft className="w-4 h-4 mr-1" />Jobs</Button>
-            <div className="w-11 h-11 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center shadow-sm"><Wrench className="w-5 h-5 text-purple-300" /></div>
-            <div className="min-w-0 flex-1">
+        <div className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="ws-job-header">
+          <div className="flex items-center gap-2.5 p-4 flex-wrap">
+            <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={() => setViewWsJob(null)} data-testid="ws-back" aria-label="Back to ticket queue" title="Back to ticket queue"><ArrowLeft className="w-4 h-4" /></Button>
+            <div className="hidden w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shadow-sm"><Wrench className="w-5 h-5 text-cyan-200" /></div>
+            <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:basis-auto lg:flex-1 lg:mx-2">
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live workshop record</div>
               <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                <span className="font-mono text-xs font-semibold tracking-wider text-purple-300">{viewWsJob.job_number}</span>
+                <span className="font-mono text-xs font-semibold tracking-wider text-cyan-300">{viewWsJob.job_number}</span>
                 <Badge className={WS_STATUSES[viewWsJob.repair_status]?.class}>{WS_STATUSES[viewWsJob.repair_status]?.label}</Badge>
                 <Badge variant="outline" className="text-[10px] capitalize">{viewWsJob.priority} priority</Badge>
                 {viewWsJob.warranty_status === "in_warranty" && <Badge className="bg-green-500/20 text-green-400 border-green-500/30"><Shield className="w-3 h-3 mr-1" />Under Warranty</Badge>}
               </div>
-              <h1 className="text-xl font-semibold tracking-tight truncate">{viewWsJob.fault_description || "Workshop repair"}</h1>
+              {wsHeaderEdit ? <Input value={wsHeaderDraft} onChange={e => setWsHeaderDraft(e.target.value)} onBlur={handleSaveWsHeader} onKeyDown={e => { if (e.key === "Enter") handleSaveWsHeader(); if (e.key === "Escape") setWsHeaderEdit(false); }} className="h-9 max-w-3xl border-cyan-500/30 bg-black/20 text-xl font-semibold" autoFocus data-testid="ws-header-title-input" /> : <button type="button" className="block max-w-full truncate text-left text-xl font-semibold tracking-tight transition-colors hover:text-cyan-100" onClick={() => { setWsHeaderDraft(viewWsJob.fault_description || ""); setWsHeaderEdit(true); }} title="Click to edit workshop title" data-testid="ws-header-title">{viewWsJob.fault_description || "Workshop repair"}</button>}
               <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground/75">{viewWsJob.customer_name || "Customer pending"}</span>
                 <span className="text-muted-foreground/30">•</span>
@@ -2200,28 +2389,28 @@ export default function TicketsPage() {
                 {viewWsJob.serial_number && <><span className="text-muted-foreground/30">•</span><span className="font-mono">S/N {viewWsJob.serial_number}</span></>}
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Button variant="outline" size="sm" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
-            <Button variant="outline" size="sm" onClick={() => setWsIntakeDialog(true)} data-testid="ws-intake-btn"><ClipboardList className="w-3 h-3 mr-1" />Intake</Button>
-            <Button variant="outline" size="sm" onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }} data-testid="ws-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
-            <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }} data-testid="ws-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadWsPdf} data-testid="ws-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadWsQr} data-testid="ws-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+            <div className="contents">
+            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn">Notify</TicketHeaderAction>
+            <TicketHeaderAction icon={ClipboardList} onClick={() => setWsIntakeDialog(true)} data-testid="ws-intake-btn">Intake</TicketHeaderAction>
+            <TicketHeaderAction icon={DollarSign} onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }} data-testid="ws-quote-btn">Quote</TicketHeaderAction>
+            <TicketHeaderAction icon={Receipt} tone="success" onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }} data-testid="ws-invoice-btn">Invoice</TicketHeaderAction>
+            <TicketHeaderAction icon={Download} onClick={handleDownloadWsPdf} data-testid="ws-pdf-btn">PDF</TicketHeaderAction>
+            <TicketHeaderAction icon={QrCode} onClick={handleDownloadWsQr} data-testid="ws-qr-btn">QR</TicketHeaderAction>
             </div>
           </div>
         </div>
 
         {/* Progress Tracker */}
-        <Card className="overflow-hidden" data-testid="ws-progress-bar">
-          <CardContent className="py-3 px-4">
+        <Card className="overflow-hidden border-cyan-500/20 bg-[linear-gradient(135deg,rgba(8,20,28,0.72),rgba(13,16,22,0.92))]" data-testid="ws-progress-bar">
+          <CardContent className="py-4 px-5">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Repair Progress</span>
-              <span className="text-xs font-mono text-muted-foreground">{wsProgress}%</span>
+              <div><span className="text-[10px] font-semibold text-cyan-200 uppercase tracking-[0.16em]">Service workflow</span><p className="mt-0.5 text-sm font-semibold">Repair progress</p></div>
+              <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-1 text-xs font-mono text-cyan-100">{wsProgress}% complete</span>
             </div>
             <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
               <div className={`h-full rounded-full bg-gradient-to-r ${wsStages[wsActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, wsProgress)}%` }} />
             </div>
-            <div className="grid grid-cols-6 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
               {wsStages.map((stage, i) => {
                 const isActive = i === wsActiveIdx;
                 const isPast = i < wsActiveIdx;
@@ -2244,9 +2433,9 @@ export default function TicketsPage() {
           {/* Main content — left 2/3 */}
           <div className="lg:col-span-2 space-y-4">
             {/* Job Details Card */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Job Details</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
+            <Card className="overflow-hidden border-cyan-500/20">
+              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.045] pb-3"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-sm flex items-center gap-2"><Wrench className="w-4 h-4 text-cyan-300" />Service record</CardTitle><p className="mt-1 text-[11px] font-normal text-muted-foreground">Customer, asset and intake evidence retained with the repair.</p></div><Button type="button" variant="outline" size="sm" className="h-8 shrink-0 border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/10" onClick={() => setWsIntakeDialog(true)} data-testid="ws-edit-service-record"><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit record</Button></div></CardHeader>
+              <CardContent className="space-y-2 pt-4 text-sm">
                 <div className="grid grid-cols-3 gap-3">
                   <div><span className="text-muted-foreground block text-xs">Customer</span><span className="font-medium">{viewWsJob.customer_name}</span></div>
                   <div><span className="text-muted-foreground block text-xs">Phone</span><span className="font-medium">{viewWsJob.customer_phone || "-"}</span></div>
@@ -2275,19 +2464,32 @@ export default function TicketsPage() {
             </Card>
 
             {/* Tabs */}
-            <Tabs defaultValue="notes" className="rounded-xl border bg-card overflow-hidden">
-              <div className="px-4 pt-3 border-b bg-muted/[0.1]">
-                <div className="flex items-center justify-between gap-3 mb-2"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Repair workspace</span><span className="text-[11px] text-muted-foreground">Evidence, work and commercial record</span></div>
+            <Tabs defaultValue="conversation" className="overflow-hidden rounded-xl border border-cyan-500/20 bg-card">
+              <div className="border-b border-cyan-500/15 bg-cyan-500/[0.035] px-4 pt-3">
+                <div className="mb-2 flex items-center justify-between gap-3"><div><span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Live service workspace</span><p className="mt-0.5 text-sm font-semibold">Repair evidence and commercial record</p></div><span className="hidden text-[11px] text-muted-foreground md:block">Notes, checks, parts and audit trail</span></div>
                 <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
-                  <TabsTrigger value="notes" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-notes-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Notes <span className="ml-1 text-[10px] opacity-70">{wsNotes.length}</span></TabsTrigger>
-                  <TabsTrigger value="checklist" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-checklist-tab"><ListChecks className="w-3 h-3 mr-1.5" />Checklist <span className="ml-1 text-[10px] opacity-70">{wsCheckDone}/{wsChecklist.length}</span></TabsTrigger>
-                  <TabsTrigger value="photos" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-photos-tab"><Camera className="w-3 h-3 mr-1.5" />Photos <span className="ml-1 text-[10px] opacity-70">{wsPhotos.length}</span></TabsTrigger>
-                  <TabsTrigger value="parts" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-parts-tab"><Package className="w-3 h-3 mr-1.5" />Parts <span className="ml-1 text-[10px] opacity-70">{viewWsJob.parts_used?.length || 0}</span></TabsTrigger>
-                  <TabsTrigger value="quote" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-quote-tab"><DollarSign className="w-3 h-3 mr-1.5" />Quote</TabsTrigger>
-                  <TabsTrigger value="history" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-history-tab"><History className="w-3 h-3 mr-1.5" />History <span className="ml-1 text-[10px] opacity-70">{wsRepairHistory.length}</span></TabsTrigger>
-                  <TabsTrigger value="audit" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-purple-400 data-[state=active]:bg-purple-500/[0.08] data-[state=active]:text-purple-200" data-testid="ws-audit-tab"><Eye className="w-3 h-3 mr-1.5" />Audit</TabsTrigger>
+                  <TabsTrigger value="conversation" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-conversation-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Conversation <span className="ml-1 text-[10px] opacity-70">{wsConversation.notes.length + wsConversation.emails.length + wsConversation.sms.length}</span></TabsTrigger>
+                  <TabsTrigger value="notes" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-notes-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Notes <span className="ml-1 text-[10px] opacity-70">{wsNotes.length}</span></TabsTrigger>
+                  <TabsTrigger value="checklist" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-checklist-tab"><ListChecks className="w-3 h-3 mr-1.5" />Checklist <span className="ml-1 text-[10px] opacity-70">{wsCheckDone}/{wsChecklist.length}</span></TabsTrigger>
+                  <TabsTrigger value="photos" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-photos-tab"><Camera className="w-3 h-3 mr-1.5" />Photos <span className="ml-1 text-[10px] opacity-70">{wsPhotos.length}</span></TabsTrigger>
+                  <TabsTrigger value="parts" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-parts-tab"><Package className="w-3 h-3 mr-1.5" />Parts <span className="ml-1 text-[10px] opacity-70">{viewWsJob.parts_used?.length || 0}</span></TabsTrigger>
+                  <TabsTrigger value="quote" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-quote-tab"><DollarSign className="w-3 h-3 mr-1.5" />Quote</TabsTrigger>
+                  <TabsTrigger value="history" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-history-tab"><History className="w-3 h-3 mr-1.5" />History <span className="ml-1 text-[10px] opacity-70">{wsRepairHistory.length}</span></TabsTrigger>
+                  <TabsTrigger value="audit" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-100" data-testid="ws-audit-tab"><Eye className="w-3 h-3 mr-1.5" />Audit</TabsTrigger>
                 </TabsList>
               </div>
+
+              <TabsContent value="conversation" className="space-y-3 p-3" data-testid="ws-conversation-panel">
+                <TicketConversationTab
+                  conversationType={wsConversationType} setConversationType={setWsConversationType}
+                  newNote={wsConversationNote} setNewNote={setWsConversationNote}
+                  handleAddNote={() => handleJobConversationNote("workshop", viewWsJob, wsConversationNote, setWsConversationNote)} cannedResponses={cannedResponses}
+                  emailForm={wsEmailForm} setEmailForm={setWsEmailForm} handleSendEmail={() => handleJobConversationEmail("workshop", viewWsJob, wsEmailForm, setWsEmailForm)} emailSignature={emailSignature} clientContacts={clientContacts}
+                  smsForm={wsSmsForm} setSmsForm={setWsSmsForm} handleSendSms={() => handleJobConversationSms("workshop", viewWsJob, wsSmsForm, setWsSmsForm)} applySmsTemplate={(key) => applyJobSmsTemplate(key, setWsSmsForm)} smsTemplates={smsTemplates} smsConfig={smsConfig} smsSending={smsSending}
+                  ticketNotes={wsConversation.notes} ticketEmails={wsConversation.emails} ticketSms={wsConversation.sms}
+                  recordLabel="workshop job"
+                />
+              </TabsContent>
 
               {/* NOTES TAB */}
               <TabsContent value="notes" className="space-y-3">
@@ -2303,7 +2505,7 @@ export default function TicketsPage() {
                       {wsNotes.map(n => (
                         <div key={n.id} className="p-3 rounded-lg border bg-muted/10" data-testid={`ws-note-${n.id}`}>
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold text-purple-400">{(n.user_name || "?")[0]}</span>
+                            <Avatar className="h-6 w-6 shrink-0 border border-purple-400/30 bg-purple-500/15 text-purple-200"><AvatarImage src={n.avatar_url} alt={n.user_name || "Technician"} className="object-cover" /><AvatarFallback className="bg-transparent text-[10px] font-bold">{(n.user_name || "?")[0]}</AvatarFallback></Avatar>
                             <span className="text-xs font-semibold">{n.user_name}</span>
                             <span className="text-[10px] text-muted-foreground ml-auto">{n.created_at?.slice(0, 16).replace("T", " ")}</span>
                           </div>
@@ -2620,15 +2822,25 @@ export default function TicketsPage() {
         {/* Device Intake Dialog */}
         <Dialog open={wsIntakeDialog} onOpenChange={setWsIntakeDialog}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden p-0 gap-0">
-            <DialogHeader className="px-6 pt-6 pb-5 border-b bg-gradient-to-r from-purple-500/[0.1] to-transparent">
+            <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/25 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-purple-300" /></div>
-                <div><DialogTitle>Complete device intake</DialogTitle><p className="text-sm text-muted-foreground mt-1">Record exactly what arrived before the repair work begins.</p></div>
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-cyan-200" /></div>
+                <div><DialogTitle>Edit workshop service record</DialogTitle><p className="mt-1 text-sm text-muted-foreground">Correct the customer, asset and intake details while preserving the audit trail.</p></div>
               </div>
             </DialogHeader>
             <div className="space-y-4 px-6 py-5 overflow-y-auto max-h-[63vh]">
+              <section className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4">
+                <div className="flex items-center gap-2"><Wrench className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Customer & repair brief</h3></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div><Label>Customer name</Label><Input value={wsIntakeForm.customer_name} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_name: e.target.value })} placeholder="Customer or organisation" /></div><div><Label>Phone</Label><Input value={wsIntakeForm.customer_phone} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_phone: e.target.value })} placeholder="Contact number" /></div></div>
+                <div><Label>Fault description</Label><Textarea value={wsIntakeForm.fault_description} onChange={e => setWsIntakeForm({ ...wsIntakeForm, fault_description: e.target.value })} rows={3} placeholder="Fault reported, symptoms and requested outcome" /></div>
+              </section>
+              <section className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.025] p-4">
+                <div className="flex items-center gap-2"><Cpu className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Asset identification</h3></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><div><Label>Device type</Label><Input value={wsIntakeForm.device_type} onChange={e => setWsIntakeForm({ ...wsIntakeForm, device_type: e.target.value })} placeholder="Laptop" /></div><div><Label>Brand</Label><Input value={wsIntakeForm.device_brand} onChange={e => setWsIntakeForm({ ...wsIntakeForm, device_brand: e.target.value })} placeholder="Lenovo" /></div><div><Label>Model</Label><Input value={wsIntakeForm.device_model} onChange={e => setWsIntakeForm({ ...wsIntakeForm, device_model: e.target.value })} placeholder="ThinkPad T14" /></div></div>
+                <div><Label>Serial number</Label><Input className="font-mono" value={wsIntakeForm.serial_number} onChange={e => setWsIntakeForm({ ...wsIntakeForm, serial_number: e.target.value })} placeholder="Manufacturer serial number" /></div>
+              </section>
               <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
-                <div className="flex items-center gap-2"><User className="w-4 h-4 text-purple-300" /><h3 className="text-sm font-semibold">Customer & access</h3></div>
+                <div className="flex items-center gap-2"><User className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">Customer & access</h3></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><Label>Customer email</Label><Input value={wsIntakeForm.customer_email} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_email: e.target.value })} placeholder="customer@example.com" data-testid="ws-intake-email" /></div>
                   <div><Label>Login password or PIN <span className="text-muted-foreground font-normal">(optional)</span></Label><Input value={wsIntakeForm.customer_password} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_password: e.target.value })} placeholder="Only if required to test" type="password" data-testid="ws-intake-password" /></div>
@@ -2682,7 +2894,7 @@ export default function TicketsPage() {
               <p className="text-xs text-muted-foreground px-1">Tip: take a before photo from the Photos tab for any existing damage, then save this intake record.</p>
             </div>
             <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12]">
-              <Button variant="outline" onClick={() => setWsIntakeDialog(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save intake record</Button>
+              <Button variant="outline" onClick={() => setWsIntakeDialog(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save service record</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -2724,37 +2936,38 @@ export default function TicketsPage() {
     return (
       <div className="space-y-4" data-testid="fj-detail">
         {/* Field job header */}
-        <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.13] via-background to-background overflow-hidden" data-testid="fj-job-header">
-          <div className="flex items-start gap-4 p-5 flex-wrap">
-            <Button variant="ghost" size="sm" className="mt-0.5 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setViewFjJob(null)} data-testid="fj-back"><ArrowLeft className="w-4 h-4 mr-1" />Jobs</Button>
-            <div className="w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shadow-sm"><Radio className="w-5 h-5 text-cyan-300" /></div>
-            <div className="min-w-0 flex-1">
+        <div className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="fj-job-header">
+          <div className="flex items-center gap-2.5 p-4 flex-wrap">
+            <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={() => setViewFjJob(null)} data-testid="fj-back" aria-label="Back to ticket queue" title="Back to ticket queue"><ArrowLeft className="w-4 h-4" /></Button>
+            <div className="hidden w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center shadow-sm"><Radio className="w-5 h-5 text-cyan-300" /></div>
+            <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:basis-auto lg:flex-1 lg:mx-2">
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live field service record</div>
               <div className="flex items-center gap-2 flex-wrap mb-1.5"><span className="font-mono text-xs font-semibold tracking-wider text-cyan-300">{viewFjJob.job_number}</span><Badge className={FJ_STATUSES[viewFjJob.field_status]?.class}>{FJ_STATUSES[viewFjJob.field_status]?.label}</Badge><Badge variant="outline" className="text-[10px] capitalize">{viewFjJob.job_category}</Badge><Badge variant="outline" className="text-[10px] capitalize">{viewFjJob.priority} priority</Badge></div>
-              <h1 className="text-xl font-semibold tracking-tight truncate">{viewFjJob.description || "Field service job"}</h1>
+              {fjHeaderEdit ? <Input value={fjHeaderDraft} onChange={e => setFjHeaderDraft(e.target.value)} onBlur={handleSaveFjHeader} onKeyDown={e => { if (e.key === "Enter") handleSaveFjHeader(); if (e.key === "Escape") setFjHeaderEdit(false); }} className="h-9 max-w-3xl border-cyan-500/30 bg-black/20 text-xl font-semibold" autoFocus data-testid="fj-header-title-input" /> : <button type="button" className="block max-w-full truncate text-left text-xl font-semibold tracking-tight transition-colors hover:text-cyan-100" onClick={() => { setFjHeaderDraft(viewFjJob.description || ""); setFjHeaderEdit(true); }} title="Click to edit field job title" data-testid="fj-header-title">{viewFjJob.description || "Field service job"}</button>}
               <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs text-muted-foreground"><span className="font-medium text-foreground/75">{viewFjJob.customer_name || "Customer pending"}</span><span className="text-muted-foreground/30">•</span><span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3 text-cyan-300" />{viewFjJob.service_address || "Site address pending"}</span>{viewFjJob.scheduled_date && <><span className="text-muted-foreground/30">•</span><span>{viewFjJob.scheduled_date} {viewFjJob.scheduled_time || ""}</span></>}</div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Button variant="outline" size="sm" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn"><Bell className="w-3 h-3 mr-1" />Notify</Button>
-            <Button variant="outline" size="sm" onClick={() => setFjSiteDialog(true)} data-testid="fj-site-btn"><MapPin className="w-3 h-3 mr-1" />Site Info</Button>
-            <Button variant="outline" size="sm" onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }} data-testid="fj-quote-btn"><DollarSign className="w-3 h-3 mr-1" />Quote</Button>
-            <Button variant="outline" size="sm" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }} data-testid="fj-invoice-btn"><Receipt className="w-3 h-3 mr-1" />Invoice</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadFjPdf} data-testid="fj-pdf-btn"><Download className="w-3 h-3 mr-1" />PDF</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadFjQr} data-testid="fj-qr-btn"><QrCode className="w-3 h-3 mr-1" />QR</Button>
+            <div className="contents">
+            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn">Notify</TicketHeaderAction>
+            <TicketHeaderAction icon={MapPin} onClick={() => setFjSiteDialog(true)} data-testid="fj-site-btn">Site info</TicketHeaderAction>
+            <TicketHeaderAction icon={DollarSign} onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }} data-testid="fj-quote-btn">Quote</TicketHeaderAction>
+            <TicketHeaderAction icon={Receipt} tone="success" onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }} data-testid="fj-invoice-btn">Invoice</TicketHeaderAction>
+            <TicketHeaderAction icon={Download} onClick={handleDownloadFjPdf} data-testid="fj-pdf-btn">PDF</TicketHeaderAction>
+            <TicketHeaderAction icon={QrCode} onClick={handleDownloadFjQr} data-testid="fj-qr-btn">QR</TicketHeaderAction>
             </div>
           </div>
         </div>
 
         {/* Progress Tracker */}
-        <Card className="overflow-hidden" data-testid="fj-progress-bar">
-          <CardContent className="py-3 px-4">
+        <Card className="overflow-hidden border-cyan-500/20 bg-[linear-gradient(135deg,rgba(8,20,28,0.72),rgba(13,16,22,0.92))]" data-testid="fj-progress-bar">
+          <CardContent className="py-4 px-5">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Job Progress</span>
-              <span className="text-xs font-mono text-muted-foreground">{fjProgress}%</span>
+              <div><span className="text-[10px] font-semibold text-cyan-200 uppercase tracking-[0.16em]">Service workflow</span><p className="mt-0.5 text-sm font-semibold">Field job progress</p></div>
+              <span className="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-1 text-xs font-mono text-cyan-100">{fjProgress}% complete</span>
             </div>
             <div className="h-2 rounded-full bg-muted/50 mb-4 overflow-hidden">
               <div className={`h-full rounded-full bg-gradient-to-r ${fjStages[fjActiveIdx].color} transition-all duration-700`} style={{ width: `${Math.max(5, fjProgress)}%` }} />
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
               {fjStages.map((stage, i) => {
                 const isActive = i === fjActiveIdx;
                 const isPast = i < fjActiveIdx;
@@ -2777,9 +2990,9 @@ export default function TicketsPage() {
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
             {/* Job Details */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Job Details</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
+            <Card className="overflow-hidden border-cyan-500/20">
+              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.045] pb-3"><CardTitle className="text-sm flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-300" />Service record</CardTitle><p className="text-[11px] font-normal text-muted-foreground">Client, site and dispatch information retained with the job.</p></CardHeader>
+              <CardContent className="space-y-2 pt-4 text-sm">
                 <div className="grid grid-cols-3 gap-3">
                   <div><span className="text-muted-foreground block text-xs">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
                   <div><span className="text-muted-foreground block text-xs">Phone</span><span className="font-medium">{viewFjJob.customer_phone || "-"}</span></div>
@@ -2798,10 +3011,11 @@ export default function TicketsPage() {
             </Card>
 
             {/* Tabs */}
-            <Tabs defaultValue="notes" className="rounded-xl border bg-card overflow-hidden">
-              <div className="px-4 pt-3 border-b bg-muted/[0.1]">
-                <div className="flex items-center justify-between gap-3 mb-2"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Field workspace</span><span className="text-[11px] text-muted-foreground">Site evidence, equipment and completion record</span></div>
+            <Tabs defaultValue="conversation" className="overflow-hidden rounded-xl border border-cyan-500/20 bg-card">
+              <div className="border-b border-cyan-500/15 bg-cyan-500/[0.035] px-4 pt-3">
+                <div className="mb-2 flex items-center justify-between gap-3"><div><span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Live service workspace</span><p className="mt-0.5 text-sm font-semibold">Field evidence and completion record</p></div><span className="hidden text-[11px] text-muted-foreground md:block">Notes, checks, materials and audit trail</span></div>
                 <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
+                  <TabsTrigger value="conversation" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-conversation-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Conversation <span className="ml-1 text-[10px] opacity-70">{fjConversation.notes.length + fjConversation.emails.length + fjConversation.sms.length}</span></TabsTrigger>
                   <TabsTrigger value="notes" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-notes-tab"><MessageSquare className="w-3 h-3 mr-1.5" />Notes <span className="ml-1 text-[10px] opacity-70">{fjNotes.length}</span></TabsTrigger>
                   <TabsTrigger value="checklist" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-checklist-tab"><ListChecks className="w-3 h-3 mr-1.5" />Checklist <span className="ml-1 text-[10px] opacity-70">{fjCheckDone}/{fjChecklist.length}</span></TabsTrigger>
                   <TabsTrigger value="photos" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-photos-tab"><Camera className="w-3 h-3 mr-1.5" />Photos <span className="ml-1 text-[10px] opacity-70">{fjPhotos.length}</span></TabsTrigger>
@@ -2812,6 +3026,18 @@ export default function TicketsPage() {
                   <TabsTrigger value="audit" className="flex-none rounded-b-none border-b-2 border-transparent px-3 py-2.5 text-xs data-[state=active]:border-cyan-400 data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:text-cyan-200" data-testid="fj-audit-tab"><Eye className="w-3 h-3 mr-1.5" />Audit</TabsTrigger>
                 </TabsList>
               </div>
+
+              <TabsContent value="conversation" className="space-y-3 p-3" data-testid="fj-conversation-panel">
+                <TicketConversationTab
+                  conversationType={fjConversationType} setConversationType={setFjConversationType}
+                  newNote={fjConversationNote} setNewNote={setFjConversationNote}
+                  handleAddNote={() => handleJobConversationNote("field", viewFjJob, fjConversationNote, setFjConversationNote)} cannedResponses={cannedResponses}
+                  emailForm={fjEmailForm} setEmailForm={setFjEmailForm} handleSendEmail={() => handleJobConversationEmail("field", viewFjJob, fjEmailForm, setFjEmailForm)} emailSignature={emailSignature} clientContacts={clientContacts}
+                  smsForm={fjSmsForm} setSmsForm={setFjSmsForm} handleSendSms={() => handleJobConversationSms("field", viewFjJob, fjSmsForm, setFjSmsForm)} applySmsTemplate={(key) => applyJobSmsTemplate(key, setFjSmsForm)} smsTemplates={smsTemplates} smsConfig={smsConfig} smsSending={smsSending}
+                  ticketNotes={fjConversation.notes} ticketEmails={fjConversation.emails} ticketSms={fjConversation.sms}
+                  recordLabel="field job"
+                />
+              </TabsContent>
 
               {/* NOTES */}
               <TabsContent value="notes" className="space-y-3">
@@ -2827,7 +3053,7 @@ export default function TicketsPage() {
                       {fjNotes.map(n => (
                         <div key={n.id} className="p-3 rounded-lg border bg-muted/10">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center text-[10px] font-bold text-cyan-400">{(n.user_name || "?")[0]}</span>
+                            <Avatar className="h-6 w-6 shrink-0 border border-cyan-400/30 bg-cyan-500/15 text-cyan-100"><AvatarImage src={n.avatar_url} alt={n.user_name || "Technician"} className="object-cover" /><AvatarFallback className="bg-transparent text-[10px] font-bold">{(n.user_name || "?")[0]}</AvatarFallback></Avatar>
                             <span className="text-xs font-semibold">{n.user_name}</span>
                             <span className="text-[10px] text-muted-foreground ml-auto">{n.created_at?.slice(0, 16).replace("T", " ")}</span>
                           </div>
@@ -3299,26 +3525,26 @@ export default function TicketsPage() {
   // ============ LIST VIEW ============
   const openCount = tickets.filter(t => t.status === "open").length;
   const inProgressCount = tickets.filter(t => t.status === "in_progress").length;
-  const resolvedCount = tickets.filter(t => t.status === "resolved").length;
+  const resolvedCount = tickets.filter(t => t.status === "closed").length;
   const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
   const noNotesCount = tickets.filter(t => noteCounts[t.id] === 0 && t.status !== "closed" && t.status !== "resolved").length;
   const avgResTime = tickets.length > 0 ? Math.round(tickets.reduce((a, t) => a + (t.total_time_minutes || 0), 0) / Math.max(1, tickets.filter(t => t.total_time_minutes > 0).length)) : 0;
 
   return (
-    <PageShell data-testid="tickets-page">
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+    <PageShell className="min-w-0 max-w-full overflow-x-hidden" data-testid="tickets-page">
+      <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-5">
 
       <TicketModuleHeader
         title="Ticket queue"
         subtitle={`${tickets.length} support · ${workshopJobs.length} workshop · ${fieldJobs.length} field jobs · saved views and live service signals`}
         actions={<>
-          <Button variant="outline" size="sm" className="h-8 text-xs text-blue-300 border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
+          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
             <Plus className="w-3 h-3 mr-1" />New ticket
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs text-purple-300 border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
+          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
             <Wrench className="w-3 h-3 mr-1" />Workshop
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs text-cyan-300 border-cyan-500/40 bg-cyan-500/5 hover:bg-cyan-500/10" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
+          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
             <Radio className="w-3 h-3 mr-1" />Cabling
           </Button>
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={fetchTickets} data-testid="refresh-tickets-btn">
@@ -3334,59 +3560,62 @@ export default function TicketsPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
           <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
           <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
-          <HeroTile label="Resolved" value={resolvedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "resolved" })} active={statusFilter === "resolved" && attentionFilter === "all"} testId="stat-resolved" />
+          <HeroTile label="Closed" value={resolvedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "closed" })} active={statusFilter === "closed" && attentionFilter === "all"} testId="stat-resolved" />
           <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
           <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
           <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({})} active={statusFilter === "all" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
         </div>
       </div>
 
-      {/* Smart Inbox — Needs Attention strip */}
-      <div key="smart-inbox" className="min-w-0">
+      {/* Live ticket attention ticker */}
+      <div key="smart-inbox" className="w-full max-w-full min-w-0 overflow-hidden">
         {(() => {
           const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
           const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
           const stale = tickets.filter(t => !t.last_response_at && (Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000) && !["closed", "resolved"].includes(t.status));
           const items = [
-            ...breached.slice(0, 6).map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "border-rose-500/30 bg-rose-500/5 text-rose-300" })),
-            ...critical.slice(0, 6).map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "border-amber-500/30 bg-amber-500/5 text-amber-300" })),
-            ...stale.slice(0, 6).map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "border-cyan-500/30 bg-cyan-500/5 text-cyan-300" })),
-          ].slice(0, 12);
+            ...breached.map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "critical" })),
+            ...critical.map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "critical" })),
+            ...stale.map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "warning" })),
+          ].reduce((unique, item) => {
+            if (!unique.some(existing => existing.id === item.id)) unique.push(item);
+            return unique;
+          }, []).slice(0, 12);
           if (items.length === 0) return (
-            <Card className="border-emerald-500/20 bg-emerald-500/[0.02] h-full" data-testid="tickets-smart-inbox-empty">
-              <CardContent className="py-4 flex items-center gap-2 text-emerald-400/80 text-sm">
-                <CheckCircle className="w-4 h-4" />All clear — no tickets need attention right now
-              </CardContent>
-            </Card>
+            <div className="nx-live-ticker" data-testid="tickets-smart-inbox-empty">
+              <div className="nx-live-ticker__label"><CheckCircle className="w-3.5 h-3.5" /><span>Attention feed</span><span className="nx-live-ticker__pulse" /></div>
+              <div className="min-w-0 flex-1 text-sm text-emerald-300">All clear - no tickets need attention right now.</div>
+              <span className="nx-live-ticker__refresh">Refreshes every minute</span>
+            </div>
           );
+          const repeatedItems = [...items, ...items];
           return (
-            <Card className="overflow-hidden border border-rose-500/20 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.10),transparent_32%),linear-gradient(135deg,rgba(17,19,24,0.96),rgba(10,12,17,0.98))] shadow-[0_14px_38px_rgba(0,0,0,0.18)] h-full" data-testid="tickets-smart-inbox">
-              <CardHeader className="border-b border-white/[0.06] pb-3 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/[0.14] ring-1 ring-rose-500/25"><AlertTriangle className="w-3.5 h-3.5 text-rose-300" /></span>Needs Attention
-                  <Badge variant="outline" className="border-rose-500/25 bg-rose-500/[0.08] text-[9px] uppercase text-rose-200">{items.length}</Badge>
-                </CardTitle>
-                <span className="text-[10px] uppercase tracking-widest font-mono text-zinc-500">{breached.length} breached · {critical.length} critical · {stale.length} stale</span>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {items.map((t, i) => (
+            <div className="nx-live-ticker" data-testid="tickets-smart-inbox">
+              <div className="nx-live-ticker__label">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
+                <span>Needs attention</span>
+                <span className="nx-live-ticker__pulse" />
+                <Badge variant="outline" className="border-rose-500/25 bg-rose-500/[0.08] text-[9px] text-rose-200">{items.length}</Badge>
+              </div>
+              <div className="nx-live-ticker__viewport">
+                <div className="nx-live-ticker__track">
+                  {repeatedItems.map((t, index) => (
                     <button
-                      key={`${t.id}-${i}-${t._kind}`}
+                      key={`${t.id}-${t._kind}-${index}`}
                       onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
-                      className={`text-left flex items-start gap-2 rounded-lg border px-2.5 py-2.5 ${t._tone} hover:brightness-125 hover:-translate-y-px transition`}
-                      data-testid={`tickets-inbox-${t.id}-${t._kind}`}
+                      className={`nx-live-ticker__item nx-live-ticker__item--${t._tone}`}
+                      data-testid={index < items.length ? `tickets-inbox-${t.id}-${t._kind}` : undefined}
+                      title={`Open ${t.ticket_number || "ticket"}`}
                     >
-                      <Badge variant="outline" className="text-[9px] uppercase shrink-0">{t._label}</Badge>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-medium truncate">{t.title}</div>
-                        <div className="text-[10px] opacity-80 truncate">#{t.ticket_number} · {t.client_name}</div>
-                      </div>
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="font-medium">{t._label}</span>
+                      <span className="nx-live-ticker__detail">{t.ticket_number ? `#${t.ticket_number}` : "Ticket"} | {t.title}{t.client_name ? ` | ${t.client_name}` : ""}</span>
                     </button>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              <span className="nx-live-ticker__refresh">{breached.length} breached | {critical.length} critical | {stale.length} stale</span>
+            </div>
           );
         })()}
       </div>
@@ -3687,13 +3916,13 @@ export default function TicketsPage() {
 
       <CreateWorkshopJobDialog
         open={wsDialog} onOpenChange={setWsDialog}
-        wsForm={wsForm} setWsForm={setWsForm} users={users}
+        wsForm={wsForm} setWsForm={setWsForm} users={users} clients={clients}
         handleCreateWsJob={handleCreateWsJob}
       />
 
       <CreateFieldJobDialog
         open={fjDialog} onOpenChange={setFjDialog}
-        fjForm={fjForm} setFjForm={setFjForm} users={users}
+        fjForm={fjForm} setFjForm={setFjForm} users={users} clients={clients}
         handleCreateFjJob={handleCreateFjJob}
       />
 

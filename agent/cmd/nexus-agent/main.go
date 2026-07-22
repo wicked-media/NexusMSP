@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"nexusagent/internal/canary"
 	"nexusagent/internal/commands"
 	"nexusagent/internal/config"
 	"nexusagent/internal/enroll"
@@ -20,13 +21,13 @@ import (
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.0-dev"
+var Version = "0.1.5-nexus-shield"
 
 func main() {
 	var (
-		runFlag   = flag.String("run", "", "run mode: foreground | install | uninstall | start | stop | status")
-		cfgPath   = flag.String("config", "", "path to config.json (default: <exedir>/config.json)")
-		showVer   = flag.Bool("version", false, "print version and exit")
+		runFlag = flag.String("run", "", "run mode: foreground | install | uninstall | start | stop | status")
+		cfgPath = flag.String("config", "", "path to config.json (default: <exedir>/config.json)")
+		showVer = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -43,31 +44,45 @@ func main() {
 	// install / uninstall / start / stop hooks are filled in by service.go (OS-specific).
 	switch *runFlag {
 	case "install":
-		if err := svcInstall(cfg); err != nil { log.Fatalf("install: %v", err) }
+		if err := svcInstall(cfg); err != nil {
+			log.Fatalf("install: %v", err)
+		}
 		fmt.Println("NexusOps Agent installed.")
 		return
 	case "uninstall":
-		if err := svcUninstall(); err != nil { log.Fatalf("uninstall: %v", err) }
+		if err := svcUninstall(); err != nil {
+			log.Fatalf("uninstall: %v", err)
+		}
 		fmt.Println("NexusOps Agent uninstalled.")
 		return
 	case "start":
-		if err := svcStart(); err != nil { log.Fatalf("start: %v", err) }
+		if err := svcStart(); err != nil {
+			log.Fatalf("start: %v", err)
+		}
 		fmt.Println("Started.")
 		return
 	case "stop":
-		if err := svcStop(); err != nil { log.Fatalf("stop: %v", err) }
+		if err := svcStop(); err != nil {
+			log.Fatalf("stop: %v", err)
+		}
 		fmt.Println("Stopped.")
 		return
 	case "status":
 		s, err := svcStatus()
-		if err != nil { log.Fatalf("status: %v", err) }
+		if err != nil {
+			log.Fatalf("status: %v", err)
+		}
 		fmt.Println(s)
 		return
 	case "foreground", "":
 		if *runFlag == "" {
 			handled, err := svcRunIfNeeded(cfg)
-			if err != nil { log.Fatalf("service: %v", err) }
-			if handled { return }
+			if err != nil {
+				log.Fatalf("service: %v", err)
+			}
+			if handled {
+				return
+			}
 		}
 		runAgent(cfg)
 	default:
@@ -115,9 +130,16 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	// Background loops
 	hb := heartbeat.NewLoop(tr, cfg, Version, 60*time.Second)
 	cmd := commands.NewLoop(tr, cfg, 10*time.Second)
+	canaryWatch := canary.NewLoop(tr, time.Duration(cfg.ShieldCanaryInterval())*time.Second)
 
 	go hb.Run(ctx)
 	go cmd.Run(ctx)
+	if cfg.ShieldCanaryEnabled() {
+		go canaryWatch.Run(ctx)
+		log.Printf("[shield] Nexus Canary integrity loop enabled (%ds interval)", cfg.ShieldCanaryInterval())
+	} else {
+		log.Printf("[shield] Nexus Canary is disabled by this deployment profile")
+	}
 
 	<-ctx.Done()
 	time.Sleep(500 * time.Millisecond)

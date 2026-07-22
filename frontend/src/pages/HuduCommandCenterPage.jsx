@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
+import DOMPurify from "dompurify";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -14,7 +15,9 @@ import {
   BookOpen, Users, Package, Globe, ListChecks, KeyRound, Search,
   RefreshCw, Loader2, ExternalLink, Copy, Eye, EyeOff, ChevronRight,
 } from "lucide-react";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 export default function HuduCommandCenterPage() {
   const { token } = useAuth();
@@ -32,6 +35,7 @@ export default function HuduCommandCenterPage() {
   const [companies, setCompanies] = useState([]);
 
   const [articleViewer, setArticleViewer] = useState(null);
+  const [revealRequest, setRevealRequest] = useState(null);
   const [passwordReveal, setPasswordReveal] = useState(null);
   const [revealing, setRevealing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -65,6 +69,12 @@ export default function HuduCommandCenterPage() {
 
   // Load tab data
   const loadTab = useCallback(async () => {
+    if (!summary) return;
+    if (!summary.configured) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setRows([]);
     try {
@@ -89,7 +99,7 @@ export default function HuduCommandCenterPage() {
       if (e.response?.status === 503) toast.error("Hudu not configured — add credentials in Settings");
       else toast.error(e.response?.data?.detail || e.message);
     } finally { setLoading(false); }
-  }, [activeTab, query, companyFilter, token]); // eslint-disable-line
+  }, [activeTab, query, companyFilter, token, summary?.configured]); // eslint-disable-line
 
   useEffect(() => { loadTab(); }, [loadTab]);
 
@@ -99,6 +109,8 @@ export default function HuduCommandCenterPage() {
   };
 
   const revealPassword = async (pw) => {
+    if (!pw) return;
+    setRevealRequest(null);
     setPasswordReveal({ ...pw, password: null });
     setRevealing(true);
     setShowPassword(false);
@@ -112,36 +124,22 @@ export default function HuduCommandCenterPage() {
 
   const notConfigured = summary && !summary.configured;
   const s = summary?.stats || {};
+  const activeTabLabel = activeTab === "passwords" ? "credentials" : activeTab;
 
   return (
     <PageShell data-testid="hudu-command-center">
-      <MetricStrip columns={6}>
-        <MetricTile label="Companies" value={s.companies ?? "—"} accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} testid="hudu-metric-companies" />
-        <MetricTile label="Articles" value={s.articles ?? "—"} accent="emerald" icon={<BookOpen className="w-2.5 h-2.5 text-emerald-400" />} testid="hudu-metric-articles" />
-        <MetricTile label="Assets" value={s.assets ?? "—"} accent="sky" icon={<Package className="w-2.5 h-2.5 text-sky-400" />} testid="hudu-metric-assets" />
-        <MetricTile label="Procedures" value={s.procedures ?? "—"} accent="violet" icon={<ListChecks className="w-2.5 h-2.5 text-violet-400" />} testid="hudu-metric-procedures" />
-        <MetricTile label="Websites" value={s.websites ?? "—"} accent="cyan" icon={<Globe className="w-2.5 h-2.5 text-cyan-400" />} testid="hudu-metric-websites" />
-        <MetricTile label="Passwords" value={s.passwords ?? "—"} accent="amber" icon={<KeyRound className="w-2.5 h-2.5 text-amber-400" />} testid="hudu-metric-passwords" />
-      </MetricStrip>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <BookOpen className="w-6 h-6 text-emerald-400" />Hudu Command Center
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {notConfigured ? (
-                <span className="text-orange-400">Not configured — add URL + API key in Settings</span>
-              ) : summary?.last_synced_at ? (
-                <span>Last synced {new Date(summary.last_synced_at).toLocaleString()}</span>
-              ) : (
-                <span>Ready</span>
-              )}
-            </p>
-          </div>
-          <div className="flex gap-2">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <OperationalPageHeader
+          eyebrow="External documentation"
+          title="Hudu"
+          description={notConfigured
+            ? "Read-only Hudu documentation, assets, websites, and credential references. Connect the Hudu tenant in Settings to begin."
+            : summary?.last_synced_at
+              ? `Read-only Hudu documentation and credential references. Last synchronised ${new Date(summary.last_synced_at).toLocaleString()}.`
+              : "Read-only Hudu documentation, assets, websites, and credential references. Every credential reveal is audited; NexusMSP does not store a copy."}
+          icon={BookOpen}
+          tone="emerald"
+          actions={<>
             {notConfigured && (
               <Button variant="outline" size="sm" asChild data-testid="hudu-configure-btn">
                 <Link to="/settings?tab=integrations"><ExternalLink className="w-3 h-3 mr-1" />Configure Hudu</Link>
@@ -153,7 +151,16 @@ export default function HuduCommandCenterPage() {
             <Button size="sm" variant="outline" onClick={() => { loadSummary(); loadTab(); }} disabled={loading || loadingSummary || notConfigured} data-testid="hudu-refresh-btn">
               {(loading || loadingSummary) ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
             </Button>
-          </div>
+          </>}
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          <HeroTile label="Companies" value={s.companies ?? 0} icon={Users} glow="indigo" subtitle="Hudu customer records" testId="hudu-metric-companies" />
+          <HeroTile label="Articles" value={s.articles ?? 0} icon={BookOpen} glow="emerald" subtitle="Knowledge references" testId="hudu-metric-articles" />
+          <HeroTile label="Assets" value={s.assets ?? 0} icon={Package} glow="sky" subtitle="External asset records" testId="hudu-metric-assets" />
+          <HeroTile label="Procedures" value={s.procedures ?? 0} icon={ListChecks} glow="violet" subtitle="Runbook references" testId="hudu-metric-procedures" />
+          <HeroTile label="Websites" value={s.websites ?? 0} icon={Globe} glow="cyan" subtitle="Documented services" testId="hudu-metric-websites" />
+          <HeroTile label="Credentials" value={s.passwords ?? 0} icon={KeyRound} glow="amber" subtitle="Hudu-held only" testId="hudu-metric-passwords" />
         </div>
 
         {/* Filter bar */}
@@ -163,7 +170,7 @@ export default function HuduCommandCenterPage() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 className="pl-8 h-9"
-                placeholder={`Search ${activeTab}…`}
+                placeholder={`Search ${activeTabLabel}…`}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && loadTab()}
@@ -195,7 +202,7 @@ export default function HuduCommandCenterPage() {
           <TabsList className="w-full md:w-auto" data-testid="hudu-tabs">
             <TabsTrigger value="articles" data-testid="hudu-tab-articles"><BookOpen className="w-3 h-3 mr-1" />Articles</TabsTrigger>
             <TabsTrigger value="procedures" data-testid="hudu-tab-procedures"><ListChecks className="w-3 h-3 mr-1" />Procedures</TabsTrigger>
-            <TabsTrigger value="passwords" data-testid="hudu-tab-passwords"><KeyRound className="w-3 h-3 mr-1" />Passwords</TabsTrigger>
+            <TabsTrigger value="passwords" data-testid="hudu-tab-passwords"><KeyRound className="w-3 h-3 mr-1" />Credentials</TabsTrigger>
             <TabsTrigger value="assets" data-testid="hudu-tab-assets"><Package className="w-3 h-3 mr-1" />Assets</TabsTrigger>
             <TabsTrigger value="websites" data-testid="hudu-tab-websites"><Globe className="w-3 h-3 mr-1" />Websites</TabsTrigger>
             <TabsTrigger value="companies" data-testid="hudu-tab-companies"><Users className="w-3 h-3 mr-1" />Companies</TabsTrigger>
@@ -207,11 +214,11 @@ export default function HuduCommandCenterPage() {
               <CardContent className="p-0">
                 {loading ? (
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading {activeTab}…
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading {activeTabLabel}…
                   </div>
                 ) : rows.length === 0 ? (
                   <div className="text-center py-12 text-xs text-muted-foreground">
-                    {notConfigured ? "Hudu not configured. Add credentials in Settings → Integrations → Hudu." : `No ${activeTab} match your filters.`}
+                    {notConfigured ? "Hudu not configured. Add credentials in Settings → Integrations → Hudu." : `No ${activeTabLabel} match your filters.`}
                   </div>
                 ) : activeTab === "passwords" ? (
                   <Table>
@@ -232,7 +239,7 @@ export default function HuduCommandCenterPage() {
                           <TableCell className="text-xs font-mono text-sky-400 max-w-xs truncate">{p.url || "—"}</TableCell>
                           <TableCell className="text-xs">{p.company_name || "—"}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="ghost" className="h-7" onClick={() => revealPassword(p)} data-testid={`hudu-pw-reveal-${p.id}`}>
+                            <Button size="sm" variant="ghost" className="h-7" onClick={() => setRevealRequest(p)} data-testid={`hudu-pw-reveal-${p.id}`}>
                               <Eye className="w-3 h-3 mr-1" />Reveal
                             </Button>
                           </TableCell>
@@ -335,7 +342,7 @@ export default function HuduCommandCenterPage() {
               <div
                 className="prose prose-invert max-w-none prose-sm text-sm"
                 // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: articleViewer.content || "(no content)" }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(articleViewer.content || "(no content)") }}
               />
               <Button size="sm" variant="outline"
                 onClick={() => { navigator.clipboard.writeText((articleViewer.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")); toast.success("Copied"); }}>
@@ -343,6 +350,25 @@ export default function HuduCommandCenterPage() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Deliberate credential reveal confirmation */}
+      <Dialog open={!!revealRequest} onOpenChange={(open) => { if (!open) setRevealRequest(null); }}>
+        <DialogContent className="max-w-md" data-testid="hudu-password-reveal-confirmation">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-amber-400" />Reveal Hudu credential?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>You are about to reveal <span className="font-semibold">{revealRequest?.name}</span> from Hudu.</p>
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+              This is a read-only Hudu lookup. NexusMSP records who revealed the credential and when; it does not store a copy.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevealRequest(null)}>Cancel</Button>
+            <Button onClick={() => revealPassword(revealRequest)} data-testid="confirm-hudu-password-reveal"><Eye className="mr-2 h-4 w-4" />Reveal and audit</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -194,6 +194,7 @@ class TestBackupDashboard:
         print(f"Backup by Client: {len(clients)} clients")
 
 
+@pytest.mark.skip(reason="NexusMSP MFA management retired in favour of Microsoft and the approved external systems")
 class TestMfaManagement:
     """MFA Management endpoints"""
     

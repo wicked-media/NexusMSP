@@ -28,7 +28,7 @@ A 1.5px gradient bar that signals the day's mood: stormy / beach / rainy_monday 
 Greets you by first name and shows the date plus high-level counts. The **Coffee Break Toggle** lives here (☕ button) — start a focus/lunch/meeting session and your assigned tickets get `sla_paused=true` for the duration.
 
 ### 4. Standup Digest banner
-Auto-rotates morning / midday / end-of-day labels. Click refresh to regenerate via Claude. Auto-emails / SMS at your configured hour.
+Auto-rotates morning / midday / end-of-day labels. Click refresh to regenerate via Nexus AI. Auto-emails / SMS at your configured hour.
 
 ### 5. SLA Radar Tile
 Top tickets at risk of SLA breach. Click any row to jump to the ticket.
@@ -79,7 +79,7 @@ Each client has a 0-100 health score driven by 6 weighted signals:
 **Score < 60** = Watchlist · **< 40** = Critical · **> 80** = Healthy.
 
 ## AI Insights tab buttons
-- **DNA Profile** — communication style + decision factors + risk preference (Claude reads recent tickets/notes).
+- **DNA Profile** — communication style + decision factors + risk preference (Nexus AI reads recent tickets/notes).
 - **LTV Forecast** — projected revenue 1y/3y/5y with confidence band.
 - **Anniversary AI** — drafts a "thanks for X years" email automatically.
 - **Monthly Recap** — emailable summary of the past month.
@@ -128,20 +128,21 @@ If a Change Freeze is active for the client (or MSP-wide) AND the freeze blocks 
     # ═══════════════════════ BACKUP / ACRONIS ═══════════════════════
     {
         "slug": "backup-command-center",
-        "title": "Backup Command Center & Acronis",
+        "title": "Backups & Acronis",
         "category": "Infrastructure",
         "icon": "💾",
         "order": 25,
-        "summary": "Live Acronis Cyber Cloud + backup drills + auto-billing.",
+        "summary": "Acronis backup monitoring, recovery readiness, tenancy and billing in one workspace.",
         "body_md": """## What it is
-`/backup` shows live data from Acronis (Steele Technology partner). 6-tile metric strip: Tenants · Machines · Healthy · Failed · Warning · Alerts.
+`/backup-center` is the single workspace for Acronis backup operations. It brings monitoring, tenant mapping, live tasks, protection policy, billing, compliance and verification together without a separate Acronis page.
 
 ## Tabs
-- **Tenants** — every Acronis customer, link button to map to a NexusOps client.
-- **Backup Status** — 364 machines with applied plans, last/next backup times, health indicator.
-- **Activities** — recent backup tasks.
-- **Alerts** — Acronis alert feed.
-- **Billing** — per-client storage usage + per-workload-type cost preview.
+- **Dashboard** — fleet health, failures, active alerts and current protection posture.
+- **Live** — running and recent Acronis activities with safe cancellation where supported.
+- **Tenants** — every Acronis customer, with client mapping and synchronisation controls.
+- **Backup Status** — protected machines, plans, last/next backup times and health indicator.
+- **Acronis Console** — a controlled deep link to the relevant Acronis context.
+- **Orphans, Compliance, Billing and Verify** — exception management, audit posture, usage billing and recovery evidence.
 
 ## Auto-billing
 When a client is linked + their recurring invoice has **Auto-attach Acronis usage** enabled, every generation pulls live usage and adds line items prefixed `Acronis —`. Same logic for Pax8.
@@ -165,7 +166,7 @@ Settings → Integrations → Acronis Cyber Cloud card. Stores Client ID + Secre
         "order": 30,
         "summary": "SOC-led incident response, agents, identity threats.",
         "body_md": """## SOC Dashboard at `/soc`
-Huntress-first when configured, demo data otherwise. 6-tile strip: Agents · Offline · Critical · Open · Signals · Orgs.
+Uses configured Huntress and Nexus evidence only. When a provider is not connected, the workspace clearly shows that no telemetry is available.
 
 ## Per-incident actions (... menu)
 - **Acknowledge** / **Add comment** / **Assign** / **Close**
@@ -173,13 +174,13 @@ Huntress-first when configured, demo data otherwise. 6-tile strip: Agents · Off
 Each action persists to `db.huntress_actions` (audit). When Huntress rejects (plan-limited), you see a structured `hint` in the toast.
 
 ## Identity Threats page (`/identity-threats`)
-Merges SOC `identity-threats` with filtered Huntress `incident_reports` (impossible_travel / brute_force / mfa_fatigue / token_theft / password_spray / privilege_escalation). Huntress rows wear an orange `HNT` badge.
+Shows filtered, provider-backed Huntress `incident_reports` (impossible_travel / brute_force / mfa_fatigue / token_theft / password_spray / privilege_escalation). No identity incidents are generated when Huntress is not connected.
 
 ## Response Timeline
 Right column on SOC Dashboard. Reads `/api/huntress/actions` — full chronological audit of every IR action with accepted/rejected badges.
 
 ## Endpoint Security page
-Merges live Huntress agents with demo endpoints. Isolate/Release routes to Huntress on Huntress-source rows.
+Uses live Huntress agents and Nexus Agent evidence. Isolate/Release routes to Huntress on Huntress-source rows.
 
 ## Configuration
 Settings → Integrations → Huntress Labs. Two fields: API Key + Secret Key (HTTP Basic auth). Test Connection probes `/v1/account`.
@@ -204,7 +205,7 @@ Rendered Hudu HTML inside a viewer dialog. Copy / open-in-Hudu links.
 Redacted in list. **Reveal** button decrypts on-demand → audit-logged in `db.hudu_password_reveals` with Show/Hide + Copy buttons.
 
 ## AI Suggestions on tickets
-The `<HuduSuggestionsPanel />` mounts under every ticket detail. It auto-runs on open, derives 3-6 keywords from title+description (stopword-filtered), queries Hudu, ranks top picks via Claude + concrete fix steps. Hit count badge shows result quantity.
+The `<HuduSuggestionsPanel />` mounts under every ticket detail. It auto-runs on open, derives 3-6 keywords from title+description (stopword-filtered), queries Hudu, then ranks top picks with Nexus AI concrete fix steps. Hit count badge shows result quantity.
 
 ## Configuration
 Settings → Integrations → Hudu. Base URL + API Key. Test Connection validates against Hudu API v1.
@@ -331,7 +332,7 @@ Body `{tech_ids, channels, auto_escalate, grace_minutes}`. When `auto_escalate=t
 `/warroom/public/{slug}` — zero-auth status page. 15s polling. Internal chat hidden; only system + status messages.
 
 ## Postmortem
-After resolve → "Generate Postmortem" button (sky break-button). Claude drafts summary / timeline / root_cause / impact / what-went-well / what-went-poorly / action_items. Persists to `db.postmortems`.
+After resolve → "Generate Postmortem" button (sky break-button). Nexus AI drafts summary / timeline / root_cause / impact / what-went-well / what-went-poorly / action_items. Persists to `db.postmortems`.
 """,
     },
 
@@ -363,7 +364,7 @@ When `require_completion=true`, `PUT /api/tickets/{id}` with status=resolved/clo
 Bigram clustering across ALL resolved/closed tickets. Each pattern shows ticket count, client count, sample titles, sample IDs. "Generate Blueprint" → AI dialog with editable draft + two switches: **Push to all N clients** + **Set as default**.
 
 ## AI suggest from history
-On a ticket's Suggestions tab → "Suggest from history". Scans the client's resolved tickets, feeds Claude, returns a STRICT-JSON draft blueprint. Save & Apply persists + applies in one shot.
+On a ticket's Suggestions tab → "Suggest from history". Scans the client's resolved tickets, feeds Nexus AI, and returns a strict JSON draft blueprint. Save & Apply persists and applies in one shot.
 """,
     },
 
@@ -376,7 +377,7 @@ On a ticket's Suggestions tab → "Suggest from history". Scans the client's res
         "order": 70,
         "summary": "Quarterly Business Reviews drafted in 60 seconds.",
         "body_md": """## What it is
-`/qbr` aggregates per-client tickets, device health, backup health, alerts, quarter spend, plus cross-client pattern hits. Then Claude drafts 7 sections.
+`/qbr` aggregates per-client tickets, device health, backup health, alerts, quarter spend, plus cross-client pattern hits. Then Nexus AI drafts seven sections.
 
 ## The 7 sections
 1. Executive summary
@@ -392,7 +393,7 @@ On a ticket's Suggestions tab → "Suggest from history". Scans the client's res
 - Download PDF — branded fpdf with cover, KPI strip, all sections, MSP intelligence bullets.
 
 ## Pro tip
-Edit the AI draft inline before saving — Claude is fast but you know your client best.
+Edit the AI draft inline before saving — Nexus AI is fast, but you know your client best.
 """,
     },
 
@@ -405,7 +406,7 @@ Edit the AI draft inline before saving — Claude is fast but you know your clie
         "order": 75,
         "summary": "Invoice templates + AI auditor + DisputeShield + recurring auto-billing.",
         "body_md": """## Invoice detail toolbar
-- **Pre-bill Audit** — Claude flags missing time entries, mispriced items, blocked work.
+- **Pre-bill Audit** — Nexus AI flags missing time entries, mispriced items, and blocked work.
 - **Smart Reminder Strategy** — recommended cadence based on client behaviour.
 - **Send SMS Reminder** — template-driven; tracks `sms_reminders_sent` + `last_sms_reminder_at`.
 - **Invoice Explainer** — plain-English client-safe summary (copy-to-clipboard).
@@ -420,7 +421,7 @@ Switches: Auto-attach Acronis · Auto-attach Pax8. Both pull live usage on every
 ## Estimates
 - **Win Probability** + **Pricing Flags** panel on detail.
 - **Follow-up draft** — AI tailors a subject+body to the most likely objection (price/scope/timing).
-- **Auto-Quote from Conversation** — read ticket + notes + product catalog → Claude draft quote.
+- **Auto-Quote from Conversation** — read ticket + notes + product catalog → Nexus AI draft quote.
 """,
     },
 
@@ -648,7 +649,7 @@ Field visits. Don't fight with the desktop layout on a 6-inch screen.
 A runbook is a published step-by-step fix for a recurring issue. The team can search them; new techs can follow them.
 
 ## Creating one
-On any resolved ticket → **To Runbook** button (Ticket AI bundle). Claude reads the resolution notes + steps + commands and drafts a publishable doc. Edit + Publish.
+On any resolved ticket → **To Runbook** button (Ticket AI bundle). Nexus AI reads the resolution notes, steps, and commands, then drafts a publishable document. Edit + Publish.
 
 ## Searching
 `/insights` → Runbooks tab. Full-text + tag search. Filter by client / category / author.
@@ -835,7 +836,7 @@ This is a great "team room" wallboard if you have a TV — leave Atmosphere on a
         "category": "Easter Eggs",
         "icon": "🎬",
         "order": 204,
-        "summary": "Claude-generated 5-scene week-in-review.",
+        "summary": "Nexus AI generated five-scene week-in-review.",
         "body_md": """## What it does
 Reads the past 7 days of:
 - Closed tickets (count + criticals)
@@ -844,7 +845,7 @@ Reads the past 7 days of:
 - Top 3 critical wins
 - Funniest ticket title (longest title heuristic)
 
-Then asks Claude Sonnet 4.5 to produce 5 short scene captions in a fun, motivational tone.
+Then asks Nexus AI to produce five short scene captions in a fun, motivational tone.
 
 ## Where to find
 `/atmosphere` → Friday Reel tab.

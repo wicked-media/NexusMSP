@@ -13,6 +13,7 @@ from typing import Optional, List
 import uuid, io, zipfile, secrets, base64, hashlib, hmac, struct, time, httpx
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import log_activity
 
 router = APIRouter()
 
@@ -26,12 +27,34 @@ async def list_services(current_user: dict = Depends(get_current_user)):
     items = await db.service_catalog.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     return items
 
+
+@router.get("/pro-pack/service-catalog/usage/summary")
+async def service_catalog_usage_summary(current_user: dict = Depends(get_current_user)):
+    """Report-ready ticket use for each service policy, including retained historic records."""
+    rows = await db.tickets.aggregate([
+        {"$match": {"service_id": {"$exists": True, "$ne": None}}},
+        {"$group": {
+            "_id": "$service_id",
+            "tickets": {"$sum": 1},
+            "open_tickets": {"$sum": {"$cond": [{"$in": ["$status", ["resolved", "closed"]]}, 0, 1]}},
+            "last_used_at": {"$max": "$created_at"},
+            "estimated_billable_value": {"$sum": {"$multiply": [{"$ifNull": ["$estimated_hours", 0]}, {"$ifNull": ["$billable_unit_price", 0]}]}},
+        }},
+    ]).to_list(500)
+    return {"usage": [{"service_id": row["_id"], **{key: value for key, value in row.items() if key != "_id"}} for row in rows]}
+
 @router.post("/pro-pack/service-catalog")
 async def create_service(data: dict, current_user: dict = Depends(get_current_user)):
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").upper().strip()
+    if not name or not code:
+        raise HTTPException(status_code=400, detail="Service name and code are required")
+    if await db.service_catalog.find_one({"code": code}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="A service with this code already exists")
     doc = {
         "id": str(uuid.uuid4()),
-        "name": data.get("name", "").strip(),
-        "code": data.get("code", "").upper().strip(),
+        "name": name,
+        "code": code,
         "category": data.get("category", "managed_services"),
         "description": data.get("description", ""),
         "default_priority": data.get("default_priority", "medium"),
@@ -42,21 +65,40 @@ async def create_service(data: dict, current_user: dict = Depends(get_current_us
         "auto_assign_team": data.get("auto_assign_team", ""),
         "is_active": data.get("is_active", True),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user.get("name", ""),
     }
     await db.service_catalog.insert_one(doc.copy())
+    await log_activity(current_user, "created", "service_policy", doc["id"], name, f"Created service policy {code}", metadata={"code": code, "category": doc["category"], "sla_resolve_hours": doc["sla_resolve_hours"]})
     return doc
 
 @router.put("/pro-pack/service-catalog/{sid}")
 async def update_service(sid: str, data: dict, current_user: dict = Depends(get_current_user)):
+    if "name" in data and not str(data["name"] or "").strip():
+        raise HTTPException(status_code=400, detail="Service name is required")
+    if "code" in data:
+        data["code"] = str(data["code"] or "").upper().strip()
+        if not data["code"]:
+            raise HTTPException(status_code=400, detail="Service code is required")
+        duplicate = await db.service_catalog.find_one({"code": data["code"], "id": {"$ne": sid}}, {"_id": 0, "id": 1})
+        if duplicate:
+            raise HTTPException(status_code=409, detail="A service with this code already exists")
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data.pop("_id", None); data.pop("id", None)
+    previous = await db.service_catalog.find_one({"id": sid}, {"_id": 0})
+    if not previous:
+        raise HTTPException(status_code=404, detail="Service policy not found")
     await db.service_catalog.update_one({"id": sid}, {"$set": data})
+    changes = {key: value for key, value in data.items() if previous.get(key) != value and key not in {"updated_at"}}
+    await log_activity(current_user, "updated", "service_policy", sid, previous.get("name", ""), "Updated service policy", changes=changes, metadata={"code": data.get("code") or previous.get("code")})
     return {"message": "updated"}
 
 @router.delete("/pro-pack/service-catalog/{sid}")
 async def delete_service(sid: str, current_user: dict = Depends(get_current_user)):
-    await db.service_catalog.delete_one({"id": sid})
-    return {"message": "deleted"}
+    result = await db.service_catalog.update_one({"id": sid}, {"$set": {"is_active": False, "archived_at": datetime.now(timezone.utc).isoformat(), "archived_by": current_user.get("name", "")}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Service not found")
+    await log_activity(current_user, "archived", "service_policy", sid, "", "Archived service policy; it remains available on historic tickets")
+    return {"message": "archived"}
 
 
 # ============================================================================
@@ -459,64 +501,163 @@ async def kb_from_ticket(ticket_id: str, current_user: dict = Depends(get_curren
 
 
 # ============================================================================
-# 13. CYBER INSURANCE EXPORT
-# ============================================================================
-
-@router.get("/pro-pack/cyber-insurance-export/{client_id}")
-async def cyber_insurance_export(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    devices = await db.devices.count_documents({"client_id": client_id})
-    mfa_enrolled = await db.devices.count_documents({"client_id": client_id, "mfa_enrolled": True})
-    backups = await db.backup_jobs.count_documents({"client_id": client_id, "status": "success"}) if False else 0
-    edr = await db.devices.count_documents({"client_id": client_id, "edr_installed": True}) if False else 0
-    return {
-        "client_id": client_id, "client_name": client.get("name"),
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "controls": {
-            "endpoints_managed": devices,
-            "mfa_enrolled_pct": round(mfa_enrolled / max(devices, 1) * 100, 1),
-            "edr_coverage_pct": round(edr / max(devices, 1) * 100, 1),
-            "backup_running": backups > 0,
-            "patch_compliance_pct": 87,
-            "phishing_training_in_last_year": True,
-            "incident_response_plan": True,
-        },
-        "format": "JSON — request `/cyber-insurance-export/{client_id}/pdf` for PDF version (TODO)",
-    }
-
-
-# ============================================================================
 # 14. DR PLAN TEMPLATES
 # ============================================================================
 
+DR_SCENARIO_TEMPLATES = [
+    {"name": "Ransomware", "steps": ["Validate and contain", "Preserve evidence", "Verify recovery path", "Document owner and customer communication"]},
+    {"name": "Service outage", "steps": ["Confirm scope", "Invoke approved recovery sequence", "Communicate status", "Validate service restoration"]},
+    {"name": "Data recovery", "steps": ["Assess data scope", "Confirm recovery point", "Restore and validate", "Record recovery evidence"]},
+]
+
+
+def _dr_plan_public(plan: dict) -> dict:
+    return {key: value for key, value in plan.items() if key != "_id"}
+
+
+def _dr_positive_hours(value, label: str) -> float:
+    try:
+        hours = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{label} must be a number of hours")
+    if hours <= 0 or hours > 8760:
+        raise HTTPException(status_code=400, detail=f"{label} must be greater than zero and no more than 8760 hours")
+    return hours
+
+
+async def _dr_plan_with_client(plan: dict) -> dict:
+    result = _dr_plan_public(plan)
+    client = await db.clients.find_one({"id": result.get("client_id")}, {"_id": 0, "name": 1})
+    result["client_name"] = client.get("name") if client else result.get("client_name") or "Client record unavailable"
+    return result
+
+
 @router.get("/pro-pack/dr-plans")
 async def list_dr(current_user: dict = Depends(get_current_user)):
-    items = await db.dr_plans.find({}, {"_id": 0}).to_list(200)
-    return items
+    items = await db.dr_plans.find({}, {"_id": 0}).sort("next_test_due", 1).to_list(200)
+    return [await _dr_plan_with_client(item) for item in items]
 
-@router.post("/pro-pack/dr-plans")
+
+@router.get("/pro-pack/dr-plans/{plan_id}")
+async def get_dr_plan(plan_id: str, current_user: dict = Depends(get_current_user)):
+    plan = await db.dr_plans.find_one({"id": plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Disaster recovery plan not found")
+    return await _dr_plan_with_client(plan)
+
+
+@router.post("/pro-pack/dr-plans", status_code=201)
 async def create_dr(data: dict, current_user: dict = Depends(get_current_user)):
+    client_id = str(data.get("client_id") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not client_id or not name:
+        raise HTTPException(status_code=400, detail="Client and plan name are required")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Choose an existing client for this recovery plan")
+    try:
+        test_interval_days = int(data.get("test_interval_days", 180))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Test interval must be a whole number of days")
+    if test_interval_days < 30 or test_interval_days > 730:
+        raise HTTPException(status_code=400, detail="Test interval must be between 30 and 730 days")
+
+    now = datetime.now(timezone.utc)
+    supplied_scenarios = data.get("scenarios")
+    scenarios = supplied_scenarios if isinstance(supplied_scenarios, list) and supplied_scenarios else [dict(item) for item in DR_SCENARIO_TEMPLATES]
     doc = {
         "id": str(uuid.uuid4()),
-        "client_id": data.get("client_id"),
-        "name": data.get("name", "DR Plan"),
-        "rto_hours": float(data.get("rto_hours", 4)),
-        "rpo_hours": float(data.get("rpo_hours", 1)),
-        "primary_contact": data.get("primary_contact", ""),
-        "after_hours_contact": data.get("after_hours_contact", ""),
-        "scenarios": data.get("scenarios", [
-            {"name": "Ransomware", "steps": ["Isolate", "Notify cyber-insurance", "Restore from immutable backup", "Forensics"]},
-            {"name": "Outage", "steps": ["Verify scope", "Failover to DR site", "Notify clients", "Restore primary"]},
-            {"name": "Data Loss", "steps": ["Assess scope", "Restore from latest backup", "Validate", "Notify"]},
-        ]),
+        "client_id": client_id,
+        "client_name": client.get("name"),
+        "name": name[:160],
+        "rto_hours": _dr_positive_hours(data.get("rto_hours", 4), "RTO"),
+        "rpo_hours": _dr_positive_hours(data.get("rpo_hours", 1), "RPO"),
+        "primary_contact": str(data.get("primary_contact") or "").strip()[:240],
+        "after_hours_contact": str(data.get("after_hours_contact") or "").strip()[:240],
+        "scenarios": scenarios,
+        "test_interval_days": test_interval_days,
         "last_tested": None,
-        "next_test_due": (datetime.now(timezone.utc) + timedelta(days=180)).date().isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "next_test_due": (now + timedelta(days=test_interval_days)).date().isoformat(),
+        "test_count": 0,
+        "created_at": now.isoformat(),
+        "created_by": current_user.get("name") or current_user.get("email") or "Unknown technician",
+        "updated_at": now.isoformat(),
     }
     await db.dr_plans.insert_one(doc.copy())
+    await log_activity(current_user, "disaster_recovery_plan_created", "disaster_recovery_plan", doc["id"], doc["name"], "Created a client-linked disaster recovery plan", metadata={"client_id": client_id, "rto_hours": doc["rto_hours"], "rpo_hours": doc["rpo_hours"]})
     return doc
+
+
+@router.put("/pro-pack/dr-plans/{plan_id}")
+async def update_dr(plan_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    plan = await db.dr_plans.find_one({"id": plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Disaster recovery plan not found")
+    updates = {}
+    if "name" in data:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Plan name is required")
+        updates["name"] = name[:160]
+    if "rto_hours" in data:
+        updates["rto_hours"] = _dr_positive_hours(data.get("rto_hours"), "RTO")
+    if "rpo_hours" in data:
+        updates["rpo_hours"] = _dr_positive_hours(data.get("rpo_hours"), "RPO")
+    for field in ("primary_contact", "after_hours_contact"):
+        if field in data:
+            updates[field] = str(data.get(field) or "").strip()[:240]
+    if "test_interval_days" in data:
+        try:
+            interval = int(data.get("test_interval_days"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Test interval must be a whole number of days")
+        if interval < 30 or interval > 730:
+            raise HTTPException(status_code=400, detail="Test interval must be between 30 and 730 days")
+        updates["test_interval_days"] = interval
+    if "scenarios" in data:
+        if not isinstance(data.get("scenarios"), list) or not data.get("scenarios"):
+            raise HTTPException(status_code=400, detail="At least one recovery scenario is required")
+        updates["scenarios"] = data["scenarios"]
+    if not updates:
+        raise HTTPException(status_code=400, detail="No recovery plan fields were supplied")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.dr_plans.update_one({"id": plan_id}, {"$set": updates})
+    await log_activity(current_user, "disaster_recovery_plan_updated", "disaster_recovery_plan", plan_id, updates.get("name") or plan.get("name", ""), "Updated a client-linked disaster recovery plan", changes={key: value for key, value in updates.items() if key != "updated_at"})
+    plan.update(updates)
+    return await _dr_plan_with_client(plan)
+
+
+@router.post("/pro-pack/dr-plans/{plan_id}/tests", status_code=201)
+async def record_dr_test(plan_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    plan = await db.dr_plans.find_one({"id": plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Disaster recovery plan not found")
+    test_type = str(data.get("test_type") or "").strip()
+    outcome = str(data.get("outcome") or "").strip().lower()
+    notes = str(data.get("notes") or "").strip()
+    if test_type not in {"tabletop", "restore", "failover", "documentation_review"}:
+        raise HTTPException(status_code=400, detail="Test type must be tabletop, restore, failover, or documentation_review")
+    if outcome not in {"passed", "needs_follow_up", "failed"}:
+        raise HTTPException(status_code=400, detail="Test outcome must be passed, needs_follow_up, or failed")
+    if not notes:
+        raise HTTPException(status_code=400, detail="Record test observations or evidence before saving the outcome")
+    now = datetime.now(timezone.utc)
+    test = {
+        "id": f"dr-test-{uuid.uuid4().hex[:10]}",
+        "plan_id": plan_id,
+        "client_id": plan.get("client_id"),
+        "test_type": test_type,
+        "outcome": outcome,
+        "notes": notes[:4000],
+        "tested_at": now.isoformat(),
+        "tested_by": current_user.get("name") or current_user.get("email") or "Unknown technician",
+    }
+    interval = int(plan.get("test_interval_days") or 180)
+    next_test_due = (now + timedelta(days=interval)).date().isoformat()
+    await db.dr_plan_tests.insert_one(test)
+    await db.dr_plans.update_one({"id": plan_id}, {"$set": {"last_tested": now.isoformat(), "next_test_due": next_test_due, "updated_at": now.isoformat()}, "$inc": {"test_count": 1}})
+    await log_activity(current_user, "disaster_recovery_test_recorded", "disaster_recovery_plan", plan_id, plan.get("name", ""), f"Recorded a {test_type} DR test with outcome {outcome}", metadata={"test_id": test["id"], "outcome": outcome, "client_id": plan.get("client_id")})
+    return {**test, "next_test_due": next_test_due}
 
 
 # ============================================================================
@@ -525,9 +666,16 @@ async def create_dr(data: dict, current_user: dict = Depends(get_current_user)):
 
 @router.get("/pro-pack/saas-spend")
 async def saas_spend(current_user: dict = Depends(get_current_user)):
-    """Aggregates Pax8 + license-mgmt + recurring invoice subscriptions per client."""
-    pax8 = await db.pax8_subscriptions.find({}, {"_id": 0}).to_list(2000) if False else []
-    licenses = await db.license_management.find({}, {"_id": 0}).to_list(2000)
+    """Aggregate confirmed licence-register spend by client.
+
+    Provider synchronisation can add source-tagged records in future.  Until
+    then, only technician-confirmed manual entries are included; empty does not
+    mean a client has no subscriptions.
+    """
+    licenses = await db.licenses.find(
+        {"source": {"$in": ["manual", "pax8", "cipp", "m365_graph", "billing_sync"]}},
+        {"_id": 0},
+    ).to_list(2000)
     by_client = {}
     for L in licenses:
         cid = L.get("client_id", "unknown")

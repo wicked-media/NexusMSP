@@ -77,14 +77,6 @@ class TestSeedDataVerification:
         data = response.json()
         print(f"✓ Skills matrix entries: {len(data)}")
     
-    def test_it_roadmap_seeded(self, api_client):
-        """Verify IT roadmap items exist"""
-        response = api_client.get(f"{BASE_URL}/api/it-roadmap")
-        assert response.status_code == 200
-        data = response.json()
-        print(f"✓ IT Roadmap entries: {len(data)}")
-
-
 # ==== PHASE 12 FEATURE 1: SLA PENALTIES ====
 class TestSlaPenalties:
     """SLA Penalty Dashboard & Calculator"""

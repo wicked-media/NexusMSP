@@ -269,8 +269,8 @@ async def top_risks(current_user: dict = Depends(get_current_user)):
             "id": "risk-patches", "icon": "🩹", "severity": "medium",
             "title": f"{len(patches)} pending security patches",
             "subtitle": "Patches available but not yet approved/deployed.",
-            "action_label": "Open Patch Hub",
-            "action_url": "/patch-hub",
+            "action_label": "Open Maintenance",
+            "action_url": "/maintenance-scheduler",
             "device_ids": [],
         })
 

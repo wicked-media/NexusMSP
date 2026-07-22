@@ -12,7 +12,7 @@ router = APIRouter()
 @router.get("/reports/financial/revenue-summary")
 async def revenue_summary(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Monthly revenue summary with MRR, ARR, collections, outstanding"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     monthly = {}
 
@@ -47,25 +47,37 @@ async def revenue_summary(months: int = 12, current_user: dict = Depends(get_cur
     }
 
 
-@router.get("/reports/financial/aging")
-async def accounts_receivable_aging(current_user: dict = Depends(get_current_user)):
-    """Accounts receivable aging report (0-30, 31-60, 61-90, 90+)"""
-    invoices = await db.invoices.find({"payment_status": {"$ne": "paid"}}, {"_id": 0}).to_list(1000)
+AGING_BUCKETS = (
+    ("current", "Current", 0),
+    ("30_days", "1–30 days overdue", 30),
+    ("60_days", "31–60 days overdue", 60),
+    ("90_days", "61–90 days overdue", 90),
+    ("over_90", "Over 90 days overdue", None),
+)
+
+
+async def build_accounts_receivable_aging() -> dict:
+    """Build the single, reusable accounts-receivable ageing evidence snapshot."""
+    invoices = await db.invoices.find({
+        "payment_status": {"$in": ["unpaid", "partial"]},
+        "status": {"$ne": "cancelled"},
+        "is_split_parent": {"$ne": True},
+    }, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
 
-    buckets = {"current": [], "30_days": [], "60_days": [], "90_days": [], "over_90": []}
-    totals = {"current": 0, "30_days": 0, "60_days": 0, "90_days": 0, "over_90": 0}
+    buckets = {key: [] for key, _, _ in AGING_BUCKETS}
+    totals = {key: 0.0 for key, _, _ in AGING_BUCKETS}
 
     for inv in invoices:
         balance = float(inv.get("total", 0)) - float(inv.get("amount_paid", 0))
         if balance <= 0:
             continue
-        due = inv.get("due_date", "")
+        due = str(inv.get("due_date") or "")
         try:
-            due_dt = datetime.fromisoformat(due) if due else now
+            due_dt = datetime.fromisoformat(due.replace("Z", "+00:00")) if due else now
             if due_dt.tzinfo is None:
                 due_dt = due_dt.replace(tzinfo=timezone.utc)
-        except:
+        except (TypeError, ValueError):
             due_dt = now
         days_overdue = (now - due_dt).days
 
@@ -80,32 +92,34 @@ async def accounts_receivable_aging(current_user: dict = Depends(get_current_use
             "days_overdue": max(0, days_overdue),
         }
 
-        if days_overdue <= 0:
-            buckets["current"].append(item)
-            totals["current"] += balance
-        elif days_overdue <= 30:
-            buckets["30_days"].append(item)
-            totals["30_days"] += balance
-        elif days_overdue <= 60:
-            buckets["60_days"].append(item)
-            totals["60_days"] += balance
-        elif days_overdue <= 90:
-            buckets["90_days"].append(item)
-            totals["90_days"] += balance
-        else:
-            buckets["over_90"].append(item)
-            totals["over_90"] += balance
+        bucket = "current" if days_overdue <= 0 else "30_days" if days_overdue <= 30 else "60_days" if days_overdue <= 60 else "90_days" if days_overdue <= 90 else "over_90"
+        buckets[bucket].append(item)
+        totals[bucket] += balance
+
+    for items in buckets.values():
+        items.sort(key=lambda item: (-item["days_overdue"], -item["balance"], item["invoice_number"]))
 
     return {
-        "buckets": {k: {"items": v, "total": round(totals[k], 2), "count": len(v)} for k, v in buckets.items()},
+        "as_of": now.date().isoformat(),
+        "buckets": {
+            key: {"label": label, "items": buckets[key], "total": round(totals[key], 2), "count": len(buckets[key])}
+            for key, label, _ in AGING_BUCKETS
+        },
         "grand_total": round(sum(totals.values()), 2),
+        "total_invoices": sum(len(items) for items in buckets.values()),
     }
+
+
+@router.get("/reports/financial/aging")
+async def accounts_receivable_aging(current_user: dict = Depends(get_current_user)):
+    """Accounts receivable ageing report retained in the Reports workspace."""
+    return await build_accounts_receivable_aging()
 
 
 @router.get("/reports/financial/profit-loss")
 async def profit_loss_report(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Profit & Loss statement"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     monthly = {}
 
@@ -137,7 +151,7 @@ async def profit_loss_report(months: int = 12, current_user: dict = Depends(get_
 @router.get("/reports/financial/client-revenue")
 async def client_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue breakdown per client"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     client_data = {}
 
     for inv in invoices:
@@ -162,7 +176,7 @@ async def client_revenue_report(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/financial/service-revenue")
 async def service_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue breakdown by service type / line item"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     services = {}
 
     for inv in invoices:
@@ -187,7 +201,7 @@ async def service_revenue_report(current_user: dict = Depends(get_current_user))
 @router.get("/reports/financial/payment-collection")
 async def payment_collection_report(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Payment collection trends and methods"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
 
     methods = {}
@@ -221,7 +235,7 @@ async def payment_collection_report(months: int = 12, current_user: dict = Depen
 @router.get("/reports/financial/tax-summary")
 async def tax_summary_report(current_user: dict = Depends(get_current_user)):
     """Tax summary for accounting"""
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     quarterly = {}
 
@@ -254,7 +268,7 @@ async def tax_summary_report(current_user: dict = Depends(get_current_user)):
 async def monthly_allocations_report(current_user: dict = Depends(get_current_user)):
     """Monthly cost/revenue allocations for accounts team"""
     contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     current_month = now.strftime("%Y-%m")
 

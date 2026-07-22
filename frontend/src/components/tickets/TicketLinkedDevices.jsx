@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, X, Monitor, Star, ExternalLink } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, X, Monitor, Star, ExternalLink, Radio, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "@/App";
 
@@ -19,6 +20,8 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
   const navigate = useNavigate();
   const [picker, setPicker] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remoteBusyId, setRemoteBusyId] = useState(null);
+  const [remoteSession, setRemoteSession] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
 
   // Normalize: device_ids array; ensure primary device_id is included
@@ -58,6 +61,32 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
     finally { setBusy(false); }
   };
 
+  const launchNative = (connectionUrl) => {
+    if (!connectionUrl) return;
+    const anchor = document.createElement("a");
+    anchor.href = connectionUrl;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => document.body.removeChild(anchor), 100);
+  };
+
+  const handleRemote = async (device, event) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (remoteBusyId) return;
+    setRemoteBusyId(device.id);
+    try {
+      const { data } = await axios.post(`${API}/tickets/${ticket.id}/devices/${device.id}/remote-connect`, {}, { headers });
+      setRemoteSession(data);
+      toast.success(`Remote session prepared for ${data.device_name}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Remote connection could not be prepared");
+    } finally {
+      setRemoteBusyId(null);
+    }
+  };
+
   const handleRemove = async (deviceId) => {
     if (busy) return;
     setBusy(true);
@@ -93,38 +122,44 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
   return (
     <div className="space-y-2" data-testid="ticket-linked-devices">
       <div className="flex items-center justify-between">
-        <Label className="text-xs text-muted-foreground">Linked Devices</Label>
+        <Label className="text-xs text-muted-foreground">Linked assets</Label>
         <span className="text-[10px] text-muted-foreground">{linkedDevices.length} linked</span>
       </div>
 
       {linkedDevices.length === 0 && (
-        <p className="text-[11px] text-muted-foreground italic">No devices linked. Add one below.</p>
+        <p className="text-[11px] text-muted-foreground italic">No assets linked. Add one below to work from this ticket.</p>
       )}
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="space-y-2">
         {linkedDevices.map(d => {
           const isPrimary = ticket.device_id === d.id;
           return (
             <div
               key={d.id}
-              className={`group inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md border text-[11px] transition-all ${
+              className={`group flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[11px] transition-all ${
                 isPrimary
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                  : "border-border bg-muted/30 hover:bg-muted/50"
+                  ? "border-cyan-400/30 bg-cyan-400/[0.07] text-zinc-100"
+                  : "border-white/[0.08] bg-black/10 hover:border-cyan-400/20 hover:bg-cyan-400/[0.035]"
               }`}
               data-testid={`linked-device-chip-${d.id}`}
             >
-              <Monitor className="w-3 h-3 opacity-70" />
+              <span className={`h-2 w-2 shrink-0 rounded-full ${d.status === "online" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-zinc-600"}`} />
+              <Monitor className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
               <button
-                className="font-medium hover:underline truncate max-w-[140px]"
+                type="button"
+                className="min-w-0 flex-1 truncate text-left font-medium hover:text-cyan-200 hover:underline"
                 onClick={() => navigate(`/devices/${d.id}`)}
                 title={d._missing ? "Device not found" : `Open ${d.name}`}
               >
                 {d.name}
               </button>
-              {isPrimary && <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />}
+              {isPrimary && <span className="rounded border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cyan-200">Primary</span>}
+              <Button type="button" size="sm" variant="outline" className="h-7 border-cyan-400/25 bg-cyan-400/[0.04] px-2 text-[10px] text-cyan-100 hover:bg-cyan-400/15" onClick={(event) => handleRemote(d, event)} disabled={!!remoteBusyId || d._missing} data-testid={`linked-device-remote-${d.id}`}>
+                {remoteBusyId === d.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Radio className="mr-1 h-3 w-3" />}Remote
+              </Button>
               {!isPrimary && (
                 <button
+                  type="button"
                   className="opacity-0 group-hover:opacity-100 transition-opacity text-amber-400 hover:bg-amber-500/20 rounded p-0.5"
                   onClick={() => handlePromote(d.id)}
                   title="Make primary device"
@@ -134,6 +169,7 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
                 </button>
               )}
               <button
+                type="button"
                 className="opacity-60 hover:opacity-100 hover:bg-red-500/20 hover:text-red-400 rounded p-0.5 transition-all"
                 onClick={() => handleRemove(d.id)}
                 title="Unlink"
@@ -156,19 +192,20 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
               <SelectItem value="__none">Choose device...</SelectItem>
               {candidates.map(d => (
                 <SelectItem key={d.id} value={d.id}>
-                  {d.name} {d.os && <span className="text-muted-foreground">· {d.os}</span>}
+                  {d.name} {d.os && <span className="text-muted-foreground"> - {d.os}</span>}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Button
+            type="button"
             size="sm" variant="outline"
-            className="h-7 px-2"
+            className="h-7 border-cyan-400/25 bg-cyan-400/[0.04] px-2.5 text-[10px] text-cyan-100 hover:bg-cyan-400/15"
             onClick={handleAdd}
             disabled={!picker || busy}
             data-testid="link-device-add-btn"
           >
-            <Plus className="w-3 h-3" />
+            <Plus className="mr-1 h-3 w-3" />Link
           </Button>
         </div>
       )}
@@ -184,6 +221,23 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
           Open primary device
         </Button>
       )}
+
+      <Dialog open={!!remoteSession} onOpenChange={(open) => !open && setRemoteSession(null)}>
+        <DialogContent className="max-w-md border-cyan-400/25 bg-[linear-gradient(145deg,rgba(10,24,32,0.98),rgba(11,14,20,0.98))]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-cyan-100"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-400/10"><Radio className="h-4 w-4 text-cyan-300" /></span>Remote session ready</DialogTitle>
+            <DialogDescription>Open the supported RustDesk session without leaving this ticket. This action is recorded in the ticket audit history.</DialogDescription>
+          </DialogHeader>
+          {remoteSession && <div className="space-y-3">
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 p-3 text-xs"><p className="font-medium text-zinc-100">{remoteSession.device_name}</p><p className="mt-1 font-mono text-[11px] text-cyan-200">RustDesk ID: {remoteSession.rustdesk_id}</p></div>
+            <Button type="button" className="h-10 w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => launchNative(remoteSession.connection_url)} data-testid="ticket-remote-launch-native"><Radio className="mr-2 h-4 w-4" />Open in RustDesk</Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant="outline" className="h-9 text-xs" onClick={() => navigator.clipboard.writeText(remoteSession.rustdesk_id).then(() => toast.success("RustDesk ID copied"))}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy ID</Button>
+              <Button type="button" variant="outline" className="h-9 text-xs" disabled={!remoteSession.web_client_url} onClick={() => window.open(remoteSession.web_client_url, "_blank", "noopener")}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Web console</Button>
+            </div>
+          </div>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

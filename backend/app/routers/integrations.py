@@ -40,6 +40,8 @@ async def test_domotz_connection(current_user: dict = Depends(get_current_user))
     try:
         agents = await domotz_service.get_agents()
         return {"success": True, "message": f"Connected! Found {len(agents) if isinstance(agents, list) else 0} agents"}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -216,22 +218,29 @@ async def send_email(email_id: str, current_user: dict = Depends(get_current_use
         email["body_type"] = body_type
         await db.emails.update_one({"id": email_id}, {"$set": {"body": body, "body_type": body_type}})
 
-        # Try to send via Office 365 if configured
-        status = await get_office365_status(current_user)
-        if status['configured']:
-            await office365_service.send_email(
-                from_address=email['from_address'],
-                to_addresses=email['to_addresses'],
-                subject=email['subject'],
-                body=email['body'],
-                body_type=email['body_type']
-            )
-        
-        await db.emails.update_one(
-            {"id": email_id},
-            {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
+        # All manual correspondence uses the same Microsoft 365 delivery
+        # gateway as tickets and invoices. Never mark a draft as sent until
+        # Graph has accepted it and the client correspondence audit is stored.
+        from app.routers.email_utils import send_email as send_microsoft365_email
+        delivery = await send_microsoft365_email(
+            email["to_addresses"], email["subject"],
+            email["body"] if email["body_type"] == "html" else f"<pre>{email['body']}</pre>",
+            category="ticket_replies" if email.get("ticket_id") else "notifications",
+            cc_addresses=email.get("cc_addresses") or [],
+            client_id=email.get("client_id"),
+            related_type="ticket" if email.get("ticket_id") else "client_email",
+            related_id=email.get("ticket_id") or email_id,
+            initiated_by=current_user.get("id"),
+            initiated_by_name=current_user.get("name"),
         )
-        return {"message": "Email sent successfully"}
+        delivery_status = delivery.get("status", "failed")
+        update = {"status": "sent" if delivery_status == "sent" else "failed", "delivery_status": delivery_status, "delivery_message": delivery.get("message", ""), "delivery_id": delivery.get("delivery_id")}
+        if delivery_status == "sent":
+            update["sent_at"] = datetime.now(timezone.utc).isoformat()
+        await db.emails.update_one({"id": email_id}, {"$set": update})
+        if delivery_status != "sent":
+            raise HTTPException(status_code=502, detail=delivery.get("message") or "Microsoft 365 could not send this email")
+        return {"message": "Email sent through Microsoft 365", "delivery_id": delivery.get("delivery_id")}
     except Exception as e:
         await db.emails.update_one({"id": email_id}, {"$set": {"status": "failed"}})
         raise HTTPException(status_code=500, detail=str(e))

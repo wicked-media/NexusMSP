@@ -10,6 +10,63 @@ from app.models import *
 
 router = APIRouter()
 
+
+async def _resolve_invoice_ticket_link(ticket_id: Optional[str], client_id: Optional[str]) -> dict:
+    """Validate a single invoice-to-ticket relationship and persist stable labels."""
+    clean_ticket_id = str(ticket_id or "").strip()
+    if not clean_ticket_id:
+        return {"ticket_id": "", "ticket_number": "", "ticket_title": ""}
+
+    ticket = await db.tickets.find_one({"id": clean_ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=422, detail="The selected ticket could not be found")
+    if client_id and ticket.get("client_id") and ticket.get("client_id") != client_id:
+        raise HTTPException(status_code=422, detail="The linked ticket must belong to the invoice client")
+    return {
+        "ticket_id": clean_ticket_id,
+        "ticket_number": ticket.get("ticket_number", ""),
+        "ticket_title": ticket.get("title", ""),
+    }
+
+
+async def _sync_split_billing_parent_payment(child_invoice: dict, amount_paid: float, payment_status: str, current_user: dict) -> None:
+    """Keep a split parent as a live audit ledger without making it billable."""
+    parent_id = child_invoice.get("split_billing_parent_id")
+    allocation_id = child_invoice.get("split_billing_allocation_id")
+    if not parent_id or not allocation_id:
+        return
+
+    parent = await db.invoices.find_one({"id": parent_id}, {"_id": 0, "id": 1, "invoice_number": 1, "split_billing": 1})
+    if not parent:
+        return
+    split_billing = dict(parent.get("split_billing") or {})
+    allocations = list(split_billing.get("allocations") or [])
+    updated = False
+    for allocation in allocations:
+        if allocation.get("id") == allocation_id:
+            allocation["amount_paid"] = round(float(amount_paid or 0), 2)
+            allocation["payment_status"] = payment_status
+            allocation["updated_at"] = datetime.now(timezone.utc).isoformat()
+            updated = True
+            break
+    if not updated:
+        return
+
+    split_billing["allocations"] = allocations
+    split_billing["amount_paid"] = round(sum(float(item.get("amount_paid", 0) or 0) for item in allocations), 2)
+    split_billing["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.invoices.update_one({"id": parent_id}, {"$set": {"split_billing": split_billing}})
+    await log_activity(
+        current_user,
+        "split_payment_updated",
+        "invoice",
+        parent_id,
+        parent.get("invoice_number", ""),
+        f"Updated a split-billing allocation after payment on {child_invoice.get('invoice_number', 'payer invoice')}.",
+        metadata={"payer_invoice_id": child_invoice.get("id"), "payer_invoice_number": child_invoice.get("invoice_number"), "amount_paid": round(float(amount_paid or 0), 2), "payment_status": payment_status},
+    )
+
+
 # ============== INVOICES ENDPOINTS ==============
 
 @router.get("/invoices", response_model=List[Invoice])
@@ -32,7 +89,7 @@ async def get_invoices(
 
 @router.get("/invoices/stats/summary")
 async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
-    all_inv = await db.invoices.find({}, {"_id": 0}).to_list(10000)
+    all_inv = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(10000)
     total = len(all_inv)
     paid = len([i for i in all_inv if i.get("payment_status") == "paid"])
     unpaid = len([i for i in all_inv if i.get("payment_status") in ("unpaid", None)])
@@ -85,11 +142,14 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
         raise HTTPException(status_code=422, detail="Due date must be YYYY-MM-DD")
     if not invoice_data.line_items:
         raise HTTPException(status_code=422, detail="At least one invoice line is required")
+    if invoice_data.invoice_name and len(invoice_data.invoice_name.strip()) > 160:
+        raise HTTPException(status_code=422, detail="Invoice name must be 160 characters or fewer")
     if not 0 <= float(invoice_data.tax_rate or 0) <= 100:
         raise HTTPException(status_code=422, detail="Tax rate must be between 0 and 100")
     if not 0 <= float(invoice_data.discount_pct or 0) <= 100:
         raise HTTPException(status_code=422, detail="Discount percentage must be between 0 and 100")
     client_name = client['name'] if client else None
+    ticket_link = await _resolve_invoice_ticket_link(invoice_data.ticket_id, invoice_data.client_id)
 
     # ---- Calculate totals supporting per-line tax + per-line discount + invoice-level discount ----
     payload = invoice_data.model_dump()
@@ -180,6 +240,8 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
         client_id=invoice_data.client_id,
         client_name=client_name,
         contract_id=invoice_data.contract_id,
+        **ticket_link,
+        invoice_name=(invoice_data.invoice_name or "").strip() or None,
         due_date=invoice_data.due_date,
         notes=invoice_data.notes,
         line_items=enriched_lines,
@@ -206,7 +268,22 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
     doc["needs_approval"] = needs_approval
     await db.invoices.insert_one(doc)
     doc.pop("_id", None)
-    await log_activity(current_user, "created", "invoice", invoice.id, invoice.invoice_number, f"Created invoice {invoice.invoice_number} for {client_name}", metadata={"client_name": client_name, "total": total})
+    await log_activity(
+        current_user,
+        "created",
+        "invoice",
+        invoice.id,
+        invoice.invoice_number,
+        f"Created invoice {invoice.invoice_number} for {client_name}",
+        metadata={"client_name": client_name, "total": total, "ticket_id": ticket_link["ticket_id"], "ticket_number": ticket_link["ticket_number"]},
+    )
+    if ticket_link["ticket_id"]:
+        await ticket_audit(
+            ticket_link["ticket_id"],
+            current_user,
+            "invoice_linked",
+            f"Invoice {invoice.invoice_number} was created and linked to this ticket.",
+        )
     return invoice
 
 @router.put("/invoices/{invoice_id}")
@@ -214,8 +291,26 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
     old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not old_inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    allowed = {"client_id", "client_name", "contract_id", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date"}
+    allowed = {"client_id", "client_name", "contract_id", "ticket_id", "invoice_name", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date", "status"}
     update = {key: value for key, value in invoice_data.items() if key in allowed}
+    if "invoice_name" in update:
+        update["invoice_name"] = str(update["invoice_name"] or "").strip()
+        if len(update["invoice_name"]) > 160:
+            raise HTTPException(status_code=422, detail="Invoice name must be 160 characters or fewer")
+    if "status" in update:
+        requested_status = str(update["status"] or "").strip().lower()
+        if requested_status not in {"draft", "pending_approval", "sent"}:
+            raise HTTPException(status_code=422, detail="Use the payment, credit note, or void workflow for that invoice status")
+        if old_inv.get("payment_status") == "paid" and requested_status != old_inv.get("status"):
+            raise HTTPException(status_code=409, detail="Paid invoices cannot have their delivery status changed")
+        update["status"] = requested_status
+        if requested_status == "sent" and old_inv.get("status") != "sent":
+            update["sent_at"] = datetime.now(timezone.utc).isoformat()
+    old_ticket_id = old_inv.get("ticket_id", "")
+    should_refresh_ticket_link = "ticket_id" in update or ("client_id" in update and old_ticket_id)
+    if should_refresh_ticket_link:
+        ticket_link = await _resolve_invoice_ticket_link(update.get("ticket_id", old_ticket_id), update.get("client_id", old_inv.get("client_id")))
+        update.update(ticket_link)
     financial_fields = {"line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total"}
     if old_inv.get("payment_status") == "paid" and financial_fields.intersection(update):
         raise HTTPException(status_code=409, detail="Paid invoices cannot be financially edited; issue a credit note instead")
@@ -287,7 +382,177 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
                 change_dict[k] = {"old": str(old_inv.get(k)), "new": str(v)}
         if change_dict:
             await log_activity(current_user, "updated", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Updated invoice fields: {', '.join(change_dict.keys())}", changes=change_dict)
+        if should_refresh_ticket_link and old_ticket_id != update.get("ticket_id", ""):
+            if old_ticket_id:
+                await ticket_audit(old_ticket_id, current_user, "invoice_unlinked", f"Invoice {old_inv.get('invoice_number', invoice_id)} was unlinked from this ticket.")
+            if update.get("ticket_id"):
+                await ticket_audit(update["ticket_id"], current_user, "invoice_linked", f"Invoice {old_inv.get('invoice_number', invoice_id)} was linked to this ticket.")
     return {"message": "Invoice updated"}
+
+
+@router.post("/invoices/{invoice_id}/split-billing")
+async def create_split_billing_invoices(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Replace one unpaid draft with auditable payer-specific invoices.
+
+    Each payer allocation is a gross (tax-inclusive) amount. The source remains
+    available as a locked audit record, while generated payer invoices are the
+    only documents included in receivables and revenue reporting.
+    """
+    source = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not source:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if source.get("is_split_parent") or source.get("is_split_child"):
+        raise HTTPException(status_code=409, detail="This invoice is already part of a split-billing workflow")
+    if source.get("status") not in {"draft", "pending_approval"}:
+        raise HTTPException(status_code=409, detail="Split billing is available only before the source invoice is sent. Clone or credit a sent invoice first.")
+    if source.get("payment_status") not in {"unpaid", None} or float(source.get("amount_paid", 0) or 0) > 0:
+        raise HTTPException(status_code=409, detail="Split billing cannot be applied after a payment has been recorded")
+
+    raw_allocations = data.get("allocations") or []
+    if not isinstance(raw_allocations, list) or len(raw_allocations) < 2:
+        raise HTTPException(status_code=422, detail="Add at least two customer allocations")
+
+    source_total = round(float(source.get("total", 0) or 0), 2)
+    if source_total <= 0:
+        raise HTTPException(status_code=422, detail="A positive invoice total is required before splitting billing")
+
+    normalized = []
+    payer_ids = set()
+    for index, allocation in enumerate(raw_allocations, start=1):
+        payer_client_id = str((allocation or {}).get("payer_client_id") or "").strip()
+        try:
+            amount = round(float((allocation or {}).get("amount", 0) or 0), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Allocation {index} needs a valid amount")
+        if not payer_client_id or amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Allocation {index} needs a customer and a positive amount")
+        client = await db.clients.find_one({"id": payer_client_id}, {"_id": 0, "id": 1, "name": 1, "email": 1})
+        if not client:
+            raise HTTPException(status_code=422, detail=f"The customer selected for allocation {index} could not be found")
+        payer_ids.add(payer_client_id)
+        normalized.append({
+            "id": str(uuid.uuid4()),
+            "payer_client_id": payer_client_id,
+            "payer_client_name": client.get("name") or "Unnamed customer",
+            "payer_email": client.get("email") or "",
+            "amount": amount,
+            "description": str((allocation or {}).get("description") or "").strip()[:240],
+        })
+
+    if len(payer_ids) < 2:
+        raise HTTPException(status_code=422, detail="Split billing needs at least two different customer payers")
+    allocated_total = round(sum(item["amount"] for item in normalized), 2)
+    if abs(allocated_total - source_total) > 0.005:
+        raise HTTPException(status_code=422, detail=f"Allocations must equal the source total of ${source_total:.2f}; currently ${allocated_total:.2f}")
+
+    # Gross allocations are converted back to a proportional tax profile so
+    # every payer receives a normal, standalone invoice and a usable PDF.
+    source_subtotal = float(source.get("subtotal", 0) or 0)
+    source_tax = float(source.get("tax", 0) or 0)
+    effective_tax_rate = (source_tax / source_subtotal * 100) if source_subtotal > 0 else 0.0
+    now = datetime.now(timezone.utc)
+    payer_invoices = []
+    parent_number = source.get("invoice_number") or f"INV-{invoice_id[:8].upper()}"
+
+    for index, allocation in enumerate(normalized, start=1):
+        gross_amount = allocation["amount"]
+        if effective_tax_rate > 0:
+            allocation_subtotal = round(gross_amount / (1 + effective_tax_rate / 100), 2)
+            allocation_tax = round(gross_amount - allocation_subtotal, 2)
+        else:
+            allocation_subtotal, allocation_tax = gross_amount, 0.0
+        payer_invoice_number = f"{parent_number}-S{index}"
+        allocation["subtotal"] = allocation_subtotal
+        allocation["tax"] = allocation_tax
+        allocation["amount_paid"] = 0.0
+        allocation["payment_status"] = "unpaid"
+        allocation["invoice_id"] = str(uuid.uuid4())
+        allocation["invoice_number"] = payer_invoice_number
+        allocation["created_at"] = now.isoformat()
+
+        allocation_detail = allocation["description"] or f"Allocated share of {parent_number}"
+        payer_invoice = Invoice(
+            id=allocation["invoice_id"],
+            invoice_number=payer_invoice_number,
+            client_id=allocation["payer_client_id"],
+            client_name=allocation["payer_client_name"],
+            invoice_name=f"Split billing — {source.get('invoice_name') or parent_number}",
+            due_date=source.get("due_date"),
+            notes=(f"Split-billing allocation from {parent_number}. {allocation_detail}").strip(),
+            line_items=[{
+                "name": f"Split share of {parent_number}",
+                "description": allocation_detail,
+                "quantity": 1.0,
+                "unit_price": allocation_subtotal,
+                "discount_pct": 0.0,
+                "discount_amount": 0.0,
+                "tax_rate": round(effective_tax_rate, 4),
+                "tax_amount": allocation_tax,
+                "total": allocation_subtotal,
+            }],
+            subtotal=allocation_subtotal,
+            tax=allocation_tax,
+            tax_rate=round(effective_tax_rate, 4),
+            total=gross_amount,
+            payment_status="unpaid",
+            status="draft",
+            is_split_child=True,
+            split_billing_parent_id=source["id"],
+            split_billing_allocation_id=allocation["id"],
+            split_source_invoice_number=parent_number,
+            split_billing={
+                "role": "payer_invoice",
+                "source_invoice_id": source["id"],
+                "source_invoice_number": parent_number,
+                "allocation_id": allocation["id"],
+                "gross_amount": gross_amount,
+                "tax_apportioned": allocation_tax,
+            },
+        )
+        child_doc = payer_invoice.model_dump()
+        child_doc["created_at"] = now.isoformat()
+        await db.invoices.insert_one(child_doc)
+        payer_invoices.append(child_doc)
+        await log_activity(
+            current_user,
+            "split_payer_invoice_created",
+            "invoice",
+            payer_invoice.id,
+            payer_invoice.invoice_number,
+            f"Created split-billing payer invoice from {parent_number} for {allocation['payer_client_name']}.",
+            metadata={"source_invoice_id": source["id"], "source_invoice_number": parent_number, "allocation_amount": gross_amount, "payer_client_id": allocation["payer_client_id"]},
+        )
+
+    split_billing = {
+        "role": "source",
+        "status": "issued",
+        "source_total": source_total,
+        "amount_paid": 0.0,
+        "created_at": now.isoformat(),
+        "created_by": current_user.get("name", ""),
+        "allocations": normalized,
+        "child_invoice_ids": [item["id"] for item in payer_invoices],
+    }
+    await db.invoices.update_one({"id": source["id"]}, {"$set": {
+        "status": "split_billed",
+        "payment_status": "split",
+        "is_split_parent": True,
+        "split_billing": split_billing,
+        "split_billed_at": now.isoformat(),
+    }})
+    parent = await db.invoices.find_one({"id": source["id"]}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "split_billing_created",
+        "invoice",
+        source["id"],
+        parent_number,
+        f"Replaced the source draft with {len(payer_invoices)} payer invoices for split billing.",
+        metadata={"source_total": source_total, "payer_invoice_ids": [item["id"] for item in payer_invoices], "allocations": normalized},
+    )
+    if source.get("ticket_id"):
+        await ticket_audit(source["ticket_id"], current_user, "invoice_split_billing", f"Invoice {parent_number} was split into {len(payer_invoices)} payer invoices for auditable billing.")
+    return {"message": "Split-billing payer invoices created", "parent": parent, "payer_invoices": payer_invoices}
 
 @router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
@@ -327,6 +592,7 @@ async def generate_invoice_from_contract(invoice_id: str, contract_id: str, curr
         client_id=contract['client_id'],
         client_name=client['name'] if client else None,
         contract_id=contract_id,
+        invoice_name=str(contract.get('name') or contract.get('title') or contract.get('service_name') or '').strip()[:160] or None,
         due_date=(datetime.now(timezone.utc) + timedelta(days=30)).strftime('%Y-%m-%d'),
         line_items=invoice_lines,
         subtotal=subtotal,
@@ -345,6 +611,8 @@ async def create_invoice_payment(invoice_id: str, request_data: dict, current_us
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("is_split_parent"):
+        raise HTTPException(status_code=409, detail="Use the generated payer invoices for payment collection")
     if invoice.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Invoice already paid")
 
@@ -431,6 +699,7 @@ async def check_payment_status(invoice_id: str, session_id: str, current_user: d
             },
             "$push": {"payments": payment_record}
         })
+        await _sync_split_billing_parent_payment(invoice, new_paid, new_payment_status, current_user)
 
     return {"payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
 
@@ -439,6 +708,8 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("is_split_parent"):
+        raise HTTPException(status_code=409, detail="Record payments against the generated payer invoices, not the split-billing source record")
     if invoice.get("status") in {"cancelled", "voided"}:
         raise HTTPException(status_code=409, detail="Cannot record a payment against a voided invoice")
     try:
@@ -450,7 +721,14 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
     outstanding = max(0, float(invoice.get("total", 0) or 0) - float(invoice.get("amount_paid", 0) or 0))
     if amount > outstanding + 0.005:
         raise HTTPException(status_code=422, detail=f"Payment exceeds the outstanding balance of ${outstanding:.2f}")
-    method = data.get("method", "manual")
+    method = str(data.get("method", "other") or "other").strip().lower()
+    allowed_methods = {"eftpos", "cash", "bank_transfer", "xero_reconciled", "cheque", "other"}
+    if method not in allowed_methods:
+        raise HTTPException(status_code=422, detail="Choose a valid payment method")
+    reference = str(data.get("reference", "") or "").strip()
+    if method in {"eftpos", "xero_reconciled"} and not reference:
+        label = "EFTPOS terminal receipt or settlement ID" if method == "eftpos" else "Xero payment or bank-feed reference"
+        raise HTTPException(status_code=422, detail=f"{label} is required for an auditable payment record")
     payment_date = str(data.get("date") or "").strip()
     if payment_date:
         try:
@@ -464,8 +742,9 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
     payment_record = {
         "amount": amount, "method": method, "date": payment_date,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
-        "reference": data.get("reference", ""), "notes": data.get("notes", ""),
+        "reference": reference, "notes": data.get("notes", ""),
         "recorded_by": current_user.get("name", ""),
+        "reconciliation_status": "matched" if method == "xero_reconciled" else "pending_xero_reconciliation",
     }
     await db.invoices.update_one({"id": invoice_id}, {
         "$set": {"payment_status": new_status, "amount_paid": new_paid,
@@ -473,8 +752,80 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
                  "paid_date": payment_date if new_status == "paid" else invoice.get("paid_date")},
         "$push": {"payments": payment_record}
     })
+    await _sync_split_billing_parent_payment(invoice, new_paid, new_status, current_user)
     await log_activity(current_user, "payment_recorded", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded {method} payment of ${amount:.2f}", metadata={"amount": amount, "method": method, "payment_date": payment_date, "reference": data.get("reference", "")})
     return {"message": "Payment recorded", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
+
+
+@router.get("/billing/reconciliation/summary")
+async def get_reconciliation_summary(current_user: dict = Depends(get_current_user)):
+    """Finance-safe payment worklist. Manual payments remain pending until matched in Xero."""
+    invoices = await db.invoices.find({"status": {"$nin": ["cancelled", "voided"]}, "is_split_parent": {"$ne": True}}, {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "payments": 1}).to_list(5000)
+    pending, methods = [], {}
+    for invoice in invoices:
+        for payment in invoice.get("payments", []) or []:
+            status = payment.get("reconciliation_status") or ("matched" if payment.get("method") == "xero_reconciled" else "pending_xero_reconciliation")
+            if status == "matched":
+                continue
+            method = payment.get("method", "other")
+            amount = float(payment.get("amount", 0) or 0)
+            bucket = methods.setdefault(method, {"method": method, "count": 0, "amount": 0.0})
+            bucket["count"] += 1; bucket["amount"] += amount
+            pending.append({"invoice_id": invoice["id"], "invoice_number": invoice.get("invoice_number"), "client_name": invoice.get("client_name"), "amount": amount, "method": method, "date": payment.get("date"), "reference": payment.get("reference", ""), "status": status})
+    pending.sort(key=lambda p: (p.get("date") or "", p.get("invoice_number") or ""), reverse=True)
+    return {"pending_count": len(pending), "pending_total": round(sum(p["amount"] for p in pending), 2), "by_method": [{**m, "amount": round(m["amount"], 2)} for m in methods.values()], "items": pending[:50]}
+
+
+@router.post("/billing/reconciliation/settlements")
+async def close_payment_settlement(data: dict, current_user: dict = Depends(get_current_user)):
+    """Closes a daily EFTPOS/cash batch without claiming it has been matched in Xero."""
+    method = str(data.get("method", "") or "").strip().lower()
+    date = str(data.get("date", "") or "").strip()
+    reference = str(data.get("reference", "") or "").strip()
+    if method not in {"eftpos", "cash"} or not date or not reference:
+        raise HTTPException(status_code=422, detail="Settlement date, method and reference are required")
+    settlement_id = f"SET-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    invoices = await db.invoices.find({"payments": {"$exists": True, "$ne": []}}, {"_id": 0}).to_list(5000)
+    payment_count = 0; total = 0.0
+    for invoice in invoices:
+        changed = False; payments = []
+        for payment in invoice.get("payments", []) or []:
+            is_pending = (payment.get("reconciliation_status") or "pending_xero_reconciliation") == "pending_xero_reconciliation"
+            if payment.get("method") == method and str(payment.get("date", "")) == date and is_pending:
+                payment = {**payment, "reconciliation_status": "settled_pending_xero", "settlement_id": settlement_id, "settlement_reference": reference, "settled_at": datetime.now(timezone.utc).isoformat()}
+                payment_count += 1; total += float(payment.get("amount", 0) or 0); changed = True
+            payments.append(payment)
+        if changed:
+            await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"payments": payments}})
+            await log_activity(current_user, "payment_settled", "invoice", invoice["id"], invoice.get("invoice_number", ""), f"Added {method} payment(s) to settlement {settlement_id}", metadata={"settlement_id": settlement_id, "reference": reference})
+    if not payment_count:
+        raise HTTPException(status_code=404, detail="No pending payments matched this settlement")
+    record = {"id": settlement_id, "method": method, "date": date, "reference": reference, "payment_count": payment_count, "total": round(total, 2), "status": "pending_xero_reconciliation", "created_at": datetime.now(timezone.utc).isoformat(), "created_by": current_user.get("name", "")}
+    await db.billing_settlements.insert_one(record)
+    return record
+
+
+@router.get("/clients/{client_id}/billing-profile")
+async def get_client_billing_profile(client_id: str, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    profile = client.get("billing_profile") or {}
+    return {"client_id": client_id, "client_name": client.get("name"), "billing_email": profile.get("billing_email") or client.get("billing_email") or client.get("email", ""), "payment_terms_days": profile.get("payment_terms_days", 30), "purchase_order_required": bool(profile.get("purchase_order_required", False)), "default_payment_method": profile.get("default_payment_method", "bank_transfer"), "xero_contact_id": profile.get("xero_contact_id", "")}
+
+
+@router.put("/clients/{client_id}/billing-profile")
+async def update_client_billing_profile(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    terms = int(data.get("payment_terms_days", 30) or 30)
+    if not 0 <= terms <= 365:
+        raise HTTPException(status_code=422, detail="Payment terms must be between 0 and 365 days")
+    profile = {"billing_email": str(data.get("billing_email", "") or "").strip(), "payment_terms_days": terms, "purchase_order_required": bool(data.get("purchase_order_required", False)), "default_payment_method": str(data.get("default_payment_method", "bank_transfer")), "xero_contact_id": str(data.get("xero_contact_id", "") or "").strip(), "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("name", "")}
+    await db.clients.update_one({"id": client_id}, {"$set": {"billing_profile": profile}})
+    await log_activity(current_user, "billing_profile_updated", "client", client_id, client.get("name", ""), "Updated client billing profile")
+    return profile
 
 # Move invoice to different client
 @router.post("/invoices/{invoice_id}/move-client")
@@ -488,6 +839,13 @@ async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict
     new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0})
     if not new_client:
         raise HTTPException(status_code=404, detail="Target client not found")
+    if invoice.get("ticket_id"):
+        linked_ticket = await db.tickets.find_one({"id": invoice["ticket_id"]}, {"_id": 0, "id": 1, "client_id": 1, "ticket_number": 1})
+        if linked_ticket and linked_ticket.get("client_id") != new_client_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invoice is linked to ticket {linked_ticket.get('ticket_number') or linked_ticket['id']}. Unlink or relink that ticket before moving the invoice to another client.",
+            )
     old_client_name = invoice.get("client_name", "Unknown")
     await db.invoices.update_one({"id": invoice_id}, {"$set": {
         "client_id": new_client_id, "client_name": new_client["name"],

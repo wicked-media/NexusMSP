@@ -77,7 +77,7 @@ export default function DevicesSmartBar({ selectedIds = [], deviceNames = {}, on
           <Button size="sm" variant="outline" onClick={() => setHistoryOpen(true)} data-testid="window-history-btn">
             <History className="w-3.5 h-3.5 mr-1" /> Windows
           </Button>
-          <div className="text-[10px] text-muted-foreground ml-2">Tick devices in the table to bulk-diagnose with Claude (max 25).</div>
+          <div className="text-[10px] text-muted-foreground ml-2">Select devices in the table to bulk-diagnose with Nexus AI (maximum 25).</div>
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 """
 Test suite for NexusOps v2.0 - Iteration 4 Features
-Tests: Scripting/Automation, IT Documentation (Password Vault + Docs), Project Management, Ticket Emails
+Tests: Scripting/Automation, IT Documentation, Project Management, Ticket Emails
 """
 import pytest
 import requests
@@ -167,8 +167,9 @@ class TestScriptingAPI:
         print(f"Found {len(data)} script executions")
 
 
-# ============== PASSWORD VAULT API TESTS ==============
+# ============== RETIRED PASSWORD VAULT API TESTS ==============
 
+@pytest.mark.skip(reason="NexusMSP password storage retired in favour of Keeper and Hudu")
 class TestPasswordVaultAPI:
     """Tests for IT Documentation - Password Vault endpoints"""
     

@@ -5,6 +5,7 @@ from app.database import db
 from app.auth import get_current_user, hash_password, password_policy_error
 from app.routers.email_utils import send_email, is_microsoft365_configured
 from app.routers.tech_intel import _log_audit
+from app.routers.technicians import _access_role_ids
 import uuid
 import os
 
@@ -77,10 +78,9 @@ async def invite_technician(data: dict, current_user: dict = Depends(get_current
         raise HTTPException(status_code=400, detail="Name and email are required")
 
     role = (data.get("role") or "technician").strip().lower()
-    allowed_roles = {"technician", "service_desk_manager", "dispatcher"}
     if role == "admin":
         raise HTTPException(status_code=400, detail="Administrator accounts must be created directly from Team Command")
-    if role not in allowed_roles:
+    if role not in await _access_role_ids():
         raise HTTPException(status_code=400, detail="Choose a valid standard access role")
 
     # Check for existing tech with this email

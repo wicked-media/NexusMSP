@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, Wifi, WifiOff, AlertTriangle, CheckCircle, Search,
   Activity, Users, Server, RefreshCw, ArrowDownRight, DollarSign,
-  Ban, ShieldAlert, Settings, Bell, Play
+  Ban, ShieldAlert, Settings, Play
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -21,8 +22,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 const STATUS_COLORS = {
   active: "#10b981",
@@ -35,47 +37,61 @@ const STATUS_COLORS = {
 
 export default function SplynxDashboardPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [configured, setConfigured] = useState(false);
   const [search, setSearch] = useState("");
   const [mainTab, setMainTab] = useState("overview");
   const [nonPayment, setNonPayment] = useState(null);
   const [suspendSettings, setSuspendSettings] = useState(null);
   const [settingsDialog, setSettingsDialog] = useState(false);
+  const [actionClientId, setActionClientId] = useState("");
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const [res, npRes, ssRes] = await Promise.all([
+      const [res, npRes, ssRes, configRes] = await Promise.all([
         axios.get(`${API}/splynx/overview`, { headers }),
         axios.get(`${API}/splynx/non-payment`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/settings/splynx-suspend`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/settings/splynx`, { headers }).catch(() => ({ data: { configured: false } })),
       ]);
       setData(res.data);
       setNonPayment(npRes.data);
-      setSuspendSettings(ssRes.data);
+      setSuspendSettings(ssRes.data || { auto_suspend_enabled: false, grace_days: 14, notify_before_suspend_days: 7, notify_client: true });
+      setConfigured(Boolean(configRes.data?.configured));
     } catch {
       setData({ linked_clients: 0, total_services: 0, active_services: 0, suspended_services: 0, clients: [] });
+      setNonPayment(null);
+      setSuspendSettings({ auto_suspend_enabled: false, grace_days: 14, notify_before_suspend_days: 7, notify_client: true });
+      setLoadError("ISP health data could not be loaded. Check the Splynx connection and try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleSuspend = async (clientId) => {
+    setActionClientId(clientId);
     try {
       const r = await axios.post(`${API}/splynx/suspend/${clientId}`, { reason: "Non-payment" }, { headers });
       toast.success(r.data.message);
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setActionClientId(""); }
   };
 
   const handleUnsuspend = async (clientId) => {
+    setActionClientId(clientId);
     try {
       const r = await axios.post(`${API}/splynx/unsuspend/${clientId}`, {}, { headers });
       toast.success(r.data.message);
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setActionClientId(""); }
   };
 
   const handleAutoSuspendCheck = async () => {
@@ -135,23 +151,47 @@ export default function SplynxDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="splynx-dashboard">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">ISP Service Health</h1>
-          <p className="text-muted-foreground">Splynx integration overview across all linked clients</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-splynx">
-            <RefreshCw className="w-4 h-4 mr-1" />Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setSettingsDialog(true)} data-testid="suspend-settings-btn">
-            <Settings className="w-4 h-4 mr-1" />Suspend Settings
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleAutoSuspendCheck} className="border-red-500/30 text-red-400 hover:bg-red-500/10" data-testid="auto-suspend-check-btn">
-            <ShieldAlert className="w-4 h-4 mr-1" />Auto-Suspend Check
-          </Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Network workspace - ISP billing"
+        title="ISP service health"
+        description="Splynx service availability, overdue billing exposure and customer links in one auditable operational view."
+        icon={Activity}
+        tone="sky"
+        actions={(
+          <>
+            <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-splynx">
+              <RefreshCw className="w-4 h-4 mr-1" />Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=splynx-settings-card")} data-testid="splynx-provider-settings-btn">
+              <Settings className="w-4 h-4 mr-1" />Provider Settings
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setSettingsDialog(true)} data-testid="suspend-settings-btn">
+              <ShieldAlert className="w-4 h-4 mr-1" />Billing Controls
+            </Button>
+          </>
+        )}
+      />
+
+      {loadError && (
+        <Card className="border-red-500/30 bg-red-500/5" data-testid="splynx-load-error">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <div className="flex items-center gap-2 text-sm text-red-200"><AlertTriangle className="w-4 h-4 text-red-400" />{loadError}</div>
+            <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Try again</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!configured && !loadError && (
+        <Card className="border-sky-500/25 bg-sky-500/5" data-testid="splynx-setup-guidance">
+          <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Connect Splynx before monitoring services</p>
+              <p className="mt-1 text-xs text-muted-foreground">Add the provider URL and API credentials, test the connection, then link each customer from their NexusMSP client profile.</p>
+            </div>
+            <Button size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=splynx-settings-card")}><Settings className="w-4 h-4 mr-1" />Configure Splynx</Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs value={mainTab} onValueChange={setMainTab}>
         <TabsList>
@@ -161,81 +201,13 @@ export default function SplynxDashboardPage() {
 
         <TabsContent value="overview">
 
-      {/* Top Stats */}
-      <div className="grid grid-cols-5 gap-3">
-        <Card data-testid="stat-health">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-3xl font-black ${healthPercent >= 90 ? "text-emerald-400" : healthPercent >= 70 ? "text-yellow-400" : "text-red-400"}`}>
-                  {healthPercent}%
-                </p>
-                <p className="text-[11px] text-muted-foreground">Service Health</p>
-              </div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${healthPercent >= 90 ? "bg-emerald-500/10" : healthPercent >= 70 ? "bg-yellow-500/10" : "bg-red-500/10"}`}>
-                <Activity className={`w-6 h-6 ${healthPercent >= 90 ? "text-emerald-400" : healthPercent >= 70 ? "text-yellow-400" : "text-red-400"}`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card data-testid="stat-linked">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-3xl font-black">{data?.linked_clients || 0}</p>
-                <p className="text-[11px] text-muted-foreground">Linked Clients</p>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card data-testid="stat-total-services">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-3xl font-black">{data?.total_services || 0}</p>
-                <p className="text-[11px] text-muted-foreground">Total Services</p>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-                <Server className="w-6 h-6 text-indigo-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card data-testid="stat-active-services">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-3xl font-black text-emerald-400">{data?.active_services || 0}</p>
-                <p className="text-[11px] text-muted-foreground">Active Services</p>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                <Wifi className="w-6 h-6 text-emerald-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className={data?.suspended_services > 0 ? "border-red-500/40" : ""} data-testid="stat-suspended">
-          <CardContent className="pt-4 pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-3xl font-black ${data?.suspended_services > 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                  {data?.suspended_services || 0}
-                </p>
-                <p className="text-[11px] text-muted-foreground">Suspended</p>
-              </div>
-              <div className={`w-12 h-12 rounded-xl ${data?.suspended_services > 0 ? "bg-red-500/10" : "bg-muted/30"} flex items-center justify-center`}>
-                <WifiOff className={`w-6 h-6 ${data?.suspended_services > 0 ? "text-red-400" : "text-muted-foreground"}`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Fleet summary */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <HeroTile label="Service health" value={healthPercent} suffix="%" icon={Activity} glow={healthPercent >= 90 ? "emerald" : healthPercent >= 70 ? "amber" : "rose"} subtitle="Active service coverage" testId="stat-health" />
+        <HeroTile label="Linked clients" value={data?.linked_clients || 0} icon={Users} glow="sky" subtitle="Customer profiles mapped" testId="stat-linked" />
+        <HeroTile label="Monitored services" value={data?.total_services || 0} icon={Server} glow="indigo" subtitle="Across linked clients" testId="stat-total-services" />
+        <HeroTile label="Active services" value={data?.active_services || 0} icon={Wifi} glow="emerald" subtitle="Provider reports active" testId="stat-active-services" />
+        <HeroTile label="Suspended" value={data?.suspended_services || 0} icon={WifiOff} glow={(data?.suspended_services || 0) > 0 ? "rose" : "zinc"} subtitle="Requires a review" testId="stat-suspended" />
       </div>
 
       {/* Charts */}
@@ -296,7 +268,7 @@ export default function SplynxDashboardPage() {
           <CardContent>
             <div className="space-y-2">
               {clientsWithIssues.map(client => (
-                <div key={client.client_id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-red-500/5 border border-red-500/10" data-testid={`issue-client-${client.client_id}`}>
+                <button key={client.client_id} type="button" className="flex w-full items-center justify-between rounded-lg border border-red-500/10 bg-red-500/5 px-3 py-2 text-left transition-colors hover:bg-red-500/10" onClick={() => navigate(`/clients?client=${client.client_id}`)} data-testid={`issue-client-${client.client_id}`}>
                   <div className="flex items-center gap-3">
                     <div className="w-2 h-8 rounded-full bg-red-500" />
                     <div>
@@ -319,7 +291,7 @@ export default function SplynxDashboardPage() {
                       ))}
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </CardContent>
@@ -343,8 +315,8 @@ export default function SplynxDashboardPage() {
               {filteredClients.map(client => {
                 const healthBar = client.total > 0 ? (client.active / client.total) * 100 : 0;
                 return (
-                  <div key={client.client_id} className="flex items-center justify-between py-3 px-3 rounded-lg hover:bg-muted/30 transition-colors border border-transparent hover:border-border"
-                    data-testid={`client-row-${client.client_id}`}>
+                  <button key={client.client_id} type="button" className="flex w-full items-center justify-between rounded-lg border border-transparent px-3 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
+                    onClick={() => navigate(`/clients?client=${client.client_id}`)} data-testid={`client-row-${client.client_id}`}>
                     <div className="flex items-center gap-3">
                       <div className={`w-2.5 h-2.5 rounded-full ${client.has_suspended ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`} />
                       <div>
@@ -371,7 +343,7 @@ export default function SplynxDashboardPage() {
                         <p className="text-[10px] text-muted-foreground text-right mt-0.5">{Math.round(healthBar)}%</p>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
               {filteredClients.length === 0 && (
@@ -392,18 +364,28 @@ export default function SplynxDashboardPage() {
       {/* NON-PAYMENT TAB */}
       <TabsContent value="nonpayment">
         <div className="space-y-4 mt-4">
-          {/* Stats */}
-          <div className="grid grid-cols-4 gap-3">
-            <Card className="border-red-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><DollarSign className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Total Overdue</p><p className="text-xl font-bold text-red-400">${nonPayment?.total_overdue?.toLocaleString() || 0}</p></div></div></CardContent></Card>
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-amber-400" /></div><div><p className="text-xs text-muted-foreground">Overdue Customers</p><p className="text-xl font-bold">{nonPayment?.total_overdue_count || 0}</p></div></div></CardContent></Card>
-            <Card className="border-red-500/20"><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><Ban className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-muted-foreground">Suspended</p><p className="text-xl font-bold text-red-400">{nonPayment?.total_suspended || 0}</p></div></div></CardContent></Card>
-            <Card><CardContent className="pt-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><ShieldAlert className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-muted-foreground">Auto-Suspend</p><p className="text-xl font-bold">{nonPayment?.auto_suspend_enabled ? "ON" : "OFF"}</p></div></div></CardContent></Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">Non-payment review</p>
+              <p className="text-xs text-muted-foreground">Review overdue accounts before any service action is taken.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleAutoSuspendCheck} className="border-red-500/30 text-red-300 hover:bg-red-500/10" data-testid="auto-suspend-check-btn">
+              <ShieldAlert className="w-4 h-4 mr-1" />Run auto-suspend check
+            </Button>
+          </div>
+
+          {/* Billing exposure */}
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <HeroTile label="Total overdue" value={`$${Number(nonPayment?.total_overdue || 0).toLocaleString()}`} animated={false} icon={DollarSign} glow="rose" subtitle="Across linked accounts" testId="splynx-overdue-total" />
+            <HeroTile label="Overdue customers" value={nonPayment?.total_overdue_count || 0} icon={AlertTriangle} glow="amber" subtitle="Require a payment review" testId="splynx-overdue-clients" />
+            <HeroTile label="Suspended clients" value={nonPayment?.total_suspended || 0} icon={Ban} glow={(nonPayment?.total_suspended || 0) > 0 ? "rose" : "zinc"} subtitle="Recorded by NexusMSP" testId="splynx-suspended-clients" />
+            <HeroTile label="Auto-suspend" value={nonPayment?.auto_suspend_enabled ? "Enabled" : "Off"} animated={false} icon={ShieldAlert} glow={nonPayment?.auto_suspend_enabled ? "sky" : "zinc"} subtitle={`Grace period: ${nonPayment?.grace_days || 14} days`} testId="splynx-auto-suspend" />
           </div>
 
           {/* Customer Table */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-red-400" />Overdue Customers — Non-Payment Tracker</CardTitle>
+              <CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-red-400" />Overdue customers - payment tracker</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -414,7 +396,7 @@ export default function SplynxDashboardPage() {
                   {(nonPayment?.customers || []).length === 0 ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No overdue customers</TableCell></TableRow>
                   ) : (nonPayment?.customers || []).map(c => (
-                    <TableRow key={c.client_id} className={c.is_suspended ? "bg-red-500/5" : ""} data-testid={`np-customer-${c.client_id}`}>
+                    <TableRow key={c.client_id} className={`${c.is_suspended ? "bg-red-500/5" : ""} cursor-pointer hover:bg-muted/40`} onClick={() => navigate(`/clients?client=${c.client_id}`)} data-testid={`np-customer-${c.client_id}`}>
                       <TableCell className="font-medium">{c.client_name}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{c.client_email || "-"}</TableCell>
                       <TableCell className="text-right font-mono font-bold text-amber-400">{c.unpaid_invoices}</TableCell>
@@ -429,12 +411,12 @@ export default function SplynxDashboardPage() {
                       </TableCell>
                       <TableCell>
                         {c.is_suspended ? (
-                          <Button size="sm" variant="outline" className="text-green-400 border-green-500/30 hover:bg-green-500/10" onClick={() => handleUnsuspend(c.client_id)} data-testid={`unsuspend-${c.client_id}`}>
-                            <Play className="w-3 h-3 mr-1" />Unsuspend
+                          <Button size="sm" variant="outline" className="text-green-400 border-green-500/30 hover:bg-green-500/10" disabled={actionClientId === c.client_id} onClick={(event) => { event.stopPropagation(); handleUnsuspend(c.client_id); }} data-testid={`unsuspend-${c.client_id}`}>
+                            {actionClientId === c.client_id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}Unsuspend
                           </Button>
                         ) : (
-                          <Button size="sm" variant="outline" className="text-red-400 border-red-500/30 hover:bg-red-500/10" onClick={() => handleSuspend(c.client_id)} data-testid={`suspend-${c.client_id}`}>
-                            <Ban className="w-3 h-3 mr-1" />Suspend
+                          <Button size="sm" variant="outline" className="text-red-400 border-red-500/30 hover:bg-red-500/10" disabled={actionClientId === c.client_id} onClick={(event) => { event.stopPropagation(); handleSuspend(c.client_id); }} data-testid={`suspend-${c.client_id}`}>
+                            {actionClientId === c.client_id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Ban className="w-3 h-3 mr-1" />}Suspend
                           </Button>
                         )}
                       </TableCell>

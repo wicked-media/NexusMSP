@@ -22,12 +22,64 @@ from app.auth import get_current_user
 router = APIRouter()
 
 
+_HELP_ICON_ALIASES = {
+    "Guide": "🧭",
+    "Ticket": "🎫",
+    "Agent": "🤖",
+    "Package": "📦",
+    "Patch": "🩹",
+    "Mail": "✉️",
+    "Device": "💻",
+}
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", re.sub(r"\s+", "-", (s or "").lower())).strip("-")
+
+
+def _repair_mojibake(value):
+    """Restore UTF-8 text that was previously stored as Windows-1252 bytes.
+
+    Older Help Centre seeds were written through an incorrectly configured
+    encoding path.  Repair response values recursively so existing articles
+    (including their icons, titles, summaries and rich Markdown) remain
+    readable without modifying technician-authored content in place.
+    """
+    if isinstance(value, str):
+        repaired = value
+        # Some legacy values passed through the bad encoding path twice.
+        for _ in range(3):
+            if not any(marker in repaired for marker in ("Ã", "Â", "â", "ð", "�")):
+                break
+            try:
+                # cp1252 cannot encode its five undefined control positions
+                # (for example U+008D), although those are valid raw bytes in
+                # the legacy data.  Preserve byte-valued characters directly
+                # and only use cp1252 for its printable extension characters.
+                legacy_bytes = bytes(
+                    ord(char) if ord(char) <= 0xFF else char.encode("cp1252")[0]
+                    for char in repaired
+                )
+                candidate = legacy_bytes.decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                break
+            if candidate == repaired:
+                break
+            repaired = candidate
+        return repaired
+    if isinstance(value, list):
+        return [_repair_mojibake(item) for item in value]
+    if isinstance(value, dict):
+        repaired_dict = {key: _repair_mojibake(item) for key, item in value.items()}
+        icon = repaired_dict.get("icon")
+        if isinstance(icon, str):
+            repaired_dict["icon"] = _HELP_ICON_ALIASES.get(icon.strip(), icon)
+        return repaired_dict
+    return value
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• CHAT BROADCAST HOOKS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -226,7 +278,7 @@ The Tickets module is the heart of NexusOps. Every customer interaction lives he
 ## Ticket detail toolbar â€” every button explained
 When you open a ticket, the header has these AI buttons (top right):
 
-- **ðŸ”¥ Why on fire** â€” Claude explains *why this ticket is still open* (waiting on client / SLA pressure / blocked by parts).
+- **ðŸ”¥ Why on fire** â€” Nexus AI explains *why this ticket is still open* (waiting on client / SLA pressure / blocked by parts).
 - **ðŸ’¬ Sentiment Badge** â€” gauges client sentiment trend across the conversation. Green = improving, red = escalating.
 - **ðŸ‘¥ DoppelgÃ¤nger** â€” finds the 3 most similar resolved tickets across ALL clients + their resolution notes.
 - **ðŸª„ Suggest Resolution** â€” copies the resolution from the closest matching past ticket. One-click time saver.
@@ -378,7 +430,7 @@ EXTENDED_ARTICLES = [
 
 ## Workflow
 1. Pick a client + quarter range.
-2. Click **Generate Draft** â€” Claude pulls tickets, devices, backups, alerts, spend, pattern hits â†’ drafts 7 sections.
+2. Click **Generate Draft** â€” Nexus AI pulls tickets, devices, backups, alerts, spend, pattern hits â†’ drafts 7 sections.
 3. Edit the inline rich-text editor for each section.
 4. **Save Draft** persists to `db.qbrs`. **Download PDF** prints branded fpdf with cover page + KPI strip + all sections.
 
@@ -407,7 +459,7 @@ Each pattern hit links to `/blueprints?pattern=...&t=...`. Click â†’ opens 
 Drag-and-drop bookings. Each booking links to a ticket. Status colours: scheduled (sky) / in_progress (amber) / completed (emerald) / cancelled (zinc).
 
 ### `/smart-scheduling` â€” AI Routing
-Claude reads tech skills + location + calendar + current load â†’ recommends best assignment. **"Auto-assign"** button writes the assignment + emails the tech.
+Nexus AI reads tech skills + location + calendar + current load â†’ recommends the best assignment. **"Auto-assign"** writes the assignment and emails the technician.
 
 ### `/tech-roster` â€” On-Call & Skills
 Tier 1/2/3 columns + skills matrix table.
@@ -492,7 +544,7 @@ HTML rendered inside a viewer dialog. Copy / open-in-Hudu.
 Redacted by default. **Reveal** decrypts on-demand â†’ audit-logged in `db.hudu_password_reveals`.
 
 ## AI Suggestions panel on tickets
-Auto-runs on ticket open. Derives 3-6 keywords from title+description (stopword-filtered), queries Hudu, ranks via Claude with concrete fix steps.
+Auto-runs on ticket open. Derives 3-6 keywords from title+description (stopword-filtered), queries Hudu, then uses Nexus AI to rank concrete fix steps.
 
 ## Tinker
 - Sync interval: `hudu.py` â†’ `_sync_articles()`.
@@ -516,10 +568,10 @@ Auto-runs on ticket open. Derives 3-6 keywords from title+description (stopword-
 Each writes to `db.huntress_actions` (audit log shown in Response Timeline).
 
 ## Identity Threats page
-`/identity-threats` â€” merges SOC identity-threats with Huntress incidents (impossible_travel / brute_force / mfa_fatigue / token_theft / password_spray / privilege_escalation). Huntress rows wear an orange `HNT` badge.
+`/identity-threats` — shows provider-backed Huntress identity incidents (impossible_travel / brute_force / mfa_fatigue / token_theft / password_spray / privilege_escalation). It stays empty until Huntress is connected.
 
 ## Endpoint Security
-`/endpoint-security` â€” merges live Huntress agents with demo endpoints.
+`/endpoint-security` — uses live Huntress agents and Nexus Agent evidence only.
 
 ## Tinker
 - Action audit shape: `huntress.py` â†’ `_record_action()`.
@@ -701,7 +753,7 @@ Tabs: Overview Â· Performance Â· Patches Â· Software Â· Sessions Â· Au
 | Preview PDF | Opens PDF in modal |
 | Download PDF | Saves locally |
 | **Dispute Shield** (amber) | Generates evidence-pack PDF with all tickets/time/products |
-| **Pre-scan Risks (AI)** (rose) *(NEW)* | Claude + heuristic dispute scan BEFORE sending. Returns flags + per-line justifications. |
+| **Pre-scan Risks (AI)** (rose) *(NEW)* | Nexus AI plus a heuristic dispute scan before sending. Returns flags and per-line justifications. |
 
 ### Send actions
 - Email Invoice â€” opens the Microsoft 365 mail dialog with template and PDF attachment
@@ -788,7 +840,7 @@ The Client detail view is a **full 360Â° profile** of a customer. 12 tabs surf
 ## The 12 tabs
 
 ### Overview
-- **Next Best Action** â€” Claude-style recommendation (SMS reminder / QBR / upsell) based on current signals.
+- **Next Best Action** â€” Nexus AI recommendation (SMS reminder / QBR / upsell) based on current signals.
 - **Quick Actions** â€” New Ticket Â· New Invoice Â· SMS Â· Email Â· Start Timer.
 - **Health Score Breakdown** â€” 5-6 dimensions (Tickets/SLA/Devices/Payments/Contracts, +M365 when CIPP linked) with live progress bars.
 - **Recent Activity** â€” unified feed of tickets / invoices / events.
@@ -864,7 +916,7 @@ Open a ticket from `/tickets` and you land on the detail view. This doc explains
 | â† Back | Returns to the ticket list. Also calls `/stop-viewing` to release live presence. |
 | ðŸ”´/ðŸŸ¢ status dot | Device online/offline indicator (if a device is linked). Colour-coded. |
 | Remote Connect | Opens `/remote-access?device={id}` in new tab (RDP/VNC/SSH picker). |
-| ðŸ§  AI Analysis | Claude analyses title + description + client history â†’ returns suggested category/priority/next steps. Results appear in the `ai-analysis-panel` card. |
+| ðŸ§  AI Analysis | Nexus AI analyses title, description, and client history â†’ returns suggested category, priority, and next steps. Results appear in the `ai-analysis-panel` card. |
 | â–¶ / â¸ Timer | Start/stop the live work timer. Persists to `time_entries` on stop. |
 | Log Time | Manual time entry dialog (duration + billable flag + rate). |
 | Email | Opens email composer (RichTextEditor, signature-aware). |
@@ -880,7 +932,7 @@ Open a ticket from `/tickets` and you land on the detail view. This doc explains
 |---|---|
 | SentimentBadge | Live sentiment pill (ðŸŸ¢ positive / ðŸŸ¡ neutral / ðŸ”´ frustrated). Click to log to history. |
 | TicketAIBundle | Action menu: To Runbook Â· Proofread Â· Summarize Â· Auto-respond Â· Add-child suggestion Â· Pre-call Brief. |
-| **Quote It** | Claude reads ticket + time + products â†’ drafts a quote, console-logs the result. |
+| **Quote It** | Nexus AI reads ticket, time, and products â†’ drafts a quote and records the result. |
 | ðŸŸ¢ **Quote Nudge Banner** *(new)* | Auto-appears when scope is expanding (score â‰¥ 50). Click "Draft quote now" to auto-generate. |
 
 ### Progress Tracker
@@ -954,14 +1006,14 @@ Current sentiment score 1-5. Trend over the last 5 interactions.
         "order": 76,
         "summary": "AI-scan an invoice BEFORE you send it so client disputes never happen.",
         "body_md": """## What it does
-On the Invoice detail â†’ Actions sidebar â†’ **Pre-scan Risks (AI)** button (rose). Claude + heuristics read every line item and flag anything a client could push back on:
+On the Invoice detail â†’ Actions sidebar â†’ **Pre-scan Risks (AI)** button (rose). Nexus AI and heuristics read every line item and flag anything a client could push back on:
 - Vague high-value lines ("Emergency support â€” $1,500" with no description)
 - Quantity Ã— unit anomalies (10 Ã— $150)
 - Emergency rate without after-hours justification
 
 ## How it works
 1. Heuristic scan runs first â€” always free, always works.
-2. If `OPENAI_API_KEY` is set, Claude scans too with context of the client's last 10 resolved tickets. Returns:
+2. If `OPENAI_API_KEY` is set, Nexus AI also scans with context from the client's last 10 resolved tickets. Returns:
    - `flags[]` â€” heuristic concerns
    - `ai_risks[]` â€” per-line with severity + justification referencing actual ticket numbers
    - `ai_summary` â€” one-paragraph exec summary
@@ -972,7 +1024,7 @@ The button shows a toast + opens an alert with the full report. Future roadmap: 
 ## Tinker
 `products_invoices_plus.py` â†’ `dispute_scan()`:
 - Change the heuristic thresholds (1500 default, qty > 5, etc).
-- Edit the Claude system prompt.
+- Edit the Nexus AI system prompt.
 
 ## Paired with DisputeShield PDF
 DisputeShield PDF assembles evidence AFTER a dispute fires (proof pack). Dispute Scan prevents disputes BEFORE they fire. Use both.
@@ -994,7 +1046,7 @@ A green banner appears at the top of a ticket when its **quote-nudge score â‰
 
 ## What it does
 - Shows the score + the specific signals that triggered it.
-- "Draft quote now" button calls `POST /api/tickets/{id}/auto-quote` to generate a Claude-drafted quote from the conversation.
+- "Draft quote now" calls `POST /api/tickets/{id}/auto-quote` to generate a Nexus AI draft quote from the conversation.
 - Dismiss (Ã—) hides for this session.
 
 ## Why it exists
@@ -1214,15 +1266,27 @@ async def list_help_articles(q: Optional[str] = None, current_user: dict = Depen
     for r in rows:
         c = r.get("category") or "Uncategorised"
         cats.setdefault(c, []).append(r)
-    return {"articles": rows, "by_category": cats, "count": len(rows)}
+    return _repair_mojibake({"articles": rows, "by_category": cats, "count": len(rows)})
 
 
 @router.get("/help/articles/{slug}")
 async def get_help_article(slug: str, current_user: dict = Depends(get_current_user)):
     doc = await db.help_articles.find_one({"slug": slug}, {"_id": 0})
+    # Direct in-product setup links must work even before the technician has
+    # opened the Help library (which normally performs the catalogue upsert).
+    # Seed just the requested shipped article instead of requiring a full reset.
+    if not doc:
+        try:
+            from app.routers._help_seed_modern import MODERN_ARTICLES
+            shipped = next((article for article in MODERN_ARTICLES if article.get("slug") == slug), None)
+            if shipped:
+                doc = {**shipped, "created_at": _now_iso(), "updated_at": _now_iso()}
+                await db.help_articles.insert_one(dict(doc))
+        except Exception:
+            doc = None
     if not doc:
         raise HTTPException(404, "Article not found")
-    return doc
+    return _repair_mojibake(doc)
 
 
 @router.post("/help/articles")
@@ -1249,7 +1313,7 @@ async def upsert_help_article(payload: dict = Body(...), current_user: dict = De
     else:
         doc["created_at"] = _now_iso()
         await db.help_articles.insert_one(dict(doc))
-    return doc
+    return _repair_mojibake(doc)
 
 
 @router.delete("/help/articles/{slug}")

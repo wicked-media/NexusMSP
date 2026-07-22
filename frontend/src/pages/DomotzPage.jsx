@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,21 +11,20 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import SetupGuideCallout from "@/components/SetupGuideCallout";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 import { toast } from "sonner";
 import { 
   Network,
   Server,
   Monitor,
   Wifi,
-  WifiOff,
   AlertTriangle,
   RefreshCw,
-  Check,
-  X,
   Loader2,
   Settings,
   Activity,
-  Globe,
   Router
 } from "lucide-react";
 
@@ -37,6 +36,7 @@ const statusColors = {
 
 export default function DomotzPage() {
   const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [status, setStatus] = useState({ configured: false });
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
@@ -44,13 +44,13 @@ export default function DomotzPage() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [credentials, setCredentials] = useState({ api_key: "", api_url: "https://api-us-east-1-cell-1.domotz.com/public-api/v1" });
 
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const statusRes = await axios.get(`${API}/domotz/status`, { headers });
       setStatus(statusRes.data);
@@ -64,17 +64,18 @@ export default function DomotzPage() {
           setAgents(Array.isArray(agentsRes.data) ? agentsRes.data : []);
           setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
         } catch (e) {
-          console.log("Could not fetch Domotz data:", e);
+          toast.error("Domotz is connected, but monitoring data could not be retrieved");
         }
       }
     } catch (error) {
-      console.error("Failed to fetch status:", error);
+      setLoadError(true);
+      toast.error("Unable to load Domotz connection status");
     } finally {
       setLoading(false);
     }
-  };
+  }, [headers]);
 
-  const fetchAgentDevices = async (agentId) => {
+  const fetchAgentDevices = useCallback(async (agentId) => {
     setLoadingDevices(true);
     try {
       const response = await axios.get(`${API}/domotz/agents/${agentId}/devices`, { headers });
@@ -84,17 +85,17 @@ export default function DomotzPage() {
     } finally {
       setLoadingDevices(false);
     }
-  };
+  }, [headers]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   useEffect(() => {
     if (selectedAgent) {
       fetchAgentDevices(selectedAgent.id);
     }
-  }, [selectedAgent]);
+  }, [selectedAgent, fetchAgentDevices]);
 
   const saveCredentials = async (e) => {
     e.preventDefault();
@@ -116,30 +117,25 @@ export default function DomotzPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="domotz-page">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Domotz Monitoring</h1>
-          <p className="text-muted-foreground">Network monitoring and device management</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchData}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
+    <div className="p-6 space-y-5" data-testid="domotz-page">
+      <OperationalPageHeader
+        eyebrow="Network monitoring"
+        title="Domotz"
+        description="Monitor external network agents, discovered devices, and provider alerts across managed customer sites."
+        icon={Network}
+        tone="sky"
+        actions={<>
+          <Badge variant="outline" className={status.configured ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}>{status.configured ? "Connected" : "Configuration required"}</Badge>
           <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
             <DialogTrigger asChild>
-              <Button variant={status.configured ? "outline" : "default"}>
-                <Settings className="w-4 h-4 mr-2" />
-                {status.configured ? "Update Credentials" : "Connect Domotz"}
-              </Button>
+              <Button variant="outline" size="sm" data-testid="domotz-connection-btn"><Settings className="mr-1.5 h-3.5 w-3.5" />Connection</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-xl">
               <DialogHeader>
                 <DialogTitle>Domotz API Credentials</DialogTitle>
               </DialogHeader>
               <form onSubmit={saveCredentials} className="space-y-4">
+                <SetupGuideCallout title="Get a Domotz API key" source="Sign in to the Domotz Portal, open Settings → API Keys, and create a dedicated NexusMSP key in the correct regional tenant." steps={["Select the Domotz API region that hosts the customer sites.", "Create a dedicated API key rather than reusing a personal technician key.", "Save the key in Keeper, then confirm the connection before relying on monitoring data."]} securityNote="Treat the Domotz API key as a credential. Keep the source record in Keeper, enter it directly into this integration setting only when required, and revoke it in Domotz if access is no longer required." />
                 <div className="space-y-2">
                   <Label>API Key</Label>
                   <Input
@@ -175,32 +171,18 @@ export default function DomotzPage() {
               </form>
             </DialogContent>
           </Dialog>
-        </div>
+          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="domotz-refresh-btn"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
+        </>}
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroTile label="Agents" value={loading ? "—" : agents.length} icon={Router} glow="cyan" subtitle="Connected monitoring agents" testId="domotz-metric-agents" />
+        <HeroTile label="Online" value={loading ? "—" : agents.filter(agent => agent.status?.value === "ONLINE").length} icon={Wifi} glow="emerald" subtitle="Agents reporting online" testId="domotz-metric-online" />
+        <HeroTile label="Selected devices" value={loading ? "—" : agentDevices.length} icon={Monitor} glow="sky" subtitle={selectedAgent ? (selectedAgent.display_name || selectedAgent.name) : "Choose an agent to inspect"} testId="domotz-metric-devices" />
+        <HeroTile label="Alerts" value={loading ? "—" : alerts.length} icon={AlertTriangle} glow={alerts.length > 0 ? "amber" : "violet"} subtitle={alerts.length > 0 ? "Require review" : "No active provider alerts"} testId="domotz-metric-alerts" />
       </div>
 
-      {/* Status Card */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                status.configured ? 'bg-green-500/10' : 'bg-yellow-500/10'
-              }`}>
-                <Network className={`w-6 h-6 ${status.configured ? 'text-green-500' : 'text-yellow-500'}`} />
-              </div>
-              <div>
-                <h3 className="font-semibold">Connection Status</h3>
-                <p className="text-sm text-muted-foreground">
-                  {status.configured ? 'Connected to Domotz' : 'Not configured'}
-                </p>
-              </div>
-            </div>
-            <Badge variant={status.configured ? "default" : "secondary"}>
-              {status.configured ? <><Check className="w-3 h-3 mr-1" /> Connected</> : <><X className="w-3 h-3 mr-1" /> Not Connected</>}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
+      {loadError && <Card className="border-amber-500/30 bg-amber-500/5"><CardContent className="flex items-center justify-between gap-3 p-4"><div><p className="text-sm font-medium text-amber-100">Domotz status is unavailable</p><p className="mt-1 text-xs text-muted-foreground">Check the connection or retry the request.</p></div><Button variant="outline" size="sm" onClick={fetchData}>Try again</Button></CardContent></Card>}
 
       {!status.configured ? (
         <Card>
@@ -208,7 +190,7 @@ export default function DomotzPage() {
             <Network className="w-16 h-16 text-muted-foreground opacity-50 mb-4" />
             <h3 className="text-lg font-semibold mb-2">Connect to Domotz</h3>
             <p className="text-muted-foreground text-center max-w-md mb-4">
-              Connect your Domotz account to view network monitoring data, device status, and alerts directly in NexusOps.
+              Connect your Domotz account to view network monitoring data, device status, and alerts directly in NexusMSP.
             </p>
             <Button onClick={() => setIsSettingsOpen(true)}>
               <Network className="w-4 h-4 mr-2" />
@@ -218,54 +200,6 @@ export default function DomotzPage() {
         </Card>
       ) : (
         <>
-          {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <Router className="w-5 h-5 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{agents.length}</p>
-                  <p className="text-xs text-muted-foreground">Agents</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-                  <Wifi className="w-5 h-5 text-green-500" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{agents.filter(a => a.status?.value === 'ONLINE').length}</p>
-                  <p className="text-xs text-muted-foreground">Online</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Monitor className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{agentDevices.length}</p>
-                  <p className="text-xs text-muted-foreground">Devices</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-yellow-500" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{alerts.length}</p>
-                  <p className="text-xs text-muted-foreground">Active Alerts</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
           {/* Main Content */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Agents List */}

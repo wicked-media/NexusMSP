@@ -147,16 +147,34 @@ async def _aggregate_subscriptions(client_id: str) -> dict:
     # Recurring invoices (NexusOps-native contracted services)
     recurring = await db.recurring_invoices.find(
         {"client_id": client_id, "status": "active"},
-        {"_id": 0, "description": 1, "amount": 1, "frequency": 1}
+        {"_id": 0, "id": 1, "description": 1, "amount": 1, "frequency": 1}
     ).to_list(50)
+    recurring_ids = [item.get("id") for item in recurring if item.get("id")]
+    linked_contracts = await db.contracts.find(
+        {"client_id": client_id, "recurring_invoice_id": {"$in": recurring_ids}},
+        {"_id": 0, "id": 1, "name": 1, "recurring_invoice_id": 1},
+    ).to_list(50) if recurring_ids else []
+    contract_by_recurring = {item.get("recurring_invoice_id"): item for item in linked_contracts}
+    # Older contracts may predate the recurring_invoice_id relationship. When a
+    # client has one active agreement, it is still an unambiguous billing source
+    # and should remain reachable from the subscription workspace.
+    active_contracts = await db.contracts.find(
+        {"client_id": client_id, "status": "active"},
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(10)
+    fallback_contract = active_contracts[0] if len(active_contracts) == 1 else None
     for ri in recurring:
         freq = ri.get("frequency", "monthly")
         amt = float(ri.get("amount", 0))
         monthly = amt if freq == "monthly" else amt / 3 if freq == "quarterly" else amt / 12 if freq == "yearly" else amt
         total_monthly += monthly
+        linked_contract = contract_by_recurring.get(ri.get("id")) or fallback_contract
         subs.append({
             "source": "msp_contract",
-            "source_label": "MSP Contract",
+            "source_label": "Contract billing" if linked_contract else "Recurring billing",
+            "source_id": ri.get("id"),
+            "linked_contract_id": linked_contract.get("id") if linked_contract else None,
+            "linked_contract_name": linked_contract.get("name") if linked_contract else None,
             "product": ri.get("description") or "Managed Services",
             "quantity": 1,
             "unit_price": amt,

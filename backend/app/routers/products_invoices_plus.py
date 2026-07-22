@@ -600,7 +600,7 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
 
 @router.post("/invoices/{invoice_id}/dispute-scan")
 async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current_user)):
-    """Claude scans invoice line items + client history, flags potential dispute risks, drafts justifications."""
+    """Nexus AI scans invoice line items and client history for dispute risks and drafts justifications."""
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv: raise HTTPException(404, "invoice not found")
 
@@ -645,7 +645,7 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
                 "Output JSON ONLY: {risks:[{line,reason,severity,justification}], summary:'...'}. "
                 "Severity: high|medium|low. Keep justifications under 50 words each."
             ),
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        ).with_model("openai", "gpt-5.6-terra")
         resp = await chat.send_message(UserMessage(text=corpus))
         import json as _json, re as _re
         m = _re.search(r"\{[\s\S]*\}", resp or "")
@@ -654,7 +654,7 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
             "flags": flags,
             "ai_risks": (parsed or {}).get("risks", []),
             "ai_summary": (parsed or {}).get("summary"),
-            "model": "claude-sonnet-4-5",
+            "model": "gpt-5.6-terra",
         }
     except Exception as e:
         return {"flags": flags, "justification": None, "error": str(e)[:200]}

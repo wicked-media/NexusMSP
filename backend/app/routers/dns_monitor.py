@@ -39,6 +39,16 @@ async def check_domain_dns(domain_id: str, current_user: dict = Depends(get_curr
         return {"error": "Domain not found"}
     now = datetime.now(timezone.utc).isoformat()
     await db.dns_domains.update_one({"id": domain_id}, {"$set": {"last_checked": now}})
+    await db.dns_history.insert_one({
+        "id": f"dnsh-{uuid.uuid4().hex[:10]}",
+        "domain_id": domain_id,
+        "domain": domain["domain"],
+        "checked_at": now,
+        "status": domain.get("status", "unknown"),
+        "records_checked": sorted((domain.get("records") or {}).keys()),
+        "initiated_by": current_user.get("name") or current_user.get("email") or "NexusMSP technician",
+        "source": "manual_check",
+    })
     return {"status": "checked", "domain": domain["domain"], "checked_at": now}
 
 @router.get("/dns-monitor/alerts")

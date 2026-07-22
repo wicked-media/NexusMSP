@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
-import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, Sun, Sunrise, Moon } from "lucide-react";
+import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, Settings2, Sun, Sunrise, Moon } from "lucide-react";
 
 // Match #PREFIX-NUMBER or bare PREFIX-NUMBER tokens (INC-1234 / SR-0001).
 const TICKET_RE = /(#?)([A-Z]{2,5}-\d{2,8})\b/g;
@@ -69,6 +69,7 @@ export function StandupDigestBanner() {
   const slot = digest?.slot || "morning";
   const label = digest?.slot_label || SLOT_DEFAULT_LABEL[slot] || "Standup";
   const Icon = SLOT_ICON[slot] || Sun;
+  const needsAiSetup = digest?.ai_status === "not_configured";
   const urgencyTone =
     (s.critical_open || 0) > 0 || (s.sla_breaches || 0) > 0 ? "rose" :
     (s.failed_backups || 0) > 0 || (s.offline_devices || 0) > 5 ? "amber" : "emerald";
@@ -112,6 +113,11 @@ export function StandupDigestBanner() {
           {loading ? (
             <div className="flex items-center justify-center py-6 text-zinc-500">
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating brief…
+            </div>
+          ) : needsAiSetup ? (
+            <div className="flex flex-col gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between" data-testid="digest-ai-setup-state">
+              <div><p className="text-xs font-semibold text-cyan-100">Connect an AI provider to generate this brief</p><p className="mt-1 text-[11px] text-muted-foreground">The operational totals above are live. Configure a provider when you want NexusMSP to add an AI-written technician summary.</p></div>
+              <Button asChild size="sm" variant="outline" className="shrink-0 border-cyan-400/30 text-cyan-100 hover:bg-cyan-400/10"><Link to="/settings?tab=ai&anchor=ai-config-card"><Settings2 className="mr-1.5 h-3.5 w-3.5" />Configure AI</Link></Button>
             </div>
           ) : (
             <LinkifiedDigest text={digest?.ai_brief} />

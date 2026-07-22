@@ -456,8 +456,8 @@ async def _standup_digest_scheduler():
                 # Email delivery
                 if channels.get("email") and email_to:
                     try:
-                        from app.routers.email_utils import send_email, is_resend_configured
-                        if is_resend_configured():
+                        from app.routers.email_utils import send_email, is_microsoft365_configured
+                        if await is_microsoft365_configured():
                             html = (
                                 f"<h2>NexusOps Morning Standup Â· {today_tag}</h2>"
                                 f"<pre style='font-family:inherit;white-space:pre-wrap'>{ai_brief}</pre>"

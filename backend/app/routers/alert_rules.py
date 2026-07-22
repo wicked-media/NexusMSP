@@ -27,21 +27,13 @@ METRIC_OPTIONS = [
 OPERATORS = ["greater_than", "less_than", "equals", "not_equals", "greater_or_equal", "less_or_equal"]
 
 ACTION_OPTIONS = [
-    {"id": "create_ticket", "label": "Create Ticket", "fields": ["priority", "category", "assign_to"]},
-    {"id": "send_email", "label": "Send Email Alert", "fields": ["recipients"]},
-    {"id": "send_slack", "label": "Send Slack Notification", "fields": ["channel"]},
-    {"id": "run_script", "label": "Run Remediation Script", "fields": ["script_id"]},
-    {"id": "reboot_device", "label": "Reboot Device", "fields": ["delay_minutes"]},
-    {"id": "suppress_30m", "label": "Suppress for 30 min", "fields": []},
+    {"id": "create_ticket", "label": "Create linked ticket", "fields": ["priority", "category", "assign_to"]},
 ]
 
 
 @router.get("/alert-rules")
 async def get_alert_rules(current_user: dict = Depends(get_current_user)):
-    rules = await db.alert_rules.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    if not rules:
-        rules = await _seed_rules()
-    return rules
+    return await db.alert_rules.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
 @router.get("/alert-rules/options")
@@ -52,8 +44,6 @@ async def get_alert_rule_options(current_user: dict = Depends(get_current_user))
 @router.get("/alert-rules/stats")
 async def get_alert_rules_stats(current_user: dict = Depends(get_current_user)):
     rules = await db.alert_rules.find({}, {"_id": 0}).to_list(200)
-    if not rules:
-        rules = await _seed_rules()
     total = len(rules)
     active = len([r for r in rules if r.get("enabled")])
     total_triggered = sum(r.get("trigger_count", 0) for r in rules)
@@ -97,6 +87,11 @@ def _metric_value(device: dict, metric: str) -> float | None:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def _agent_observed(device: dict) -> bool:
+    source = str(device.get("source") or device.get("telemetry_source") or "").lower()
+    return source in {"nexus-agent", "rmm-agent", "agent", "api-agent", "provider"} or bool(device.get("nexus_agent_id") or device.get("last_heartbeat"))
 
 
 def _matches(value: float, operator: str, threshold: Any) -> bool:
@@ -173,6 +168,8 @@ async def evaluate_alert_rules(*, device_ids: list[str] | None = None, create_ac
 
     for rule in rules:
         for device in devices:
+            if not _agent_observed(device):
+                continue
             if not _in_scope(rule, device):
                 continue
             active_window = await db.maintenance_windows.find_one(
@@ -346,6 +343,7 @@ async def toggle_alert_rule(rule_id: str, current_user: dict = Depends(get_curre
 
 
 async def _seed_rules():
+    raise HTTPException(status_code=410, detail="Generated alert-rule samples are retired. Create a technician-confirmed policy instead.")
     rules = [
         {"id": "ar-001", "name": "CPU Critical - Servers", "description": "Alert when any server CPU exceeds 90% for 5 minutes", "metric": "cpu_usage", "operator": "greater_than", "threshold": 90, "duration_minutes": 5, "scope": "device_type", "scope_filter": {"device_type": "server"}, "actions": [{"type": "create_ticket", "config": {"priority": "critical", "category": "infrastructure"}}, {"type": "send_email", "config": {"recipients": "noc@company.com"}}], "severity": "critical", "enabled": True, "cooldown_minutes": 30, "trigger_count": 12, "last_triggered": "2026-04-15T10:00:00Z", "created_by": "System", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-04-15T10:00:00Z"},
         {"id": "ar-002", "name": "Disk Space Low", "description": "Alert when disk usage exceeds 85%", "metric": "disk_usage", "operator": "greater_than", "threshold": 85, "duration_minutes": 0, "scope": "all", "scope_filter": {}, "actions": [{"type": "create_ticket", "config": {"priority": "high", "category": "infrastructure"}}], "severity": "high", "enabled": True, "cooldown_minutes": 60, "trigger_count": 8, "last_triggered": "2026-04-14T08:00:00Z", "created_by": "System", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-04-14T08:00:00Z"},

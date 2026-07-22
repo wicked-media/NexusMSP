@@ -1,37 +1,43 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Globe, AlertTriangle, CheckCircle, XCircle, RefreshCw, Shield, Clock, Plus } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Globe, AlertTriangle, CheckCircle, RefreshCw, Shield, Clock, Plus, Activity } from "lucide-react";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 export default function DnsMonitorPage() {
   const { token } = useAuth();
   const [domains, setDomains] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [newDomain, setNewDomain] = useState("");
-  const headers = { Authorization: `Bearer ${token}` };
+  const [domainForm, setDomainForm] = useState({ domain: "", client_id: "", check_interval_minutes: "60" });
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    setLoading(true);
     try {
-      const [dRes, aRes] = await Promise.all([
+      const [dRes, aRes, clientRes] = await Promise.all([
         axios.get(`${API}/dns-monitor/domains`, { headers }),
         axios.get(`${API}/dns-monitor/alerts`, { headers }),
+        axios.get(`${API}/clients`, { headers }),
       ]);
       setDomains(dRes.data);
       setAlerts(aRes.data);
+      setClients(clientRes.data || []);
     } catch (e) { toast.error("Failed to load DNS data"); }
-    setLoading(false);
-  };
+    finally { setLoading(false); }
+  }, [headers]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleCheck = async (id) => {
     try {
@@ -50,11 +56,17 @@ export default function DnsMonitorPage() {
   };
 
   const handleAddDomain = async () => {
-    if (!newDomain) return;
+    if (!domainForm.domain.trim()) { toast.error("Enter a domain name"); return; }
+    const client = clients.find(item => item.id === domainForm.client_id);
     try {
-      await axios.post(`${API}/dns-monitor/domains`, { domain: newDomain }, { headers });
+      await axios.post(`${API}/dns-monitor/domains`, {
+        domain: domainForm.domain.trim().toLowerCase(),
+        client_id: client?.id || "",
+        client_name: client?.name || "",
+        check_interval_minutes: Number(domainForm.check_interval_minutes) || 60,
+      }, { headers });
       toast.success("Domain added");
-      setNewDomain("");
+      setDomainForm({ domain: "", client_id: "", check_interval_minutes: "60" });
       setShowAdd(false);
       fetchData();
     } catch (e) { toast.error("Failed to add domain"); }
@@ -68,27 +80,38 @@ export default function DnsMonitorPage() {
 
   return (
     <div className="space-y-6" data-testid="dns-monitor-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">DNS Monitor</h1>
-          <p className="text-muted-foreground text-sm mt-1">Track DNS record changes across client domains</p>
-        </div>
-        <Button onClick={() => setShowAdd(!showAdd)} data-testid="add-domain-btn"><Plus className="w-4 h-4 mr-2" />Add Domain</Button>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Network workspace · DNS"
+        title="DNS monitor"
+        description="Monitor client DNS records, investigate unexpected changes and retain an acknowledgement trail."
+        icon={Globe}
+        tone="sky"
+        actions={(
+          <>
+            <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="dns-refresh-btn"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
+            <Button onClick={() => setShowAdd(value => !value)} data-testid="add-domain-btn"><Plus className="w-4 h-4 mr-2" />Add Domain</Button>
+          </>
+        )}
+      />
 
       {showAdd && (
-        <Card><CardContent className="pt-4 flex gap-3">
-          <Input value={newDomain} onChange={e => setNewDomain(e.target.value)} placeholder="e.g. example.com" data-testid="new-domain-input" />
-          <Button onClick={handleAddDomain} data-testid="save-domain-btn">Add</Button>
+        <Card className="border-sky-500/20 bg-sky-500/[0.03]" data-testid="add-domain-form"><CardContent className="space-y-4 p-5">
+          <div><p className="text-sm font-semibold">Add a monitored domain</p><p className="mt-1 text-xs text-muted-foreground">Link it to a client now so DNS changes are visible in the correct service context and audit trail.</p></div>
+          <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_180px_auto] md:items-end">
+            <div className="space-y-1.5"><Label htmlFor="new-domain-input">Domain</Label><Input id="new-domain-input" value={domainForm.domain} onChange={event => setDomainForm(form => ({ ...form, domain: event.target.value }))} placeholder="example.com" data-testid="new-domain-input" /></div>
+            <div className="space-y-1.5"><Label>Client</Label><Select value={domainForm.client_id || "unlinked"} onValueChange={value => setDomainForm(form => ({ ...form, client_id: value === "unlinked" ? "" : value }))}><SelectTrigger data-testid="dns-client-select"><SelectValue placeholder="Unlinked domain" /></SelectTrigger><SelectContent><SelectItem value="unlinked">Unlinked domain</SelectItem>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Check interval</Label><Select value={domainForm.check_interval_minutes} onValueChange={value => setDomainForm(form => ({ ...form, check_interval_minutes: value }))}><SelectTrigger data-testid="dns-interval-select"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="15">Every 15 minutes</SelectItem><SelectItem value="30">Every 30 minutes</SelectItem><SelectItem value="60">Hourly</SelectItem><SelectItem value="360">Every 6 hours</SelectItem><SelectItem value="1440">Daily</SelectItem></SelectContent></Select></div>
+            <Button onClick={handleAddDomain} data-testid="save-domain-btn"><Plus className="w-4 h-4 mr-1" />Add</Button>
+          </div>
         </CardContent></Card>
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card><CardContent className="pt-5 flex items-center gap-3"><div className="p-2 rounded-lg bg-primary/10"><Globe className="w-5 h-5 text-primary" /></div><div><p className="text-2xl font-bold">{domains.length}</p><p className="text-xs text-muted-foreground">Monitored Domains</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><div className="p-2 rounded-lg bg-emerald-500/10"><CheckCircle className="w-5 h-5 text-emerald-500" /></div><div><p className="text-2xl font-bold">{domains.filter(d => d.status === "healthy").length}</p><p className="text-xs text-muted-foreground">Healthy</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><div className="p-2 rounded-lg bg-red-500/10"><AlertTriangle className="w-5 h-5 text-red-500" /></div><div><p className="text-2xl font-bold">{unackAlerts.length}</p><p className="text-xs text-muted-foreground">Unacknowledged Alerts</p></div></CardContent></Card>
-        <Card><CardContent className="pt-5 flex items-center gap-3"><div className="p-2 rounded-lg bg-amber-500/10"><Shield className="w-5 h-5 text-amber-500" /></div><div><p className="text-2xl font-bold">{alerts.filter(a => a.severity === "critical" && !a.acknowledged).length}</p><p className="text-xs text-muted-foreground">Critical Alerts</p></div></CardContent></Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <HeroTile label="Monitored domains" value={domains.length} icon={Globe} glow="sky" subtitle="DNS baselines in scope" />
+        <HeroTile label="Healthy domains" value={domains.filter(domain => domain.status === "healthy").length} icon={CheckCircle} glow="emerald" subtitle="No current record concern" />
+        <HeroTile label="Needs review" value={unackAlerts.length} icon={AlertTriangle} glow={unackAlerts.length ? "rose" : "zinc"} subtitle={unackAlerts.length ? "Awaiting acknowledgement" : "No open alerts"} />
+        <HeroTile label="Critical changes" value={alerts.filter(alert => alert.severity === "critical" && !alert.acknowledged).length} icon={Shield} glow="amber" subtitle="Investigate immediately" />
       </div>
 
       {/* Alerts */}
@@ -130,7 +153,7 @@ export default function DnsMonitorPage() {
                     <td className="py-3"><div className="flex gap-1 flex-wrap">{Object.keys(d.records || {}).map(r => <Badge key={r} variant="outline" className="text-[10px]">{r}</Badge>)}</div></td>
                     <td className="py-3 text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" />{d.check_interval_minutes}m</td>
                     <td className="py-3 text-xs text-muted-foreground">{d.last_checked ? new Date(d.last_checked).toLocaleString() : "Never"}</td>
-                    <td className="py-3"><Button variant="ghost" size="sm" onClick={() => handleCheck(d.id)} data-testid={`check-dns-${d.id}`}><RefreshCw className="w-4 h-4" /></Button></td>
+                    <td className="py-3"><Button variant="outline" size="sm" onClick={() => handleCheck(d.id)} data-testid={`check-dns-${d.id}`}><Activity className="w-3 h-3 mr-1" />Check</Button></td>
                   </tr>
                 ))}
               </tbody>

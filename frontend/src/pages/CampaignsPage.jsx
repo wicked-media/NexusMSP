@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { Mail, Plus, Send, Trash2, Loader2, RefreshCw, FileText, Users, Copy, Eye } from "lucide-react";
 
-export default function CampaignsPage() {
+export default function CampaignsPage({ embedded = false }) {
   const { token } = useAuth();
   const [campaigns, setCampaigns] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -64,16 +64,25 @@ export default function CampaignsPage() {
 
   return (
     <div className="space-y-5" data-testid="campaigns-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Mail className="w-8 h-8 text-pink-400" />Email Campaigns</h1>
-          <p className="text-muted-foreground">{campaigns.length} campaigns &middot; {campaigns.filter(c => c.status === "sent").length} sent</p>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Mail className="w-8 h-8 text-pink-400" />Email Campaigns</h1>
+            <p className="text-muted-foreground">{campaigns.length} campaigns &middot; {campaigns.filter(c => c.status === "sent").length} sent</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+            <Button onClick={() => setShowCreate(true)} data-testid="create-campaign-btn"><Plus className="w-4 h-4 mr-1" />New Campaign</Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setShowCreate(true)} data-testid="create-campaign-btn"><Plus className="w-4 h-4 mr-1" />New Campaign</Button>
+      )}
+
+      {embedded && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
+          <div><p className="text-sm font-semibold">Email campaigns</p><p className="text-xs text-muted-foreground">{campaigns.length} campaigns &middot; {campaigns.filter(c => c.status === "sent").length} sent</p></div>
+          <div className="flex gap-2"><Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button><Button size="sm" onClick={() => setShowCreate(true)} data-testid="create-campaign-btn"><Plus className="w-3.5 h-3.5 mr-1" />New Campaign</Button></div>
         </div>
-      </div>
+      )}
 
       {/* Templates */}
       <div>

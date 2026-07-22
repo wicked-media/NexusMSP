@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth, useTheme } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +45,7 @@ const SETTINGS_SECTIONS = [
 ];
 
 export default function TechSettingsPage() {
-  const { user, token } = useAuth();
+  const { user, token, refreshUser } = useAuth();
   const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,6 +60,8 @@ export default function TechSettingsPage() {
   // Profile
   const [profileForm, setProfileForm] = useState({ name: "", phone: "", job_title: "", specialties: "" });
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
 
   // Password
   const [pwForm, setPwForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
@@ -177,6 +180,38 @@ export default function TechSettingsPage() {
     finally { setSaving(false); }
   };
 
+  const uploadProfilePhoto = async (event) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || !user?.id) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file to use as your profile photo");
+      input.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Choose an image smaller than 10 MB");
+      input.value = "";
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      const response = await axios.post(`${API}/technicians/${user.id}/avatar`, payload, {
+        headers: { ...headers, "Content-Type": "multipart/form-data" },
+      });
+      setProfile(current => ({ ...current, avatar: response.data.avatar_url }));
+      try { await refreshUser?.(); } catch { /* The uploaded photo remains available after the next refresh. */ }
+      toast.success("Profile photo updated");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to upload profile photo");
+    } finally {
+      setAvatarUploading(false);
+      input.value = "";
+    }
+  };
+
   const changePassword = async () => {
     if (pwForm.new_password !== pwForm.confirm_password) return toast.error("Passwords don't match");
     if (pwForm.new_password.length < 12) return toast.error("Use at least 12 characters");
@@ -293,9 +328,10 @@ export default function TechSettingsPage() {
       <div className="space-y-4">
         <Card className="border-primary/15 bg-gradient-to-b from-card to-muted/20 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.7)]">
           <CardContent className="space-y-4 pt-5 text-center">
-            <div className="w-16 h-16 rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/35 to-primary/10 text-primary mx-auto flex items-center justify-center text-xl font-bold shadow-lg shadow-primary/10">
-              {profile?.name?.split(" ").map(n => n[0]).join("") || "U"}
-            </div>
+            <Avatar className="mx-auto h-16 w-16 rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/35 to-primary/10 text-xl font-bold text-primary shadow-lg shadow-primary/10">
+              <AvatarImage src={profile?.avatar} alt={profile?.name || "Profile photo"} className="object-cover" />
+              <AvatarFallback className="rounded-2xl bg-transparent text-primary">{profile?.name?.split(" ").map(n => n[0]).join("") || "U"}</AvatarFallback>
+            </Avatar>
             <div>
               <p className="font-semibold text-base tracking-tight">{profile?.name}</p>
               <p className="text-sm text-muted-foreground">{profile?.email}</p>
@@ -349,6 +385,24 @@ export default function TechSettingsPage() {
             <Card data-testid="settings-profile-panel">
               <CardHeader><CardTitle className="flex items-center gap-2"><User className="w-5 h-5" />Profile Information</CardTitle></CardHeader>
               <CardContent className="space-y-4">
+                <div className="flex flex-col gap-4 rounded-xl border border-primary/15 bg-primary/[0.035] p-4 sm:flex-row sm:items-center">
+                  <Avatar className="h-20 w-20 shrink-0 rounded-2xl border-2 border-primary/25 bg-primary/10 shadow-lg shadow-primary/10">
+                    <AvatarImage src={profile?.avatar} alt={profile?.name || "Profile photo"} className="object-cover" />
+                    <AvatarFallback className="rounded-2xl bg-primary/10 text-lg font-bold text-primary">{profile?.name?.split(" ").map(n => n[0]).join("") || "U"}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">Profile photo</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">Shown beside your ticket comments, assignments, active-viewer indicators, and technician activity. If no photo is selected, NexusMSP uses your initials.</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadProfilePhoto} data-testid="profile-avatar-file" />
+                      <Button type="button" size="sm" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="profile-avatar-upload-btn">
+                        {avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
+                        {avatarUploading ? "Uploading…" : "Upload photo"}
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">PNG, JPG, WebP, or GIF · up to 10 MB</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label>Display Name</Label><Input value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} data-testid="profile-name" /></div>
                   <div><Label>Phone</Label><Input value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} data-testid="profile-phone" /></div>

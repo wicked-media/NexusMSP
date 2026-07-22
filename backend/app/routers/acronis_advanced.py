@@ -8,12 +8,40 @@ Advanced Acronis backup operations:
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from uuid import uuid4
 import httpx
 from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
 
 router = APIRouter()
+
+
+async def _record_acronis_activity(
+    current_user: dict,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    entity_name: str,
+    details: str,
+    metadata: Optional[dict] = None,
+):
+    """Record backup actions for the central activity/audit feed."""
+    try:
+        await db.activity_logs.insert_one({
+            "id": uuid4().hex,
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "entity_name": entity_name,
+            "user_id": current_user.get("id", ""),
+            "user_name": current_user.get("name") or current_user.get("email", ""),
+            "details": details,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": metadata or {},
+        })
+    except Exception:
+        pass
 
 
 @router.get("/acronis/orphans")
@@ -168,6 +196,7 @@ async def detect_acronis_orphans(stale_days: int = 30, current_user: dict = Depe
     except Exception as e:
         return {
             "scanned_at": datetime.now(timezone.utc).isoformat(),
+            "stale_threshold_days": stale_days,
             "totals": {"total_orphans": 0, "unprotected": 0, "stale": 0, "zombie_apps": 0, "offline_consuming": 0},
             "unprotected": [], "stale": [], "zombie_apps": [], "offline_consuming": [],
             "data_source": "error",
@@ -246,6 +275,14 @@ async def dismiss_acronis_alert(alert_id: str, current_user: dict = Depends(get_
                 headers={"Authorization": f"Bearer {token}"},
             )
             if resp.status_code in (200, 202, 204):
+                await _record_acronis_activity(
+                    current_user,
+                    "acronis_alert_dismissed",
+                    "acronis_alert",
+                    alert_id,
+                    "Acronis alert",
+                    "Marked Acronis alert as handled",
+                )
                 return {"status": "dismissed", "alert_id": alert_id}
             raise HTTPException(status_code=resp.status_code, detail=f"Acronis returned {resp.status_code}: {resp.text[:200]}")
     except HTTPException:
@@ -328,25 +365,8 @@ async def get_live_acronis_activities(current_user: dict = Depends(get_current_u
 
 
 # ============================================================================
-# Backup operations: Run / Cancel / Apply Plan / Remove Plan / List Policies
+# Backup operations: Cancel / Apply Plan / Remove Plan / List Policies
 # ============================================================================
-
-@router.post("/acronis/backup/run")
-async def run_backup_now(body: dict, current_user: dict = Depends(get_current_user)):
-    """Run a backup plan now for the given resources.
-    Body: {"policy_id": "...", "resource_ids": ["..."]}
-    """
-    policy_id = (body or {}).get("policy_id")
-    resource_ids = (body or {}).get("resource_ids") or []
-    if not policy_id or not resource_ids:
-        raise HTTPException(status_code=400, detail="policy_id and resource_ids required")
-    try:
-        results = await acronis_service.run_applications([{"policy_id": policy_id, "resource_ids": resource_ids}])
-        ok = bool(results) and (results[0].get("status_code") in (200, 202, 204))
-        return {"status": "started" if ok else "failed", "results": results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Run failed: {str(e)}")
-
 
 @router.post("/acronis/backup/cancel")
 async def cancel_backup(body: dict, current_user: dict = Depends(get_current_user)):
@@ -370,6 +390,15 @@ async def cancel_backup(body: dict, current_user: dict = Depends(get_current_use
                 json=payload,
             )
             if resp.status_code in (200, 202, 204):
+                await _record_acronis_activity(
+                    current_user,
+                    "acronis_backup_cancelled",
+                    "backup_run",
+                    resource_ids[0] if resource_ids else policy_id,
+                    f"Acronis policy {policy_id}",
+                    f"Stopped backup run for {len(resource_ids)} resource(s)",
+                    {"policy_id": policy_id, "resource_ids": resource_ids},
+                )
                 return {"status": "cancelled", "policy_id": policy_id, "resource_count": len(resource_ids)}
             raise HTTPException(status_code=resp.status_code, detail=f"Acronis: {resp.text[:300]}")
     except HTTPException:
@@ -466,13 +495,23 @@ async def apply_acronis_policy(body: dict, current_user: dict = Depends(get_curr
         if run_now and ok_count > 0:
             run_result = await acronis_service.run_applications([{"policy_id": policy_id, "resource_ids": resource_ids}])
 
-        return {
+        response = {
             "status": "applied" if ok_count == len(resource_ids) else "partial",
             "applied_count": ok_count,
             "total": len(resource_ids),
             "results": results,
             "run_result": run_result,
         }
+        await _record_acronis_activity(
+            current_user,
+            "acronis_policy_applied",
+            "acronis_policy",
+            policy_id,
+            f"Acronis policy {policy_id}",
+            f"Applied backup policy to {ok_count} of {len(resource_ids)} resource(s)",
+            {"policy_id": policy_id, "resource_ids": resource_ids, "run_now": run_now, "status": response["status"]},
+        )
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Apply policy failed: {str(e)}")
 

@@ -14,11 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
-  Siren, AlertTriangle, Clock, Users, Radio, MessageSquare, Send,
+  Siren, AlertTriangle, ArrowLeft, Clock, Users, Radio, MessageSquare, Send,
   CheckCircle2, Loader2, ChevronRight, Share2, Copy, Link2, XCircle,
   Activity, Server, FileText, Zap, Plus, Eye, Megaphone, ChevronUp, RefreshCw,
 } from "lucide-react";
 import { PostmortemButton } from "@/components/ai/PostmortemButton";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 const STATUS_CLS = {
   investigating: "text-rose-400 border-rose-500/40 bg-rose-500/10",
@@ -61,6 +63,9 @@ function WarRoomList() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: "", severity: "P1", summary: "", client_id: "", ticket_id: "" });
   const [clients, setClients] = useState([]);
+  const [tickets, setTickets] = useState([]);
+  const [clientQuery, setClientQuery] = useState("");
+  const [ticketQuery, setTicketQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +85,23 @@ function WarRoomList() {
       } catch {}
     })();
   }, [headers]);
+  useEffect(() => {
+    if (!form.client_id) { setTickets([]); return; }
+    axios.get(`${API}/tickets?client_id=${form.client_id}`, { headers }).then(res => setTickets(res.data || [])).catch(() => setTickets([]));
+  }, [form.client_id, headers]);
+
+  const chooseClient = value => {
+    const match = clients.find(client => client.name.toLowerCase() === value.trim().toLowerCase());
+    setClientQuery(value);
+    setTicketQuery("");
+    setForm(current => ({ ...current, client_id: match?.id || "", ticket_id: "" }));
+  };
+  const ticketLabel = ticket => [ticket.ticket_number ? `#${ticket.ticket_number}` : "Ticket", ticket.title].filter(Boolean).join(" - ");
+  const chooseTicket = value => {
+    const match = tickets.find(ticket => ticketLabel(ticket).toLowerCase() === value.trim().toLowerCase());
+    setTicketQuery(value);
+    setForm(current => ({ ...current, ticket_id: match?.id || "" }));
+  };
 
   const create = async () => {
     if (!form.title.trim()) { toast.error("Title required"); return; }
@@ -88,6 +110,9 @@ function WarRoomList() {
       const res = await axios.post(`${API}/warroom`, form, { headers });
       toast.success("War room opened");
       setCreateOpen(false);
+      setForm({ title: "", severity: "P1", summary: "", client_id: "", ticket_id: "" });
+      setClientQuery("");
+      setTicketQuery("");
       navigate(`/warroom/${res.data.war_room.id}`);
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
     finally { setCreating(false); }
@@ -97,40 +122,29 @@ function WarRoomList() {
   const resolved = rooms.filter(r => r.status === "resolved");
 
   return (
-    <div className="p-6 space-y-5" data-testid="warroom-list-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <Siren className="w-7 h-7 text-rose-500" />
-            Incident War Rooms
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            One URL · live tech chat · affected devices · past-incident playbook · client-bookmarkable status.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIncludeResolved(v => !v)} data-testid="warroom-toggle-resolved">
-            {includeResolved ? "Active only" : "Show resolved"}
-          </Button>
-          <Button
-            onClick={() => setCreateOpen(true)}
-            variant="outline"
-            className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
-            data-testid="warroom-new-btn"
-          >
-            <Plus className="w-4 h-4 mr-1" /> Open War Room
-          </Button>
-        </div>
+    <div className="space-y-6" data-testid="warroom-list-page">
+      <OperationalPageHeader
+        eyebrow="Incident command · real-time response and client communication"
+        title="War Rooms"
+        description="Open a focused incident workspace with a technician bridge, live status, paging controls, evidence and a client-safe update link."
+        icon={Siren}
+        tone="amber"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => setIncludeResolved(v => !v)} data-testid="warroom-toggle-resolved">{includeResolved ? "Active only" : "Show resolved"}</Button>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
+          <Button onClick={() => setCreateOpen(true)} data-testid="warroom-new-btn"><Siren className="mr-1.5 h-4 w-4" />Open war room</Button>
+        </>}
+      />
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <HeroTile label="Active rooms" value={active.length} icon={Siren} glow={active.length ? "rose" : "zinc"} subtitle="Live incident workspaces" testId="warroom-metric-active" />
+        <HeroTile label="Investigating" value={active.filter(r => r.status === "investigating").length} icon={AlertTriangle} glow="rose" subtitle="Initial response in progress" testId="warroom-metric-investigating" />
+        <HeroTile label="Identified" value={active.filter(r => r.status === "identified").length} icon={Activity} glow="amber" subtitle="Root cause or scope known" testId="warroom-metric-identified" />
+        <HeroTile label="Monitoring" value={active.filter(r => r.status === "monitoring").length} icon={Eye} glow="sky" subtitle="Validation underway" testId="warroom-metric-monitoring" />
+        <HeroTile label="Resolved" value={resolved.length} icon={CheckCircle2} glow="emerald" subtitle={includeResolved ? "Included in this view" : "Enable history to review"} testId="warroom-metric-resolved" />
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        <KpiBox label="Active" value={active.length} accent="rose" icon={<Siren className="w-4 h-4" />} />
-        <KpiBox label="Investigating" value={active.filter(r => r.status === "investigating").length} accent="rose" icon={<AlertTriangle className="w-4 h-4" />} />
-        <KpiBox label="Identified" value={active.filter(r => r.status === "identified").length} accent="amber" icon={<Activity className="w-4 h-4" />} />
-        <KpiBox label="Monitoring" value={active.filter(r => r.status === "monitoring").length} accent="sky" icon={<Eye className="w-4 h-4" />} />
-      </div>
-
-      <Card>
+      <Card className="border-border/80 bg-card/80">
         <CardContent className="p-0">
           {loading ? (
             <div className="p-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Loading…</div>
@@ -170,58 +184,21 @@ function WarRoomList() {
       </Card>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-xl" data-testid="warroom-create-dialog">
-          <DialogHeader><DialogTitle>Open a new War Room</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Title *</Label>
-              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="ACME Corp · VPN outage" data-testid="warroom-title" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Severity</Label>
-                <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
-                  <SelectTrigger data-testid="warroom-severity"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["P1", "P2", "P3", "P4"].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Client (optional)</Label>
-                <Select value={form.client_id || "__none"} onValueChange={(v) => setForm({ ...form, client_id: v === "__none" ? "" : v })}>
-                  <SelectTrigger data-testid="warroom-client"><SelectValue placeholder="None" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">None</SelectItem>
-                    {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label>Summary (optional)</Label>
-              <Textarea rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} placeholder="What do we know so far?" />
+        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto p-0" data-testid="warroom-create-dialog">
+          <DialogHeader className="border-b border-border/80 px-6 py-5"><DialogTitle className="flex items-center gap-2"><Siren className="h-5 w-5 text-rose-300" />Open incident war room</DialogTitle><p className="text-sm text-muted-foreground">Create the response bridge first, then use it as the complete record for coordination, updates, paging and follow-up.</p></DialogHeader>
+          <div className="space-y-5 px-6 py-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2"><Label htmlFor="warroom-title-input">Incident title</Label><Input id="warroom-title-input" className="mt-1" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. ACME Corp VPN outage" data-testid="warroom-title" /></div>
+              <div><Label>Severity</Label><Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}><SelectTrigger className="mt-1" data-testid="warroom-severity"><SelectValue /></SelectTrigger><SelectContent>{["P1", "P2", "P3", "P4"].map(s => <SelectItem key={s} value={s}>{s} · {s === "P1" ? "critical" : s === "P2" ? "high impact" : s === "P3" ? "standard" : "low impact"}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label htmlFor="warroom-client-input">Client</Label><Input id="warroom-client-input" list="warroom-client-options" className="mt-1" value={clientQuery} onChange={event => chooseClient(event.target.value)} placeholder="Type to find a client" data-testid="warroom-client" /><datalist id="warroom-client-options">{clients.map((client, index) => <option key={`${client.id}-${index}`} value={client.name} />)}</datalist></div>
+              <div className="md:col-span-2"><Label htmlFor="warroom-ticket-input">Related ticket</Label><Input id="warroom-ticket-input" list="warroom-ticket-options" className="mt-1" value={ticketQuery} onChange={event => chooseTicket(event.target.value)} placeholder={form.client_id ? "Type to link a client ticket" : "Choose a client to search their tickets"} disabled={!form.client_id} /><datalist id="warroom-ticket-options">{tickets.map((ticket, index) => <option key={`${ticket.id}-${index}`} value={ticketLabel(ticket)} />)}</datalist><p className="mt-1 text-[11px] text-muted-foreground">Linking the affected ticket keeps the response, device context and later post-incident reporting connected.</p></div>
+              <div className="md:col-span-2"><Label htmlFor="warroom-summary">Initial situation brief</Label><Textarea id="warroom-summary" className="mt-1" rows={4} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} placeholder="What is affected, what is known, what has been tried, and when will the next client update be due?" /></div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={create} disabled={creating || !form.title.trim()} variant="outline" className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10" data-testid="warroom-create-submit">
-              {creating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Siren className="w-4 h-4 mr-1" />}Open
-            </Button>
-          </DialogFooter>
+          <DialogFooter className="border-t border-border/80 px-6 py-4"><Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button><Button onClick={create} disabled={creating || !form.title.trim()} data-testid="warroom-create-submit">{creating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Siren className="mr-1.5 h-4 w-4" />}Open war room</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function KpiBox({ label, value, accent = "zinc", icon }) {
-  const col = { rose: "text-rose-400", amber: "text-amber-400", sky: "text-sky-400", emerald: "text-emerald-400", zinc: "text-zinc-400" }[accent];
-  return (
-    <Card><CardContent className="p-4">
-      <div className={`flex items-center gap-1.5 text-[10px] uppercase tracking-widest ${col}`}>{icon}{label}</div>
-      <div className="text-3xl font-light mt-1">{value}</div>
-    </CardContent></Card>
   );
 }
 
@@ -297,26 +274,14 @@ function WarRoomDetail({ wrId }) {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-background to-muted/20" data-testid="warroom-detail-page">
-      {/* War room header */}
-      <div className="border-b border-border px-6 py-3 flex items-center gap-3 bg-background/80 backdrop-blur">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/warroom")} className="flex-shrink-0">← Back</Button>
-        <Siren className="w-5 h-5 text-rose-500 flex-shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-medium truncate" data-testid="warroom-title">{wr.title}</h1>
-            <Badge variant="outline" className={SEVERITY_CLS[wr.severity]}>{wr.severity}</Badge>
-            <Badge variant="outline" className={STATUS_CLS[wr.status]}>{wr.status}</Badge>
-          </div>
-          <div className="text-[11px] text-muted-foreground">
-            {wr.client_name || "No client"} · opened {timeAgo(wr.created_at)} by {wr.created_by}
-            {wr.resolved_at && <span> · resolved {timeAgo(wr.resolved_at)}</span>}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+    <div className="space-y-4" data-testid="warroom-detail-page">
+      <section className="rounded-2xl border border-rose-500/20 bg-gradient-to-br from-rose-500/[0.11] via-background to-background p-5 md:p-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-300">Incident command · live response</p><Badge variant="outline" className={SEVERITY_CLS[wr.severity]}>{wr.severity}</Badge><Badge variant="outline" className={STATUS_CLS[wr.status]}>{wr.status}</Badge></div><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight" data-testid="warroom-title"><Siren className="h-6 w-6 shrink-0 text-rose-300" />{wr.title}</h1><p className="mt-2 text-sm text-muted-foreground">{wr.client_name || "No client linked"} · opened {timeAgo(wr.created_at)} by {wr.created_by}{wr.resolved_at && ` · resolved ${timeAgo(wr.resolved_at)}`}</p></div>
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <Button variant="outline" size="sm" onClick={() => navigate("/warroom")}><ArrowLeft className="mr-1.5 h-4 w-4" />All war rooms</Button>
           <Button
-            variant="outline" size="sm"
-            className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+            variant="outline" size="sm" className="border-rose-500/30 text-rose-200 hover:bg-rose-500/10"
             onClick={() => setPageOpen(true)}
             disabled={wr.status === "resolved"}
             data-testid="warroom-page-btn"
@@ -332,10 +297,11 @@ function WarRoomDetail({ wrId }) {
             </Button>
           )}
           {wr.status === "resolved" && <PostmortemButton warRoomId={wr.id} />}
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
+      <div className="grid h-[calc(100vh-280px)] min-h-[620px] grid-cols-12 gap-3 overflow-hidden">
         {/* LEFT sidebar: context */}
         <div className="col-span-3 overflow-y-auto space-y-3">
           <Card>
@@ -433,13 +399,13 @@ function WarRoomDetail({ wrId }) {
 
         {/* CENTER: Chat + messages */}
         <div className="col-span-6 flex flex-col overflow-hidden">
-          <Card className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-3 py-2 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
-              <MessageSquare className="w-3 h-3" /> Live tech chat · {wr.messages?.length || 0} messages
+          <Card className="flex flex-1 flex-col overflow-hidden border-border/80 bg-card/90 shadow-lg shadow-black/10">
+            <div className="flex items-center gap-2 border-b border-border/80 bg-gradient-to-r from-cyan-500/[0.06] to-transparent px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span><MessageSquare className="h-3.5 w-3.5 text-cyan-300" />Live response bridge <span className="ml-auto normal-case tracking-normal text-muted-foreground">{wr.messages?.length || 0} updates</span>
             </div>
-            <div ref={messagesRef} className="flex-1 overflow-y-auto p-3 space-y-2" data-testid="warroom-messages">
+            <div ref={messagesRef} className="flex-1 space-y-2 overflow-y-auto p-4" data-testid="warroom-messages">
               {(wr.messages || []).map(m => (
-                <div key={m.id} className={m.kind === "system" ? "text-[10px] text-zinc-500 italic" : "bg-muted/30 rounded-md p-2"}>
+                <div key={m.id} className={m.kind === "system" ? "mx-auto max-w-[90%] rounded-lg border border-cyan-500/15 bg-cyan-500/[0.04] px-3 py-2 text-center text-[10px] text-cyan-100/70" : "rounded-xl border border-border/75 bg-muted/20 p-3 shadow-sm"}>
                   {m.kind === "system" ? (
                     <div>⊙ {m.body} · <span className="text-[9px]">{timeAgo(m.ts)}</span></div>
                   ) : (
@@ -452,7 +418,7 @@ function WarRoomDetail({ wrId }) {
               ))}
               {(!wr.messages || wr.messages.length === 0) && <div className="text-center text-xs text-muted-foreground py-6">Drop the first update…</div>}
             </div>
-            <div className="border-t border-border p-2 flex items-center gap-2 bg-background/50">
+            <div className="flex items-center gap-2 border-t border-border/80 bg-muted/15 p-3">
               <Input
                 value={msg}
                 onChange={(e) => setMsg(e.target.value)}
@@ -461,7 +427,7 @@ function WarRoomDetail({ wrId }) {
                 disabled={sending || wr.status === "resolved"}
                 data-testid="warroom-message-input"
               />
-              <Button size="sm" variant="outline" onClick={sendMessage} disabled={sending || !msg.trim() || wr.status === "resolved"} data-testid="warroom-send-btn">
+              <Button size="sm" onClick={sendMessage} disabled={sending || !msg.trim() || wr.status === "resolved"} data-testid="warroom-send-btn">
                 {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </Button>
             </div>
@@ -594,13 +560,9 @@ function PageTeamDialog({ open, onOpenChange, wrId, headers, onPaged }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl" data-testid="warroom-page-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Megaphone className="w-5 h-5 text-rose-500" /> Page Team
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
+      <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto p-0" data-testid="warroom-page-dialog">
+        <DialogHeader className="border-b border-border/80 px-6 py-5"><DialogTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5 text-rose-300" />Page response team</DialogTitle><p className="text-sm text-muted-foreground">Choose who is paged, how they are notified, and whether NexusMSP should escalate if the first responders do not acknowledge.</p></DialogHeader>
+        <div className="space-y-4 px-6 py-5">
           <div className="flex items-center justify-between bg-muted/30 rounded-md px-3 py-2">
             <div>
               <div className="text-sm font-medium flex items-center gap-2">
@@ -669,13 +631,11 @@ function PageTeamDialog({ open, onOpenChange, wrId, headers, onPaged }) {
             )}
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="border-t border-border/80 px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             onClick={fire}
             disabled={sending || selected.size === 0}
-            variant="outline"
-            className="text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
             data-testid="warroom-page-fire-btn"
           >
             {sending ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Megaphone className="w-4 h-4 mr-1" />}

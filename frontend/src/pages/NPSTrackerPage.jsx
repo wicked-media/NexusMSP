@@ -1,55 +1,48 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { ThumbsUp, ThumbsDown, Minus } from "lucide-react";
+import { Users, Loader2, MessageSquare, RefreshCw, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function NPSTrackerPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const headers = { Authorization: `Bearer ${token}` };
-  useEffect(() => { axios.get(`${API}/nps-tracker/overview`, { headers }).then(r => setData(r.data)); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData((await axios.get(`${API}/nps-tracker/overview`, { headers })).data); }
+    finally { setLoading(false); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
 
-  if (!data) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  const s = data.summary;
+  if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  const s = data.summary || {};
+  const evidenceAvailable = data.evidence_state === "evidence_available";
+  const scoreColour = s.nps_score >= 50 ? "text-emerald-400" : s.nps_score >= 0 ? "text-amber-400" : "text-red-400";
+
   return (
-    <div className="space-y-6" data-testid="nps-tracker-page">
-      <div><h1 className="text-2xl font-bold">NPS Tracker</h1><p className="text-muted-foreground text-sm">Net Promoter Score tracking and client satisfaction over time</p></div>
-      <div className="grid grid-cols-5 gap-4">
-        <Card><CardContent className="pt-4 text-center"><div className={`text-4xl font-bold ${s.nps_score >= 50 ? 'text-green-500' : s.nps_score >= 0 ? 'text-yellow-500' : 'text-red-500'}`}>{s.nps_score}</div><div className="text-xs text-muted-foreground mt-1">NPS Score</div></CardContent></Card>
-        <Card><CardContent className="pt-4 text-center"><div className="text-2xl font-bold">{s.avg_score}</div><div className="text-xs text-muted-foreground mt-1">Avg Rating</div></CardContent></Card>
-        <Card><CardContent className="pt-4 text-center"><div className="text-2xl font-bold text-green-500">{s.promoters}</div><div className="text-xs text-muted-foreground mt-1">Promoters (9-10)</div></CardContent></Card>
-        <Card><CardContent className="pt-4 text-center"><div className="text-2xl font-bold text-yellow-500">{s.passives}</div><div className="text-xs text-muted-foreground mt-1">Passives (7-8)</div></CardContent></Card>
-        <Card><CardContent className="pt-4 text-center"><div className="text-2xl font-bold text-red-500">{s.detractors}</div><div className="text-xs text-muted-foreground mt-1">Detractors (0-6)</div></CardContent></Card>
-      </div>
-      <Card><CardHeader className="pb-2"><CardTitle className="text-base">NPS Trend (6 Months)</CardTitle></CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data.trend}>
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, color: 'hsl(var(--card-foreground))' }} />
-              <Line type="monotone" dataKey="nps" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6' }} name="NPS Score" />
-            </LineChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-      <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recent Responses</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {data.surveys.slice(0, 15).map(sv => (
-              <div key={sv.id} className="flex items-center gap-4 p-2 rounded hover:bg-muted/50">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${sv.score >= 9 ? 'bg-green-500/20 text-green-500' : sv.score >= 7 ? 'bg-yellow-500/20 text-yellow-500' : 'bg-red-500/20 text-red-500'}`}>{sv.score}</div>
-                <div className="flex-1"><div className="text-sm font-medium">{sv.respondent}</div><div className="text-xs text-muted-foreground">{sv.client_name}</div></div>
-                <div className="text-sm text-muted-foreground max-w-md truncate">{sv.feedback || "No feedback"}</div>
-                <span className="text-xs text-muted-foreground">{new Date(sv.submitted_at).toLocaleDateString()}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-5" data-testid="nps-tracker-page">
+      <OperationalPageHeader eyebrow="Customer feedback" title="NPS tracker" description="Net Promoter Score is calculated only from recorded NPS responses. No response rate or trend is inferred when your collection workflow has not run." icon={MessageSquare} tone="sky" actions={<Button variant="outline" size="sm" onClick={load}><RefreshCw className="mr-1 h-4 w-4" />Refresh</Button>} />
+
+      {!evidenceAvailable ? <Card className="border-dashed border-sky-500/30 bg-sky-500/5"><CardContent className="py-20 text-center"><MessageSquare className="mx-auto mb-3 h-12 w-12 text-sky-300 opacity-40" /><p className="font-semibold">No NPS responses have been recorded</p><p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">Connect a verified NPS collection workflow before using NPS in client health or QBR reporting. NexusMSP will show evidence gaps instead of estimated satisfaction.</p></CardContent></Card> : <>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <Metric label="NPS score" value={s.nps_score} colour={scoreColour} />
+          <Metric label="Average rating" value={s.avg_score} />
+          <Metric label="Promoters (9–10)" value={s.promoters} colour="text-emerald-400" icon={ThumbsUp} />
+          <Metric label="Passives (7–8)" value={s.passives} colour="text-amber-400" icon={Minus} />
+          <Metric label="Detractors (0–6)" value={s.detractors} colour="text-red-400" icon={ThumbsDown} />
+        </div>
+        {data.trend?.length > 0 && <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recorded NPS trend</CardTitle></CardHeader><CardContent><ResponsiveContainer width="100%" height={250}><LineChart data={data.trend}><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, color: "hsl(var(--card-foreground))" }} /><Line type="monotone" connectNulls={false} dataKey="nps" stroke="#38bdf8" strokeWidth={2} dot={{ fill: "#38bdf8" }} name="NPS score" /></LineChart></ResponsiveContainer></CardContent></Card>}
+        <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recent responses</CardTitle></CardHeader><CardContent><div className="space-y-2">{data.surveys.slice(0, 15).map(survey => <div key={survey.id} className="flex items-center gap-4 rounded-lg p-2 hover:bg-muted/50"><div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${survey.score >= 9 ? "bg-emerald-500/20 text-emerald-400" : survey.score >= 7 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"}`}>{survey.score}</div><div className="flex-1"><div className="text-sm font-medium">{survey.respondent || "Respondent"}</div><div className="text-xs text-muted-foreground">{survey.client_name || "Unassigned client"}</div></div><div className="max-w-md truncate text-sm text-muted-foreground">{survey.feedback || "No feedback"}</div><span className="text-xs text-muted-foreground">{survey.submitted_at ? new Date(survey.submitted_at).toLocaleDateString() : ""}</span></div>)}</div></CardContent></Card>
+      </>}
     </div>
   );
+}
+
+function Metric({ label, value, colour = "text-foreground", icon: Icon = Users }) {
+  return <Card><CardContent className="pt-4 text-center"><Icon className={`mx-auto mb-2 h-4 w-4 ${colour}`} /><div className={`text-3xl font-bold ${colour}`}>{value ?? "—"}</div><div className="mt-1 text-xs text-muted-foreground">{label}</div></CardContent></Card>;
 }

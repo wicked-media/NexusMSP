@@ -11,7 +11,8 @@ router = APIRouter()
 
 # ============== IT DOCUMENTATION ENDPOINTS ==============
 
-@router.get("/passwords")
+# Retired: password storage is handled by Keeper/Hudu, not NexusMSP.
+# @router.get("/passwords")
 async def get_passwords(client_id: Optional[str] = None, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
     if client_id:
@@ -25,7 +26,7 @@ async def get_passwords(client_id: Optional[str] = None, category: Optional[str]
         p['password'] = '••••••••'
     return passwords
 
-@router.get("/passwords/{password_id}")
+# @router.get("/passwords/{password_id}")
 async def get_password(password_id: str, current_user: dict = Depends(get_current_user)):
     """Get a password entry (reveals actual password)"""
     password = await db.passwords.find_one({"id": password_id}, {"_id": 0})
@@ -53,7 +54,7 @@ async def get_password(password_id: str, current_user: dict = Depends(get_curren
     
     return password
 
-@router.post("/passwords")
+# @router.post("/passwords")
 async def create_password(password_data: dict, current_user: dict = Depends(get_current_user)):
     client_name = None
     if password_data.get('client_id'):
@@ -78,7 +79,7 @@ async def create_password(password_data: dict, current_user: dict = Depends(get_
     await db.passwords.insert_one(doc)
     return {"id": password.id, "name": password.name, "message": "Password created"}
 
-@router.put("/passwords/{password_id}")
+# @router.put("/passwords/{password_id}")
 async def update_password(password_id: str, password_data: dict, current_user: dict = Depends(get_current_user)):
     password_data['updated_at'] = datetime.now(timezone.utc).isoformat()
     result = await db.passwords.update_one({"id": password_id}, {"$set": password_data})
@@ -86,7 +87,7 @@ async def update_password(password_id: str, password_data: dict, current_user: d
         raise HTTPException(status_code=404, detail="Password not found")
     return {"message": "Password updated"}
 
-@router.delete("/passwords/{password_id}")
+# @router.delete("/passwords/{password_id}")
 async def delete_password(password_id: str, current_user: dict = Depends(get_current_user)):
     result = await db.passwords.delete_one({"id": password_id})
     if result.deleted_count == 0:

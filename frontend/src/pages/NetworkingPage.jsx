@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,15 +14,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
-  Wifi, Router, Server, Monitor, Globe, Search, Loader2, RefreshCw, ChevronRight,
+  Wifi, Network, Router, Server, Monitor, Globe, Search, Loader2, RefreshCw, ChevronRight,
   Plus, Users, Smartphone, Download, Upload, Shield, AlertTriangle, CheckCircle2,
-  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap, BarChart3, Lock, Eye, EyeOff
+  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap, BarChart3, Lock,
+  MoreHorizontal, ChevronDown, GitBranch, FileSearch
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from "recharts";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -38,14 +43,22 @@ function formatUptime(seconds) {
 }
 
 const StatusDot = ({ status }) => {
-  const c = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500", pending_adoption: "bg-blue-500" };
+  const c = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500", pending_adoption: "bg-blue-500", pending_sync: "bg-amber-500", pending_configuration: "bg-slate-500", sync_failed: "bg-red-500", recorded: "bg-sky-500" };
   return <span className={`inline-block w-2.5 h-2.5 rounded-full ${c[status] || "bg-slate-500"}`} />;
 };
 
-const emptySiteForm = { name: "", client_id: "", client_name: "", controller_url: "", site_id: "default", location: "", wan_ip: "", isp: "", download_speed_mbps: "", upload_speed_mbps: "", api_key: "", username: "", password: "", verify_ssl: false, notes: "" };
+const emptySiteForm = { name: "", client_id: "", client_name: "", controller_url: "", site_id: "default", location: "", wan_ip: "", isp: "", download_speed_mbps: "", upload_speed_mbps: "", username: "", password: "", verify_ssl: true, notes: "" };
 const emptyDeviceForm = { name: "", mac: "", model: "", device_type: "ap", ip_address: "", firmware: "" };
 
 const DPI_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
+const NETWORK_WORKSPACE_TOOLS = [
+  { path: "/unifi", label: "UniFi Operations", icon: Wifi },
+  { path: "/topology", label: "Topology", icon: GitBranch },
+  { path: "/dns-monitor", label: "DNS Monitor", icon: Search },
+  { path: "/bandwidth-monitor", label: "Bandwidth", icon: Activity },
+  { path: "/dmarc-compliance", label: "Email Security", icon: Shield },
+  { path: "/splynx-dashboard", label: "ISP Health", icon: FileSearch },
+];
 
 function WlanTab({ siteId, headers }) {
   const [wlans, setWlans] = useState([]);
@@ -191,6 +204,7 @@ function DpiTab({ siteId, headers }) {
 }
 
 export default function NetworkingPage() {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [sites, setSites] = useState([]);
   const [clients, setClients] = useState([]);
@@ -254,8 +268,7 @@ export default function NetworkingPage() {
       location: site.location || "", wan_ip: site.wan_ip || "", isp: site.isp || "",
       download_speed_mbps: String(site.download_speed_mbps || ""),
       upload_speed_mbps: String(site.upload_speed_mbps || ""),
-      api_key: site.api_key || "", username: site.username || "", password: "",
-      verify_ssl: site.verify_ssl || false, notes: site.notes || "",
+      username: "", password: "", verify_ssl: site.verify_ssl !== false, notes: site.notes || "",
     });
     setSiteDialog(true);
   };
@@ -310,11 +323,11 @@ export default function NetworkingPage() {
     if (!adoptForm.name || !adoptForm.mac) { toast.error("Name and MAC are required"); return; }
     try {
       await axios.post(`${API}/networking/sites/${selectedSite.id}/adopt-device`, adoptForm, { headers });
-      toast.success("Device adoption initiated");
+      toast.success("Network device record saved. It has not been adopted by the controller.");
       setAdoptDialog(false);
       fetchSiteData(selectedSite.id);
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to adopt device"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not save network device"); }
   };
 
   const openEditDevice = (device) => {
@@ -383,19 +396,16 @@ export default function NetworkingPage() {
           <div><Label>Location</Label><Input value={siteForm.location} onChange={e => setSiteForm({ ...siteForm, location: e.target.value })} placeholder="123 Business Ave, Suite 200" /></div>
 
           <Separator />
-          <p className="text-sm font-semibold flex items-center gap-2"><Link2 className="w-4 h-4" />UniFi Controller Connection</p>
+          <div><p className="text-sm font-semibold flex items-center gap-2"><Link2 className="w-4 h-4" />UniFi Controller Connection</p><p className="mt-1 text-xs text-muted-foreground">Add a controller when this site should sync live inventory. Sites can also be retained as audited network records without a controller.</p></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Controller URL *</Label><Input value={siteForm.controller_url} onChange={e => setSiteForm({ ...siteForm, controller_url: e.target.value })} placeholder="https://192.168.1.1:8443" data-testid="site-controller-url" /></div>
+            <div><Label>Controller URL</Label><Input value={siteForm.controller_url} onChange={e => setSiteForm({ ...siteForm, controller_url: e.target.value })} placeholder="https://192.168.1.1:8443" data-testid="site-controller-url" /></div>
             <div><Label>UniFi Site ID</Label><Input value={siteForm.site_id} onChange={e => setSiteForm({ ...siteForm, site_id: e.target.value })} placeholder="default" /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>API Key / Token</Label><Input type="password" value={siteForm.api_key} onChange={e => setSiteForm({ ...siteForm, api_key: e.target.value })} placeholder="UniFi API key" data-testid="site-api-key" /></div>
-            <div><Label>Username (legacy)</Label><Input value={siteForm.username} onChange={e => setSiteForm({ ...siteForm, username: e.target.value })} placeholder="Optional" /></div>
+            <div><Label>Controller username</Label><Input value={siteForm.username} onChange={e => setSiteForm({ ...siteForm, username: e.target.value })} placeholder={editingSite ? "Leave blank to retain saved username" : "UniFi controller username"} /></div>
+            <div><Label>Controller password</Label><Input type="password" value={siteForm.password} onChange={e => setSiteForm({ ...siteForm, password: e.target.value })} placeholder={editingSite ? "Leave blank to retain saved password" : "UniFi controller password"} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Password (legacy)</Label><Input type="password" value={siteForm.password} onChange={e => setSiteForm({ ...siteForm, password: e.target.value })} placeholder="Optional" /></div>
-            <div className="flex items-end gap-2 pb-1"><Switch checked={siteForm.verify_ssl} onCheckedChange={v => setSiteForm({ ...siteForm, verify_ssl: v })} /><Label>Verify SSL</Label></div>
-          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-border/70 p-3"><Switch checked={siteForm.verify_ssl} onCheckedChange={v => setSiteForm({ ...siteForm, verify_ssl: v })} /><div><Label>Verify TLS certificate</Label><p className="text-xs text-muted-foreground">Leave enabled unless the controller uses a trusted exception you have documented.</p></div></div>
 
           <Separator />
           <p className="text-sm font-semibold flex items-center gap-2"><Activity className="w-4 h-4" />WAN Details</p>
@@ -419,7 +429,8 @@ export default function NetworkingPage() {
   const adoptDeviceDialog = (
     <Dialog open={adoptDialog} onOpenChange={setAdoptDialog}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Adopt Device</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Add network device record</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground">This saves an audited local inventory record only. Use Sync to discover devices from a connected UniFi controller.</p>
         <div className="space-y-3">
           <div><Label>Device Name *</Label><Input value={adoptForm.name} onChange={e => setAdoptForm({ ...adoptForm, name: e.target.value })} placeholder="e.g. U6-Pro-Lobby" data-testid="adopt-device-name" /></div>
           <div><Label>MAC Address *</Label><Input value={adoptForm.mac} onChange={e => setAdoptForm({ ...adoptForm, mac: e.target.value })} placeholder="F0:9F:C2:AA:BB:CC" data-testid="adopt-device-mac" /></div>
@@ -441,7 +452,7 @@ export default function NetworkingPage() {
             <div><Label>Firmware</Label><Input value={adoptForm.firmware} onChange={e => setAdoptForm({ ...adoptForm, firmware: e.target.value })} placeholder="7.0.83" /></div>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleAdoptDevice} data-testid="adopt-device-btn"><Radio className="w-4 h-4 mr-1" />Adopt Device</Button></DialogFooter>
+        <DialogFooter><Button onClick={handleAdoptDevice} data-testid="adopt-device-btn"><Radio className="w-4 h-4 mr-1" />Save device record</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -462,7 +473,8 @@ export default function NetworkingPage() {
                   <SelectItem value="online">Online</SelectItem>
                   <SelectItem value="offline">Offline</SelectItem>
                   <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="pending_adoption">Pending Adoption</SelectItem>
+                  <SelectItem value="recorded">Manually recorded</SelectItem>
+                  <SelectItem value="pending_adoption">Legacy pending adoption</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -478,27 +490,28 @@ export default function NetworkingPage() {
   if (selectedSite && siteOverview) {
     return (
       <div className="space-y-6" data-testid="networking-site-detail">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites"><Globe className="w-4 h-4 mr-1" />Back</Button>
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            <span className="font-semibold">{selectedSite.name}</span>
-            <StatusDot status={selectedSite.status} />
-            {selectedSite.client_name && <Badge variant="outline" className="text-xs">{selectedSite.client_name}</Badge>}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
-            <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
-            <Button variant="default" size="sm" onClick={async () => {
-              toast.info("Syncing from controller...");
-              try {
-                const res = await axios.post(`${API}/networking/sites/${selectedSite.id}/sync`, {}, { headers });
-                if (res.data.success) { toast.success(res.data.message); fetchSiteData(selectedSite.id); fetchData(); }
-                else toast.error(res.data.message);
-              } catch { toast.error("Sync failed"); }
-            }} data-testid="sync-site-btn"><RefreshCw className="w-3 h-3 mr-1" />Sync from Controller</Button>
-          </div>
-        </div>
+        <OperationalPageHeader
+          eyebrow={`Network workspace${selectedSite.client_name ? ` · ${selectedSite.client_name}` : ""}`}
+          title={selectedSite.name}
+          description={`${selectedSite.status === "online" ? "Online" : selectedSite.status || "Unknown"} site · ${selectedSite.isp || "ISP not recorded"} · ${selectedSite.location || "Location not recorded"}`}
+          icon={Wifi}
+          tone="sky"
+          actions={(
+            <>
+              <Button variant="outline" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites"><Globe className="w-4 h-4 mr-1" />All sites</Button>
+              <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
+              <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing || !selectedSite.controller_url} title={selectedSite.controller_url ? "Test controller reachability" : "Configure a controller URL first"}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
+              <Button variant="default" size="sm" disabled={!selectedSite.controller_url} title={selectedSite.controller_url ? "Sync from the configured UniFi controller" : "Configure a controller URL first"} onClick={async () => {
+                toast.info("Syncing from controller...");
+                try {
+                  const res = await axios.post(`${API}/networking/sites/${selectedSite.id}/sync`, {}, { headers });
+                  if (res.data.success) { toast.success(res.data.message); fetchSiteData(selectedSite.id); fetchData(); }
+                  else toast.error(res.data.message);
+                } catch { toast.error("Sync failed"); }
+              }} data-testid="sync-site-btn"><RefreshCw className="w-3 h-3 mr-1" />Sync</Button>
+            </>
+          )}
+        />
 
         {/* Controller Info */}
         <Card className="border-zinc-800">
@@ -520,13 +533,13 @@ export default function NetworkingPage() {
         </Card>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Router className="w-5 h-5 text-blue-500" /><div><p className="text-xs text-muted-foreground">Devices</p><p className="text-lg font-bold">{siteOverview.online_devices}/{siteOverview.total_devices}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Wifi className="w-5 h-5 text-cyan-500" /><div><p className="text-xs text-muted-foreground">APs</p><p className="text-lg font-bold">{siteOverview.access_points}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Server className="w-5 h-5 text-purple-500" /><div><p className="text-xs text-muted-foreground">Switches</p><p className="text-lg font-bold">{siteOverview.switches}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Users className="w-5 h-5 text-green-500" /><div><p className="text-xs text-muted-foreground">Clients</p><p className="text-lg font-bold">{siteOverview.total_clients}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Download className="w-5 h-5 text-emerald-500" /><div><p className="text-xs text-muted-foreground">RX</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_rx_bytes)}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Upload className="w-5 h-5 text-orange-500" /><div><p className="text-xs text-muted-foreground">TX</p><p className="text-lg font-bold">{formatBytes(siteOverview.total_tx_bytes)}</p></div></div></CardContent></Card>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+          <HeroTile label="Devices online" value={siteOverview.online_devices ?? 0} icon={Router} glow="emerald" subtitle={`of ${siteOverview.total_devices ?? 0} discovered`} />
+          <HeroTile label="Access points" value={siteOverview.access_points ?? 0} icon={Wifi} glow="sky" subtitle={`${siteOverview.wireless_clients ?? 0} wireless clients`} />
+          <HeroTile label="Switches" value={siteOverview.switches ?? 0} icon={Server} glow="violet" subtitle={`${siteOverview.wired_clients ?? 0} wired clients`} />
+          <HeroTile label="Network clients" value={siteOverview.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Currently discovered" />
+          <HeroTile label="Received" value={formatBytes(siteOverview.total_rx_bytes)} icon={Download} glow="emerald" subtitle="Observed traffic" animated={false} />
+          <HeroTile label="Sent" value={formatBytes(siteOverview.total_tx_bytes)} icon={Upload} glow="amber" subtitle="Observed traffic" animated={false} />
         </div>
 
         {/* Health */}
@@ -562,7 +575,7 @@ export default function NetworkingPage() {
             <div className="flex items-center gap-2">
               {tab === "devices" && (
                 <>
-                  <Button size="sm" onClick={() => { setAdoptForm({ ...emptyDeviceForm }); setAdoptDialog(true); }} data-testid="adopt-btn"><Plus className="w-3 h-3 mr-1" />Adopt Device</Button>
+                  <Button size="sm" onClick={() => { setAdoptForm({ ...emptyDeviceForm }); setAdoptDialog(true); }} data-testid="adopt-btn"><Plus className="w-3 h-3 mr-1" />Add device record</Button>
                   <Select value={deviceFilter} onValueChange={setDeviceFilter}>
                     <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -599,12 +612,12 @@ export default function NetworkingPage() {
                       <div className="text-center"><p className="text-xs text-muted-foreground">CPU</p><p className="font-mono font-medium">{device.cpu_usage ?? "-"}%</p></div>
                       <div className="text-center"><p className="text-xs text-muted-foreground">MEM</p><p className="font-mono font-medium">{device.mem_usage ?? "-"}%</p></div>
                       {device.device_type === "ap" && <>
-                        <div className="text-center"><p className="text-xs text-muted-foreground">Clients</p><p className="font-mono font-medium">{(device.clients_2g || 0) + (device.clients_5g || 0)}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">Clients</p><p className="font-mono font-medium">{device.num_sta ?? ((device.clients_2g || 0) + (device.clients_5g || 0))}</p></div>
                         <div className="text-center"><p className="text-xs text-muted-foreground">Satisfaction</p><p className="font-mono font-medium">{device.satisfaction ?? "-"}%</p></div>
                       </>}
                       {device.device_type === "switch" && <>
-                        <div className="text-center"><p className="text-xs text-muted-foreground">Ports</p><p className="font-mono font-medium">{device.num_ports}</p></div>
-                        <div className="text-center"><p className="text-xs text-muted-foreground">PoE</p><p className="font-mono font-medium">{device.poe_power_w ? `${device.poe_power_w}W` : "-"}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">Ports</p><p className="font-mono font-medium">{device.num_ports ?? device.ports ?? device.port_table?.length ?? "-"}</p></div>
+                        <div className="text-center"><p className="text-xs text-muted-foreground">PoE</p><p className="font-mono font-medium">{(device.poe_power_w ?? device.poe_power) ? `${device.poe_power_w ?? device.poe_power}W` : "-"}</p></div>
                       </>}
                       {device.device_type === "gateway" && <>
                         <div className="text-center"><p className="text-xs text-muted-foreground">DL</p><p className="font-mono font-medium">{device.throughput_rx_mbps ? `${device.throughput_rx_mbps}Mbps` : "-"}</p></div>
@@ -638,12 +651,12 @@ export default function NetworkingPage() {
                     {filteredClients.map(c => (
                       <TableRow key={c.id}>
                         <TableCell><div className="flex items-center gap-2">{c.is_wireless ? <Smartphone className="w-4 h-4 text-cyan-500" /> : <Monitor className="w-4 h-4 text-blue-500" />}<span className="font-medium">{c.name || c.hostname || "Unknown"}</span></div></TableCell>
-                        <TableCell className="font-mono text-xs">{c.ip_address}</TableCell>
+                        <TableCell className="font-mono text-xs">{c.ip_address || c.ip || "-"}</TableCell>
                         <TableCell className="font-mono text-xs">{c.mac}</TableCell>
                         <TableCell><Badge variant="outline" className="text-xs">{c.is_wireless ? "WiFi" : "Wired"}</Badge></TableCell>
                         <TableCell className="text-sm">{c.os_type || "-"}</TableCell>
                         <TableCell className="text-xs">{c.ap_name ? `${c.ap_name} / ${c.ssid}` : "-"}</TableCell>
-                        <TableCell>{c.signal_strength ? <span className={`font-mono text-xs ${c.signal_strength > -50 ? "text-green-500" : c.signal_strength > -70 ? "text-yellow-500" : "text-red-500"}`}>{c.signal_strength} dBm</span> : "-"}</TableCell>
+                        <TableCell>{(c.signal_strength ?? c.signal) ? <span className={`font-mono text-xs ${(c.signal_strength ?? c.signal) > -50 ? "text-green-500" : (c.signal_strength ?? c.signal) > -70 ? "text-yellow-500" : "text-red-500"}`}>{c.signal_strength ?? c.signal} dBm</span> : "-"}</TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatBytes(c.rx_bytes)} / {formatBytes(c.tx_bytes)}</TableCell>
                       </TableRow>
                     ))}
@@ -672,29 +685,41 @@ export default function NetworkingPage() {
   // ============ SITES LIST ============
   return (
     <div className="space-y-6" data-testid="networking-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Networking</h1>
-          <p className="text-muted-foreground">UniFi network management across client sites</p>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Network workspace"
+        title="Managed network"
+        description="Client network records, controller connectivity, site health and UniFi operations in one workspace."
+        icon={Network}
+        tone="sky"
+        actions={(
+          <>
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add Site</Button>
-        </div>
-      </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="network-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {NETWORK_WORKSPACE_TOOLS.map(tool => {
+                const Icon = tool.icon;
+                return <DropdownMenuItem key={tool.path} onSelect={() => navigate(tool.path)}><Icon className="mr-2 h-3.5 w-3.5" />{tool.label}</DropdownMenuItem>;
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          </>
+        )}
+      />
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Globe className="w-5 h-5 text-blue-500" /><div><p className="text-xs text-muted-foreground">Sites</p><p className="text-xl font-bold">{stats.online_sites}/{stats.total_sites}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Router className="w-5 h-5 text-emerald-500" /><div><p className="text-xs text-muted-foreground">Devices</p><p className="text-xl font-bold">{stats.online_devices}/{stats.total_devices}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Users className="w-5 h-5 text-green-500" /><div><p className="text-xs text-muted-foreground">Clients</p><p className="text-xl font-bold">{stats.total_clients}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Wifi className="w-5 h-5 text-cyan-500" /><div><p className="text-xs text-muted-foreground">APs</p><p className="text-xl font-bold">{stats.access_points}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Server className="w-5 h-5 text-purple-500" /><div><p className="text-xs text-muted-foreground">Switches</p><p className="text-xl font-bold">{stats.switches}</p></div></div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><Shield className="w-5 h-5 text-indigo-500" /><div><p className="text-xs text-muted-foreground">Gateways</p><p className="text-xl font-bold">{stats.gateways}</p></div></div></CardContent></Card>
-          <Card className={stats.online_sites < stats.total_sites ? "border-amber-500/40" : "border-emerald-500/40"}>
-            <CardContent className="pt-4"><div className="flex items-center gap-2">{stats.online_sites < stats.total_sites ? <AlertTriangle className="w-5 h-5 text-amber-500" /> : <CheckCircle2 className="w-5 h-5 text-emerald-500" />}<div><p className="text-xs text-muted-foreground">Health</p><p className="text-xl font-bold">{stats.online_sites < stats.total_sites ? "Warning" : "Healthy"}</p></div></div></CardContent>
-          </Card>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-7">
+          <HeroTile label="Sites online" value={stats.online_sites ?? 0} icon={Globe} glow="sky" subtitle={`of ${stats.total_sites ?? 0} managed`} />
+          <HeroTile label="Devices online" value={stats.online_devices ?? 0} icon={Router} glow="emerald" subtitle={`of ${stats.total_devices ?? 0} discovered`} />
+          <HeroTile label="Network clients" value={stats.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Currently discovered" />
+          <HeroTile label="Access points" value={stats.access_points ?? 0} icon={Wifi} glow="sky" subtitle="Managed wireless" />
+          <HeroTile label="Switches" value={stats.switches ?? 0} icon={Server} glow="violet" subtitle="Managed switching" />
+          <HeroTile label="Gateways" value={stats.gateways ?? 0} icon={Shield} glow="amber" subtitle="Managed edge" />
+          <HeroTile label="Network health" value={stats.online_sites < stats.total_sites ? "Attention" : "Healthy"} icon={stats.online_sites < stats.total_sites ? AlertTriangle : CheckCircle2} glow={stats.online_sites < stats.total_sites ? "amber" : "emerald"} subtitle={stats.online_sites < stats.total_sites ? "One or more sites offline" : "All sites reporting"} animated={false} />
         </div>
       )}
 

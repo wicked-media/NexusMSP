@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -44,12 +45,18 @@ func (c *Client) Do(method, path string, body any, result any) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
-		if err != nil { return fmt.Errorf("marshal: %w", err) }
+		if err != nil {
+			return fmt.Errorf("marshal: %w", err)
+		}
 		reqBody = bytes.NewReader(b)
 	}
 	req, err := http.NewRequest(method, url, reqBody)
-	if err != nil { return err }
-	if reqBody != nil { req.Header.Set("Content-Type", "application/json") }
+	if err != nil {
+		return err
+	}
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "nexus-agent/"+c.version)
 
@@ -61,14 +68,18 @@ func (c *Client) Do(method, path string, body any, result any) error {
 	}
 
 	resp, err := c.http.Do(req)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(string(respBody))
-		if msg == "" { msg = resp.Status }
+		if msg == "" {
+			msg = resp.Status
+		}
 		return &HTTPError{Status: resp.StatusCode, Message: msg}
 	}
 
@@ -78,6 +89,46 @@ func (c *Client) Do(method, path string, body any, result any) error {
 		}
 	}
 	return nil
+}
+
+// Download retrieves an authenticated binary or artifact and writes it to a
+// caller-provided temporary path. The caller is responsible for verifying any
+// expected fingerprint before making the artifact active.
+func (c *Client) Download(path, destination string) error {
+	req, err := http.NewRequest(http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "nexus-agent/"+c.version)
+	c.mu.RLock()
+	token := c.token
+	c.mu.RUnlock()
+	if token != "" {
+		req.Header.Set("X-Agent-Token", token)
+	}
+	response, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		body, _ := io.ReadAll(response.Body)
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			message = response.Status
+		}
+		return &HTTPError{Status: response.StatusCode, Message: message}
+	}
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(file, response.Body)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 type HTTPError struct {

@@ -38,12 +38,14 @@ export default function ClientPulseWall({ search = "", tierFilter = "all" }) {
     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(190px,1fr))]" data-testid="client-pulse-wall">
       {filtered.map(t => {
         const m = tierMeta(t.tier);
-        const isHealthy = t.health >= 80;
+        const assessed = Number.isFinite(t.health);
+        const isHealthy = assessed && t.health >= 80;
         const bg = t.vip
           ? "from-yellow-500/30 to-amber-700/10 border-yellow-500/50"
           : isHealthy ? "from-emerald-500/30 to-emerald-700/5 border-emerald-500/40"
-          : t.health >= 60 ? "from-amber-400/30 to-amber-700/5 border-amber-500/40"
-          : "from-red-500/30 to-red-700/10 border-red-500/40";
+          : assessed && t.health >= 60 ? "from-amber-400/30 to-amber-700/5 border-amber-500/40"
+          : assessed ? "from-red-500/30 to-red-700/10 border-red-500/40"
+          : "from-slate-500/20 to-slate-700/5 border-slate-500/40";
         return (
           <button
             key={t.id}
@@ -60,8 +62,8 @@ export default function ClientPulseWall({ search = "", tierFilter = "all" }) {
             </div>
             <p className="text-[10px] text-zinc-400 truncate mb-2">{t.industry || "—"}</p>
             <div className="flex items-center gap-2 mb-1.5">
-              <Sparkline data={t.spark_health || []} width={70} height={16} color={healthColor(t.health)} />
-              <span className="text-[10px] font-mono text-zinc-300">{t.health}</span>
+              {(t.spark_health || []).length > 1 ? <Sparkline data={t.spark_health} width={70} height={16} color={healthColor(t.health)} /> : <div className="h-4 w-[70px] rounded bg-zinc-800/70" />}
+              <span className="text-[10px] font-mono text-zinc-300">{assessed ? t.health : "Not assessed"}</span>
             </div>
             <div className="grid grid-cols-3 gap-1 text-center text-[10px]">
               <div className="bg-zinc-950/40 rounded py-0.5">

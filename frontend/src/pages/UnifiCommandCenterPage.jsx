@@ -17,7 +17,8 @@ import {
   Power, Lightbulb, RotateCw, Download, Activity, TrendingUp, Zap, ShieldCheck,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, RadialBarChart, RadialBar } from "recharts";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 function bytesHuman(n) {
   if (!n) return "—";
@@ -116,33 +117,24 @@ export default function UnifiCommandCenterPage() {
   const s = summary?.stats || {};
   const sites = (summary?.sites || []).filter(x => !query || `${x.name}`.toLowerCase().includes(query.toLowerCase()));
 
-  return (
-    <PageShell data-testid="unifi-command-center">
-      <MetricStrip columns={5}>
-        <MetricTile label="Sites" value={s.sites ?? "—"} accent="sky" icon={<Server className="w-2.5 h-2.5 text-sky-400" />} testid="unifi-metric-sites" />
-        <MetricTile label="Devices" value={`${s.devices_online ?? 0}/${s.devices ?? 0}`} accent="emerald" icon={<Radio className="w-2.5 h-2.5 text-emerald-400" />} testid="unifi-metric-devices" />
-        <MetricTile label="Clients" value={s.clients ?? "—"} accent="indigo" icon={<Users className="w-2.5 h-2.5 text-indigo-400" />} testid="unifi-metric-clients" />
-        <MetricTile label="Alerts" value={s.alerts ?? "—"} accent={s.alerts ? "rose" : "zinc"} icon={<AlertTriangle className="w-2.5 h-2.5 text-rose-400" />} testid="unifi-metric-alerts" />
-        <MetricTile label="Linked" value={`${s.linked_clients ?? 0} · ${s.coverage_pct ?? 0}%`} accent="violet" icon={<LinkIcon className="w-2.5 h-2.5 text-violet-400" />} testid="unifi-metric-linked" />
-      </MetricStrip>
+  const headerDescription = notConfigured
+    ? "Connect UniFi Site Manager to discover cloud sites and then manage individual controllers from one Network workspace."
+    : error
+      ? error
+      : summary?.last_synced_at
+        ? `Cloud discovery last synced ${new Date(summary.last_synced_at).toLocaleString()}. Use live controllers for device actions.`
+        : "Cloud discovery and live controller actions for every managed UniFi environment.";
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Wifi className="w-6 h-6 text-sky-400" />UniFi Command Center
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {notConfigured ? (
-                <span className="text-orange-400">Not configured — add your UniFi Site Manager API key in Settings</span>
-              ) : error ? (
-                <span className="text-rose-400">{error}</span>
-              ) : summary?.last_synced_at ? (
-                <span>Last synced {new Date(summary.last_synced_at).toLocaleString()}</span>
-              ) : <span>Ready</span>}
-            </p>
-          </div>
-          <div className="flex gap-2">
+  return (
+    <div className="space-y-6" data-testid="unifi-command-center">
+      <OperationalPageHeader
+        eyebrow="Network workspace · UniFi"
+        title="UniFi operations"
+        description={headerDescription}
+        icon={Wifi}
+        tone="sky"
+        actions={(
+          <>
             {notConfigured && (
               <Button variant="outline" size="sm" asChild data-testid="unifi-configure-btn">
                 <Link to="/settings?tab=integrations&anchor=unifi-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure UniFi</Link>
@@ -151,8 +143,19 @@ export default function UnifiCommandCenterPage() {
             <Button size="sm" variant="outline" onClick={loadSummary} disabled={loading} data-testid="unifi-refresh-btn">
               {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
             </Button>
-          </div>
-        </div>
+          </>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <HeroTile label="Cloud sites" value={s.sites ?? 0} icon={Server} glow="sky" subtitle="Discovered in Site Manager" testId="unifi-metric-sites" />
+        <HeroTile label="Devices online" value={s.devices_online ?? 0} icon={Radio} glow="emerald" subtitle={`of ${s.devices ?? 0} discovered`} testId="unifi-metric-devices" />
+        <HeroTile label="Network clients" value={s.clients ?? 0} icon={Users} glow="indigo" subtitle="Across managed sites" testId="unifi-metric-clients" />
+        <HeroTile label="Active alerts" value={s.alerts ?? 0} icon={AlertTriangle} glow={(s.alerts ?? 0) > 0 ? "rose" : "zinc"} subtitle={(s.alerts ?? 0) > 0 ? "Review attention items" : "No alerts reported"} testId="unifi-metric-alerts" />
+        <HeroTile label="Client coverage" value={s.coverage_pct ?? 0} suffix="%" icon={LinkIcon} glow="violet" subtitle={`${s.linked_clients ?? 0} client sites linked`} testId="unifi-metric-linked" />
+      </div>
+
+      <div className="space-y-4">
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList data-testid="unifi-tabs">
@@ -509,7 +512,7 @@ export default function UnifiCommandCenterPage() {
       <Dialog open={!!linkDialog} onOpenChange={() => setLinkDialog(null)}>
         <DialogContent data-testid="unifi-link-dialog">
           <DialogHeader>
-            <DialogTitle>Link UniFi site to NexusOps client</DialogTitle>
+            <DialogTitle>Link UniFi site to NexusMSP client</DialogTitle>
             <DialogDescription>{linkDialog?.name}</DialogDescription>
           </DialogHeader>
           <Select value={linkClientId} onValueChange={setLinkClientId}>
@@ -524,7 +527,7 @@ export default function UnifiCommandCenterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </div>
   );
 }
 
@@ -744,10 +747,10 @@ function ControllersPanel() {
               </Card>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard icon={<Radio className="w-4 h-4 text-emerald-400" />} label="Devices Online" value={onlineCount} sub={`${offlineCount} offline`} accent="emerald" testid="unifi-ctrl-m-online" />
-                <MetricCard icon={<Users className="w-4 h-4 text-indigo-400" />} label="Total Clients" value={cli.length} sub={`${wifiCount} wifi · ${wiredCount} wired`} accent="indigo" testid="unifi-ctrl-m-clients" />
-                <MetricCard icon={<Zap className="w-4 h-4 text-amber-400" />} label="Updates Available" value={updateAvail} sub={updateAvail ? "Plan a maintenance window" : "All up to date"} accent={updateAvail ? "amber" : "emerald"} testid="unifi-ctrl-m-updates" />
-                <MetricCard icon={<ShieldCheck className="w-4 h-4 text-violet-400" />} label="Models" value={modelData.length} sub={modelData[0]?.name || "—"} accent="violet" testid="unifi-ctrl-m-models" />
+                <MetricCard Icon={Radio} label="Devices Online" value={onlineCount} sub={`${offlineCount} offline`} accent="emerald" testid="unifi-ctrl-m-online" />
+                <MetricCard Icon={Users} label="Total Clients" value={cli.length} sub={`${wifiCount} wifi · ${wiredCount} wired`} accent="indigo" testid="unifi-ctrl-m-clients" />
+                <MetricCard Icon={Zap} label="Updates Available" value={updateAvail} sub={updateAvail ? "Plan a maintenance window" : "All up to date"} accent={updateAvail ? "amber" : "emerald"} testid="unifi-ctrl-m-updates" />
+                <MetricCard Icon={ShieldCheck} label="Models" value={modelData.length} sub={modelData[0]?.name || "—"} accent="violet" testid="unifi-ctrl-m-models" />
               </div>
             </div>
 
@@ -959,21 +962,6 @@ function ControllersPanel() {
   );
 }
 
-function MetricCard({ icon, label, value, sub, accent = "indigo", testid }) {
-  const accentBg = {
-    emerald: "from-emerald-500/10 to-emerald-500/0 border-emerald-500/20",
-    indigo: "from-indigo-500/10 to-indigo-500/0 border-indigo-500/20",
-    amber: "from-amber-500/10 to-amber-500/0 border-amber-500/20",
-    violet: "from-violet-500/10 to-violet-500/0 border-violet-500/20",
-    rose: "from-rose-500/10 to-rose-500/0 border-rose-500/20",
-  };
-  return (
-    <Card className={`bg-gradient-to-br ${accentBg[accent] || accentBg.indigo}`} data-testid={testid}>
-      <CardContent className="p-3">
-        <div className="flex items-center gap-2 mb-1">{icon}<span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{label}</span></div>
-        <div className="text-3xl font-bold tabular-nums leading-none">{value}</div>
-        {sub && <div className="text-[10px] text-muted-foreground mt-1.5 truncate">{sub}</div>}
-      </CardContent>
-    </Card>
-  );
+function MetricCard({ Icon, label, value, sub, accent = "indigo", testid }) {
+  return <HeroTile label={label} value={value} subtitle={sub} icon={Icon} glow={accent} testId={testid} />;
 }

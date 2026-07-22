@@ -5,13 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Ticket, Receipt, FileText, Monitor, Heart, CheckCircle, Clock, Users, Activity } from "lucide-react";
+import { Ticket, Receipt, FileText, Monitor, Heart, CheckCircle, Clock, Users, Activity, Mail } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 
-const iconMap = { ticket: Ticket, check: CheckCircle, receipt: Receipt, file: FileText, filetext: FileText, monitor: Monitor, heart: Heart };
+const iconMap = { ticket: Ticket, check: CheckCircle, receipt: Receipt, file: FileText, filetext: FileText, monitor: Monitor, heart: Heart, mail: Mail };
 const colorMap = { blue: "bg-blue-500", green: "bg-green-500", amber: "bg-amber-500", violet: "bg-violet-500", emerald: "bg-emerald-500", cyan: "bg-cyan-500", pink: "bg-pink-500" };
 
-export default function ClientTimelinePage() {
+export default function ClientTimelinePage({ embedded = false }) {
   const { token } = useAuth();
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState("");
@@ -34,11 +34,11 @@ export default function ClientTimelinePage() {
 
   return (
     <div className="space-y-6" data-testid="client-timeline-page">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className={`flex items-center ${embedded ? "justify-end" : "justify-between"}`}>
+        {!embedded && <div>
           <h1 className="text-2xl font-bold tracking-tight">Client Communication Timeline</h1>
           <p className="text-muted-foreground text-sm mt-1">Single pane of glass for all client interactions</p>
-        </div>
+        </div>}
         <Select value={selectedClient} onValueChange={setSelectedClient}>
           <SelectTrigger className="w-[280px]" data-testid="client-timeline-select">
             <SelectValue placeholder="Select a client..." />

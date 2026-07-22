@@ -1,7 +1,7 @@
 """
 Hudu integration Ã¢â‚¬â€ feature-rich read-only client.
 Fixes: correct 'search' query param, paginated fetch of all resource types,
-AI-powered KB suggestions for tickets via OpenAI API key (Claude Sonnet 4.5).
+AI-powered KB suggestions for tickets via the centrally configured OpenAI model.
 """
 import os
 import re
@@ -307,14 +307,21 @@ async def get_password(password_id: int, current_user: dict = Depends(get_curren
     data = await _hudu_get(config, f"asset_passwords/{password_id}")
     if not data:
         raise HTTPException(404, "Password not found")
+    credential = data.get("asset_password") or data.get("password") or data
     # Audit every decrypted reveal
     await db.hudu_password_reveals.insert_one({
+        "id": f"hudu-reveal-{uuid.uuid4().hex[:12]}",
         "password_id": password_id,
+        "credential_name": credential.get("name"),
+        "company_id": credential.get("company_id"),
+        "company_name": credential.get("company_name"),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
+        "user_email": current_user.get("email"),
+        "action": "revealed_from_hudu",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
-    return data.get("asset_password") or data.get("password") or data
+    return credential
 
 
 # Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -555,7 +562,7 @@ async def suggest_for_ticket(data: dict, current_user: dict = Depends(get_curren
                     api_key=api_key,
                     session_id=f"hudu-suggest-{uuid.uuid4().hex[:6]}",
                     system_message="You are an MSP senior engineer. Recommend the single best KB articles to solve the ticket, drawing fix steps directly from the candidate content.",
-                ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+                ).with_model("openai", "gpt-5.6-terra")
                 resp = await chat.send_message(UserMessage(text=prompt))
                 text = resp if isinstance(resp, str) else str(resp)
                 m = re.search(r"\{[\s\S]*\}", text)

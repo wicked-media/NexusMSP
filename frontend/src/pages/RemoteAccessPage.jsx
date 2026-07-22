@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,10 +24,13 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import SetupGuideCallout from "@/components/SetupGuideCallout";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
 export default function RemoteAccessPage() {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [devices, setDevices] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -81,7 +85,6 @@ export default function RemoteAccessPage() {
       setConfig(cRes.data?.value || cRes.data);
       setProviders(pRes.data || []);
       if (policyRes.data) setRemotePolicy(policyRes.data);
-      axios.get(`${API}/rustdesk/agent-deployments`, { headers }).then(r => setDeployments(r.data)).catch(() => {});
       const cfg = cRes.data?.value || cRes.data;
       if (cfg?.enabled && cfg?.server_url) {
         axios.get(`${API}/rustdesk/live/peers`, { headers }).then(r => setLivePeers(r.data)).catch(() => setLivePeers(null));
@@ -344,24 +347,22 @@ export default function RemoteAccessPage() {
 
   return (
     <div className="space-y-5" data-testid="remote-access-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center"><Laptop className="w-5 h-5 text-white" /></div>
-            Remote Access Hub
-          </h1>
-          <p className="text-muted-foreground mt-1">Manage remote access providers and device connections</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Server Settings</Button>
-          <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Managed access"
+        title="Remote Access"
+        description="Connect technicians to managed assets, govern provider access, and keep each remote session traceable."
+        icon={Laptop}
+        tone="sky"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Server settings</Button>
+          <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-remote-access"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+        </>}
+      />
 
       {/* Connection Status Bar */}
       <Card className={`border ${serverConfigured ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
-        <CardContent className="pt-3 pb-3">
-          <div className="flex items-center justify-between">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">
               <div className={`w-3 h-3 rounded-full ${serverConfigured ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
               <div>
@@ -375,7 +376,7 @@ export default function RemoteAccessPage() {
                 {config?.last_sync && !config?.last_auto_sync && <span className="text-xs text-muted-foreground ml-2">Last sync: {new Date(config.last_sync).toLocaleString()}</span>}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {serverConfigured && (
                 <>
                   <Button size="sm" variant="outline" onClick={testConnection} disabled={testingConnection} data-testid="test-connection-btn">
@@ -386,7 +387,7 @@ export default function RemoteAccessPage() {
                   </Button>
                 </>
               )}
-              {!serverConfigured && <Button size="sm" variant="outline" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }}>Configure Now</Button>}
+              {!serverConfigured && <Button size="sm" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }} data-testid="configure-remote-access">Configure server</Button>}
             </div>
           </div>
           {connectionResult && (
@@ -402,13 +403,12 @@ export default function RemoteAccessPage() {
       </Card>
 
       {/* Quick Connect Bar */}
-      <Card className="border-border/40">
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center gap-3">
-            <Zap className="w-5 h-5 text-amber-400 flex-shrink-0" />
-            <span className="text-sm font-semibold whitespace-nowrap">Quick Connect</span>
-            <Input placeholder="Enter RustDesk ID (e.g., 842931675)" value={quickId} onChange={e => setQuickId(e.target.value)} onKeyDown={e => e.key === "Enter" && quickConnect()} className="flex-1 max-w-xs font-mono" data-testid="quick-connect-input" />
-            <Button onClick={quickConnect} disabled={!quickId.trim() || connecting === "quick"} data-testid="quick-connect-btn">
+      <Card className="border-sky-500/20 bg-sky-500/[0.03]">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-3 sm:min-w-[190px]"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10"><Zap className="w-4 h-4 text-sky-300" /></div><div><p className="text-sm font-semibold">Quick connect</p><p className="text-xs text-muted-foreground">Use a RustDesk ID</p></div></div>
+            <Input placeholder="Enter RustDesk ID (for example 842931675)" value={quickId} onChange={e => setQuickId(e.target.value)} onKeyDown={e => e.key === "Enter" && quickConnect()} className="flex-1 font-mono" data-testid="quick-connect-input" />
+            <Button onClick={quickConnect} disabled={!quickId.trim() || connecting === "quick"} className="sm:min-w-28" data-testid="quick-connect-btn">
               {connecting === "quick" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}Connect
             </Button>
           </div>
@@ -422,19 +422,18 @@ export default function RemoteAccessPage() {
           { label: "RustDesk Registered", value: registered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
           { label: "Unregistered", value: unregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
           { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400", accent: "cyan" },
-          { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-violet-400", accent: "violet" },
+          { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-sky-400", accent: "sky" },
         ].map(st => (
           <MetricTile key={st.label} label={st.label} value={st.value} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`remote-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
       </MetricStrip>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
           <TabsTrigger value="devices">All Devices ({devices.length})</TabsTrigger>
           <TabsTrigger value="registered">Registered ({registered.length})</TabsTrigger>
           <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Integrations ({providers.length})</TabsTrigger>
           {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Peers ({livePeers.count})</TabsTrigger>}
-          <TabsTrigger value="deployments" data-testid="tab-deployments"><Rocket className="w-3 h-3 mr-1" />Deployments ({deployments?.total || 0})</TabsTrigger>
           <TabsTrigger value="sessions">Sessions ({sessions.length})</TabsTrigger>
         </TabsList>
 
@@ -469,7 +468,7 @@ export default function RemoteAccessPage() {
               <CardContent className="py-2.5 px-4 flex items-center justify-between">
                 <span className="text-sm font-medium"><SquareCheckBig className="w-4 h-4 inline mr-1.5 text-primary" />{selectedDevices.size} selected</span>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={bulkDeployAgent} data-testid="bulk-deploy-btn"><Rocket className="w-3 h-3" />Deploy Agent to Selected</Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => navigate("/nexus-agent")} data-testid="bulk-deploy-btn"><Rocket className="w-3 h-3" />Open Nexus Agent</Button>
                   <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedDevices(new Set())}><XCircle className="w-3 h-3 mr-1" />Clear</Button>
                 </div>
               </CardContent>
@@ -489,7 +488,6 @@ export default function RemoteAccessPage() {
                     <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No devices match your filters</TableCell></TableRow>
                   ) : filtered.map(d => {
                     const Icon = TYPE_ICONS[d.device_type] || Monitor;
-                    const dep = getDeployStatus(d.id);
                     return (
                       <TableRow key={d.id} data-testid={`device-row-${d.id}`}>
                         <TableCell onClick={e => e.stopPropagation()}><Checkbox checked={selectedDevices.has(d.id)} onCheckedChange={() => toggleDeviceSelect(d.id)} /></TableCell>
@@ -541,16 +539,11 @@ export default function RemoteAccessPage() {
                         </TableCell>
                         {/* Agent Status */}
                         <TableCell>
-                          {dep?.status === "deployed" ? (
-                            <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Deployed</Badge>
-                          ) : dep?.status === "pending" ? (
-                            <div className="flex items-center gap-1">
-                              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-400/30"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
-                              <Button size="sm" variant="ghost" className="h-6 text-[10px] text-emerald-400" onClick={() => markDeployed(d.id)} title="Mark as deployed"><Check className="w-3 h-3" /></Button>
-                            </div>
+                          {d.nexus_agent_id ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Nexus Agent</Badge>
                           ) : (
-                            <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300" onClick={() => deployAgent(d)} disabled={deployingDevice === d.id} data-testid={`deploy-agent-${d.id}`}>
-                              {deployingDevice === d.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}Deploy
+                            <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300" onClick={() => navigate("/nexus-agent")} data-testid={`deploy-agent-${d.id}`}>
+                              <Rocket className="w-3 h-3 mr-1" />Install agent
                             </Button>
                           )}
                         </TableCell>
@@ -931,6 +924,7 @@ export default function RemoteAccessPage() {
             <DialogDescription id="settings-desc">Configure your RustDesk server connection</DialogDescription>
           </DialogHeader>
           <form onSubmit={saveSettings} className="space-y-4">
+            <SetupGuideCallout title="Prepare your RustDesk server" source="NexusMSP uses the RustDesk Server Pro web-console API for live peer status and synchronisation. Generate an API token in the RustDesk Web Console under Settings → API Tokens." steps={["Enter the web-console API URL, normally including port 21114.", "Generate a least-privileged API token in the RustDesk web console.", "Use Test Connection before saving so the peer endpoint is confirmed."]} securityNote="Keep the API token in NexusMSP only. The open-source RustDesk server does not expose the Server Pro REST API used by this workspace." />
             <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="https://your-server:21114" required data-testid="settings-server" /><p className="text-[10px] text-muted-foreground">The full URL of your RustDesk API server, including port (default RustDesk Pro API port is 21114)</p></div>
             <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /><p className="text-[10px] text-muted-foreground">Generate from RustDesk Web Console → Settings → API Tokens (required for peer list &amp; sync)</p></div>
             <div className="space-y-2"><Label>Relay Server (optional)</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /><p className="text-[10px] text-muted-foreground">Only needed if your relay runs on a separate host from the ID server</p></div>

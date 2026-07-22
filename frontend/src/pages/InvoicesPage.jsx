@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,10 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageShell } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,22 +23,23 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
-  CreditCard, AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
+  AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
   Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
-  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap, FileSpreadsheet, CheckSquare
+  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
 import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 import { InvoiceAIBundle } from "@/components/ai/InvoiceAIBundle";
-import InvoicesSmartBar, { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
+import { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
   partial: { label: "Partial", class: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30", icon: Clock },
   paid: { label: "Paid", class: "bg-green-500/20 text-green-400 border-green-500/30", icon: CheckCircle },
+  split: { label: "Split across payers", class: "bg-violet-500/20 text-violet-200 border-violet-400/30", icon: Users },
 };
 
 const STATUS_CONFIG = {
@@ -44,8 +47,177 @@ const STATUS_CONFIG = {
   sent: { label: "Sent", class: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
   paid: { label: "Paid", class: "bg-green-500/10 text-green-400 border-green-500/20" },
   overdue: { label: "Overdue", class: "bg-red-500/10 text-red-400 border-red-500/20" },
+  split_billed: { label: "Split billing source", class: "bg-violet-500/10 text-violet-200 border-violet-400/25" },
   cancelled: { label: "Cancelled", class: "bg-gray-500/10 text-gray-500 border-gray-500/20" },
 };
+
+const RECURRING_INTERVAL_OPTIONS = [
+  { value: "weekly", label: "Weekly", detail: "Every 7 days" },
+  { value: "biweekly", label: "Bi-Weekly", detail: "Every 14 days" },
+  { value: "monthly", label: "Monthly", detail: "Once each month" },
+  { value: "quarterly", label: "Quarterly", detail: "Every 3 months" },
+  { value: "semi-annual", label: "Semi-Annual", detail: "Every 6 months" },
+  { value: "annually", label: "Annually", detail: "Once each year" },
+];
+
+function ClientAutocomplete({
+  clients,
+  value,
+  onValueChange,
+  placeholder = "Search clients…",
+  testId,
+  excludeClientId = "",
+  emptyMessage = "No matching clients found.",
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const availableClients = clients.filter((client) => client.id !== excludeClientId);
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchingClients = normalizedQuery
+    ? availableClients.filter((client) => [client.name, client.email, client.contact_name]
+      .filter(Boolean)
+      .some((field) => field.toLowerCase().includes(normalizedQuery)))
+    : availableClients;
+  const selectedClient = availableClients.find((client) => client.id === value)
+    || clients.find((client) => client.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={(nextOpen) => {
+      setOpen(nextOpen);
+      if (!nextOpen) setQuery("");
+    }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          data-testid={testId}
+          className="h-10 w-full justify-between border-white/10 bg-black/10 px-3 text-left font-normal hover:border-cyan-400/35 hover:bg-cyan-400/[0.04]"
+        >
+          <span className={selectedClient ? "truncate text-zinc-100" : "truncate text-muted-foreground"}>
+            {selectedClient?.name || placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-cyan-300/70" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] overflow-hidden border-cyan-400/25 bg-[#0b151d] p-0 shadow-2xl"
+      >
+        <Command shouldFilter={false}>
+          <CommandInput
+            autoFocus
+            placeholder="Type a client name, email, or contact…"
+            data-testid={`${testId}-search`}
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            {matchingClients.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+            ) : (
+              <CommandGroup heading={`${matchingClients.length} matching client${matchingClients.length === 1 ? "" : "s"}`}>
+              {matchingClients.map((client) => (
+                <CommandItem
+                  key={client.id}
+                  value={`${client.name || ""} ${client.email || ""} ${client.contact_name || ""}`}
+                  onSelect={() => {
+                    onValueChange(client.id);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  className="py-2"
+                >
+                  <Check className={`mt-0.5 h-4 w-4 shrink-0 ${value === client.id ? "opacity-100 text-emerald-300" : "opacity-0"}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{client.name}</span>
+                    {(client.email || client.contact_name) && <span className="block truncate text-[11px] text-muted-foreground">{client.email || client.contact_name}</span>}
+                  </span>
+                </CommandItem>
+              ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function SearchableSelect({
+  options,
+  value,
+  onValueChange,
+  placeholder = "Choose an option…",
+  searchPlaceholder = "Type to search…",
+  emptyMessage = "No matching options found.",
+  testId,
+  disabled = false,
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchingOptions = normalizedQuery
+    ? options.filter((option) => `${option.label || ""} ${option.detail || ""} ${option.searchText || ""}`.toLowerCase().includes(normalizedQuery))
+    : options;
+  const selectedOption = options.find((option) => option.value === value);
+
+  return (
+    <Popover open={open} onOpenChange={(nextOpen) => {
+      if (disabled) return;
+      setOpen(nextOpen);
+      if (!nextOpen) setQuery("");
+    }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-disabled={disabled}
+          disabled={disabled}
+          data-testid={testId}
+          className="h-10 w-full justify-between border-white/10 bg-black/10 px-3 text-left font-normal hover:border-cyan-400/35 hover:bg-cyan-400/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className={selectedOption ? "truncate text-zinc-100" : "truncate text-muted-foreground"}>{selectedOption?.label || placeholder}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-cyan-300/70" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] overflow-hidden border-cyan-400/25 bg-[#0b151d] p-0 shadow-2xl">
+        <Command shouldFilter={false}>
+          <CommandInput autoFocus placeholder={searchPlaceholder} data-testid={`${testId}-search`} value={query} onValueChange={setQuery} />
+          <CommandList>
+            {matchingOptions.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+            ) : (
+              <CommandGroup heading={`${matchingOptions.length} matching option${matchingOptions.length === 1 ? "" : "s"}`}>
+                {matchingOptions.map((option) => (
+                  <CommandItem
+                    key={option.value}
+                    value={option.value}
+                    onSelect={() => {
+                      onValueChange(option.value);
+                      setQuery("");
+                      setOpen(false);
+                    }}
+                    className="py-2"
+                  >
+                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${value === option.value ? "opacity-100 text-emerald-300" : "opacity-0"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{option.label}</span>
+                      {option.detail && <span className="block truncate text-[11px] text-muted-foreground">{option.detail}</span>}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export default function InvoicesPage() {
   const { token } = useAuth();
@@ -54,8 +226,10 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState([]);
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
+  const [tickets, setTickets] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPayment, setFilterPayment] = useState("all");
@@ -67,6 +241,17 @@ export default function InvoicesPage() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "manual", reference: "", notes: "", date: "" });
   const [payingInvoice, setPayingInvoice] = useState(null);
+  const [splitBillingOpen, setSplitBillingOpen] = useState(false);
+  const [splitBillingInvoice, setSplitBillingInvoice] = useState(null);
+  const [splitAllocations, setSplitAllocations] = useState([]);
+  const [splitBillingBusy, setSplitBillingBusy] = useState(false);
+  const [xeroStatus, setXeroStatus] = useState({ connected: false, configured: false, org_name: null });
+  const [reconciliation, setReconciliation] = useState({ pending_count: 0, pending_total: 0, by_method: [] });
+  const [billingProfileOpen, setBillingProfileOpen] = useState(false);
+  const [billingProfileClient, setBillingProfileClient] = useState("");
+  const [billingProfile, setBillingProfile] = useState({ billing_email: "", payment_terms_days: 30, purchase_order_required: false, default_payment_method: "bank_transfer", xero_contact_id: "" });
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [settlementForm, setSettlementForm] = useState({ method: "eftpos", date: new Date().toISOString().slice(0, 10), reference: "" });
   const [moveDialog, setMoveDialog] = useState(false);
   const [moveTarget, setMoveTarget] = useState("");
   const [movingInvoice, setMovingInvoice] = useState(null);
@@ -82,6 +267,7 @@ export default function InvoicesPage() {
   const [emailHistory, setEmailHistory] = useState([]);
   const [emailDialog, setEmailDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
+  const [emailInvoiceTarget, setEmailInvoiceTarget] = useState(null);
   const [disputeScan, setDisputeScan] = useState(null);
   // SMS reminder state
   const [smsDialog, setSmsDialog] = useState(false);
@@ -91,13 +277,12 @@ export default function InvoicesPage() {
   const [smsHistory, setSmsHistory] = useState([]);
   const [creditNoteDialog, setCreditNoteDialog] = useState(false);
   const [creditNoteForm, setCreditNoteForm] = useState({ reason: "", line_items: [], subtotal: 0, tax: 0, total: 0 });
-  const [agingReport, setAgingReport] = useState(null);
   const [revenueAnalytics, setRevenueAnalytics] = useState(null);
-  const [topView, setTopView] = useState("list"); // list | aging | revenue
+  const [topView, setTopView] = useState("list"); // list | revenue
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [form, setForm] = useState({
-    client_id: "", contract_id: "", due_date: "", notes: "",
+    client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
     line_items: [], tax_rate: "0", discount_pct: "0", discount_amount: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -107,18 +292,31 @@ export default function InvoicesPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [invRes, clientRes, prodRes, statsRes] = await Promise.all([
+      const [invRes, clientRes, prodRes, ticketRes, statsRes, xeroRes, reconciliationRes] = await Promise.all([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/products`, { headers }),
-        axios.get(`${API}/invoices/stats/summary`, { headers }),
+        // Ticket linkage and the summary rail enrich the form, but an
+        // intermittent response from either must not make a successfully
+        // created invoice look as though it failed to save.
+        axios.get(`${API}/tickets`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/invoices/stats/summary`, { headers }).catch(() => ({ data: {} })),
+        axios.get(`${API}/xero/status`, { headers }).catch(() => ({ data: { connected: false, configured: false, org_name: null } })),
+        axios.get(`${API}/billing/reconciliation/summary`, { headers }).catch(() => ({ data: { pending_count: 0, pending_total: 0, by_method: [] } })),
       ]);
       setInvoices(invRes.data);
       setClients(clientRes.data);
       setProducts(prodRes.data);
+      setTickets(ticketRes.data);
       setStats(statsRes.data);
-    } catch { toast.error("Failed to load invoices"); }
+      setXeroStatus(xeroRes.data || { connected: false, configured: false, org_name: null });
+      setReconciliation(reconciliationRes.data || { pending_count: 0, pending_total: 0, by_method: [] });
+    } catch {
+      setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
+      toast.error("Failed to load invoices");
+    }
     finally { setLoading(false); }
   }, [token]);
 
@@ -152,7 +350,7 @@ export default function InvoicesPage() {
   }, [searchParams, invoices.length]);
 
   const resetForm = () => setForm({
-    client_id: "", contract_id: "", due_date: "", notes: "",
+    client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
     line_items: [], tax_rate: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -175,12 +373,19 @@ export default function InvoicesPage() {
     } catch { setInvoiceActivity([]); setEmailHistory([]); setInvoiceActivityError("Invoice history could not be loaded."); }
   };
 
-  const openCreate = () => { setEditing(null); resetForm(); setIsFormOpen(true); };
+  const openCreate = () => {
+    setEditing(null);
+    resetForm();
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 30);
+    setForm((current) => ({ ...current, due_date: dueDate.toISOString().slice(0, 10) }));
+    setIsFormOpen(true);
+  };
   const openEdit = (inv) => {
     setEditing(inv);
     setForm({
-      client_id: inv.client_id, contract_id: inv.contract_id || "", due_date: inv.due_date,
-      notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0),
+      client_id: inv.client_id, contract_id: inv.contract_id || "", ticket_id: inv.ticket_id || "", ticket_number: inv.ticket_number || "", ticket_title: inv.ticket_title || "", due_date: inv.due_date,
+      invoice_name: inv.invoice_name || "", notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0),
       is_recurring: inv.is_recurring || false, recurring_interval: inv.recurring_interval || "monthly",
       recurring_start_date: inv.recurring_start_date || "", recurring_end_date: inv.recurring_end_date || ""
     });
@@ -279,15 +484,52 @@ export default function InvoicesPage() {
   };
 
   const handleStatusChange = async (inv, status) => {
-    try { await axios.put(`${API}/invoices/${inv.id}`, { status }, { headers }); toast.success(`Status: ${status}`); fetchAll(); if (viewInvoice?.id === inv.id) setViewInvoice({ ...viewInvoice, status }); }
-    catch { toast.error("Failed"); }
+    try {
+      await axios.put(`${API}/invoices/${inv.id}`, { status }, { headers });
+      toast.success(status === "sent" ? "Invoice marked as sent" : `Status: ${status}`);
+      fetchAll();
+      if (viewInvoice?.id === inv.id) setViewInvoice({ ...viewInvoice, status, ...(status === "sent" ? { sent_at: new Date().toISOString() } : {}) });
+    } catch (e) { toast.error(e.response?.data?.detail || "Unable to update invoice status"); }
   };
 
-  const handleStripePayment = async (inv) => {
+  const openPaymentDialog = (inv, method = "eftpos") => {
+    const balance = Math.max(0, (inv.total || 0) - (inv.amount_paid || 0));
+    setPayingInvoice(inv);
+    setPaymentForm({
+      amount: String(balance.toFixed(2)),
+      method,
+      reference: "",
+      notes: "",
+      date: new Date().toISOString().split("T")[0],
+    });
+    setIsPaymentOpen(true);
+  };
+
+  const openBillingProfile = async (clientId = form.client_id || clients[0]?.id || "") => {
+    if (!clientId) { toast.info("Create or select a client first"); return; }
+    setBillingProfileClient(clientId);
     try {
-      const res = await axios.post(`${API}/invoices/${inv.id}/pay`, { origin_url: window.location.origin }, { headers });
-      if (res.data.url) window.location.href = res.data.url;
-    } catch (e) { toast.error(e.response?.data?.detail || "Payment failed"); }
+      const response = await axios.get(`${API}/clients/${clientId}/billing-profile`, { headers });
+      setBillingProfile(response.data);
+      setBillingProfileOpen(true);
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not load billing profile"); }
+  };
+
+  const saveBillingProfile = async () => {
+    try {
+      await axios.put(`${API}/clients/${billingProfileClient}/billing-profile`, billingProfile, { headers });
+      toast.success("Client billing profile saved");
+      setBillingProfileOpen(false);
+      fetchAll();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not save billing profile"); }
+  };
+
+  const closeSettlement = async () => {
+    try {
+      const response = await axios.post(`${API}/billing/reconciliation/settlements`, settlementForm, { headers });
+      toast.success(`Settlement ${response.data.id} created — ready for Xero reconciliation`);
+      setSettlementOpen(false); setSettlementForm(f => ({ ...f, reference: "" })); fetchAll();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not close settlement"); }
   };
 
   const handleManualPayment = async () => {
@@ -304,6 +546,74 @@ export default function InvoicesPage() {
         setViewInvoice(updated.data);
       }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const openSplitBilling = (inv) => {
+    if (inv.is_split_parent || inv.is_split_child) {
+      toast.info("This invoice is already part of a split-billing record");
+      return;
+    }
+    setSplitBillingInvoice(inv);
+    setSplitAllocations([{ payer_client_id: inv.client_id || "", amount: String(Number(inv.total || 0).toFixed(2)), description: "Primary payer allocation" }]);
+    setSplitBillingOpen(true);
+  };
+
+  const updateSplitAllocation = (index, field, value) => {
+    setSplitAllocations(current => current.map((allocation, allocationIndex) => (
+      allocationIndex === index ? { ...allocation, [field]: value } : allocation
+    )));
+  };
+
+  const removeSplitAllocation = (index) => {
+    setSplitAllocations(current => current.filter((_, allocationIndex) => allocationIndex !== index));
+  };
+
+  const totalSplitAllocated = splitAllocations.reduce((sum, allocation) => sum + (parseFloat(allocation.amount) || 0), 0);
+
+  const handleCreateSplitBilling = async () => {
+    if (!splitBillingInvoice) return;
+    const sourceTotal = Number(splitBillingInvoice.total || 0);
+    if (splitAllocations.length < 2) { toast.error("Add at least two customer payers"); return; }
+    if (splitAllocations.some(allocation => !allocation.payer_client_id || !(parseFloat(allocation.amount) > 0))) {
+      toast.error("Each allocation needs a customer and a positive amount"); return;
+    }
+    if (Math.abs(totalSplitAllocated - sourceTotal) > 0.005) {
+      toast.error(`Allocations must equal $${sourceTotal.toFixed(2)}`); return;
+    }
+    if (new Set(splitAllocations.map(allocation => allocation.payer_client_id)).size < 2) {
+      toast.error("Select at least two different customer payers"); return;
+    }
+    setSplitBillingBusy(true);
+    try {
+      const response = await axios.post(`${API}/invoices/${splitBillingInvoice.id}/split-billing`, { allocations: splitAllocations }, { headers });
+      toast.success(`${response.data.payer_invoices?.length || 0} payer invoices created`);
+      setSplitBillingOpen(false);
+      setSplitBillingInvoice(null);
+      setSplitAllocations([]);
+      setViewInvoice(response.data.parent);
+      setDetailTab("split");
+      fetchAll();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not create split-billing invoices");
+    } finally {
+      setSplitBillingBusy(false);
+    }
+  };
+
+  const openSplitPayerInvoice = async (invoiceId) => {
+    try {
+      const response = await axios.get(`${API}/invoices/${invoiceId}`, { headers });
+      viewInvoiceDetail(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not open the payer invoice");
+    }
+  };
+
+  const openInvoiceEmail = (invoice) => {
+    const client = clients.find(clientItem => clientItem.id === invoice.client_id);
+    setEmailInvoiceTarget(invoice);
+    setEmailForm({ email: client?.email || "", subject: `Invoice ${invoice.invoice_number}`, message: "" });
+    setEmailDialog(true);
   };
 
   const handleMoveClient = async () => {
@@ -326,19 +636,23 @@ export default function InvoicesPage() {
   // --- Email Invoice ---
   const handleEmailInvoice = async () => {
     if (!emailForm.email.trim()) { toast.error("Enter the recipient email address"); return; }
-    if (!viewInvoice) return;
+    const invoiceTarget = emailInvoiceTarget || viewInvoice;
+    if (!invoiceTarget) return;
     try {
-      const response = await axios.post(`${API}/invoices/${viewInvoice.id}/email`, emailForm, { headers });
+      const response = await axios.post(`${API}/invoices/${invoiceTarget.id}/email`, emailForm, { headers });
       if (response.data?.sent) toast.success("Invoice emailed");
       else toast.warning(response.data?.message || "Email delivery is not configured");
       setEmailDialog(false);
+      setEmailInvoiceTarget(null);
       const [invoiceRes, historyRes] = await Promise.all([
-        axios.get(`${API}/invoices/${viewInvoice.id}`, { headers }),
-        axios.get(`${API}/invoices/${viewInvoice.id}/email-history`, { headers }),
+        axios.get(`${API}/invoices/${invoiceTarget.id}`, { headers }),
+        axios.get(`${API}/invoices/${invoiceTarget.id}/email-history`, { headers }),
       ]);
-      setViewInvoice(invoiceRes.data);
+      if (viewInvoice?.id === invoiceTarget.id) {
+        setViewInvoice(invoiceRes.data);
+        setEmailHistory(historyRes.data);
+      }
       setInvoices(current => current.map(invoice => invoice.id === invoiceRes.data.id ? invoiceRes.data : invoice));
-      setEmailHistory(historyRes.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to email"); }
   };
 
@@ -410,33 +724,29 @@ export default function InvoicesPage() {
   const handlePdfPreview = async (inv) => {
     setPdfLoading(true); setPdfPreviewInvoice(inv);
     try {
-      const res = await axios.get(`${API}/invoices/${inv.id}/pdf`, { headers, responseType: "blob" });
+      const urlWithToken = `${API}/invoices/${inv.id}/pdf?token=${encodeURIComponent(token)}`;
+      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       setPdfPreviewUrl(url);
-    } catch { toast.error("Failed to generate PDF"); }
+    } catch { toast.error("Failed to generate invoice PDF"); }
     finally { setPdfLoading(false); }
   };
 
   const handlePdfDownload = async (inv) => {
     try {
-      const res = await axios.get(`${API}/invoices/${inv.id}/pdf/download`, { headers, responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const urlWithToken = `${API}/invoices/${inv.id}/pdf/download?token=${encodeURIComponent(token)}`;
+      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       const a = document.createElement("a"); a.href = url; a.download = `${inv.invoice_number || "invoice"}.pdf`; a.click();
       window.URL.revokeObjectURL(url); toast.success("PDF downloaded");
-    } catch { toast.error("Failed to download PDF"); }
+    } catch { toast.error("Failed to download invoice PDF"); }
   };
 
   const closePdfPreview = () => {
     if (pdfPreviewUrl) window.URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null); setPdfPreviewInvoice(null);
-  };
-
-  // --- Aging Report ---
-  const fetchAgingReport = async () => {
-    try {
-      const res = await axios.get(`${API}/invoices/aging-report`, { headers });
-      setAgingReport(res.data);
-    } catch { toast.error("Failed to load aging report"); }
   };
 
   // --- Revenue Analytics ---
@@ -450,9 +760,10 @@ export default function InvoicesPage() {
   const filtered = invoices
     .filter(i => filterStatus === "all" || i.status === filterStatus)
     .filter(i => filterPayment === "all" || (i.payment_status || "unpaid") === filterPayment)
-    .filter(i => !search || i.invoice_number?.toLowerCase().includes(search.toLowerCase()) || i.client_name?.toLowerCase().includes(search.toLowerCase()));
+    .filter(i => !search || i.invoice_number?.toLowerCase().includes(search.toLowerCase()) || i.invoice_name?.toLowerCase().includes(search.toLowerCase()) || i.client_name?.toLowerCase().includes(search.toLowerCase()));
 
   const getEffectiveStatus = (inv) => {
+    if (inv.is_split_parent) return "split_billed";
     if (inv.payment_status === "paid") return "paid";
     if (inv.due_date && isPast(parseISO(inv.due_date)) && inv.payment_status !== "paid") return "overdue";
     return inv.status;
@@ -460,30 +771,94 @@ export default function InvoicesPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  if (loadError) {
+    return (
+      <PageShell data-testid="invoices-load-error">
+        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
+          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
+            <AlertTriangle className="h-10 w-10 text-rose-300" />
+            <div><h1 className="text-lg font-semibold">Invoice workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError}</p></div>
+            <Button onClick={fetchAll} data-testid="retry-invoices-load"><RefreshCw className="mr-2 h-4 w-4" />Retry invoices</Button>
+          </CardContent>
+        </Card>
+      </PageShell>
+    );
+  }
+
   // ========== SHARED DIALOGS ==========
   const dialogs = (
     <>
       {/* CREATE/EDIT */}
       <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>{editing ? `Edit ${editing.invoice_number}` : "New Invoice"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+        <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="shrink-0 border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)] px-6 py-5 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Billing document workspace</p>
+            <div className="flex flex-wrap items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><Receipt className="h-4 w-4 text-emerald-300" /></span><DialogTitle className="text-2xl tracking-tight text-zinc-100">{editing ? `Edit ${editing.invoice_number}` : "Create invoice"}</DialogTitle><Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/5 text-[10px] text-emerald-300">Product catalogue linked</Badge></div>
+            <DialogDescription>Build a client-ready invoice from the product catalogue. Link one related ticket to keep all invoice lines, billing events, and audit activity traceable to the service record.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5 pr-6">
             <div className="grid grid-cols-4 gap-3">
-              <div>
-                <Label>Client *</Label>
-                <Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}>
-                  <SelectTrigger data-testid="invoice-client"><SelectValue placeholder="Select client" /></SelectTrigger>
-                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="col-span-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"><div className="min-w-0 flex-1"><Label>Invoice name <span className="font-normal text-muted-foreground">(internal)</span></Label><Input value={form.invoice_name} onChange={e => setForm({ ...form, invoice_name: e.target.value })} maxLength={160} placeholder="e.g. July 2026 managed services" data-testid="invoice-name" /><p className="mt-1 text-[10px] leading-relaxed text-cyan-200/75">A searchable workspace label for technicians. It does not replace the formal invoice number or client-facing notes.</p></div><Badge variant="outline" className="shrink-0 border-cyan-400/20 bg-cyan-400/[0.05] text-[10px] text-cyan-100">Optional</Badge></div>
+              </div>
+              <div className="col-span-2">
+                <div className="flex items-center justify-between"><Label>Client *</Label>{form.client_id && <button type="button" className="text-[11px] font-medium text-emerald-300 hover:text-emerald-200" onClick={() => openBillingProfile(form.client_id)}>Billing profile</button>}</div>
+                <ClientAutocomplete
+                  clients={clients}
+                  value={form.client_id}
+                  testId="invoice-client"
+                  placeholder="Search for a client…"
+                  onValueChange={v => setForm(current => {
+                  const linkedTicket = tickets.find(ticket => ticket.id === current.ticket_id);
+                  const ticketBelongsToClient = !linkedTicket || linkedTicket.client_id === v;
+                  return ticketBelongsToClient
+                    ? { ...current, client_id: v }
+                    : { ...current, client_id: v, ticket_id: "", ticket_number: "", ticket_title: "" };
+                  })}
+                />
+                <p className="mt-1 text-[10px] text-cyan-200/75">Start typing to find a client by name, billing email, or contact.</p>
+              </div>
+              <div className="col-span-2">
+                <Label className="flex items-center gap-1.5">Related ticket <span className="font-normal text-muted-foreground">(optional)</span></Label>
+                <SearchableSelect
+                  testId="invoice-ticket-select"
+                  value={form.ticket_id || "__none"}
+                  placeholder="Search a related ticket…"
+                  searchPlaceholder="Search ticket number or title…"
+                  emptyMessage="No tickets match the selected client."
+                  options={[
+                    { value: "__none", label: "No ticket linked", detail: "Keep this as account-level billing", searchText: "account billing none" },
+                    ...tickets
+                      .filter(ticket => !form.client_id || ticket.client_id === form.client_id)
+                      .map(ticket => ({
+                        value: ticket.id,
+                        label: `${ticket.ticket_number || "Ticket"} — ${ticket.title || "Untitled"}`,
+                        detail: ticket.status ? `Status: ${ticket.status.replace(/_/g, " ")}` : "Service ticket",
+                        searchText: `${ticket.ticket_number || ""} ${ticket.title || ""}`,
+                      })),
+                  ]}
+                  onValueChange={v => {
+                    const ticket = tickets.find(item => item.id === v);
+                    setForm(current => ({
+                      ...current,
+                      ticket_id: v === "__none" ? "" : v,
+                      ticket_number: ticket?.ticket_number || "",
+                      ticket_title: ticket?.title || "",
+                      client_id: v === "__none" ? current.client_id : (ticket?.client_id || current.client_id),
+                    }));
+                  }}
+                />
+                <p className="mt-1 text-[10px] text-cyan-200/80">One ticket applies to every line and billing event on this invoice.</p>
               </div>
               <div><Label>Due Date *</Label><Input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="invoice-due-date" /></div>
               <div><Label>Tax Rate (%)</Label><Input type="number" step="0.01" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} /></div>
               <div><Label>Discount %</Label><Input type="number" step="0.1" value={form.discount_pct} onChange={e => setForm({ ...form, discount_pct: e.target.value })} data-testid="invoice-discount-pct" /></div>
+              <div className="flex items-end"><div className={`w-full rounded-lg border px-3 py-2 text-xs ${form.ticket_id ? "border-cyan-400/20 bg-cyan-400/[0.05] text-cyan-100" : "border-white/[0.08] bg-white/[0.025] text-zinc-500"}`}><span className="font-semibold">{form.ticket_id ? form.ticket_number || "Ticket linked" : "No ticket link"}</span><p className="mt-0.5 text-[10px] opacity-80">{form.ticket_id ? "Invoice and ticket audits are connected." : "Use for account-level billing."}</p></div></div>
             </div>
             <Separator />
             <div>
               <div className="flex items-center justify-between mb-2">
-                <Label className="text-base font-semibold">Line Items</Label>
+                <div><Label className="text-base font-semibold">Line items</Label><p className="mt-0.5 text-xs text-muted-foreground">Choose a catalogue product to automatically apply its name, SKU and sell price, or add a manual billing line.</p></div>
                 <div className="flex items-center gap-1.5">
                   {form.client_id && (
                     <Button
@@ -504,7 +879,7 @@ export default function InvoicesPage() {
                       data-testid="ai-smart-suggest"
                     ><Zap className="w-3 h-3 mr-1" />AI Smart-Suggest</Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-inv-line-item"><Plus className="w-3 h-3 mr-1" />Add Item</Button>
+                  <Button variant="outline" size="sm" onClick={addLineItem} data-testid="add-inv-line-item"><PackagePlus className="w-3 h-3 mr-1" />Add catalogue line</Button>
                 </div>
               </div>
               {form.line_items.length === 0 ? (
@@ -515,10 +890,20 @@ export default function InvoicesPage() {
                     <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
                       <div className="col-span-3">
                         {idx === 0 && <Label className="text-xs">Product / Item</Label>}
-                        <Select value={li.product_id || ""} onValueChange={v => updateLineItem(idx, "product_id", v)}>
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.retail_price?.toFixed(2)}</SelectItem>)}</SelectContent>
-                        </Select>
+                        <SearchableSelect
+                          testId={`invoice-line-product-${idx}`}
+                          value={li.product_id || ""}
+                          placeholder="Search catalogue…"
+                          searchPlaceholder="Search product name or SKU…"
+                          emptyMessage="No catalogue products found."
+                          options={products.map(product => ({
+                            value: product.id,
+                            label: product.name || "Untitled product",
+                            detail: `${product.sku || "No SKU"} · $${(product.sell_price ?? product.retail_price ?? 0).toFixed(2)}`,
+                            searchText: `${product.name || ""} ${product.sku || ""}`,
+                          }))}
+                          onValueChange={v => updateLineItem(idx, "product_id", v)}
+                        />
                       </div>
                       <div className="col-span-2">{idx === 0 && <Label className="text-xs">Name</Label>}<Input value={li.name} onChange={e => updateLineItem(idx, "name", e.target.value)} placeholder="Item name" /></div>
                       <div className="col-span-1">{idx === 0 && <Label className="text-xs">Qty</Label>}<Input type="number" min="1" step="0.01" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseFloat(e.target.value) || 0)} /></div>
@@ -559,14 +944,14 @@ export default function InvoicesPage() {
               {form.is_recurring && (
                 <div className="grid grid-cols-3 gap-3 p-3 rounded-lg border bg-muted/20">
                   <div><Label className="text-xs">Frequency</Label>
-                    <Select value={form.recurring_interval} onValueChange={v => setForm({ ...form, recurring_interval: v })}>
-                      <SelectTrigger data-testid="recurring-interval"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="weekly">Weekly</SelectItem><SelectItem value="biweekly">Bi-Weekly</SelectItem>
-                        <SelectItem value="monthly">Monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem>
-                        <SelectItem value="semi-annual">Semi-Annual</SelectItem><SelectItem value="annually">Annually</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      testId="recurring-interval"
+                      value={form.recurring_interval}
+                      onValueChange={v => setForm({ ...form, recurring_interval: v })}
+                      options={RECURRING_INTERVAL_OPTIONS}
+                      placeholder="Search frequency…"
+                      searchPlaceholder="Search frequency…"
+                    />
                   </div>
                   <div><Label className="text-xs">Start Date</Label><Input type="date" value={form.recurring_start_date} onChange={e => setForm({ ...form, recurring_start_date: e.target.value })} /></div>
                   <div><Label className="text-xs">End Date (optional)</Label><Input type="date" value={form.recurring_end_date} onChange={e => setForm({ ...form, recurring_end_date: e.target.value })} /></div>
@@ -574,31 +959,105 @@ export default function InvoicesPage() {
               )}
             </div>
           </div>
-          <DialogFooter><Button onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Update" : "Create"} Invoice</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">Saved invoices remain drafts until you explicitly send or mark them as sent.</p><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Save audited changes" : "Create draft invoice"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* MANUAL PAYMENT */}
       <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Amount ($)</Label><Input type="number" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div>
-            <div><Label>Payment Method</Label>
+        <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="border-b border-border/80 px-6 py-5">
+            <div className="flex items-start gap-3 pr-6">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10"><Banknote className="h-5 w-5 text-emerald-300" /></span>
+              <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing workflow</p><DialogTitle className="mt-1">Record customer payment</DialogTitle><DialogDescription className="mt-1">Create the auditable payment record here, then reconcile it with Xero once the bank feed or terminal settlement is available.</DialogDescription></div>
+            </div>
+          </DialogHeader>
+          <div className="space-y-5 px-6 py-5">
+            {payingInvoice && <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Invoice</p><p className="mt-1 font-mono text-sm font-semibold">{payingInvoice.invoice_number}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Client</p><p className="mt-1 truncate text-sm font-medium">{payingInvoice.client_name || "Unassigned client"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Remaining balance</p><p className="mt-1 text-sm font-semibold text-emerald-300">${Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)).toFixed(2)}</p></div></div>}
+            <div className="grid gap-4 sm:grid-cols-2"><div><Label>Payment amount ($)</Label><Input className="mt-1" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div><div><Label>Payment date</Label><Input className="mt-1" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div></div>
+            <div><Label>Payment method</Label>
               <Select value={paymentForm.method} onValueChange={v => setPaymentForm({ ...paymentForm, method: v })}>
-                <SelectTrigger data-testid="payment-method"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1" data-testid="payment-method"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer / EFT</SelectItem>
-                  <SelectItem value="check">Check / Cheque</SelectItem><SelectItem value="credit_card_offline">Credit Card (Offline)</SelectItem>
-                  <SelectItem value="paypal">PayPal</SelectItem><SelectItem value="wire">Wire Transfer</SelectItem><SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="eftpos">EFTPOS terminal</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="bank_transfer">Bank transfer / EFT</SelectItem>
+                  <SelectItem value="xero_reconciled">Already reconciled in Xero</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Reference</Label><Input value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder="Reference number" data-testid="payment-reference" /></div>
-            <div><Label>Payment Date</Label><Input type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div>
-            <div><Label>Internal Notes</Label><Textarea value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional payment notes" rows={2} /></div>
+            <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">{paymentForm.method === "eftpos" ? "Record the EFTPOS terminal receipt or settlement reference so the payment can be matched in Xero." : paymentForm.method === "cash" ? "Record the receipt number or till reference. Cash payments should be reconciled with the daily cash-up." : paymentForm.method === "xero_reconciled" ? "Use this only after the payment is matched in Xero; include the Xero payment or bank-feed reference." : "Include the banking or remittance reference so finance can reconcile the payment in Xero."}</p>
+            <div><Label>Reference</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
+            <div><Label>Internal notes</Label><Textarea className="mt-1" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional reconciliation, remittance, or customer notes" rows={3} /></div>
           </div>
-          <DialogFooter><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="w-4 h-4 mr-1" />Confirm Payment</Button></DialogFooter>
+          <DialogFooter className="border-t border-border/80 px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={splitBillingOpen} onOpenChange={(open) => { setSplitBillingOpen(open); if (!open && !splitBillingBusy) { setSplitBillingInvoice(null); setSplitAllocations([]); } }}>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-4xl flex-col overflow-hidden border-violet-400/25 bg-[linear-gradient(145deg,rgba(18,14,34,0.99),rgba(9,20,29,0.99))] p-0">
+          <DialogHeader className="shrink-0 border-b border-violet-400/20 bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.19),transparent_45%),linear-gradient(135deg,rgba(34,211,238,0.08),transparent)] px-6 py-5 text-left">
+            <div className="flex items-start gap-3 pr-6">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/30 bg-violet-500/10"><Users className="h-5 w-5 text-violet-200" /></span>
+              <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200">Shared billing workflow</p><DialogTitle className="mt-1 text-2xl tracking-tight text-zinc-100">Split billing across customers</DialogTitle><DialogDescription className="mt-1">Create one auditable payer invoice per customer. The source draft remains available as a locked allocation ledger and is excluded from receivables to prevent double counting.</DialogDescription></div>
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+            {splitBillingInvoice && (() => {
+              const sourceTotal = Number(splitBillingInvoice.total || 0);
+              const remaining = Math.round((sourceTotal - totalSplitAllocated) * 100) / 100;
+              const isBalanced = Math.abs(remaining) < 0.005;
+              return (
+                <>
+                  <div className="grid gap-3 rounded-xl border border-violet-400/20 bg-violet-500/[0.055] p-4 sm:grid-cols-3">
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Source draft</p><p className="mt-1 font-mono text-sm font-semibold text-zinc-100">{splitBillingInvoice.invoice_number}</p></div>
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Original customer</p><p className="mt-1 truncate text-sm font-medium text-zinc-100">{splitBillingInvoice.client_name || "Unassigned"}</p></div>
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Amount to allocate</p><p className="mt-1 text-sm font-semibold text-violet-100">${sourceTotal.toFixed(2)} <span className="text-xs font-normal text-violet-200/70">tax inclusive</span></p></div>
+                  </div>
+                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.045] px-4 py-3 text-xs leading-relaxed text-sky-100"><span className="font-semibold">How it works:</span> allocate the full gross total between at least two different customers. Each payer receives their own PDF, email history, payment ledger and Xero reconciliation trail. Tax is apportioned from the source invoice’s tax profile.</div>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-end justify-between gap-3"><div><Label className="text-base font-semibold text-zinc-100">Payer allocations</Label><p className="mt-1 text-xs text-muted-foreground">Use customer search to select who is responsible for each portion.</p></div><Button type="button" variant="outline" className="border-violet-400/30 text-violet-100 hover:bg-violet-500/10" onClick={() => setSplitAllocations(current => [...current, { payer_client_id: "", amount: "", description: "" }])} data-testid="add-split-payer"><Plus className="mr-1.5 h-4 w-4" />Add payer</Button></div>
+                    {splitAllocations.map((allocation, index) => (
+                      <div key={`split-allocation-form-${index}`} className="grid gap-3 rounded-xl border border-white/[0.09] bg-black/[0.14] p-4 md:grid-cols-12 md:items-end">
+                        <div className="md:col-span-5"><Label className="text-xs">Customer payer</Label><div className="mt-1"><ClientAutocomplete clients={clients} value={allocation.payer_client_id} onValueChange={(value) => updateSplitAllocation(index, "payer_client_id", value)} placeholder="Search customer, email, or contact…" testId={`split-payer-client-${index}`} /></div></div>
+                        <div className="md:col-span-2"><Label className="text-xs">Gross amount ($)</Label><Input className="mt-1 font-mono" type="number" min="0.01" step="0.01" value={allocation.amount} onChange={(event) => updateSplitAllocation(index, "amount", event.target.value)} placeholder="0.00" data-testid={`split-payer-amount-${index}`} /></div>
+                        <div className="md:col-span-4"><Label className="text-xs">Allocation detail <span className="font-normal text-muted-foreground">(optional)</span></Label><Input className="mt-1" value={allocation.description || ""} onChange={(event) => updateSplitAllocation(index, "description", event.target.value)} placeholder="e.g. hardware contribution" data-testid={`split-payer-description-${index}`} /></div>
+                        <div className="flex justify-end md:col-span-1"><Button type="button" variant="ghost" size="sm" className="h-10 w-10 p-0 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-35" disabled={splitAllocations.length <= 1} onClick={() => removeSplitAllocation(index)} title="Remove payer" aria-label="Remove payer"><Trash2 className="h-4 w-4" /></Button></div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${isBalanced ? "border-emerald-500/25 bg-emerald-500/[0.055]" : "border-amber-500/25 bg-amber-500/[0.055]"}`}>
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Allocation check</p><p className={`mt-1 text-sm font-semibold ${isBalanced ? "text-emerald-200" : "text-amber-200"}`}>{isBalanced ? "Balanced — ready to create payer invoices" : remaining > 0 ? `$${remaining.toFixed(2)} still needs a payer` : `$${Math.abs(remaining).toFixed(2)} over-allocated`}</p></div>
+                    <div className="text-right text-xs"><p className="text-muted-foreground">Allocated <span className="font-mono text-zinc-100">${totalSplitAllocated.toFixed(2)}</span></p><p className="mt-1 text-muted-foreground">Source <span className="font-mono text-zinc-100">${sourceTotal.toFixed(2)}</span></p></div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+          <DialogFooter className="shrink-0 border-t border-violet-400/15 bg-black/20 px-6 py-4"><p className="mr-auto max-w-lg text-xs text-zinc-500">This cannot be reversed automatically. If a payer invoice has already been sent or paid, use the normal credit-note process for corrections.</p><Button variant="outline" onClick={() => setSplitBillingOpen(false)} disabled={splitBillingBusy}>Cancel</Button><Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={handleCreateSplitBilling} disabled={splitBillingBusy || splitAllocations.length < 2} data-testid="confirm-split-billing-btn">{splitBillingBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Users className="mr-1.5 h-4 w-4" />}Create payer invoices</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={billingProfileOpen} onOpenChange={setBillingProfileOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Client billing profile</DialogTitle><DialogDescription>Set the defaults that keep billing, approval and Xero matching consistent for this client.</DialogDescription></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Client</Label><ClientAutocomplete clients={clients} value={billingProfileClient} onValueChange={openBillingProfile} placeholder="Search for a client…" testId="billing-profile-client" /></div>
+            <div className="grid grid-cols-2 gap-3"><div><Label>Billing email</Label><Input type="email" value={billingProfile.billing_email || ""} onChange={e => setBillingProfile({ ...billingProfile, billing_email: e.target.value })} placeholder="accounts@client.com" /></div><div><Label>Payment terms (days)</Label><Input type="number" min="0" max="365" value={billingProfile.payment_terms_days ?? 30} onChange={e => setBillingProfile({ ...billingProfile, payment_terms_days: e.target.value })} /></div></div>
+            <div className="grid grid-cols-2 gap-3"><div><Label>Default payment method</Label><Select value={billingProfile.default_payment_method || "bank_transfer"} onValueChange={v => setBillingProfile({ ...billingProfile, default_payment_method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bank_transfer">Bank transfer / EFT</SelectItem><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Xero contact ID</Label><Input value={billingProfile.xero_contact_id || ""} onChange={e => setBillingProfile({ ...billingProfile, xero_contact_id: e.target.value })} placeholder="Optional, after Xero sync" /></div></div>
+            <label className="flex items-start gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm"><Switch checked={Boolean(billingProfile.purchase_order_required)} onCheckedChange={v => setBillingProfile({ ...billingProfile, purchase_order_required: v })} /><span><span className="block font-medium">Purchase order required</span><span className="text-xs text-muted-foreground">Keep a PO requirement visible before billing this client.</span></span></label>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setBillingProfileOpen(false)}>Cancel</Button><Button onClick={saveBillingProfile}>Save billing profile</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={settlementOpen} onOpenChange={setSettlementOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Close payment settlement</DialogTitle><DialogDescription>Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero.</DialogDescription></DialogHeader>
+          <div className="space-y-3"><div><Label>Method</Label><Select value={settlementForm.method} onValueChange={v => setSettlementForm({ ...settlementForm, method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" /></div></div>
+          <DialogFooter><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button onClick={closeSettlement}><Check className="w-4 h-4 mr-1" />Close settlement</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -608,11 +1067,9 @@ export default function InvoicesPage() {
           <DialogHeader><DialogTitle>Move Invoice to Different Client</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {movingInvoice && <div className="p-3 rounded-lg bg-muted/30 border text-sm"><p className="font-mono font-medium">{movingInvoice.invoice_number}</p><p className="text-muted-foreground">Currently: {movingInvoice.client_name} | ${(movingInvoice.total || 0).toFixed(2)}</p></div>}
+            {movingInvoice?.ticket_id && <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-3 py-2 text-xs leading-relaxed text-amber-100">This invoice is linked to a service ticket. Unlink or relink the ticket first so the invoice cannot be moved to a different client while retaining an invalid ticket relationship.</div>}
             <div><Label>Move to Client *</Label>
-              <Select value={moveTarget} onValueChange={setMoveTarget}>
-                <SelectTrigger data-testid="move-target-client"><SelectValue placeholder="Select new client" /></SelectTrigger>
-                <SelectContent>{clients.filter(c => c.id !== movingInvoice?.client_id).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <ClientAutocomplete clients={clients} value={moveTarget} onValueChange={setMoveTarget} placeholder="Search for a new client…" testId="move-target-client" excludeClientId={movingInvoice?.client_id || ""} />
             </div>
           </div>
           <DialogFooter>
@@ -656,9 +1113,9 @@ export default function InvoicesPage() {
       </Dialog>
 
       {/* EMAIL INVOICE */}
-      <Dialog open={emailDialog} onOpenChange={setEmailDialog}>
+      <Dialog open={emailDialog} onOpenChange={(open) => { setEmailDialog(open); if (!open) setEmailInvoiceTarget(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email Invoice</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email {emailInvoiceTarget?.invoice_number || viewInvoice?.invoice_number || "Invoice"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Recipient Email</Label><Input value={emailForm.email} onChange={e => setEmailForm({ ...emailForm, email: e.target.value })} placeholder="client@example.com" data-testid="invoice-email-input" /></div>
             <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} /></div>
@@ -790,33 +1247,49 @@ export default function InvoicesPage() {
   );
   if (viewInvoice) {
     const inv = viewInvoice;
-    const pStatus = inv.payment_status || "unpaid";
+    const isSplitParent = Boolean(inv.is_split_parent);
+    const pStatus = isSplitParent ? "split" : (inv.payment_status || "unpaid");
     const canDelete = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
     const canVoid = pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
-    const balance = (inv.total || 0) - (inv.amount_paid || 0);
-    const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+    const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
+    const isOverdue = !isSplitParent && inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
 
     return (
-      <div className="space-y-6" data-testid="invoice-detail">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setViewInvoice(null); setDetailTab("items"); }} data-testid="back-to-invoices"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-mono font-semibold text-lg">{inv.invoice_number}</span>
-          <Badge className={PAYMENT_STATUS[pStatus]?.class}><PayIcon className="w-3 h-3 mr-1" />{PAYMENT_STATUS[pStatus]?.label}</Badge>
-          <Badge className={STATUS_CONFIG[getEffectiveStatus(inv)]?.class}>{STATUS_CONFIG[getEffectiveStatus(inv)]?.label}</Badge>
-          {isOverdue && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>}
-          {inv.is_recurring && <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30"><RefreshCw className="w-3 h-3 mr-1" />Recurring</Badge>}
-          <div className="ml-auto flex gap-2 flex-wrap">
-            <InvoiceAIBundle invoiceId={inv.id} />
-            <InvoiceExplainerButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
-            {balance > 0 && <PaymentPromiseButton invoiceId={inv.id} />}
-          </div>
-        </div>
+      <div className="space-y-4" data-testid="invoice-detail">
+        <Card className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="invoice-console-header">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live billing record <span className="text-zinc-600">/</span><span className="text-zinc-400">Finance operations</span></div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={() => { setViewInvoice(null); setDetailTab("items"); }} data-testid="back-to-invoices" aria-label="Back to invoices" title="Back to invoices"><ArrowLeft className="h-4 w-4" /></Button>
+              <Badge className="h-6 border-white/[0.10] bg-black/30 px-2.5 font-mono text-[10px] tracking-wide text-zinc-200">{inv.invoice_number}</Badge>
+              <Badge className={PAYMENT_STATUS[pStatus]?.class}><PayIcon className="mr-1 h-3 w-3" />{PAYMENT_STATUS[pStatus]?.label}</Badge>
+              <Badge className={STATUS_CONFIG[getEffectiveStatus(inv)]?.class}>{STATUS_CONFIG[getEffectiveStatus(inv)]?.label}</Badge>
+              {isOverdue && <Badge className="animate-pulse border-red-500/30 bg-red-500/20 text-red-400"><AlertTriangle className="mr-1 h-3 w-3" />Overdue</Badge>}
+              {inv.is_recurring && <Badge className="border-cyan-500/30 bg-cyan-500/10 text-cyan-200"><RefreshCw className="mr-1 h-3 w-3" />Recurring</Badge>}
+              <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:ml-2 lg:basis-auto lg:flex-1">
+                <p className="truncate text-xl font-semibold tracking-tight text-white">{inv.invoice_name || inv.client_name || "Client invoice"}</p>
+                <p className="mt-1 text-xs text-zinc-400">{isSplitParent ? <><span>Source record retained for audit</span><span className="px-1.5 text-zinc-600">/</span><span className="text-violet-200">{(inv.split_billing?.allocations || []).length} payer invoice{(inv.split_billing?.allocations || []).length === 1 ? "" : "s"} issued</span></> : <>{inv.invoice_name && <><span>{inv.client_name || "Client invoice"}</span><span className="px-1.5 text-zinc-600">/</span></>}Due {inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "date not set"} <span className="px-1.5 text-zinc-600">/</span> Balance <span className={balance > 0 ? "font-mono text-amber-200" : "font-mono text-emerald-200"}>${Math.max(0, balance).toFixed(2)}</span></>}</p>
+              </div>
+              {balance > 0 && <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
+              {!isSplitParent && <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
+              <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="header-preview-invoice-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3">
+              <span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{inv.client_name || "No customer"}</span>
+              {inv.ticket_id && <Link to={`/tickets?ticket=${encodeURIComponent(inv.ticket_id)}`} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.14]" data-testid="invoice-linked-ticket"><Ticket className="h-3 w-3" />{inv.ticket_number || "Linked ticket"}</Link>}
+              {isSplitParent && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split-billing ledger</span>}
+              {inv.is_split_child && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split payer invoice</span>}
+              <span className="rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">Total ${(inv.total || 0).toFixed(2)}</span>
+              <span className="rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">Paid ${(inv.amount_paid || 0).toFixed(2)}</span>
+              <div className="ml-auto flex flex-wrap gap-2"><InvoiceAIBundle invoiceId={inv.id} /><InvoiceExplainerButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />{balance > 0 && <PaymentPromiseButton invoiceId={inv.id} />}</div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Payment Progress Bar */}
         {balance > 0 && (
-          <Card className="border-slate-700/50 overflow-hidden">
+          <Card className="overflow-hidden border border-cyan-400/[0.14] bg-[linear-gradient(135deg,rgba(34,211,238,0.06),rgba(16,185,129,0.04))]">
             <CardContent className="py-3 px-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Payment Progress</span>
@@ -828,7 +1301,7 @@ export default function InvoicesPage() {
         )}
 
         {/* Smart Actions (AI Reminder, Payment Plan, Late Fee, Pay-Now Link, Reissue) */}
-        <Card className="bg-gradient-to-r from-emerald-500/5 to-cyan-500/5 border-emerald-500/20">
+        <Card className="border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.09),rgba(34,211,238,0.05))]">
           <CardContent className="p-3">
             <InvoiceDetailSmartActions invoice={inv} onReload={async () => {
               const updated = await axios.get(`${API}/invoices/${inv.id}`, { headers });
@@ -838,14 +1311,15 @@ export default function InvoicesPage() {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-8 space-y-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="space-y-4 xl:col-span-8">
             <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList>
-                <TabsTrigger value="items" data-testid="tab-inv-items">Line Items</TabsTrigger>
-                <TabsTrigger value="payments" data-testid="tab-inv-payments">Payments ({(inv.payments || []).length})</TabsTrigger>
-                <TabsTrigger value="emails" data-testid="tab-inv-emails">Emails ({emailHistory.length})</TabsTrigger>
-                <TabsTrigger value="audit" data-testid="tab-inv-audit">Audit ({invoiceActivity.length})</TabsTrigger>
+              <TabsList className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/[0.14] p-1">
+                <TabsTrigger value="items" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-items">Line Items</TabsTrigger>
+                <TabsTrigger value="payments" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-payments">Payments ({(inv.payments || []).length})</TabsTrigger>
+                {isSplitParent && <TabsTrigger value="split" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-violet-500/[0.14] data-[state=active]:text-violet-100" data-testid="tab-inv-split-billing">Payer invoices ({(inv.split_billing?.allocations || []).length})</TabsTrigger>}
+                <TabsTrigger value="emails" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-emails">Emails ({emailHistory.length})</TabsTrigger>
+                <TabsTrigger value="audit" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-audit">Audit ({invoiceActivity.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="items">
@@ -886,13 +1360,14 @@ export default function InvoicesPage() {
                       <div className="text-center py-8 text-muted-foreground text-sm">No payments recorded</div>
                     ) : (
                       <Table>
-                        <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Notes</TableHead><TableHead>Recorded By</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+                        <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Reconciliation</TableHead><TableHead>Notes</TableHead><TableHead>Recorded By</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
                         <TableBody>
                           {(inv.payments || []).map((p, i) => (
                             <TableRow key={`k-${i}`}>
                               <TableCell className="text-sm">{p.date ? (String(p.date).length === 10 ? format(parseISO(p.date), "MMM d, yyyy") : format(new Date(p.date), "MMM d, yyyy h:mm a")) : "-"}</TableCell>
                               <TableCell><Badge variant="outline" className="capitalize text-xs">{(p.method || "").replace(/_/g, " ")}</Badge></TableCell>
                               <TableCell className="text-sm font-mono">{p.reference || p.session_id?.slice(0, 12) || "-"}</TableCell>
+                              <TableCell><Badge variant="outline" className={`text-[10px] ${p.reconciliation_status === "matched" ? "border-emerald-500/30 text-emerald-400" : p.reconciliation_status === "settled_pending_xero" ? "border-sky-500/30 text-sky-300" : "border-amber-500/30 text-amber-300"}`}>{p.reconciliation_status === "matched" ? "Matched in Xero" : p.reconciliation_status === "settled_pending_xero" ? "Settlement queued" : "Awaiting Xero"}</Badge></TableCell>
                               <TableCell className="max-w-48 truncate text-sm text-muted-foreground" title={p.notes || ""}>{p.notes || "-"}</TableCell>
                               <TableCell className="text-sm">{p.recorded_by || "-"}</TableCell>
                               <TableCell className="text-right font-mono font-medium text-green-500">${(p.amount || 0).toFixed(2)}</TableCell>
@@ -904,6 +1379,49 @@ export default function InvoicesPage() {
                   </CardContent>
                 </Card>
               </TabsContent>
+
+              {isSplitParent && (
+                <TabsContent value="split">
+                  <Card className="mt-2 overflow-hidden border-violet-400/20 bg-[linear-gradient(135deg,rgba(139,92,246,0.08),rgba(34,211,238,0.035))]">
+                    <CardHeader className="border-b border-violet-400/15 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <CardTitle className="flex items-center gap-2 text-sm text-violet-100"><Users className="h-4 w-4 text-violet-300" />Split-billing payer ledger</CardTitle>
+                          <p className="mt-1 text-xs text-muted-foreground">This source record is retained for audit only. Payments and customer-facing documents live on the payer invoices below.</p>
+                        </div>
+                        <Badge variant="outline" className="border-violet-400/30 bg-violet-500/10 text-violet-100">Allocated ${(inv.split_billing?.source_total || inv.total || 0).toFixed(2)}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3 p-4">
+                      {(inv.split_billing?.allocations || []).map((allocation) => {
+                        const allocationPaid = Number(allocation.amount_paid || 0);
+                        const allocationAmount = Number(allocation.amount || 0);
+                        const allocationBalance = Math.max(0, allocationAmount - allocationPaid);
+                        const isAllocationPaid = allocation.payment_status === "paid" || allocationBalance <= 0;
+                        return (
+                          <div key={allocation.id || allocation.invoice_id} className="rounded-xl border border-white/[0.09] bg-black/[0.16] p-3.5" data-testid={`split-allocation-${allocation.invoice_id}`}>
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2"><p className="font-medium text-zinc-100">{allocation.payer_client_name || "Customer payer"}</p><Badge variant="outline" className={isAllocationPaid ? "border-emerald-500/35 text-emerald-300" : "border-amber-500/35 text-amber-200"}>{isAllocationPaid ? "Paid" : "Awaiting payment"}</Badge></div>
+                                <p className="mt-1 text-xs text-muted-foreground">{allocation.invoice_number || "Payer invoice"}{allocation.description ? ` · ${allocation.description}` : ""}</p>
+                              </div>
+                              <div className="grid grid-cols-3 gap-4 text-right text-xs">
+                                <div><p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Allocated</p><p className="mt-1 font-mono text-sm font-semibold text-zinc-100">${allocationAmount.toFixed(2)}</p></div>
+                                <div><p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Paid</p><p className="mt-1 font-mono text-sm font-semibold text-emerald-300">${allocationPaid.toFixed(2)}</p></div>
+                                <div><p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Outstanding</p><p className={`mt-1 font-mono text-sm font-semibold ${allocationBalance > 0 ? "text-amber-200" : "text-emerald-300"}`}>${allocationBalance.toFixed(2)}</p></div>
+                              </div>
+                              <div className="flex shrink-0 gap-2">
+                                <Button variant="outline" size="sm" className="border-violet-400/25 text-violet-100 hover:bg-violet-500/10" onClick={() => openSplitPayerInvoice(allocation.invoice_id)} data-testid={`open-split-invoice-${allocation.invoice_id}`}><Eye className="mr-1.5 h-3.5 w-3.5" />Open</Button>
+                                <Button variant="outline" size="sm" className="border-cyan-400/25 text-cyan-100 hover:bg-cyan-400/[0.08]" onClick={async () => { try { const response = await axios.get(`${API}/invoices/${allocation.invoice_id}`, { headers }); openInvoiceEmail(response.data); } catch { toast.error("Could not prepare the payer invoice email"); } }} data-testid={`email-split-invoice-${allocation.invoice_id}`}><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              )}
 
               <TabsContent value="emails">
                 <Card className="mt-2">
@@ -971,9 +1489,9 @@ export default function InvoicesPage() {
             {inv.notes && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Notes</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{inv.notes}</p></CardContent></Card>}
           </div>
 
-          <div className="col-span-4 space-y-4">
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
+          <div className="space-y-4 xl:col-span-4">
+            <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
+              <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />Billing details</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div><span className="text-muted-foreground block">Client</span><span className="font-medium">{inv.client_name}</span></div>
                 <Separator />
@@ -994,25 +1512,20 @@ export default function InvoicesPage() {
                 )}
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {pStatus !== "paid" && (
-                  <>
-                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleStripePayment(inv)} data-testid="stripe-pay-btn">
-                      <CreditCard className="w-4 h-4 mr-1" />Pay with Stripe
-                    </Button>
-                    <Button variant="outline" className="w-full" onClick={() => { setPayingInvoice(inv); setPaymentForm({ amount: String(balance.toFixed(2)), method: "cash", reference: "", notes: "", date: new Date().toISOString().split("T")[0] }); setIsPaymentOpen(true); }} data-testid="record-payment-btn">
-                      <Banknote className="w-4 h-4 mr-1" />Record Manual Payment
-                    </Button>
-                  </>
-                )}
+            <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
+              <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Invoice controls</CardTitle></CardHeader>
+              <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
+                {!isSplitParent && pStatus !== "paid" && <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
+                {!isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
+                {isSplitParent && <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100"><span className="font-medium">Payer invoices issued.</span> Open the Payer invoices tab to email each customer or record their payment.</div>}
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground"><span className="font-medium text-sky-300">Xero</span> {xeroStatus.connected ? `Connected to ${xeroStatus.org_name || "your organisation"}. Reconcile payments after they are recorded.` : xeroStatus.configured ? "Setup is incomplete. Finish Xero OAuth before relying on sync or reconciliation." : "Not connected. Configure Xero before relying on sync or reconciliation."}</div>
+                <Button variant="outline" className="w-full border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="open-xero-btn"><Building2 className="mr-1.5 h-4 w-4" />{xeroStatus.connected ? "Open Xero hub" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
                 <Separator />
-                <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handlePdfPreview(inv)} data-testid="preview-pdf-btn">
-                  <Eye className="w-4 h-4 mr-1" />Preview PDF
+                <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="preview-pdf-btn">
+                  <Eye className="mr-1.5 h-4 w-4" />Preview PDF
                 </Button>
-                <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => handlePdfDownload(inv)} data-testid="download-pdf-detail-btn">
-                  <Download className="w-4 h-4 mr-1" />Download PDF
+                <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfDownload(inv)} data-testid="download-pdf-detail-btn">
+                  <Download className="mr-1.5 h-4 w-4" />Download PDF
                 </Button>
                 <Button
                   variant="outline"
@@ -1044,13 +1557,9 @@ export default function InvoicesPage() {
                 >
                   <Zap className="w-4 h-4 mr-1" />Pre-scan Risks (AI)
                 </Button>
-                <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => {
-                  const client = clients.find(c => c.id === inv.client_id);
-                  setEmailForm({ email: client?.email || "", subject: `Invoice ${inv.invoice_number}`, message: "" });
-                  setEmailDialog(true);
-                }} data-testid="email-invoice-btn">
+                {!isSplitParent && <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => openInvoiceEmail(inv)} data-testid="email-invoice-btn">
                   <Mail className="w-4 h-4 mr-1" />Email Invoice
-                </Button>
+                </Button>}
                 {pStatus !== "paid" && (
                   <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => openSmsDialog(inv)} data-testid="sms-reminder-btn">
                     <Smartphone className="w-4 h-4 mr-1" />Send SMS Reminder
@@ -1082,67 +1591,6 @@ export default function InvoicesPage() {
             </Card>
           </div>
         </div>
-        {dialogs}
-      </div>
-    );
-  }
-
-  // ========== AGING REPORT VIEW ==========
-  if (topView === "aging") {
-    if (!agingReport) fetchAgingReport();
-    const bucketLabels = { current: "Current", "30": "1-30 Days", "60": "31-60 Days", "90": "61-90 Days", "120_plus": "120+ Days" };
-    const bucketColors = { current: "text-green-400", "30": "text-blue-400", "60": "text-amber-400", "90": "text-orange-400", "120_plus": "text-red-400" };
-    return (
-      <div className="space-y-6" data-testid="aging-report">
-        <div className="flex items-center justify-between">
-          <div><h1 className="text-3xl font-bold tracking-tight">Aging Report</h1><p className="text-muted-foreground">Outstanding invoices by age</p></div>
-          <Button variant="outline" onClick={() => setTopView("list")} data-testid="back-to-invoices-list"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-        </div>
-        {!agingReport ? <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div> : (
-          <>
-            <div className="grid grid-cols-5 gap-3">
-              {Object.entries(bucketLabels).map(([key, label]) => {
-                const b = agingReport.buckets?.[key] || {};
-                return (
-                  <Card key={key} className={b.total > 0 ? "border-" + bucketColors[key].replace("text-", "") + "/30" : ""}>
-                    <CardContent className="pt-4">
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className={`text-xl font-bold font-mono ${b.total > 0 ? bucketColors[key] : ""}`}>${(b.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                      <p className="text-xs text-muted-foreground">{b.count || 0} invoices</p>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-            <Card>
-              <CardHeader><CardTitle className="text-sm">Grand Total Outstanding: <span className="text-red-400 font-mono">${(agingReport.grand_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></CardTitle></CardHeader>
-              <CardContent>
-                {Object.entries(agingReport.buckets || {}).map(([key, bucket]) => {
-                  if (!bucket.invoices?.length) return null;
-                  return (
-                    <div key={key} className="mb-4">
-                      <h3 className={`text-sm font-semibold mb-2 ${bucketColors[key]}`}>{bucketLabels[key]} ({bucket.count})</h3>
-                      <Table>
-                        <TableHeader><TableRow><TableHead>Invoice</TableHead><TableHead>Client</TableHead><TableHead>Due Date</TableHead><TableHead className="text-right">Balance</TableHead><TableHead className="text-right">Days Overdue</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                          {bucket.invoices.slice(0, 10).map(inv => (
-                            <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50" onClick={() => viewInvoiceDetail(inv)}>
-                              <TableCell className="font-mono">{inv.invoice_number}</TableCell>
-                              <TableCell>{inv.client_name}</TableCell>
-                              <TableCell>{inv.due_date || "-"}</TableCell>
-                              <TableCell className="text-right font-mono text-red-400">${(inv.balance || ((inv.total || 0) - (inv.amount_paid || 0))).toFixed(2)}</TableCell>
-                              <TableCell className="text-right font-mono">{inv.days_overdue || 0}d</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          </>
-        )}
         {dialogs}
       </div>
     );
@@ -1234,22 +1682,24 @@ export default function InvoicesPage() {
   return (
     <PageShell data-testid="invoices-page">
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center"><Receipt className="w-4 h-4 text-emerald-300" /></span>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Finance operations</p>
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><Receipt className="h-5 w-5 text-emerald-300" /></span>
             <div><h1 className="text-2xl font-bold tracking-tight">Invoices</h1><p className="text-sm text-muted-foreground">Billing command centre · {invoices.length} invoices</p></div>
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/billing-pro")} className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10" data-testid="goto-billing-pro"><Zap className="w-3.5 h-3.5 mr-1" />Billing Pro</Button>
-          <Button variant="outline" size="sm" onClick={() => { setTopView("aging"); setAgingReport(null); }} data-testid="aging-report-btn">
-            <Timer className="w-4 h-4 mr-1" />Aging Report
+          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Zap className="w-3.5 h-3.5 mr-1.5" />Billing Command</Button>
+          <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
+          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/reports?tab=commercial")} data-testid="aging-report-btn">
+            <Timer className="w-4 h-4 mr-1" />Receivables Report
           </Button>
-          <Button variant="outline" size="sm" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn">
+          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn">
             <BarChart3 className="w-4 h-4 mr-1" />Revenue Analytics
           </Button>
-          <Button onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1" />New Invoice</Button>
+          <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New Invoice</Button>
         </div>
       </div>
 
@@ -1259,6 +1709,12 @@ export default function InvoicesPage() {
         <HeroTile label="Unpaid" value={stats.unpaid || 0} icon={XCircle} glow={stats.unpaid > 0 ? "rose" : "emerald"} testId="stat-unpaid" />
         <HeroTile label="Collected" value={`$${(stats.total_collected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingUp} glow="emerald" animated={false} testId="stat-collected" />
         <HeroTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={AlertTriangle} glow={stats.total_outstanding > 0 ? "amber" : "emerald"} animated={false} testId="stat-outstanding" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <HeroTile label="Xero finance link" value={xeroStatus.connected ? "Connected" : xeroStatus.configured ? "Finish setup" : "Not connected"} subtitle={xeroStatus.connected ? (xeroStatus.org_name || "Open reconciliation hub") : "Configure OAuth before sync"} icon={Building2} glow="sky" animated={false} onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="xero-finance-tile" />
+        <HeroTile label="Reconciliation queue" value={`$${Number(reconciliation.pending_total || 0).toFixed(2)}`} subtitle={`${reconciliation.pending_count} payment${reconciliation.pending_count === 1 ? "" : "s"} awaiting Xero match`} icon={Wallet} glow="amber" animated={false} onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} testId="reconciliation-tile" />
+        <HeroTile label="Client billing controls" value={clients.length} subtitle="Terms, PO and billing contact defaults" icon={Users} glow="emerald" onClick={() => openBillingProfile()} testId="billing-profile-tile" />
       </div>
 
       {/* Filters */}
@@ -1282,8 +1738,6 @@ export default function InvoicesPage() {
           </SelectContent>
         </Select>
       </div>
-
-      <InvoicesSmartBar invoices={invoices} selectedIds={selectedIds} onReload={fetchAll} />
 
       {/* Bulk Actions Toolbar (visible when items selected) */}
       {selectedIds.size > 0 && (
@@ -1326,11 +1780,12 @@ export default function InvoicesPage() {
               {filtered.length === 0 ? (
                 <TableRow><TableCell colSpan={10} className="text-center py-12 text-muted-foreground">No invoices found</TableCell></TableRow>
               ) : filtered.map(inv => {
-                const pStatus = inv.payment_status || "unpaid";
+                const isSplitParent = Boolean(inv.is_split_parent);
+                const pStatus = isSplitParent ? "split" : (inv.payment_status || "unpaid");
                 const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
                 const effectiveStatus = getEffectiveStatus(inv);
-                const balance = (inv.total || 0) - (inv.amount_paid || 0);
-                const isOverdue = inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+                const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
+                const isOverdue = !isSplitParent && inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
                 return (
                   <TableRow key={inv.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => viewInvoiceDetail(inv)} data-testid={`invoice-row-${inv.id}`}>
                     <TableCell onClick={e => e.stopPropagation()}>
@@ -1345,10 +1800,11 @@ export default function InvoicesPage() {
                         data-testid={`select-${inv.id}`}
                       />
                     </TableCell>
-                    <TableCell className="font-mono font-medium">{inv.invoice_number}</TableCell>
+                    <TableCell><p className="font-mono font-medium">{inv.invoice_number}</p>{inv.invoice_name && <p className="mt-0.5 max-w-[17rem] truncate text-xs text-muted-foreground" title={inv.invoice_name}>{inv.invoice_name}</p>}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">{inv.client_name}
                         {inv.is_recurring && <RefreshCw className="w-3 h-3 text-purple-500" />}
+                        {isSplitParent && <Users className="h-3 w-3 text-violet-300" />}
                       </div>
                     </TableCell>
                     <TableCell className={isOverdue ? "text-red-500 font-medium" : ""}>{inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "-"}{isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}</TableCell>
@@ -1363,7 +1819,7 @@ export default function InvoicesPage() {
                     <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
                     <TableCell>
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        {pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-green-500 hover:text-green-400 text-xs px-2" onClick={() => handleStripePayment(inv)} data-testid={`pay-btn-${inv.id}`}><CreditCard className="w-3 h-3 mr-1" />Pay</Button>}
+                        {!isSplitParent && pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-emerald-400 hover:text-emerald-300 text-xs px-2" onClick={() => openPaymentDialog(inv)} data-testid={`pay-btn-${inv.id}`}><Banknote className="w-3 h-3 mr-1" />Record</Button>}
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400" title="Preview PDF" onClick={() => handlePdfPreview(inv)} data-testid={`print-btn-${inv.id}`}><Printer className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-400" title="Download" onClick={() => handlePdfDownload(inv)} data-testid={`download-btn-${inv.id}`}><Download className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>

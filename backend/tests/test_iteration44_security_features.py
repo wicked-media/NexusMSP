@@ -2,7 +2,7 @@
 Iteration 44 Test Suite - Phase D Security Features + Operations
 Tests new 21 feature batch: Security Dashboard, Endpoint Security, Ransomware Canary,
 Kanban Tickets, Recurring Invoices, Identity Threats, SOC Feed, Vulnerability Scanner,
-Remediation Playbooks, Third Party Patching, Audit Trail, Password Rotation, Threat Timeline
+Remediation Playbooks, Third Party Patching, Audit Trail, Threat Timeline
 """
 import pytest
 import requests
@@ -286,6 +286,7 @@ class TestAuditTrail(TestAuth):
         print(f"Audit summary: {data['total_events']} total events")
 
 
+@pytest.mark.skip(reason="NexusMSP password rotation retired in favour of Keeper-managed credential rotation")
 class TestPasswordRotation(TestAuth):
     """Password Rotation API tests"""
     

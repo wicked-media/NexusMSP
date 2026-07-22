@@ -239,6 +239,8 @@ async def send_sms(data: dict = Body(...), current_user: dict = Depends(get_curr
         "client_id": data.get("client_id"),
         "client_name": data.get("client_name"),
         "ticket_id": data.get("ticket_id"),
+        "job_type": data.get("job_type"),
+        "job_id": data.get("job_id"),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
         "sent_at": now,
@@ -436,22 +438,31 @@ async def webhook_inbound(request: Request):
         "raw_payload": data,
     }
 
-    # Auto-link to ticket if custom_ref starts with tkt- or inv-
+    # Auto-link replies to the record that sent the outbound message.
     ref = data.get("custom_ref") or ""
     if ref.startswith("tkt-"):
         doc["ticket_id"] = ref[4:]
     elif ref.startswith("inv-"):
         doc["invoice_id"] = ref[4:]
+    elif ref.startswith("workshop-"):
+        doc["job_type"] = "workshop"
+        doc["job_id"] = ref[len("workshop-"):]
+    elif ref.startswith("field-"):
+        doc["job_type"] = "field"
+        doc["job_id"] = ref[len("field-"):]
     else:
-        # Otherwise, if client has recent outbound SMS linked to a ticket, link to most recent one
+        # Fall back to the client's most recent ticket or service-job thread.
         if doc.get("client_id"):
             recent = await db.sms_messages.find_one(
-                {"client_id": doc["client_id"], "direction": "outbound", "ticket_id": {"$ne": None}},
-                {"_id": 0, "ticket_id": 1},
+                {"client_id": doc["client_id"], "direction": "outbound", "$or": [{"ticket_id": {"$ne": None}}, {"job_id": {"$ne": None}}]},
+                {"_id": 0, "ticket_id": 1, "job_id": 1, "job_type": 1},
                 sort=[("sent_at", -1)]
             )
             if recent and recent.get("ticket_id"):
                 doc["ticket_id"] = recent["ticket_id"]
+            elif recent and recent.get("job_id"):
+                doc["job_id"] = recent["job_id"]
+                doc["job_type"] = recent.get("job_type")
 
     await db.sms_messages.insert_one(doc)
 
@@ -468,6 +479,14 @@ async def webhook_inbound(request: Request):
                 "timestamp": now,
             }}, "$set": {"updated_at": now, "has_unread_sms": True}}
         )
+    elif doc.get("job_id") and doc.get("job_type") in ("workshop", "field"):
+        collection = "workshop_audit_log" if doc["job_type"] == "workshop" else "field_audit_log"
+        await db[collection].insert_one({
+            "id": str(uuid.uuid4()), "job_id": doc["job_id"], "action": "conversation_sms_received",
+            "details": f"SMS reply received from {doc.get('client_name') or sender_num}",
+            "user_id": "system", "user_name": doc.get("client_name") or sender_num or "Client",
+            "created_at": now,
+        })
 
     await db.sms_webhook_log.insert_one({
         "id": str(uuid.uuid4()),

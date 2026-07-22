@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   Brain, Users, Zap, Target, ArrowRight, RefreshCw, Loader2, Plus, Trash2,
   Shield, AlertCircle, CheckCircle, TrendingUp, BarChart3, Gauge, Edit
@@ -18,7 +20,7 @@ import {
 
 const methodLabels = { highest_skill: "Highest Skill", skill_match: "Skill Match", least_loaded: "Least Loaded", round_robin: "Round Robin" };
 
-export default function IntelligentRoutingPage() {
+export default function IntelligentRoutingPage({ embedded = false }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState(null);
@@ -42,9 +44,9 @@ export default function IntelligentRoutingPage() {
     setRouting(true);
     try {
       const res = await axios.post(`${API}/intelligent-routing/bulk-route`, {}, { headers });
-      toast.success(`Routed ${res.data.routed} tickets (${res.data.failed} failed)`);
+      toast.success(`Routed ${res.data.routed} ticket${res.data.routed === 1 ? "" : "s"}; ${res.data.manual_review || 0} require manual review.`);
       fetchData();
-    } catch { toast.error("Bulk routing failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Bulk routing failed"); }
     finally { setRouting(false); }
   };
 
@@ -55,7 +57,7 @@ export default function IntelligentRoutingPage() {
       setShowAddRule(false);
       setRuleForm({ name: "", priority: "", category: "", route_to: "skill_match", enabled: true });
       fetchData();
-    } catch { toast.error("Failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not create routing rule"); }
   };
 
   const deleteRule = async (id) => {
@@ -63,14 +65,14 @@ export default function IntelligentRoutingPage() {
       await axios.delete(`${API}/intelligent-routing/rules/${id}`, { headers });
       toast.success("Rule deleted");
       fetchData();
-    } catch { toast.error("Failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not delete routing rule"); }
   };
 
   const toggleRule = async (rule) => {
     try {
       await axios.put(`${API}/intelligent-routing/rules/${rule.id}`, { enabled: !rule.enabled }, { headers });
       fetchData();
-    } catch { toast.error("Failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not update routing rule"); }
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -80,24 +82,24 @@ export default function IntelligentRoutingPage() {
 
   return (
     <div className="space-y-5" data-testid="intelligent-routing-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Intelligent Routing</h1>
-          <p className="text-sm text-muted-foreground">AI-powered ticket assignment based on skills, workload, and availability</p>
+      {!embedded && <OperationalPageHeader eyebrow="Ticket workspace - technician routing" title="Intelligent Routing" description="Rules-based assignment using confirmed technician skills, availability, and live workload. Tickets without a matching rule or eligible technician remain in manual review." icon={Brain} tone="sky" actions={<Button onClick={bulkRoute} disabled={routing} size="sm" data-testid="bulk-route-btn">{routing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Brain className="mr-1 h-4 w-4" />}Route {stats.unassigned} unassigned</Button>} />}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+        <p className="text-xs text-muted-foreground">Only available, opted-in technicians with a confirmed matching rule are automatically assigned. All other tickets remain for review.</p>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={fetchData}><RefreshCw className="mr-1 h-3.5 w-3.5" />Refresh</Button>
+          <Button size="sm" variant="outline" onClick={() => setShowAddRule(true)} data-testid="add-rule-btn"><Plus className="mr-1 h-3.5 w-3.5" />New rule</Button>
+          <Button size="sm" onClick={bulkRoute} disabled={routing} data-testid="bulk-route-btn">{routing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Brain className="mr-1 h-3.5 w-3.5" />}Route {stats.unassigned} unassigned</Button>
         </div>
-        <Button onClick={bulkRoute} disabled={routing} data-testid="bulk-route-btn">
-          {routing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Brain className="w-4 h-4 mr-1" />}
-          Route {stats.unassigned} Unassigned
-        </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card><CardContent className="p-4"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Open Tickets</p><p className="text-2xl font-bold">{stats.total_open}</p></CardContent></Card>
-        <Card className={stats.unassigned > 0 ? "border-amber-500/30" : ""}><CardContent className="p-4"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Unassigned</p><p className="text-2xl font-bold text-amber-500">{stats.unassigned}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Auto-Routed Today</p><p className="text-2xl font-bold text-blue-500">{stats.auto_routed_today}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Avg Assignment</p><p className="text-2xl font-bold">{stats.avg_assignment_time_sec}s</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Routing Accuracy</p><p className="text-2xl font-bold text-emerald-500">{stats.routing_accuracy_pct}%</p></CardContent></Card>
+      {/* Routing signal tiles */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <HeroTile label="Open" value={stats.total_open} icon={AlertCircle} glow="cyan" subtitle="Active service work" testId="routing-open" />
+        <HeroTile label="Unassigned" value={stats.unassigned} icon={Users} glow={stats.unassigned > 0 ? "amber" : "emerald"} subtitle={stats.unassigned > 0 ? "Needs a route" : "Queue covered"} testId="routing-unassigned" />
+        <HeroTile label="Auto-routed" value={stats.auto_routed_today} icon={Zap} glow="violet" subtitle="Today" testId="routing-auto-routed" />
+        <HeroTile label="Assignment" value={stats.avg_assignment_time_sec ?? "—"} suffix={stats.avg_assignment_time_sec == null ? "" : "s"} icon={Gauge} glow="sky" subtitle="Historical timing not configured" testId="routing-assignment-time" />
+        <HeroTile label="Validated accuracy" value={stats.routing_accuracy_pct ?? "—"} suffix={stats.routing_accuracy_pct == null ? "" : "%"} icon={CheckCircle} glow="emerald" subtitle="Outcome tracking not configured" testId="routing-accuracy" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -123,9 +125,9 @@ export default function IntelligentRoutingPage() {
                         <span className="text-muted-foreground/30">|</span>
                         <span>{tech.resolved_today} resolved today</span>
                         <span className="text-muted-foreground/30">|</span>
-                        <span>SLA: {tech.sla_compliance}%</span>
+                        <span>SLA: {tech.sla_compliance == null ? "not measured" : `${tech.sla_compliance}%`}</span>
                         <span className="text-muted-foreground/30">|</span>
-                        <span>CSAT: {tech.csat_score}</span>
+                        <span>CSAT: {tech.csat_score == null ? "not measured" : tech.csat_score}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
@@ -136,6 +138,7 @@ export default function IntelligentRoutingPage() {
                             {skill.slice(0, 4)} {level}
                           </Badge>
                         ))}
+                        {!Object.keys(tech.skills || {}).length && <span className="text-[10px] text-amber-300">Skills not configured</span>}
                       </div>
                       {/* Capacity bar */}
                       <div className="w-16 text-center">
@@ -156,9 +159,10 @@ export default function IntelligentRoutingPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wider">Routing Rules</h2>
-            <Button size="sm" onClick={() => setShowAddRule(true)} data-testid="add-rule-btn"><Plus className="w-3 h-3 mr-1" />Add Rule</Button>
+            <Button size="sm" onClick={() => setShowAddRule(true)}><Plus className="w-3 h-3 mr-1" />Add Rule</Button>
           </div>
           <div className="space-y-2">
+            {!routing_rules.length && <Card className="border-dashed"><CardContent className="p-4 text-sm text-muted-foreground">No confirmed routing rules yet. Add a rule before using automatic routing.</CardContent></Card>}
             {routing_rules.map(rule => (
               <Card key={rule.id} className={`${rule.enabled ? "" : "opacity-50"}`} data-testid={`rule-${rule.id}`}>
                 <CardContent className="py-3 px-4">

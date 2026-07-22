@@ -13,6 +13,67 @@
     width: 260px;
 }
 
+/* Sidebar workspaces: one calm visual language for navigation feedback. */
+@keyframes nexus-sidebar-icon-settle {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-1px) scale(1.04); }
+}
+
+@keyframes nexus-sidebar-icon-enter {
+    0% { transform: translateY(0) rotate(0deg) scale(1); }
+    45% { transform: translateY(-2px) rotate(-4deg) scale(1.08); }
+    100% { transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+@keyframes nexus-sidebar-attention {
+    0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+    50% { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.12); }
+}
+
+.nexus-sidebar-workspace-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.45rem;
+    transition: color 180ms ease, filter 180ms ease, transform 180ms ease;
+}
+
+.group:hover .nexus-sidebar-workspace-icon {
+    animation: nexus-sidebar-icon-enter 420ms cubic-bezier(.22, 1, .36, 1) both;
+    filter: drop-shadow(0 3px 5px hsl(var(--primary) / 0.2));
+}
+
+.nexus-sidebar-workspace-icon.is-active {
+    color: hsl(var(--primary));
+    animation: nexus-sidebar-icon-settle 2.8s ease-in-out infinite;
+    filter: drop-shadow(0 2px 5px hsl(var(--primary) / 0.24));
+}
+
+.nexus-sidebar-workspace-icon.has-attention.is-active::after {
+    content: "";
+    position: absolute;
+    right: -0.2rem;
+    top: -0.15rem;
+    width: 0.33rem;
+    height: 0.33rem;
+    border-radius: 9999px;
+    background: hsl(var(--primary));
+    animation: nexus-sidebar-attention 2.1s ease-in-out infinite;
+}
+
+/* The Voice form replaces the former raw product-ID field with its product picker. */
+.voice-pbx-form > div:nth-child(6) {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .group:hover .nexus-sidebar-workspace-icon,
+    .nexus-sidebar-workspace-icon.is-active,
+    .nexus-sidebar-workspace-icon.has-attention.is-active::after {
+        animation: none;
+    }
+}
+
 /* Table row hover effect */
 .table-row-hover {
     transition: background-color 0.15s ease;
@@ -196,4 +257,30 @@
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+/*
+ * Legacy page-header compatibility layer.
+ * Modern pages opt in directly with OperationalPageHeader; older routed pages
+ * often begin with a plain title block. Give only that first block the same
+ * Service Catalog shell without restyling existing rounded module headers.
+ */
+main > div > [data-testid] > :first-child:not([class*="rounded-2xl"]):has(h1) {
+  border: 1px solid rgb(139 92 246 / 0.20);
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgb(139 92 246 / 0.10), hsl(var(--background)) 58%, hsl(var(--background)));
+  padding: 1.25rem;
+}
+
+main > div > [data-testid] > :first-child:not([class*="rounded-2xl"]):has(h1) h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+main > div > [data-testid] > :first-child:not([class*="rounded-2xl"]):has(h1) > p,
+main > div > [data-testid] > :first-child:not([class*="rounded-2xl"]):has(h1) p.text-muted-foreground {
+  margin-top: 0.5rem;
+  max-width: 48rem;
+  font-size: 0.875rem;
 }

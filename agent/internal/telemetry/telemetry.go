@@ -22,7 +22,9 @@ type QuickPayload struct {
 func QuickInfo() QuickPayload {
 	info, _ := host.Info()
 	ver := ""
-	if info != nil { ver = info.PlatformVersion }
+	if info != nil {
+		ver = info.PlatformVersion
+	}
 	mac := ""
 	if ifs, err := net.Interfaces(); err == nil {
 		for _, n := range ifs {
@@ -37,33 +39,33 @@ func QuickInfo() QuickPayload {
 
 // Snapshot is a full periodic heartbeat payload.
 type Snapshot struct {
-	Hostname     string         `json:"hostname"`
-	OS           string         `json:"os"`
-	OSVersion    string         `json:"os_version,omitempty"`
-	OSPlatform   string         `json:"os_platform,omitempty"`
-	Arch         string         `json:"arch"`
-	UptimeSec    uint64         `json:"uptime_sec"`
-	BootTime     uint64         `json:"boot_time,omitempty"`
-	CPUPercent   float64        `json:"cpu_percent"`
-	CPUCount     int            `json:"cpu_count"`
-	CPUModel     string         `json:"cpu_model,omitempty"`
-	MemTotalMB   uint64         `json:"mem_total_mb"`
-	MemUsedMB    uint64         `json:"mem_used_mb"`
-	MemPercent   float64        `json:"mem_percent"`
-	Disks        []DiskInfo     `json:"disks,omitempty"`
-	NICs         []NICInfo      `json:"nics,omitempty"`
-	Security     *SecurityInfo  `json:"security,omitempty"`
-	Software     []SoftwareInfo `json:"software,omitempty"`
-	Hardware     *HardwareInfo  `json:"hardware,omitempty"`
+	Hostname   string         `json:"hostname"`
+	OS         string         `json:"os"`
+	OSVersion  string         `json:"os_version,omitempty"`
+	OSPlatform string         `json:"os_platform,omitempty"`
+	Arch       string         `json:"arch"`
+	UptimeSec  uint64         `json:"uptime_sec"`
+	BootTime   uint64         `json:"boot_time,omitempty"`
+	CPUPercent float64        `json:"cpu_percent"`
+	CPUCount   int            `json:"cpu_count"`
+	CPUModel   string         `json:"cpu_model,omitempty"`
+	MemTotalMB uint64         `json:"mem_total_mb"`
+	MemUsedMB  uint64         `json:"mem_used_mb"`
+	MemPercent float64        `json:"mem_percent"`
+	Disks      []DiskInfo     `json:"disks,omitempty"`
+	NICs       []NICInfo      `json:"nics,omitempty"`
+	Security   *SecurityInfo  `json:"security,omitempty"`
+	Software   []SoftwareInfo `json:"software,omitempty"`
+	Hardware   *HardwareInfo  `json:"hardware,omitempty"`
 }
 
 type DiskInfo struct {
-	Device     string  `json:"device"`
-	Mount      string  `json:"mount"`
-	FSType     string  `json:"fs_type,omitempty"`
-	TotalGB    float64 `json:"total_gb"`
-	UsedGB     float64 `json:"used_gb"`
-	Percent    float64 `json:"percent"`
+	Device  string  `json:"device"`
+	Mount   string  `json:"mount"`
+	FSType  string  `json:"fs_type,omitempty"`
+	TotalGB float64 `json:"total_gb"`
+	UsedGB  float64 `json:"used_gb"`
+	Percent float64 `json:"percent"`
 }
 
 type NICInfo struct {
@@ -108,7 +110,9 @@ func Collect() Snapshot {
 	if parts, err := disk.Partitions(false); err == nil {
 		for _, p := range parts {
 			u, err := disk.Usage(p.Mountpoint)
-			if err != nil || u == nil { continue }
+			if err != nil || u == nil {
+				continue
+			}
 			s.Disks = append(s.Disks, DiskInfo{
 				Device:  p.Device,
 				Mount:   p.Mountpoint,
@@ -122,7 +126,9 @@ func Collect() Snapshot {
 
 	if ifs, err := net.Interfaces(); err == nil {
 		for _, n := range ifs {
-			if contains(n.Flags, "loopback") { continue }
+			if contains(n.Flags, "loopback") {
+				continue
+			}
 			ips := []string{}
 			for _, a := range n.Addrs {
 				ips = append(ips, a.Addr)
@@ -140,7 +146,11 @@ func Collect() Snapshot {
 }
 
 func contains(s []string, v string) bool {
-	for _, x := range s { if x == v { return true } }
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
 	return false
 }
 
@@ -151,20 +161,20 @@ func round2(f float64) float64 {
 // SecurityInfo contains the endpoint controls used for the MSP compliance
 // score. Unknown values mean the endpoint could not be assessed, not failed.
 type SecurityInfo struct {
-	DefenderInstalled bool        `json:"defender_installed"`
-	DefenderEnabled   bool        `json:"defender_enabled"`
-	RealTimeEnabled   bool        `json:"real_time_enabled"`
-	SignatureAgeDays  int         `json:"signature_age_days,omitempty"`
-	FirewallEnabled   bool        `json:"firewall_enabled"`
-	EncryptionStatus  string      `json:"encryption_status,omitempty"`
-	PendingUpdateCount int        `json:"pending_update_count,omitempty"`
-	PendingUpdates    []PatchInfo `json:"pending_updates,omitempty"`
+	DefenderInstalled  bool        `json:"defender_installed"`
+	DefenderEnabled    bool        `json:"defender_enabled"`
+	RealTimeEnabled    bool        `json:"real_time_enabled"`
+	SignatureAgeDays   int         `json:"signature_age_days,omitempty"`
+	FirewallEnabled    bool        `json:"firewall_enabled"`
+	EncryptionStatus   string      `json:"encryption_status,omitempty"`
+	PendingUpdateCount int         `json:"pending_update_count,omitempty"`
+	PendingUpdates     []PatchInfo `json:"pending_updates,omitempty"`
 }
 
 type PatchInfo struct {
-	Title           string `json:"title"`
-	KB              string `json:"kb,omitempty"`
-	RebootRequired  bool   `json:"reboot_required,omitempty"`
+	Title          string `json:"title"`
+	KB             string `json:"kb,omitempty"`
+	RebootRequired bool   `json:"reboot_required,omitempty"`
 }
 
 // SoftwareInfo is deliberately limited to uninstall-registry information: it

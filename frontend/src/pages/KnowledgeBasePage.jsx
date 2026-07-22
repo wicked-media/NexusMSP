@@ -19,6 +19,9 @@ import {
   ArrowLeft, Link2, CheckCircle, ChevronRight
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import HeroTile from "@/components/HeroTile";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import DOMPurify from "dompurify";
 
 const categories = [
   { value: "general", label: "General", color: "bg-slate-500/20 text-slate-400" },
@@ -45,11 +48,12 @@ export default function KnowledgeBasePage() {
   const [viewArticle, setViewArticle] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
   const [huduSyncing, setHuduSyncing] = useState(false);
+  const [installingLibrary, setInstallingLibrary] = useState(false);
   const [huduArticles, setHuduArticles] = useState([]);
   const [showHuduPanel, setShowHuduPanel] = useState(false);
   const [formData, setFormData] = useState({
-    title: "", content: "", category: "general", tags: "",
-    is_public: false, is_pinned: false, related_article_ids: []
+    title: "", summary: "", content: "", category: "general", tags: "",
+    is_public: false, is_pinned: false, related_article_ids: [], content_format: "html"
   });
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -57,7 +61,7 @@ export default function KnowledgeBasePage() {
   const fetchArticles = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/kb-articles`, { headers });
+      const res = await axios.get(`${API}/kb/articles`, { headers });
       setArticles(res.data);
     } catch { toast.error("Failed to fetch articles"); }
     finally { setLoading(false); }
@@ -91,10 +95,10 @@ export default function KnowledgeBasePage() {
     };
     try {
       if (selectedArticle) {
-        await axios.put(`${API}/kb-articles/${selectedArticle.id}`, payload, { headers });
+        await axios.put(`${API}/kb/articles/${selectedArticle.id}`, payload, { headers });
         toast.success("Article updated");
       } else {
-        await axios.post(`${API}/kb-articles`, payload, { headers });
+        await axios.post(`${API}/kb/articles`, payload, { headers });
         toast.success("Article created");
       }
       setIsDialogOpen(false);
@@ -106,7 +110,7 @@ export default function KnowledgeBasePage() {
   const handleDelete = async (id) => {
     if (!confirm("Delete this article?")) return;
     try {
-      await axios.delete(`${API}/kb-articles/${id}`, { headers });
+      await axios.delete(`${API}/kb/articles/${id}`, { headers });
       toast.success("Article deleted");
       if (viewArticle?.id === id) setViewArticle(null);
       fetchArticles();
@@ -115,7 +119,7 @@ export default function KnowledgeBasePage() {
 
   const handleHelpful = async (id) => {
     try {
-      await axios.post(`${API}/kb-articles/${id}/helpful`, {}, { headers });
+      await axios.post(`${API}/kb/articles/${id}/helpful`, {}, { headers });
       toast.success("Marked as helpful");
       fetchArticles();
     } catch { toast.error("Failed"); }
@@ -123,7 +127,7 @@ export default function KnowledgeBasePage() {
 
   const togglePin = async (article) => {
     try {
-      await axios.put(`${API}/kb-articles/${article.id}`, { is_pinned: !article.is_pinned }, { headers });
+      await axios.put(`${API}/kb/articles/${article.id}`, { is_pinned: !article.is_pinned }, { headers });
       toast.success(article.is_pinned ? "Unpinned" : "Pinned");
       fetchArticles();
     } catch { toast.error("Failed"); }
@@ -131,7 +135,7 @@ export default function KnowledgeBasePage() {
 
   const toggleVisibility = async (article) => {
     try {
-      await axios.put(`${API}/kb-articles/${article.id}`, { is_public: !article.is_public }, { headers });
+      await axios.put(`${API}/kb/articles/${article.id}`, { is_public: !article.is_public }, { headers });
       toast.success(article.is_public ? "Made internal" : "Made public");
       fetchArticles();
     } catch { toast.error("Failed"); }
@@ -140,21 +144,32 @@ export default function KnowledgeBasePage() {
   const openEdit = (article) => {
     setSelectedArticle(article);
     setFormData({
-      title: article.title, content: article.content, category: article.category,
+      title: article.title, summary: article.summary || "", content: article.content, category: article.category,
       tags: (article.tags || []).join(", "),
       is_public: article.is_public || false,
       is_pinned: article.is_pinned || false,
-      related_article_ids: article.related_article_ids || []
+      related_article_ids: article.related_article_ids || [], content_format: article.content_format || "html"
     });
     setIsDialogOpen(true);
   };
 
   const resetForm = () => {
-    setFormData({ title: "", content: "", category: "general", tags: "", is_public: false, is_pinned: false, related_article_ids: [] });
+    setFormData({ title: "", summary: "", content: "", category: "general", tags: "", is_public: false, is_pinned: false, related_article_ids: [], content_format: "html" });
     setSelectedArticle(null);
   };
 
   const getCategoryStyle = (cat) => categories.find(c => c.value === cat)?.color || "bg-slate-500/20 text-slate-400";
+
+  const installTechnicianLibrary = async () => {
+    setInstallingLibrary(true);
+    try {
+      const res = await axios.post(`${API}/kb/articles/install-technician-library`, {}, { headers });
+      toast.success(res.data.message);
+      fetchArticles();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not install the technician library");
+    } finally { setInstallingLibrary(false); }
+  };
 
   const filteredArticles = articles.filter(a => {
     const matchSearch = !searchQuery || a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.content?.toLowerCase().includes(searchQuery.toLowerCase()) || (a.tags || []).some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -195,7 +210,10 @@ export default function KnowledgeBasePage() {
           <div className="col-span-9">
             <Card>
               <CardContent className="p-6">
-                <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap" data-testid="article-content">{viewArticle.content}</div>
+                {viewArticle.summary && <p className="mb-5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{viewArticle.summary}</p>}
+                {viewArticle.content_format === "html" ? (
+                  <div className="prose prose-sm max-w-none dark:prose-invert" data-testid="article-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewArticle.content || "") }} />
+                ) : <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap" data-testid="article-content">{viewArticle.content}</div>}
               </CardContent>
             </Card>
             {viewArticle.tags?.length > 0 && (
@@ -232,16 +250,22 @@ export default function KnowledgeBasePage() {
       <div className="flex items-center justify-between">
         <div><h1 className="text-3xl font-bold tracking-tight">Knowledge Base</h1><p className="text-muted-foreground">{articles.length} articles - {pinnedArticles.length} pinned</p></div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={installTechnicianLibrary} disabled={installingLibrary} data-testid="install-technician-library">
+            {installingLibrary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BookOpen className="w-4 h-4 mr-2" />}Install technician library
+          </Button>
           <Button variant="outline" size="sm" onClick={syncFromHudu} disabled={huduSyncing} data-testid="hudu-sync-btn">
             {huduSyncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Sync from Hudu
           </Button>
           <Button variant="outline" onClick={fetchArticles}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
             <Button onClick={() => setIsDialogOpen(true)} data-testid="create-article-btn"><Plus className="w-4 h-4 mr-2" />New Article</Button>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader><DialogTitle>{selectedArticle ? "Edit Article" : "Create Article"}</DialogTitle></DialogHeader>
+            <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>{selectedArticle ? "Edit knowledge article" : "Create knowledge article"}</DialogTitle><p className="text-sm text-muted-foreground">A structured, Hudu-style workspace with rich content, tables, links, screenshots, HTML source, and publication controls.</p></DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2"><Label>Title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="How to reset a Windows password" required /></div>
+                <div className="grid gap-4 md:grid-cols-[1fr_280px]">
+                  <div className="space-y-2"><Label>Article title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="How to reset a Windows password" required /></div>
+                  <div className="space-y-2"><Label>Tags</Label><Input value={formData.tags} onChange={e => setFormData({ ...formData, tags: e.target.value })} placeholder="password, windows, reset" /></div>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2"><Label>Category</Label>
                     <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
@@ -249,10 +273,10 @@ export default function KnowledgeBasePage() {
                       <SelectContent>{categories.map(c => (<SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>))}</SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2"><Label>Tags (comma separated)</Label><Input value={formData.tags} onChange={e => setFormData({ ...formData, tags: e.target.value })} placeholder="password, windows, reset" /></div>
+                  <div className="space-y-2"><Label>Technician summary</Label><Input value={formData.summary} onChange={e => setFormData({ ...formData, summary: e.target.value })} placeholder="What this runbook solves and when to use it" /></div>
                 </div>
-                <div className="space-y-2"><Label>Content *</Label>
-                  <Textarea value={formData.content} onChange={e => setFormData({ ...formData, content: e.target.value })} className="min-h-[200px] font-mono text-sm" placeholder="Step-by-step instructions..." required />
+                <div className="space-y-2"><div className="flex items-center justify-between"><Label>Article content *</Label><span className="text-xs text-muted-foreground">Paste screenshots, drag images, build tables, or switch to HTML source.</span></div>
+                  <RichTextEditor content={formData.content} onChange={content => setFormData(current => ({ ...current, content, content_format: "html" }))} minHeight="320px" />
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-2"><Switch checked={formData.is_public} onCheckedChange={v => setFormData({ ...formData, is_public: v })} /><Label className="flex items-center gap-1">{formData.is_public ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}{formData.is_public ? "Public" : "Internal Only"}</Label></div>
@@ -266,12 +290,22 @@ export default function KnowledgeBasePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"><BookOpen className="w-5 h-5 text-blue-500" /></div><div><p className="text-2xl font-bold">{articles.length}</p><p className="text-xs text-muted-foreground">Total Articles</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center"><Pin className="w-5 h-5 text-amber-500" /></div><div><p className="text-2xl font-bold">{pinnedArticles.length}</p><p className="text-xs text-muted-foreground">Pinned</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center"><Globe className="w-5 h-5 text-green-500" /></div><div><p className="text-2xl font-bold">{articles.filter(a => a.is_public).length}</p><p className="text-xs text-muted-foreground">Public</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center"><Eye className="w-5 h-5 text-purple-500" /></div><div><p className="text-2xl font-bold">{articles.reduce((s, a) => s + (a.views || 0), 0)}</p><p className="text-xs text-muted-foreground">Total Views</p></div></CardContent></Card>
-        <Card><CardContent className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center"><ThumbsUp className="w-5 h-5 text-cyan-500" /></div><div><p className="text-2xl font-bold">{articles.reduce((s, a) => s + (a.helpful_count || 0), 0)}</p><p className="text-xs text-muted-foreground">Helpful Votes</p></div></CardContent></Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <HeroTile label="Total articles" value={articles.length} icon={BookOpen} glow="sky" />
+        <HeroTile label="Pinned" value={pinnedArticles.length} icon={Pin} glow="amber" />
+        <HeroTile label="Public" value={articles.filter(a => a.is_public).length} icon={Globe} glow="emerald" />
+        <HeroTile label="Total views" value={articles.reduce((s, a) => s + (a.views || 0), 0)} icon={Eye} glow="violet" />
+        <HeroTile label="Helpful votes" value={articles.reduce((s, a) => s + (a.helpful_count || 0), 0)} icon={ThumbsUp} glow="cyan" />
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-sm font-semibold">Knowledge library</p><p className="text-xs text-muted-foreground">Build runbooks with rich text, screenshots, links, tables, and safe HTML source.</p></div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={installTechnicianLibrary} disabled={installingLibrary} data-testid="install-technician-library-toolbar">
+            {installingLibrary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BookOpen className="w-4 h-4 mr-2" />}Install starter library
+          </Button>
+          <Button size="sm" onClick={() => setIsDialogOpen(true)} data-testid="create-article-toolbar"><Plus className="w-4 h-4 mr-2" />New article</Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -304,7 +338,7 @@ export default function KnowledgeBasePage() {
                       </div>
                       <Badge variant="outline" className="text-[9px] flex-shrink-0 ml-2">{article.is_public ? <Globe className="w-2.5 h-2.5 mr-0.5" /> : <Lock className="w-2.5 h-2.5 mr-0.5" />}{article.is_public ? "Public" : "Internal"}</Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-3 mb-3">{article.content?.substring(0, 150)}...</p>
+                    <p className="text-xs text-muted-foreground line-clamp-3 mb-3">{article.summary || article.content?.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().substring(0, 150)}...</p>
                     <div className="flex items-center gap-2 mb-2">
                       <Badge className={`text-[9px] ${getCategoryStyle(article.category)}`}>{categories.find(c => c.value === article.category)?.label || article.category}</Badge>
                       {article.tags?.slice(0, 2).map((tag, i) => (<Badge key={`k-${i}`} variant="outline" className="text-[9px]">{tag}</Badge>))}

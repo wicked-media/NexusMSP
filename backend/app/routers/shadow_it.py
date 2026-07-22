@@ -17,6 +17,21 @@ from app.auth import get_current_user
 router = APIRouter()
 
 
+async def _write_audit(current_user: dict, action: str, entity_type: str, entity_id: str, entity_name: str, metadata: dict | None = None):
+    """Keep policy decisions and remediation actions visible in the central audit trail."""
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CURATED RISK DATABASE
 # Categories: file_sharing, remote_access, unapproved_vpn, ai_tool, messaging,
@@ -133,6 +148,15 @@ async def update_baseline(client_id: str, data: dict, current_user: dict = Depen
         {"$set": {"client_id": client_id, "approved": approved, "updated_at": now, "updated_by": current_user.get("name")}},
         upsert=True,
     )
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    await _write_audit(
+        current_user,
+        "update",
+        "shadow_it_baseline",
+        client_id,
+        (client or {}).get("name") or client_id,
+        {"approved_count": len(approved)},
+    )
     return {"client_id": client_id, "approved": approved, "updated_at": now}
 
 
@@ -190,13 +214,33 @@ async def _scan_client(client_id: str) -> dict:
         {"client_id": client_id},
         {"_id": 0, "id": 1, "name": 1, "installed_software": 1, "os": 1}
     ).to_list(5000)
+    device_ids = [device.get("id") for device in devices if device.get("id")]
+    agent_rows = await db.device_software.find(
+        {"device_id": {"$in": device_ids}, "source": "nexus-agent"},
+        {"_id": 0, "device_id": 1, "name": 1, "version": 1, "publisher": 1, "last_inventory_at": 1},
+    ).to_list(200000) if device_ids else []
+    agent_software: dict[str, list[dict]] = {}
+    for row in agent_rows:
+        device_id = row.get("device_id")
+        if device_id:
+            agent_software.setdefault(device_id, []).append(row)
 
     # Purge old findings for this client first
     await db.shadow_it_findings.delete_many({"client_id": client_id, "status": {"$in": ["open", None]}})
 
     agg: dict = {}  # key = (app lowercased) → aggregated finding
+    devices_with_agent_inventory = 0
+    devices_with_legacy_inventory = 0
     for d in devices:
-        software = d.get("installed_software") or []
+        software = agent_software.get(d.get("id")) or []
+        inventory_source = "nexus-agent" if software else "legacy-device-record"
+        if software:
+            devices_with_agent_inventory += 1
+        elif d.get("installed_software"):
+            software = d.get("installed_software") or []
+            devices_with_legacy_inventory += 1
+        else:
+            inventory_source = "not-reported"
         for s in software:
             name = s.get("name") if isinstance(s, dict) else (s if isinstance(s, str) else None)
             if not name:
@@ -206,7 +250,7 @@ async def _scan_client(client_id: str) -> dict:
                 continue
             key = finding["app"].lower()
             entry = agg.setdefault(key, {**finding, "devices": [], "device_count": 0, "first_seen_on": d.get("name")})
-            entry["devices"].append({"id": d.get("id"), "name": d.get("name"), "os": d.get("os")})
+            entry["devices"].append({"id": d.get("id"), "name": d.get("name"), "os": d.get("os"), "inventory_source": inventory_source})
             entry["device_count"] = len(entry["devices"])
 
     now = datetime.now(timezone.utc).isoformat()
@@ -224,6 +268,7 @@ async def _scan_client(client_id: str) -> dict:
             "classification": entry["classification"],
             "device_count": entry["device_count"],
             "devices": entry["devices"][:50],
+            "inventory_sources": sorted({device.get("inventory_source") for device in entry["devices"] if device.get("inventory_source")}),
             "status": "open",
             "detected_at": now,
         })
@@ -238,6 +283,9 @@ async def _scan_client(client_id: str) -> dict:
         "client_id": client_id,
         "client_name": client_doc.get("name"),
         "devices_scanned": len(devices),
+        "devices_with_agent_inventory": devices_with_agent_inventory,
+        "devices_with_legacy_inventory": devices_with_legacy_inventory,
+        "devices_without_inventory": len(devices) - devices_with_agent_inventory - devices_with_legacy_inventory,
         "findings": len(findings_docs),
         "risk_counts": risk_counts,
         "scanned_at": now,
@@ -252,7 +300,16 @@ async def run_scan(data: dict = None, current_user: dict = Depends(get_current_u
     """
     data = data or {}
     if data.get("client_id"):
-        return {"results": [await _scan_client(data["client_id"])]}
+        result = await _scan_client(data["client_id"])
+        await _write_audit(
+            current_user,
+            "scan",
+            "shadow_it_client",
+            data["client_id"],
+            result.get("client_name") or data["client_id"],
+            {"devices_scanned": result.get("devices_scanned", 0), "findings": result.get("findings", 0)},
+        )
+        return {"results": [result]}
 
     clients = await db.clients.find({}, {"_id": 0, "id": 1}).to_list(1000)
     results = []
@@ -265,10 +322,27 @@ async def run_scan(data: dict = None, current_user: dict = Depends(get_current_u
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "client_count": len(clients),
             "by": current_user.get("name"),
+            "agent_inventory_devices": sum(result.get("devices_with_agent_inventory", 0) for result in results),
+            "legacy_inventory_devices": sum(result.get("devices_with_legacy_inventory", 0) for result in results),
+            "devices_without_inventory": sum(result.get("devices_without_inventory", 0) for result in results),
         }}},
         upsert=True,
     )
-    return {"results": results, "clients_scanned": len(clients)}
+    await _write_audit(
+        current_user,
+        "scan",
+        "shadow_it_fleet",
+        "fleet",
+        "Managed endpoint fleet",
+        {"clients_scanned": len(clients), "findings": sum(result.get("findings", 0) for result in results)},
+    )
+    return {
+        "results": results,
+        "clients_scanned": len(clients),
+        "agent_inventory_devices": sum(result.get("devices_with_agent_inventory", 0) for result in results),
+        "legacy_inventory_devices": sum(result.get("devices_with_legacy_inventory", 0) for result in results),
+        "devices_without_inventory": sum(result.get("devices_without_inventory", 0) for result in results),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -351,6 +425,8 @@ async def act_on_finding(finding_id: str, action: str, data: dict = None, curren
     doc = await db.shadow_it_findings.find_one({"id": finding_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Finding not found")
+    if doc.get("status") not in ("open", None):
+        raise HTTPException(409, f"This finding has already been {doc.get('status')}")
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -364,12 +440,28 @@ async def act_on_finding(finding_id: str, action: str, data: dict = None, curren
             {"id": finding_id},
             {"$set": {"status": "approved", "actioned_at": now, "actioned_by": current_user.get("name")}},
         )
+        await _write_audit(
+            current_user,
+            "approve",
+            "shadow_it_finding",
+            finding_id,
+            doc.get("app") or finding_id,
+            {"client_id": doc.get("client_id"), "client_name": doc.get("client_name"), "risk": doc.get("risk"), "category": doc.get("category")},
+        )
         return {"status": "approved", "app_added_to_baseline": doc["app"]}
 
     if action == "ignore":
         await db.shadow_it_findings.update_one(
             {"id": finding_id},
             {"$set": {"status": "ignored", "actioned_at": now, "actioned_by": current_user.get("name")}},
+        )
+        await _write_audit(
+            current_user,
+            "ignore",
+            "shadow_it_finding",
+            finding_id,
+            doc.get("app") or finding_id,
+            {"client_id": doc.get("client_id"), "client_name": doc.get("client_name"), "risk": doc.get("risk"), "category": doc.get("category")},
         )
         return {"status": "ignored"}
 
@@ -405,6 +497,14 @@ async def act_on_finding(finding_id: str, action: str, data: dict = None, curren
         {"id": finding_id},
         {"$set": {"status": "ticketed", "ticket_id": ticket["id"], "ticket_number": ticket["ticket_number"], "actioned_at": now, "actioned_by": current_user.get("name")}},
     )
+    await _write_audit(
+        current_user,
+        "create_ticket",
+        "shadow_it_finding",
+        finding_id,
+        doc.get("app") or finding_id,
+        {"client_id": doc.get("client_id"), "client_name": doc.get("client_name"), "ticket_id": ticket["id"], "ticket_number": ticket["ticket_number"], "risk": doc.get("risk")},
+    )
     return {"status": "ticketed", "ticket": ticket}
 
 
@@ -415,33 +515,8 @@ async def act_on_finding(finding_id: str, action: str, data: dict = None, curren
 
 @router.post("/shadow-it/seed-demo")
 async def seed_demo(current_user: dict = Depends(get_current_user)):
-    """Populate installed_software on existing devices with a realistic mix. Safe to re-run."""
-    import random
-    COMMON = ["Microsoft Office 365", "Microsoft Edge", "Microsoft Teams", "Google Chrome",
-              "Mozilla Firefox", "Adobe Reader", "Zoom", "Slack", "1Password",
-              "Windows Defender", "7-Zip", "Notepad++", "VLC media player"]
-    SHADOW = [
-        "Dropbox", "WeTransfer Desktop", "TeamViewer 15", "AnyDesk",
-        "ChatGPT Desktop", "Discord", "Telegram Desktop", "WhatsApp Desktop",
-        "NordVPN", "ExpressVPN", "Tor Browser", "uTorrent",
-        "MetaMask", "Backblaze", "Loom", "Dashlane",
-    ]
-    devices = await db.devices.find({}, {"_id": 0, "id": 1}).to_list(5000)
-    touched = 0
-    for d in devices:
-        sw = list(COMMON)
-        # 45% chance this device has 1-3 shadow apps
-        if random.random() < 0.45:
-            k = random.randint(1, 3)
-            sw.extend(random.sample(SHADOW, k=min(k, len(SHADOW))))
-        payload = [{"name": n} for n in sw]
-        await db.devices.update_one(
-            {"id": d["id"]},
-            {"$set": {
-                "installed_software": payload,
-                "installed_software_count": len(payload),
-                "software_reported_at": datetime.now(timezone.utc).isoformat(),
-            }},
-        )
-        touched += 1
-    return {"devices_seeded": touched}
+    """Retired compatibility endpoint: never overwrite real agent inventory with samples."""
+    raise HTTPException(
+        status_code=410,
+        detail="Shadow IT demonstration seeding was retired. Run a scan against software inventory reported by the Nexus Agent.",
+    )

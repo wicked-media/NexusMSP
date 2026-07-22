@@ -41,9 +41,25 @@ async def upload_avatar(tech_id: str, file: UploadFile = File(...), current_user
         content = await file.read()
         f.write(content)
     
-    avatar_url = f"/api/uploads/avatars/{filename}"
-    await db.users.update_one({"id": tech_id}, {"$set": {"avatar": avatar_url}})
-    return {"message": "Avatar uploaded", "avatar_url": avatar_url}
+    avatar_updated_at = datetime.now(timezone.utc).isoformat()
+    avatar_url = f"/api/uploads/avatars/{filename}?v={uuid.uuid4().hex}"
+    await db.users.update_one({"id": tech_id}, {"$set": {
+        "avatar": avatar_url,
+        "avatar_updated_at": avatar_updated_at,
+    }})
+    await log_activity(
+        current_user,
+        "profile_photo_updated",
+        "technician",
+        tech_id,
+        user.get("name", "Technician"),
+        "Updated technician profile photo.",
+    )
+    return {
+        "message": "Avatar uploaded",
+        "avatar_url": avatar_url,
+        "avatar_updated_at": avatar_updated_at,
+    }
 
 @router.put("/technicians/{tech_id}/profile")
 async def update_tech_profile(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):

@@ -164,7 +164,7 @@ function FridayReelView({ api }) {
           ))}
         </div>
       ) : (
-        <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Storyboard not generated — Claude key may be missing or quiet week.</CardContent></Card>
+        <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Storyboard not generated — OpenAI is not configured yet or there was a quiet week.</CardContent></Card>
       )}
       {d.top_critical_wins?.length > 0 && (
         <Card>

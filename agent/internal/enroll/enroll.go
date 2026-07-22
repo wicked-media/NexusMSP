@@ -12,14 +12,15 @@ import (
 )
 
 type request struct {
-	EnrollmentToken string `json:"enrollment_token"`
-	ClientID        string `json:"client_id"`
-	Hostname        string `json:"hostname"`
-	OS              string `json:"os"`
-	Arch            string `json:"arch"`
-	OSVersion       string `json:"os_version,omitempty"`
-	MAC             string `json:"mac,omitempty"`
-	AgentVersion    string `json:"agent_version,omitempty"`
+	EnrollmentToken string   `json:"enrollment_token"`
+	ClientID        string   `json:"client_id"`
+	Hostname        string   `json:"hostname"`
+	OS              string   `json:"os"`
+	Arch            string   `json:"arch"`
+	OSVersion       string   `json:"os_version,omitempty"`
+	MAC             string   `json:"mac,omitempty"`
+	AgentVersion    string   `json:"agent_version,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
 }
 
 type response struct {
@@ -44,6 +45,7 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 		OSVersion:       info.OSVersion,
 		MAC:             info.PrimaryMAC,
 		AgentVersion:    info.AgentVersion,
+		Capabilities:    cfg.ShieldCapabilities(),
 	}
 	var resp response
 	if err := tr.Do("POST", "/api/nexus-agent/enroll", req, &resp); err != nil {

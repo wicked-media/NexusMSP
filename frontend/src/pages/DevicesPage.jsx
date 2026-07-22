@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3, Zap, Activity, Flame, Command, Rows3, AlignJustify, Maximize2 } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3, Zap, Activity, Flame, Command, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -36,11 +36,16 @@ import DeviceThumbnail from "../components/devices/DeviceThumbnail";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
 const STATUS_DOT = { online: "bg-emerald-500", offline: "bg-red-500", warning: "bg-amber-500" };
+const MANAGED_ASSET_TOOLS = [
+  { path: "/nexus-agent", label: "NexusOps Agent", icon: Terminal },
+  { path: "/maintenance-scheduler", label: "Maintenance", icon: CalendarClock },
+  { path: "/patch-tuesday", label: "Patch Tuesday", icon: Shield },
+];
 
 function UsagePill({ value, thresholds = [70, 90] }) {
   const color = value >= thresholds[1] ? "text-red-500" : value >= thresholds[0] ? "text-amber-500" : "text-emerald-500";
@@ -77,6 +82,7 @@ export default function DevicesPage() {
   const [rdStatusMap, setRdStatusMap] = useState({});
   const [activeProviders, setActiveProviders] = useState([]);
   const [remoteBusy, setRemoteBusy] = useState({});
+  const [liveChatBusy, setLiveChatBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
   const [tab, setTab] = useState("pulse");
   const [density, setDensity] = useState("comfortable"); // comfortable | compact | dense
@@ -90,6 +96,18 @@ export default function DevicesPage() {
     const clientId = searchParams.get("clientId");
     if (clientId) setFilterClient(clientId);
   }, [searchParams]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    if (["pulse", "directory", "insights", "map"].includes(requestedTab)) setTab(requestedTab);
+    if (searchParams.get("maintenance") === "1") {
+      setTab("directory");
+      toast.info("Select enrolled assets, then choose Schedule Window.");
+      const next = new URLSearchParams(searchParams);
+      next.delete("maintenance");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -129,28 +147,6 @@ export default function DevicesPage() {
   // Launch handlers for inline Remote button (called from RemoteAccessButton)
   const setDevBusy = (id, v) => setRemoteBusy(m => ({ ...m, [id]: v }));
 
-  const launchTrmmForDevice = async (dev) => {
-    // If not linked, deep-link to device detail where the link dialog is
-    if (!dev.trmm_agent_id) {
-      toast.info("Opening device to link TRMM agent…");
-      navigate(`/devices/${dev.id}`);
-      return;
-    }
-    setDevBusy(dev.id, true);
-    try {
-      const res = await axios.get(`${API}/trmm/agents/${dev.trmm_agent_id}/remote-url`, { headers });
-      if (res.data?.success && res.data?.urls) {
-        const url = res.data.urls.control || res.data.urls.terminal || res.data.urls.file
-          || Object.values(res.data.urls).find(v => typeof v === "string");
-        if (url) { window.open(url, "_blank", "noopener,noreferrer"); toast.success("Opening MeshCentral…"); }
-        else toast.error("No remote URL returned by TRMM");
-      } else {
-        toast.error(res.data?.message || "Could not start remote session");
-      }
-    } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-    finally { setDevBusy(dev.id, false); }
-  };
-
   const launchRustDeskForDevice = async (dev) => {
     if (!dev.rustdesk_id) {
       toast.info("Opening device to configure RustDesk…");
@@ -170,6 +166,25 @@ export default function DevicesPage() {
       toast.success(`Launching RustDesk to ${dev.rustdesk_id}`);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
     finally { setDevBusy(dev.id, false); }
+  };
+
+  const startLiveChatForDevice = async (dev) => {
+    if (!dev.nexus_agent_id) {
+      toast.info("Install or link Nexus Agent before starting client chat");
+      return;
+    }
+    setLiveChatBusy(current => ({ ...current, [dev.id]: true }));
+    try {
+      const response = await axios.post(`${API}/live-chat/devices/${dev.id}/open`, {}, { headers });
+      const sessionId = response.data?.session?.id;
+      if (!sessionId) throw new Error("No chat session returned");
+      toast.success(`Live chat opened for ${dev.name}`);
+      navigate(`/live-chat?session=${encodeURIComponent(sessionId)}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to start client chat");
+    } finally {
+      setLiveChatBusy(current => ({ ...current, [dev.id]: false }));
+    }
   };
 
 
@@ -321,20 +336,23 @@ export default function DevicesPage() {
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{editing ? `Edit ${editing.name}` : "Add Device"}</DialogTitle></DialogHeader>
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+      <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset register</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Monitor className="h-4 w-4 text-cyan-200" /></span>{editing ? `Refine ${editing.name}` : "Add managed asset"}</DialogTitle><DialogDescription className="mt-2">Capture ownership, endpoint identity and operational context in one auditable asset record.</DialogDescription></DialogHeader>
+        <div className="max-h-[68vh] space-y-5 overflow-y-auto px-6 py-5">
+          <section className="space-y-3"><div><p className="text-xs font-semibold text-zinc-200">Identity & ownership</p><p className="mt-0.5 text-[11px] text-zinc-500">Required fields establish the client relationship and asset identity.</p></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Device Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="ACME-WS-001" data-testid="device-name-input" /></div>
-            <div><Label>Client *</Label>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Asset name *</Label><Input autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="ACME-WS-001" data-testid="device-name-input" /></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Client *</Label>
               <Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}>
                 <SelectTrigger data-testid="device-client-select"><SelectValue placeholder="Select client" /></SelectTrigger>
                 <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
+          </section>
+          <section className="space-y-3 border-y border-white/[0.07] py-5"><div><p className="text-xs font-semibold text-zinc-200">Endpoint profile</p><p className="mt-0.5 text-[11px] text-zinc-500">Core technical details help technicians identify the right endpoint immediately.</p></div>
           <div className="grid grid-cols-3 gap-3">
-            <div><Label>Type</Label>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Type</Label>
               <Select value={form.device_type} onValueChange={v => setForm({ ...form, device_type: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -346,8 +364,8 @@ export default function DevicesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>OS</Label><Input value={form.os} onChange={e => setForm({ ...form, os: e.target.value })} placeholder="Windows 11" /></div>
-            <div><Label>IP Address</Label><Input value={form.ip_address} onChange={e => setForm({ ...form, ip_address: e.target.value })} placeholder="192.168.1.100" /></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Operating system</Label><Input value={form.os} onChange={e => setForm({ ...form, os: e.target.value })} placeholder="Windows 11" /></div>
+            <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">IP address</Label><Input value={form.ip_address} onChange={e => setForm({ ...form, ip_address: e.target.value })} placeholder="192.168.1.100" /></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Manufacturer</Label><Input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} placeholder="Dell" /></div>
@@ -359,6 +377,8 @@ export default function DevicesPage() {
             <div><Label>RAM (GB)</Label><Input type="number" value={form.ram_gb} onChange={e => setForm({ ...form, ram_gb: e.target.value })} /></div>
             <div><Label>Storage (GB)</Label><Input type="number" value={form.storage_total_gb} onChange={e => setForm({ ...form, storage_total_gb: e.target.value })} /></div>
           </div>
+          </section>
+          <section className="space-y-3"><div><p className="text-xs font-semibold text-zinc-200">Operations context</p><p className="mt-0.5 text-[11px] text-zinc-500">Optional information used in search, dispatch and lifecycle work.</p></div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Location</Label><Input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Office Floor 2" /></div>
             <div><Label>Assigned User</Label><Input value={form.assigned_user} onChange={e => setForm({ ...form, assigned_user: e.target.value })} placeholder="john@acme.com" /></div>
@@ -366,29 +386,29 @@ export default function DevicesPage() {
           <div><Label>MAC Address</Label><Input value={form.mac_address} onChange={e => setForm({ ...form, mac_address: e.target.value })} placeholder="00:1A:2B:3C:4D:5E" /></div>
           <div><Label>Tags (comma separated)</Label><Input value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} placeholder="production, vpn-user, critical" /></div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Additional notes..." /></div>
+          </section>
         </div>
-        <DialogFooter><Button onClick={handleSave} data-testid="save-device-btn">{editing ? "Update" : "Create"} Device</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-device-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
 
   return (
     <PageShell data-testid="devices-page">
-      <TrmmFreshnessStrip token={token} />
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
       {/* Header — matches Team Command Center pattern */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-r from-sky-500/[0.10] via-card to-cyan-500/[0.05] p-5 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Devices Command Center
+            <Sparkles className="w-6 h-6 text-cyan-300" />Managed Assets
           </h1>
           <p className="text-sm text-zinc-500">{devices.length} managed endpoints · live telemetry · fan-out actions · site map</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button
             size="sm" variant="outline"
-            className="h-8 text-xs text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10"
+            className="text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10"
             onClick={async () => {
               try {
                 const r = await axios.post(`${API}/devices/auto-link-acronis`, {}, { headers: { Authorization: `Bearer ${token}` } });
@@ -401,17 +421,17 @@ export default function DevicesPage() {
           >
             <Cloud className="w-3 h-3 mr-1" />Acronis
           </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
+          <Button size="sm" variant="outline" onClick={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
             <BarChart3 className="w-3 h-3 mr-1" />Compare
           </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn">
+          <Button size="sm" variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn">
             <Radar className="w-3 h-3 mr-1" />Discover
           </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10" onClick={openCreate} data-testid="add-device-btn">
-            <Plus className="w-3 h-3 mr-1" />Add Device
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={openCreate} data-testid="add-device-btn">
+            <Plus className="w-4 h-4 mr-1" />Add managed asset
           </Button>
-          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={fetchData} data-testid="devices-refresh-btn">
-            <RefreshCw className="w-3 h-3 mr-1" />Refresh
+          <Button size="sm" variant="outline" onClick={fetchData} data-testid="devices-refresh-btn">
+            <RefreshCw className="w-4 h-4 mr-1" />Refresh
           </Button>
         </div>
       </div>
@@ -433,20 +453,35 @@ export default function DevicesPage() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto overflow-x-auto">
-          {[
-            { v: "pulse",     l: "Fleet Pulse", Icon: Flame },
-            { v: "directory", l: "Directory",   Icon: List },
-            { v: "insights",  l: "Insights",    Icon: BarChart3 },
-            { v: "map",       l: "Site Map",    Icon: Cloud },
-          ].map(t => (
-            <TabsTrigger key={t.v} value={t.v}
-              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
-              data-testid={`devices-tab-${t.v}`}>
-              <t.Icon className="w-3 h-3 mr-1" />{t.l}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="flex items-center border-b border-zinc-800">
+          <TabsList className="h-auto flex-1 justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
+            {[
+              { v: "pulse",     l: "Fleet Pulse", Icon: Flame },
+              { v: "directory", l: "Directory",   Icon: List },
+              { v: "insights",  l: "Insights",    Icon: BarChart3 },
+              { v: "map",       l: "Site Map",    Icon: Cloud },
+            ].map(t => (
+              <TabsTrigger key={t.v} value={t.v}
+                className="data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 data-[state=active]:text-cyan-100 text-muted-foreground rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
+                data-testid={`devices-tab-${t.v}`}>
+                <t.Icon className="w-3 h-3 mr-1" />{t.l}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-9 shrink-0 gap-1.5 px-3 text-xs text-zinc-400 hover:bg-cyan-500/[0.08] hover:text-cyan-100" data-testid="managed-assets-more">
+                <MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {MANAGED_ASSET_TOOLS.map(tool => {
+                const Icon = tool.icon;
+                return <DropdownMenuItem key={tool.path} onSelect={() => navigate(tool.path)}><Icon className="mr-2 h-3.5 w-3.5" />{tool.label}</DropdownMenuItem>;
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
         {/* Fleet Pulse */}
         <TabsContent value="pulse" className="mt-4 space-y-4">
@@ -576,7 +611,7 @@ export default function DevicesPage() {
         )}
         <div className="ml-auto flex gap-1 items-center">
           {selectedDevices.length > 0 && (
-            <Button size="sm" variant="outline" className="h-9 text-xs text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">
+            <Button size="sm" variant="outline" className="h-9 text-xs text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">
               <Zap className="w-3 h-3 mr-1" />Quick Script ({selectedDevices.length})
             </Button>
           )}
@@ -584,19 +619,19 @@ export default function DevicesPage() {
             <button
               title="Comfortable"
               onClick={() => setDensity("comfortable")}
-              className={`px-1.5 py-1.5 ${density === "comfortable" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              className={`px-1.5 py-1.5 ${density === "comfortable" ? "bg-cyan-500/15 text-cyan-200" : "text-zinc-500 hover:text-zinc-300"}`}
               data-testid="density-comfortable"
             ><Rows3 className="w-3.5 h-3.5" /></button>
             <button
               title="Compact"
               onClick={() => setDensity("compact")}
-              className={`px-1.5 py-1.5 ${density === "compact" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              className={`px-1.5 py-1.5 ${density === "compact" ? "bg-cyan-500/15 text-cyan-200" : "text-zinc-500 hover:text-zinc-300"}`}
               data-testid="density-compact"
             ><AlignJustify className="w-3.5 h-3.5" /></button>
             <button
               title="Ultra-dense"
               onClick={() => setDensity("dense")}
-              className={`px-1.5 py-1.5 ${density === "dense" ? "bg-violet-500/15 text-violet-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              className={`px-1.5 py-1.5 ${density === "dense" ? "bg-cyan-500/15 text-cyan-200" : "text-zinc-500 hover:text-zinc-300"}`}
               data-testid="density-dense"
             ><Maximize2 className="w-3.5 h-3.5" /></button>
           </div>
@@ -642,7 +677,7 @@ export default function DevicesPage() {
                   return (
                     <TableRow
                       key={d.id}
-                      className={`cursor-pointer hover:bg-violet-500/[0.06] hover:shadow-[inset_2px_0_0_rgb(139,92,246)] transition-all ${rowDensity} ${isRemoted ? "bg-cyan-500/[0.03]" : ""}`}
+                      className={`cursor-pointer transition-all hover:bg-cyan-500/[0.06] hover:shadow-[inset_2px_0_0_rgb(34,211,238)] ${rowDensity} ${isRemoted ? "bg-cyan-500/[0.03]" : ""}`}
                       onClick={() => navigate(`/devices/${d.id}`)}
                       data-testid={`device-row-${d.id}`}
                     >
@@ -734,11 +769,13 @@ export default function DevicesPage() {
                       <TableCell className="text-xs text-muted-foreground">{d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "-"}</TableCell>
                       <TableCell>
                         <div className="flex gap-1 items-center" onClick={e => e.stopPropagation()}>
+                          {d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" title="Start live chat" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`row-live-chat-${d.id}`}>
+                            {liveChatBusy[d.id] ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3 w-3" />}
+                          </Button>}
                           <RemoteAccessButton
                             device={d}
                             status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
                             busy={!!remoteBusy[d.id]}
-                            onLaunchTrmm={() => launchTrmmForDevice(d)}
                             onLaunchRustDesk={() => launchRustDeskForDevice(d)}
                             compact
                             providersOverride={activeProviders}
@@ -846,11 +883,13 @@ export default function DevicesPage() {
                   <div className="flex items-center justify-between mt-3 pt-2 border-t text-[10px] text-muted-foreground">
                     <span>Last seen: {d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "N/A"}</span>
                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      {d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`card-live-chat-${d.id}`}>
+                        {liveChatBusy[d.id] ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <MessageSquare className="mr-1 h-3 w-3" />} Chat
+                      </Button>}
                       <RemoteAccessButton
                         device={d}
                         status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
                         busy={!!remoteBusy[d.id]}
-                        onLaunchTrmm={() => launchTrmmForDevice(d)}
                         onLaunchRustDesk={() => launchRustDeskForDevice(d)}
                         compact
                         providersOverride={activeProviders}
@@ -873,36 +912,35 @@ export default function DevicesPage() {
 
       {/* DEVICE DISCOVERY DIALOG */}
       <Dialog open={isDiscoveryOpen} onOpenChange={setIsDiscoveryOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>Network Device Discovery</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Scan a client's network to discover devices and import them with one click.</p>
-          <div className="flex items-end gap-3">
+        <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset onboarding</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Radar className="h-4 w-4 text-cyan-200" /></span>Network discovery</DialogTitle><DialogDescription className="mt-2">Scan an approved client subnet, review findings, and import only the endpoints you intend to manage.</DialogDescription></DialogHeader>
+          <div className="space-y-4 px-6 py-5"><div className="grid gap-3 md:grid-cols-[1fr_190px_auto] md:items-end">
             <div className="flex-1">
-              <Label>Client</Label>
+              <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Client</Label>
               <Select value={discoveryClientId} onValueChange={setDiscoveryClientId}>
                 <SelectTrigger data-testid="discovery-client-select"><SelectValue placeholder="Select client" /></SelectTrigger>
                 <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="w-48">
-              <Label>Subnet</Label>
+            <div>
+              <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Approved subnet</Label>
               <Input value={discoverySubnet} onChange={e => setDiscoverySubnet(e.target.value)} placeholder="192.168.1.0/24" data-testid="discovery-subnet" />
             </div>
-            <Button onClick={handleDiscoverDevices} disabled={discoveryLoading || !discoveryClientId} data-testid="run-discovery-btn">
+            <Button className="h-10 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleDiscoverDevices} disabled={discoveryLoading || !discoveryClientId} data-testid="run-discovery-btn">
               {discoveryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Radar className="w-4 h-4 mr-1" />}
               Scan Network
             </Button>
-          </div>
+           </div>
 
           {discoveryResults && (
-            <div className="space-y-3 mt-2">
+            <div className="space-y-3 border-t border-white/[0.07] pt-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{discoveryResults.discovered_count} devices found</Badge>
+                  <Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/[0.07] text-cyan-200">{discoveryResults.discovered_count} devices found</Badge>
                   <span className="text-xs text-muted-foreground">on {discoveryResults.subnet}</span>
                 </div>
                 {selectedDiscovered.length > 0 && (
-                  <Button size="sm" onClick={handleImportDiscovered} disabled={importLoading} data-testid="import-discovered-btn">
+                  <Button size="sm" className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleImportDiscovered} disabled={importLoading} data-testid="import-discovered-btn">
                     {importLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}
                     Import {selectedDiscovered.length} Device{selectedDiscovered.length > 1 ? "s" : ""}
                   </Button>
@@ -910,8 +948,8 @@ export default function DevicesPage() {
               </div>
               <div className="max-h-[400px] overflow-y-auto space-y-1.5">
                 {discoveryResults.devices.map(dev => (
-                  <div key={dev.id} className={`flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${
-                    dev.already_imported ? "bg-muted/20 opacity-60" : selectedDiscovered.includes(dev.id) ? "bg-primary/5 border-primary/30" : "hover:bg-muted/50"
+                  <div key={dev.id} className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${
+                    dev.already_imported ? "bg-muted/20 opacity-60" : selectedDiscovered.includes(dev.id) ? "border-cyan-400/35 bg-cyan-400/[0.07]" : "border-white/[0.07] bg-black/10 hover:border-cyan-400/20 hover:bg-cyan-400/[0.035]"
                   }`} data-testid={`discovered-device-${dev.id}`}>
                     {!dev.already_imported ? (
                       <input type="checkbox" checked={selectedDiscovered.includes(dev.id)} onChange={() => toggleDiscoveredSelect(dev.id)} className="rounded" />
@@ -942,7 +980,7 @@ export default function DevicesPage() {
                 ))}
               </div>
             </div>
-          )}
+          )}</div>
         </DialogContent>
       </Dialog>
 
@@ -953,57 +991,6 @@ export default function DevicesPage() {
       <DeviceCommandPalette devices={devices} />
       </div>
     </PageShell>
-  );
-}
-
-function TrmmFreshnessStrip({ token }) {
-  const [status, setStatus] = useState(null);
-  const [outages, setOutages] = useState([]);
-  const [syncing, setSyncing] = useState(false);
-  const load = useCallback(() => {
-    const headers = { Authorization: `Bearer ${token}` };
-    axios.get(`${API}/trmm-sync/status`, { headers }).then((r) => setStatus(r.data)).catch(() => {});
-    axios.get(`${API}/trmm-sync/outages`, { headers }).then((r) => setOutages(r.data?.outages || [])).catch(() => {});
-  }, [token]);
-  useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, [load]);
-
-  if (!status) return null;
-  const sec = status.staleness_seconds;
-  const color = sec == null ? "zinc" : sec < 180 ? "emerald" : sec < 900 ? "amber" : "rose";
-  const fmt = sec == null ? "never" : sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h`;
-
-  const syncNow = async () => {
-    setSyncing(true);
-    try {
-      const r = await axios.post(`${API}/trmm-sync/run`, {}, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(`Synced · ${r.data.devices_updated} devices${r.data.outages_created ? ` · ${r.data.outages_created} outage(s)` : ""}`);
-      load();
-    } catch (e) { toast.error(e.message); }
-    finally { setSyncing(false); }
-  };
-
-  return (
-    <div className="px-6 pt-3 space-y-2" data-testid="trmm-freshness">
-      <div className="flex items-center gap-2 text-xs flex-wrap">
-        <Server className="w-3.5 h-3.5 text-violet-400" />
-        <span className="text-muted-foreground">TRMM sync:</span>
-        <Badge variant="outline" className={`text-${color}-400 border-${color}-500/40 text-[10px]`}>Updated {fmt} ago</Badge>
-        {status.demo_mode && <Badge variant="outline" className="text-amber-400 border-amber-500/40 text-[10px]">DEMO MODE</Badge>}
-        <span className="text-muted-foreground">· {status.agents_seen} agents · {status.transitions_count || 0} recent transitions</span>
-        <Button size="sm" variant="ghost" onClick={syncNow} disabled={syncing} data-testid="devices-sync-now" className="h-6 px-2 text-[11px]">
-          {syncing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync now
-        </Button>
-        <a href="/device-reliability" className="ml-auto text-violet-400 hover:underline text-[11px]">Reliability center →</a>
-      </div>
-      {outages.length > 0 && (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded px-3 py-2 flex items-center gap-2 text-xs flex-wrap" data-testid="outage-banner">
-          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-          <strong className="text-rose-300">{outages.length} active outage{outages.length > 1 ? "s" : ""}:</strong>
-          <span>{outages.slice(0, 3).map((o) => `${o.client_name} (${o.offline_count} offline)`).join(" · ")}</span>
-          <a href="/device-reliability" className="ml-auto text-rose-300 hover:underline">Review</a>
-        </div>
-      )}
-    </div>
   );
 }
 

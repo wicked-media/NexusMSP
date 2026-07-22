@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -166,6 +167,7 @@ const WEEKDAY_OPTIONS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function ScriptingPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [scripts, setScripts] = useState([]);
   const [executions, setExecutions] = useState([]);
   const [devices, setDevices] = useState([]);
@@ -460,6 +462,7 @@ export default function ScriptingPage() {
           <p className="text-muted-foreground">Script library, agent execution, and scheduled automation</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate("/git-scripts")} data-testid="open-git-scripts-btn"><BookOpen className="w-4 h-4 mr-2" />Git scripts</Button>
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild><Button data-testid="create-script-btn"><Plus className="w-4 h-4 mr-2" />New Script</Button></DialogTrigger>
@@ -676,9 +679,11 @@ export default function ScriptingPage() {
             <BookOpen className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Script Library</h2>
             <Badge variant="secondary">{scriptLibrary.length} templates</Badge>
+            <Button size="sm" variant="ghost" onClick={() => setActiveTab("scripts")} data-testid="open-installed-scripts-btn"><Code className="mr-1.5 h-3.5 w-3.5" />My scripts</Button>
+            <Button size="sm" variant="ghost" onClick={() => navigate("/git-scripts")} data-testid="open-git-library-btn"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Git library</Button>
             <Button size="sm" variant="outline" className="ml-auto" onClick={installTechnicianPack} data-testid="install-technician-pack"><Download className="mr-1.5 h-3.5 w-3.5" />Install technician pack</Button>
           </div>
-          <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Install the full pack for direct terminal use, or import individual scripts to review and customise them first.</p>
+          <p className="text-sm text-muted-foreground mb-4">Ready-to-use scripts for common MSP tasks. Install the full pack for direct terminal use, import individual scripts to review and customise them first, or bring a version-controlled script across from the Git library.</p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5 mb-5">
             {SCRIPT_PACKS.map(pack => {
               const Icon = pack.icon;

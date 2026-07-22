@@ -48,6 +48,28 @@ async def get_client_timeline(client_id: str, current_user: dict = Depends(get_c
     for s in sentiments:
         events.append({"type": "sentiment", "icon": "heart", "title": f"Sentiment Score: {s.get('score',0)}/100", "subtitle": s.get("status",""), "timestamp": s.get("analyzed_at",""), "color": "pink"})
 
+    # Correspondence is captured centrally by the Microsoft 365 delivery layer.
+    # Include successful sends, rejected sends, and inbound messages so the
+    # client record is the authoritative operational communications history.
+    communications = await db.client_communication_events.find(
+        {"client_id": client_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    for event in communications:
+        direction = event.get("direction", "outbound")
+        status = event.get("delivery_status", "recorded")
+        addresses = event.get("recipients", [])
+        counterparty = event.get("sender_email") if direction == "inbound" else ", ".join(addresses[:2])
+        state = "received" if direction == "inbound" else status.replace("_", " ")
+        events.append({
+            "type": "email",
+            "icon": "mail",
+            "title": f"{'Received' if direction == 'inbound' else 'Sent'} email: {event.get('subject') or '(no subject)'}",
+            "subtitle": f"{state.title()} · {counterparty or event.get('sender_mailbox') or 'Unknown address'}",
+            "timestamp": event.get("created_at", ""),
+            "ref_id": event.get("related_id"),
+            "color": "emerald" if status in {"sent", "received"} else "rose",
+        })
+
     # Sort by timestamp descending
     events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 

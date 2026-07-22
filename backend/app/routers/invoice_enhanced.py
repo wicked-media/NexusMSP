@@ -9,6 +9,7 @@ import logging
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
+from app.routers.financial_reports import build_accounts_receivable_aging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,10 +30,10 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         raise HTTPException(status_code=400, detail="No email address provided or found for client")
     if "@" not in email or email.startswith("@") or email.endswith("@"):
         raise HTTPException(status_code=422, detail="A valid recipient email address is required")
-    subject = data.get("subject", f"Invoice {invoice.get('invoice_number', '')} from NexusOps")
+    subject = data.get("subject", f"Invoice {invoice.get('invoice_number', '')} from NexusMSP")
     message = data.get("message", "")
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
-    company = branding.get("company_name", "NexusOps")
+    company = branding.get("company_name", "NexusMSP")
     if not message:
         balance = float(invoice.get("total", 0)) - float(invoice.get("amount_paid", 0))
         message = f"""<h2>{company}</h2>
@@ -60,6 +61,11 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         subject,
         f"<div style='font-family:sans-serif;max-width:600px;margin:auto;'>{message}</div>",
         category="billing",
+        client_id=invoice.get("client_id"),
+        related_type="invoice",
+        related_id=invoice_id,
+        initiated_by=current_user.get("id"),
+        initiated_by_name=current_user.get("name"),
     )
     sent = delivery.get("status") == "sent"
     delivery_status = delivery.get("status", "failed")
@@ -164,6 +170,8 @@ async def apply_credit_note(cn_id: str, data: dict, current_user: dict = Depends
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("is_split_parent"):
+        raise HTTPException(status_code=409, detail="Email the generated payer invoices; the split-billing source is retained for audit only")
     if invoice.get("status") in {"cancelled", "voided"}:
         raise HTTPException(status_code=409, detail="Cannot apply a credit note to a voided invoice")
     if cn.get("client_id") and cn.get("client_id") != invoice.get("client_id"):
@@ -475,51 +483,27 @@ async def get_client_statement_pdf(client_id: str, current_user: dict = Depends(
 
 @router.get("/invoices/aging-report")
 async def get_aging_report(current_user: dict = Depends(get_current_user)):
-    today = datetime.now(timezone.utc)
-    today_str = today.strftime("%Y-%m-%d")
-    unpaid = await db.invoices.find({
-        "payment_status": {"$in": ["unpaid", "partial"]},
-        "status": {"$ne": "cancelled"},
-    }, {"_id": 0}).to_list(10000)
-    buckets = {"current": [], "30": [], "60": [], "90": [], "120_plus": []}
-    totals = {"current": 0, "30": 0, "60": 0, "90": 0, "120_plus": 0}
-    for inv in unpaid:
-        due = inv.get("due_date", "")
-        if not due:
-            buckets["current"].append(inv)
-            balance = float(inv.get("total", 0)) - float(inv.get("amount_paid", 0))
-            totals["current"] += balance
-            continue
-        try:
-            due_dt = datetime.strptime(due, "%Y-%m-%d")
-        except Exception:
-            buckets["current"].append(inv)
-            continue
-        days_overdue = (today - due_dt.replace(tzinfo=timezone.utc)).days
-        balance = float(inv.get("total", 0)) - float(inv.get("amount_paid", 0))
-        inv["days_overdue"] = days_overdue
-        inv["balance"] = round(balance, 2)
-        if days_overdue <= 0:
-            buckets["current"].append(inv)
-            totals["current"] += balance
-        elif days_overdue <= 30:
-            buckets["30"].append(inv)
-            totals["30"] += balance
-        elif days_overdue <= 60:
-            buckets["60"].append(inv)
-            totals["60"] += balance
-        elif days_overdue <= 90:
-            buckets["90"].append(inv)
-            totals["90"] += balance
-        else:
-            buckets["120_plus"].append(inv)
-            totals["120_plus"] += balance
-    grand_total = sum(totals.values())
+    """Legacy compatibility endpoint; Reporting is now the authoritative UI."""
+    report = await build_accounts_receivable_aging()
+    legacy_keys = {
+        "current": "current",
+        "30": "30_days",
+        "60": "60_days",
+        "90": "90_days",
+        "120_plus": "over_90",
+    }
     return {
-        "as_of": today_str,
-        "buckets": {k: {"invoices": v, "total": round(totals[k], 2), "count": len(v)} for k, v in buckets.items()},
-        "grand_total": round(grand_total, 2),
-        "total_invoices": len(unpaid),
+        "as_of": report["as_of"],
+        "buckets": {
+            legacy_key: {
+                "invoices": report["buckets"][source_key]["items"],
+                "total": report["buckets"][source_key]["total"],
+                "count": report["buckets"][source_key]["count"],
+            }
+            for legacy_key, source_key in legacy_keys.items()
+        },
+        "grand_total": report["grand_total"],
+        "total_invoices": report["total_invoices"],
     }
 
 
@@ -537,6 +521,9 @@ async def clone_invoice(invoice_id: str, current_user: dict = Depends(get_curren
     new["payment_status"] = "unpaid"
     new["amount_paid"] = 0
     new["status"] = "draft"
+    source_name = str(inv.get("invoice_name") or "").strip()
+    if source_name:
+        new["invoice_name"] = f"Copy of {source_name}"[:160]
     new["payments"] = []
     new["audit_trail"] = []
     new["due_date"] = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")

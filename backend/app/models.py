@@ -126,6 +126,7 @@ class Ticket(BaseModel):
     source: str = "portal"
     assigned_to: Optional[str] = None
     assigned_name: Optional[str] = None
+    assignee_avatar: Optional[str] = None
     sla_due: Optional[datetime] = None
     due_date: Optional[str] = None
     estimated_hours: Optional[float] = None
@@ -317,6 +318,21 @@ class LineItemCreate(BaseModel):
     billing_frequency: str = "monthly"
     pax8_subscription_id: Optional[str] = None
     pax8_product_id: Optional[str] = None
+    line_type: str = "standard"  # standard, asset_count, asset_backed
+    asset_id: Optional[str] = None
+    asset_name: Optional[str] = None
+    asset_serial_number: Optional[str] = None
+    asset_imei: Optional[str] = None
+    asset_status: str = "active"  # active, returned, replaced
+    term_start: Optional[str] = None
+    term_end: Optional[str] = None
+    supplier_cost: float = 0.0
+    buyout_value: float = 0.0
+    billing_lock: bool = False
+    billing_source: str = "manual"  # manual, asset_backed, asset_count, pax8_subscription, inventory
+    asset_type_filter: Optional[str] = None
+    product_id: Optional[str] = None
+    source_label: Optional[str] = None
 
 class LineItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -332,12 +348,30 @@ class LineItem(BaseModel):
     billing_frequency: str = "monthly"
     pax8_subscription_id: Optional[str] = None
     pax8_product_id: Optional[str] = None
+    line_type: str = "standard"
+    asset_id: Optional[str] = None
+    asset_name: Optional[str] = None
+    asset_serial_number: Optional[str] = None
+    asset_imei: Optional[str] = None
+    asset_status: str = "active"
+    term_start: Optional[str] = None
+    term_end: Optional[str] = None
+    supplier_cost: float = 0.0
+    buyout_value: float = 0.0
+    billing_lock: bool = False
+    asset_history: List[Dict[str, Any]] = []
+    billing_source: str = "manual"
+    asset_type_filter: Optional[str] = None
+    product_id: Optional[str] = None
+    source_label: Optional[str] = None
     synced_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class InvoiceCreate(BaseModel):
     client_id: Optional[str] = None
     contract_id: Optional[str] = None
+    ticket_id: Optional[str] = None
+    invoice_name: Optional[str] = None
     due_date: Optional[str] = None
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
@@ -356,6 +390,10 @@ class Invoice(BaseModel):
     client_id: Optional[str] = None
     client_name: Optional[str] = None
     contract_id: Optional[str] = None
+    ticket_id: Optional[str] = None
+    invoice_name: Optional[str] = None
+    ticket_number: Optional[str] = None
+    ticket_title: Optional[str] = None
     status: str = "draft"
     payment_status: str = "unpaid"
     subtotal: float = 0.0
@@ -368,6 +406,14 @@ class Invoice(BaseModel):
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
     payments: List[Dict[str, Any]] = []
+    # A split parent is an auditable source record only. The generated payer
+    # invoices hold the collectable balance so revenue is never duplicated.
+    is_split_parent: bool = False
+    is_split_child: bool = False
+    split_billing_parent_id: Optional[str] = None
+    split_billing_allocation_id: Optional[str] = None
+    split_source_invoice_number: Optional[str] = None
+    split_billing: Optional[Dict[str, Any]] = None
     stripe_session_id: Optional[str] = None
     xero_invoice_id: Optional[str] = None
     is_recurring: bool = False
@@ -1192,6 +1238,9 @@ class ProjectTask(BaseModel):
     assigned_name: Optional[str] = None
     estimated_hours: Optional[float] = None
     actual_hours: float = 0.0
+    ticket_id: Optional[str] = None
+    ticket_number: Optional[str] = None
+    ticket_title: Optional[str] = None
     due_date: Optional[str] = None
     completed_at: Optional[datetime] = None
     dependencies: List[str] = []  # Task IDs this depends on

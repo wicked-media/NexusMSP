@@ -115,7 +115,7 @@ export default function CommandPalette() {
       if (search.clients?.length) list.push({ heading: "Clients", icon: Users, items: search.clients.map(c => ({
         kind: "client", label: c.name, hint: c.email || c.contract_status, id: c.id,
       }))});
-      if (search.devices?.length) list.push({ heading: "Devices", icon: Monitor, items: search.devices.map(d => ({
+      if (search.devices?.length) list.push({ heading: "Assets", icon: Monitor, items: search.devices.map(d => ({
         kind: "device", label: d.hostname || d.name, hint: `${d.client_name || ""} · ${d.device_type || ""}`, id: d.id, status: d.status,
       }))});
       if (search.users?.length) list.push({ heading: "People", icon: Users, items: search.users.map(u => ({

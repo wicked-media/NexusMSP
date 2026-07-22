@@ -7,106 +7,15 @@ import random; random = random.SystemRandom()
 
 router = APIRouter(tags=["Huntress Integration"])
 
-# Mock data generator for when no API key is configured
-def generate_mock_agents(count=25):
-    hostnames = ["WS-ACME-", "SRV-TECH-", "PC-SUMMIT-", "DC-LEGAL-", "LT-APEX-", "WS-BYTE-", "SRV-CLOUD-", "PC-NOVA-"]
-    os_list = ["Windows 11 Pro 23H2", "Windows 10 Enterprise", "Windows Server 2022", "Windows Server 2019", "macOS 14.2 Sonoma", "Windows 11 Enterprise"]
-    statuses = ["online", "online", "online", "online", "online", "offline", "isolated", "needs_attention"]
-    agents = []
-    for i in range(count):
-        prefix = random.choice(hostnames)
-        status = random.choice(statuses)
-        agents.append({
-            "id": f"agent-{uuid.uuid4().hex[:8]}",
-            "hostname": f"{prefix}{random.randint(100,999)}",
-            "external_ip": f"203.0.{random.randint(1,255)}.{random.randint(1,255)}",
-            "internal_ip": f"192.168.{random.randint(1,10)}.{random.randint(10,254)}",
-            "os": random.choice(os_list),
-            "agent_version": f"0.14.{random.randint(1,9)}",
-            "status": status,
-            "last_seen": (datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 1440 if status == "offline" else 15))).isoformat(),
-            "organization": random.choice(["Acme Corp", "TechStart Inc", "Summit Legal Group", "Apex Dynamics", "ByteForge Labs", "CloudNine Solutions"]),
-            "edr_version": f"2.{random.randint(0,5)}.{random.randint(0,9)}",
-            "platform": random.choice(["windows", "windows", "windows", "macos"]),
-            "isolated": status == "isolated",
-            "tags": random.sample(["production", "server", "workstation", "critical", "vip", "remote"], k=random.randint(1, 3)),
-        })
-    return agents
 
-
-def generate_mock_incidents(count=12):
-    titles = [
-        "Suspicious PowerShell execution detected",
-        "Credential dumping attempt via LSASS",
-        "Ransomware encryption behavior detected",
-        "Unauthorized RDP brute-force attempt",
-        "Malicious DLL injection in svchost.exe",
-        "Cobalt Strike beacon communication",
-        "Suspicious scheduled task creation",
-        "LOLBin abuse: certutil downloading payload",
-        "Persistence via registry run key",
-        "Lateral movement via PsExec detected",
-        "Phishing payload executed from Outlook",
-        "Mimikatz credential harvesting attempt",
-        "Suspicious WMI remote execution",
-        "UAC bypass via fodhelper.exe",
-        "Base64 encoded PowerShell command",
-    ]
-    severities = ["critical", "critical", "high", "high", "high", "medium", "medium", "medium", "low", "low"]
-    statuses = ["new", "new", "investigating", "investigating", "remediated", "closed"]
-    mitre = ["T1059.001", "T1003.001", "T1486", "T1110", "T1055.001", "T1071.001", "T1053.005", "T1105", "T1547.001", "T1570"]
-    incidents = []
-    for i in range(count):
-        sev = random.choice(severities)
-        status = random.choice(statuses)
-        incidents.append({
-            "id": f"inc-{uuid.uuid4().hex[:8]}",
-            "title": random.choice(titles),
-            "severity": sev,
-            "status": status,
-            "hostname": f"WS-{random.choice(['ACME','TECH','SUMMIT','APEX'])}-{random.randint(100,999)}",
-            "organization": random.choice(["Acme Corp", "TechStart Inc", "Summit Legal Group"]),
-            "created_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 168))).isoformat(),
-            "updated_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 24))).isoformat(),
-            "description": f"Huntress SOC detected suspicious activity on endpoint. MITRE ATT&CK: {random.choice(mitre)}. Immediate investigation recommended.",
-            "mitre_attack": random.choice(mitre),
-            "indicators": [f"SHA256:{uuid.uuid4().hex}", f"IP:{random.randint(45,220)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"],
-            "remediation_steps": [
-                "Isolate the affected endpoint immediately",
-                "Collect memory dump and event logs",
-                "Scan with updated AV signatures",
-                "Check for lateral movement indicators",
-                "Reset compromised credentials",
-                "Review and block malicious IPs/domains",
-            ][:random.randint(2, 5)],
-            "assigned_to": random.choice([None, "Aaron Buckanen", "Tech Support"]),
-            "ticket_id": None if status in ["new", "investigating"] else f"TK-{random.randint(1000,9999)}",
-        })
-    return sorted(incidents, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}[x["severity"]])
-
-
-def generate_mock_summary(agents, incidents):
-    online = len([a for a in agents if a["status"] == "online"])
-    offline = len([a for a in agents if a["status"] == "offline"])
-    isolated = len([a for a in agents if a["status"] == "isolated"])
-    needs_attn = len([a for a in agents if a["status"] == "needs_attention"])
-    open_inc = len([i for i in incidents if i["status"] in ["new", "investigating"]])
-    critical_inc = len([i for i in incidents if i["severity"] == "critical" and i["status"] in ["new", "investigating"]])
-    return {
-        "total_agents": len(agents),
-        "online": online,
-        "offline": offline,
-        "isolated": isolated,
-        "needs_attention": needs_attn,
-        "health_pct": round(online / max(len(agents), 1) * 100),
-        "total_incidents": len(incidents),
-        "open_incidents": open_inc,
-        "critical_incidents": critical_inc,
-        "resolved_last_24h": random.randint(1, 5),
-        "avg_response_time_min": random.randint(3, 15),
-        "threats_blocked_30d": random.randint(20, 150),
-    }
-
+def _retired_generated_data_error(workspace: str) -> HTTPException:
+    return HTTPException(
+        status_code=410,
+        detail=(
+            f"{workspace} was retired because it generated security data "
+            "instead of reading a connected provider or Nexus evidence source."
+        ),
+    )
 
 @router.get("/huntress/settings")
 async def get_huntress_settings(user=Depends(get_current_user)):
@@ -140,79 +49,66 @@ async def save_huntress_settings(body: dict, user=Depends(get_current_user)):
 async def test_huntress_connection(user=Depends(get_current_user)):
     settings = await db.integration_settings.find_one({"type": "huntress"}, {"_id": 0})
     if not settings or not settings.get("configured"):
-        return {"connected": False, "message": "Not configured - using mock data", "mock": True}
-    # In production, would make real API call here
-    return {"connected": False, "message": "API key saved but live connection not yet implemented - using mock data", "mock": True}
+        return {"connected": False, "connection_state": "not_configured", "message": "Huntress is not configured. No Huntress data is displayed until a verified provider connection exists."}
+    return {"connected": False, "connection_state": "configured_unverified", "message": "Credentials are saved but this legacy endpoint does not verify them. Use the configured integration test in Settings."}
 
 
 @router.get("/huntress/dashboard")
 async def get_huntress_dashboard(user=Depends(get_current_user)):
-    """Main Huntress dashboard with all data."""
-    agents = generate_mock_agents(25)
-    incidents = generate_mock_incidents(12)
-    summary = generate_mock_summary(agents, incidents)
-    orgs = {}
-    for a in agents:
-        org = a["organization"]
-        if org not in orgs:
-            orgs[org] = {"name": org, "agents": 0, "online": 0, "incidents": 0}
-        orgs[org]["agents"] += 1
-        if a["status"] == "online":
-            orgs[org]["online"] += 1
-    for inc in incidents:
-        org = inc["organization"]
-        if org in orgs:
-            orgs[org]["incidents"] += 1
-    return {
-        "summary": summary,
-        "agents": agents,
-        "incidents": incidents,
-        "organizations": list(orgs.values()),
-        "mock_data": True,
-    }
+    raise _retired_generated_data_error("Legacy Huntress dashboard")
 
 
 @router.get("/huntress/agents")
 async def get_huntress_agents(user=Depends(get_current_user)):
-    return generate_mock_agents(30)
+    raise _retired_generated_data_error("Legacy Huntress agents endpoint")
 
 
 @router.get("/huntress/incidents")
 async def get_huntress_incidents(user=Depends(get_current_user)):
-    return generate_mock_incidents(15)
+    raise _retired_generated_data_error("Legacy Huntress incidents endpoint")
 
 
 @router.get("/soc/dashboard")
 async def get_soc_dashboard(user=Depends(get_current_user)):
     """Operational SOC view from stored alerts and enrolled Nexus devices only."""
     devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
+    agent_devices = [device for device in devices if device.get("nexus_agent_id")]
     alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     open_alerts = [a for a in alerts if a.get("status") in {"new", "investigating", "open"}]
     critical_alerts = [a for a in open_alerts if a.get("severity") == "critical"]
-    online = sum(1 for d in devices if d.get("status") == "online")
-    offline = sum(1 for d in devices if d.get("status") == "offline")
-    security_scores = [float(d["security_score"]) for d in devices if isinstance(d.get("security_score"), (int, float))]
+    online = sum(1 for d in agent_devices if d.get("status") == "online")
+    offline = sum(1 for d in agent_devices if d.get("status") == "offline")
+    security_scores = [float(d["compliance_score"]) for d in agent_devices if isinstance(d.get("compliance_score"), (int, float))]
     vulnerabilities = await db.vulnerabilities.find({}, {"_id": 0, "severity": 1, "discovered_at": 1}).to_list(2000)
     vuln_summary = {severity: sum(1 for v in vulnerabilities if v.get("severity") == severity) for severity in ("critical", "high", "medium", "low")}
     vuln_summary["last_scan"] = max((v.get("discovered_at") for v in vulnerabilities if v.get("discovered_at")), default=None)
-    dark_web = await db.dark_web_alerts.find({}, {"_id": 0}).sort("found_at", -1).to_list(100)
-    identity_threats = await db.identity_threats.count_documents({"status": {"$in": ["new", "open", "investigating"]}})
-    phishing_running = await db.phishing_campaigns.count_documents({"status": {"$in": ["active", "running"]}})
+    resolved_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    resolved_last_24h = sum(
+        1 for alert in alerts
+        if alert.get("status") in {"resolved", "closed"}
+        and isinstance(alert.get("resolved_at"), str)
+        and alert["resolved_at"] >= resolved_cutoff.isoformat()
+    )
     summary = {
-        "total_agents": len(devices), "online": online, "offline": offline,
-        "isolated": sum(1 for d in devices if d.get("isolated")),
-        "needs_attention": sum(1 for d in devices if d.get("status") in {"needs_attention", "degraded"}),
-        "health_pct": round((online / len(devices)) * 100) if devices else 0,
+        "total_agents": len(agent_devices), "online": online, "offline": offline,
+        "isolated": sum(1 for d in agent_devices if d.get("isolated")),
+        "needs_attention": sum(1 for d in agent_devices if d.get("status") in {"needs_attention", "degraded"}),
+        "health_pct": round((online / len(agent_devices)) * 100) if agent_devices else 0,
         "total_incidents": len(alerts), "open_incidents": len(open_alerts),
-        "critical_incidents": len(critical_alerts), "resolved_last_24h": 0,
+        "critical_incidents": len(critical_alerts), "resolved_last_24h": resolved_last_24h,
         "avg_response_time_min": None, "threats_blocked_30d": 0,
     }
     return {
         "huntress": summary, "agents": devices[:10], "incidents": open_alerts[:8],
-        "persisted_alerts": alerts[:20], "dark_web_alerts": dark_web,
+        # Dark-web findings require a breach-intelligence provider. Do not
+        # surface the old generated collection as SOC evidence.
+        "persisted_alerts": alerts[:20], "dark_web_alerts": [],
         "vulnerability_summary": vuln_summary,
         "compliance_score": round(sum(security_scores) / len(security_scores)) if security_scores else None,
-        "identity_threats": identity_threats, "phishing_tests_running": phishing_running,
+        # Neither identity threat detection nor phishing simulation has a
+        # provider-backed Nexus source yet. Do not report legacy seeded rows.
+        "identity_threats": None, "identity_source_configured": False,
+        "phishing_tests_running": None, "phishing_source_configured": False,
         "mock_data": False,
     }
 
@@ -227,13 +123,15 @@ async def get_soc_alerts(user=Depends(get_current_user)):
 
 @router.post("/soc/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(alert_id: str, user=Depends(get_current_user)):
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOC alert not found")
     now = datetime.now(timezone.utc).isoformat()
     await db.soc_alerts.update_one(
         {"id": alert_id},
-        {"$set": {"status": "investigating", "acknowledged_by": user.get("name"), "acknowledged_at": now}},
-        upsert=True
+        {"$set": {"status": "investigating", "acknowledged_by": user.get("name"), "acknowledged_at": now}}
     )
-    return {"message": "Alert acknowledged", "status": "investigating"}
+    return {"message": "Alert acknowledgement recorded", "status": "investigating"}
 
 
 @router.post("/soc/alerts/{alert_id}/create-ticket")
@@ -242,7 +140,9 @@ async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_c
     now = datetime.now(timezone.utc).isoformat()
     ticket_id = str(uuid.uuid4())
     ticket_num = f"SEC-{random.randint(1000,9999)}"
-    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0}) or {}
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOC alert not found")
     device = None
     if alert.get("device_id"):
         device = await db.devices.find_one({"id": alert["device_id"]}, {"_id": 0})
@@ -273,193 +173,125 @@ async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_c
 
     await db.soc_alerts.update_one(
         {"id": alert_id},
-        {"$set": {"ticket_id": ticket_id, "ticket_number": ticket_num, "status": "investigating"}},
-        upsert=True
+        {"$set": {"ticket_id": ticket_id, "ticket_number": ticket_num, "status": "investigating"}}
     )
     return {"message": f"Ticket {ticket_num} created", "ticket_id": ticket_id, "ticket_number": ticket_num}
 
 
 @router.post("/soc/alerts/{alert_id}/isolate")
 async def isolate_endpoint(alert_id: str, body: dict, user=Depends(get_current_user)):
-    """Isolate an endpoint from a SOC alert."""
-    now = datetime.now(timezone.utc).isoformat()
-    hostname = body.get("hostname", "Unknown")
-    await db.soc_alerts.update_one(
-        {"id": alert_id},
-        {"$set": {"isolated": True, "isolated_by": user.get("name"), "isolated_at": now},
-         "$push": {"actions": {"type": "isolate", "by": user.get("name"), "at": now, "hostname": hostname}}},
-        upsert=True
+    raise HTTPException(
+        status_code=410,
+        detail="SOC endpoint isolation was retired because it only changed a Nexus record. Use the connected provider or an agent-backed containment command once one is implemented.",
     )
-    await db.soc_isolation_log.insert_one({
-        "id": str(uuid.uuid4()), "alert_id": alert_id, "hostname": hostname,
-        "action": "isolate", "by": user.get("name"), "at": now,
-    })
-    return {"message": f"Endpoint {hostname} isolated", "isolated": True}
 
 
 @router.post("/soc/alerts/{alert_id}/remediate")
 async def remediate_alert(alert_id: str, body: dict, user=Depends(get_current_user)):
-    """Mark alert as remediated with notes."""
+    """Record internal remediation evidence; it never claims provider remediation."""
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOC alert not found")
+    notes = str(body.get("notes") or "").strip()
+    if not notes:
+        raise HTTPException(status_code=400, detail="Record remediation evidence or an external provider reference before closing the internal case")
     now = datetime.now(timezone.utc).isoformat()
     await db.soc_alerts.update_one(
         {"id": alert_id},
         {"$set": {"status": "remediated", "remediated_by": user.get("name"), "remediated_at": now,
-                  "remediation_notes": body.get("notes", "")},
-         "$push": {"actions": {"type": "remediate", "by": user.get("name"), "at": now, "notes": body.get("notes", "")}}},
-        upsert=True
+                  "remediation_notes": notes},
+         "$push": {"actions": {"type": "remediation_evidence_recorded", "by": user.get("name"), "at": now, "notes": notes}}}
     )
-    return {"message": "Alert remediated", "status": "remediated"}
+    return {"message": "Internal remediation evidence recorded", "status": "remediated"}
 
 
 @router.post("/soc/alerts/{alert_id}/close")
 async def close_alert(alert_id: str, body: dict, user=Depends(get_current_user)):
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOC alert not found")
+    reason = str(body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A closure reason or provider reference is required")
     now = datetime.now(timezone.utc).isoformat()
     await db.soc_alerts.update_one(
         {"id": alert_id},
         {"$set": {"status": "closed", "closed_by": user.get("name"), "closed_at": now,
-                  "close_reason": body.get("reason", "Resolved")}},
-        upsert=True
+                  "close_reason": reason}}
     )
-    return {"message": "Alert closed"}
+    return {"message": "Internal alert case closed"}
 
 
 # --- Endpoint Security ---
 @router.get("/soc/endpoints")
 async def get_endpoint_security(user=Depends(get_current_user)):
-    agents = generate_mock_agents(30)
-    for a in agents:
-        a["av_status"] = random.choice(["active", "active", "active", "outdated", "disabled"])
-        a["firewall"] = random.choice(["enabled", "enabled", "enabled", "disabled"])
-        a["encryption"] = random.choice(["bitlocker", "bitlocker", "filevault", "none"])
-        a["patch_status"] = random.choice(["up_to_date", "up_to_date", "pending", "critical_missing"])
-        a["last_scan"] = (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 48))).isoformat()
-        a["risk_score"] = random.randint(0, 100)
-    return agents
+    raise _retired_generated_data_error("Legacy SOC endpoint security")
 
 
 @router.post("/soc/endpoints/{agent_id}/scan")
 async def trigger_endpoint_scan(agent_id: str, user=Depends(get_current_user)):
-    return {"message": f"Scan initiated on {agent_id}", "status": "scanning"}
+    raise _retired_generated_data_error("Legacy SOC endpoint scan")
 
 
 @router.post("/soc/endpoints/{agent_id}/isolate")
 async def isolate_single_endpoint(agent_id: str, user=Depends(get_current_user)):
-    now = datetime.now(timezone.utc).isoformat()
-    await db.soc_isolation_log.insert_one({
-        "id": str(uuid.uuid4()), "agent_id": agent_id,
-        "action": "isolate", "by": user.get("name"), "at": now,
-    })
-    return {"message": f"Endpoint {agent_id} isolated from network", "isolated": True}
+    raise _retired_generated_data_error("Legacy SOC endpoint isolation")
 
 
 @router.post("/soc/endpoints/{agent_id}/unisolate")
 async def unisolate_endpoint(agent_id: str, user=Depends(get_current_user)):
-    return {"message": f"Endpoint {agent_id} restored to network", "isolated": False}
+    raise _retired_generated_data_error("Legacy SOC endpoint release")
 
 
 # --- Dark Web Monitor ---
 @router.get("/soc/dark-web")
 async def get_dark_web_alerts(user=Depends(get_current_user)):
-    domains = ["acmecorp.com", "techstart.io", "summitlegal.com", "apexdynamics.net", "byteforge.dev"]
-    breach_sources = ["Dark Web Forum", "Paste Site", "Telegram Channel", "Ransomware Blog", "Credential Market", "Data Dump"]
-    alerts = []
-    for i in range(random.randint(5, 15)):
-        domain = random.choice(domains)
-        alerts.append({
-            "id": f"dw-{uuid.uuid4().hex[:8]}",
-            "type": random.choice(["credential_leak", "domain_mention", "data_breach", "executive_impersonation", "brand_abuse"]),
-            "severity": random.choice(["critical", "high", "high", "medium", "medium", "low"]),
-            "source": random.choice(breach_sources),
-            "domain": domain,
-            "details": f"{'Credentials' if random.random() > 0.5 else 'Mention'} found for {random.choice(['admin','ceo','it.support','billing','sales'])}@{domain}",
-            "found_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 720))).isoformat(),
-            "status": random.choice(["new", "new", "reviewed", "actioned", "dismissed"]),
-            "affected_users": random.randint(1, 25),
-            "breach_name": random.choice(["MegaLeak2026", "CorpDump", "ShadowBreach", "PhishPaste", None]),
-        })
-    alerts.sort(key=lambda x: x["found_at"], reverse=True)
-    return {"alerts": alerts, "monitored_domains": domains, "total_findings": len(alerts), "mock_data": True}
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Dark Web Monitor was retired because no breach-intelligence "
+            "provider is configured. NexusMSP will not generate security "
+            "findings or claim domain coverage without a live source."
+        ),
+    )
 
 
 # --- Vulnerability Scanner ---
 @router.get("/soc/vulnerabilities")
 async def get_vulnerabilities(user=Depends(get_current_user)):
-    cves = ["CVE-2025-21298", "CVE-2025-0282", "CVE-2024-55591", "CVE-2025-24813", "CVE-2024-50623",
-            "CVE-2025-22457", "CVE-2025-29824", "CVE-2024-49138", "CVE-2025-30406", "CVE-2024-20439"]
-    vulns = []
-    for i in range(random.randint(15, 30)):
-        sev = random.choice(["critical", "critical", "high", "high", "medium", "medium", "medium", "low", "low"])
-        vulns.append({
-            "id": f"vuln-{uuid.uuid4().hex[:8]}",
-            "cve": random.choice(cves),
-            "title": f"{'Remote Code Execution' if sev == 'critical' else 'Elevation of Privilege' if sev == 'high' else 'Information Disclosure' if sev == 'medium' else 'Denial of Service'} in {random.choice(['Windows Kernel','Exchange Server','IIS','SQL Server','Edge Browser','Office','Defender'])}",
-            "severity": sev,
-            "cvss": round(random.uniform(3.0, 10.0), 1),
-            "affected_hosts": random.randint(1, 20),
-            "status": random.choice(["open", "open", "patching", "patched", "accepted_risk"]),
-            "discovered_at": (datetime.now(timezone.utc) - timedelta(days=random.randint(1, 60))).isoformat(),
-            "patch_available": random.choice([True, True, True, False]),
-            "exploited_in_wild": sev in ["critical", "high"] and random.random() > 0.5,
-        })
-    vulns.sort(key=lambda x: x["cvss"], reverse=True)
-    return {"vulnerabilities": vulns, "summary": {
-        "critical": len([v for v in vulns if v["severity"] == "critical"]),
-        "high": len([v for v in vulns if v["severity"] == "high"]),
-        "medium": len([v for v in vulns if v["severity"] == "medium"]),
-        "low": len([v for v in vulns if v["severity"] == "low"]),
-        "total_hosts_affected": len(set(random.randint(1, 30) for _ in vulns)),
-    }, "mock_data": True}
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Legacy SOC vulnerabilities were retired because they generated "
+            "CVE findings. Use Vulnerability Scanner for Nexus Agent patch "
+            "and trusted-feed evidence."
+        ),
+    )
 
 
 # --- Phishing Simulation ---
 @router.get("/soc/phishing")
 async def get_phishing_campaigns(user=Depends(get_current_user)):
-    campaigns = []
-    templates = ["Fake Invoice", "Password Reset", "IT Support", "CEO Wire Transfer", "Shared Document", "Benefits Update"]
-    for i in range(random.randint(3, 6)):
-        sent = random.randint(20, 100)
-        opened = random.randint(int(sent * 0.3), int(sent * 0.8))
-        clicked = random.randint(0, int(opened * 0.4))
-        reported = random.randint(0, int(sent * 0.3))
-        campaigns.append({
-            "id": f"phish-{uuid.uuid4().hex[:6]}",
-            "name": f"{random.choice(templates)} - {random.choice(['Q1','Q2','Q3','Q4'])} 2026",
-            "template": random.choice(templates),
-            "status": random.choice(["completed", "completed", "active", "scheduled"]),
-            "sent": sent, "opened": opened, "clicked": clicked, "reported": reported,
-            "click_rate": round(clicked / max(sent, 1) * 100, 1),
-            "report_rate": round(reported / max(sent, 1) * 100, 1),
-            "created_at": (datetime.now(timezone.utc) - timedelta(days=random.randint(1, 90))).isoformat(),
-            "organization": random.choice(["Acme Corp", "TechStart Inc", "All Organizations"]),
-        })
-    return {"campaigns": campaigns, "overall_click_rate": round(sum(c["click_rate"] for c in campaigns) / max(len(campaigns), 1), 1), "mock_data": True}
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Phishing Simulation was retired because no mail-delivery and "
+            "tracking provider is connected. NexusMSP will not generate "
+            "campaign metrics without actual delivery and audit evidence."
+        ),
+    )
 
 
 # --- Identity Threat ---
 @router.get("/soc/identity-threats")
 async def get_identity_threats(user=Depends(get_current_user)):
-    threats = []
-    types = ["impossible_travel", "brute_force", "mfa_fatigue", "token_theft", "privilege_escalation", "suspicious_login", "password_spray"]
-    for i in range(random.randint(5, 12)):
-        threats.append({
-            "id": f"idt-{uuid.uuid4().hex[:6]}",
-            "type": random.choice(types),
-            "severity": random.choice(["critical", "high", "high", "medium", "low"]),
-            "user": f"{random.choice(['john.smith','jane.doe','admin','ceo','it.support','billing'])}@{random.choice(['acmecorp','techstart','summitlegal'])}.com",
-            "details": f"{'Impossible travel' if random.random() > 0.5 else 'Suspicious login'} from {random.choice(['Russia','China','Nigeria','VPN','Tor Exit Node'])}",
-            "source_ip": f"{random.randint(45,220)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}",
-            "location": random.choice(["Moscow, RU", "Beijing, CN", "Lagos, NG", "Unknown (VPN)", "Tor Network"]),
-            "status": random.choice(["new", "new", "investigating", "resolved", "false_positive"]),
-            "detected_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 168))).isoformat(),
-            "mfa_status": random.choice(["bypassed", "challenged", "not_configured", "passed"]),
-        })
-    threats.sort(key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}[x["severity"]])
-    return {"threats": threats, "summary": {
-        "total": len(threats),
-        "critical": len([t for t in threats if t["severity"] == "critical"]),
-        "mfa_gaps": random.randint(2, 10),
-        "compromised_accounts": random.randint(0, 3),
-    }, "mock_data": True}
+    return {
+        "threats": [],
+        "summary": {"total": 0, "critical": 0, "mfa_gaps": 0, "compromised_accounts": 0},
+        "source_configured": False,
+        "availability": "no_identity_provider",
+        "mock_data": False,
+    }
 
 
 # --- Smart Automation ---
@@ -576,20 +408,9 @@ async def get_billing_reconciliation(user=Depends(get_current_user)):
     }
 
 
-# ============================================================
-# SOC Feed (merged from soc_feed.py)
-# ============================================================
-from datetime import timedelta as _socf_td
-import uuid as _socf_uuid
-import random as _socf_rand_mod
-_socf_rand = _socf_rand_mod.SystemRandom()
-
-
 @router.get("/soc-feed/events")
 async def get_soc_feed_events(current_user: dict = Depends(get_current_user)):
     events = await db.soc_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(200)
-    if not events:
-        events = await _seed_soc_feed_events()
     return events
 
 
@@ -601,36 +422,15 @@ async def get_soc_feed_stats(current_user: dict = Depends(get_current_user)):
         "investigations": sum(1 for e in events if e.get("type") == "investigation"),
         "responses": sum(1 for e in events if e.get("type") == "response"),
         "resolutions": sum(1 for e in events if e.get("type") == "resolution"),
-        "avg_response_time_min": round(_socf_rand.uniform(4, 12), 1),
-        "mttr_hours": round(_socf_rand.uniform(1.5, 4.2), 1),
+        "avg_response_time_min": None,
+        "mttr_hours": None,
+        "evidence_state": "recorded_events_only",
     }
 
 
-async def _seed_soc_feed_events():
-    now = datetime.now(timezone.utc)
-    events = [
-        {"id": "soc-001", "type": "investigation", "analyst": "NexusOps AI", "title": "Automated triage: Suspicious scheduled task on TECH-SRV-01", "description": "AI detected persistence mechanism. Escalating to L2 analyst for human review.", "client_name": "TechStart Inc", "severity": "critical", "timestamp": (now - _socf_td(hours=2, minutes=5)).isoformat()},
-        {"id": "soc-002", "type": "response", "analyst": "Sarah C. (L2)", "title": "Confirmed malicious: Isolating TECH-SRV-01", "description": "Scheduled task confirmed as malicious. Endpoint isolated. Running remediation playbook.", "client_name": "TechStart Inc", "severity": "critical", "timestamp": (now - _socf_td(hours=2)).isoformat()},
-        {"id": "soc-003", "type": "investigation", "analyst": "NexusOps AI", "title": "BEC attempt detected on Summit Legal partner account", "description": "Inbox rule forwarding wire transfer emails to external address. Account flagged for immediate review.", "client_name": "Summit Legal Group", "severity": "critical", "timestamp": (now - _socf_td(hours=5, minutes=10)).isoformat()},
-        {"id": "soc-004", "type": "response", "analyst": "Mike R. (L3)", "title": "BEC remediation complete - Summit Legal", "description": "Malicious inbox rule removed. Password reset forced. MFA re-enrolled. All sessions revoked.", "client_name": "Summit Legal Group", "severity": "critical", "timestamp": (now - _socf_td(hours=4, minutes=30)).isoformat()},
-        {"id": "soc-005", "type": "resolution", "analyst": "Sarah C. (L2)", "title": "False positive: LSASS access by security tool", "description": "CrowdStrike sensor triggered LSASS access alert on ACME-DC01. Confirmed legitimate security scan.", "client_name": "Acme Corporation", "severity": "low", "timestamp": (now - _socf_td(days=1)).isoformat()},
-        {"id": "soc-006", "type": "investigation", "analyst": "NexusOps AI", "title": "Ransomware canary triggered on HC-WS-REC01", "description": "Canary file encryption detected. Auto-isolation executed. Forensic data collection in progress.", "client_name": "HealthCare Plus", "severity": "critical", "timestamp": (now - _socf_td(hours=1, minutes=5)).isoformat()},
-        {"id": "soc-007", "type": "response", "analyst": "Alex T. (L1)", "title": "Data exfiltration investigation - Global Finance CFO laptop", "description": "Analyzing 2.3GB upload to mega.nz from CFO laptop. User contacted for verification.", "client_name": "Global Finance Ltd", "severity": "high", "timestamp": (now - _socf_td(hours=3, minutes=45)).isoformat()},
-        {"id": "soc-008", "type": "resolution", "analyst": "Alex T. (L1)", "title": "Confirmed authorized: CFO uploading board presentation", "description": "CFO confirmed uploading quarterly board presentation to personal storage. Advisory issued on policy compliance.", "client_name": "Global Finance Ltd", "severity": "info", "timestamp": (now - _socf_td(hours=3)).isoformat()},
-    ]
-    for e in events:
-        await db.soc_events.insert_one(e)
-    return [dict((k, v) for k, v in e.items() if k != "_id") for e in events]
-
-
-# ============================================================
-# SOC Realtime (merged from soc_realtime.py)
-# ============================================================
 @router.get("/soc-realtime/events")
 async def get_soc_realtime_events(current_user: dict = Depends(get_current_user)):
     events = await db.soc_realtime_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
-    if not events:
-        events = await _seed_realtime_events()
     stats = {
         "total_events_24h": len(events),
         "critical": len([e for e in events if e.get("severity") == "critical"]),
@@ -644,68 +444,10 @@ async def get_soc_realtime_events(current_user: dict = Depends(get_current_user)
 
 @router.post("/soc-realtime/generate")
 async def generate_soc_realtime_event(current_user: dict = Depends(get_current_user)):
-    event = _create_realtime_event()
-    await db.soc_realtime_events.insert_one({**event})
-    return {"status": "generated", "event": event}
+    raise _retired_generated_data_error("SOC realtime event generation")
 
 
 @router.get("/soc-realtime/threat-map")
 async def soc_threat_map(current_user: dict = Depends(get_current_user)):
-    sources = [
-        {"country": "Russia", "code": "RU", "attacks": _socf_rand.randint(15, 45), "lat": 55.75, "lng": 37.62},
-        {"country": "China", "code": "CN", "attacks": _socf_rand.randint(20, 50), "lat": 39.9, "lng": 116.4},
-        {"country": "North Korea", "code": "KP", "attacks": _socf_rand.randint(5, 15), "lat": 39.0, "lng": 125.8},
-        {"country": "Iran", "code": "IR", "attacks": _socf_rand.randint(8, 20), "lat": 35.7, "lng": 51.4},
-        {"country": "Brazil", "code": "BR", "attacks": _socf_rand.randint(3, 12), "lat": -15.8, "lng": -47.9},
-        {"country": "Nigeria", "code": "NG", "attacks": _socf_rand.randint(2, 8), "lat": 9.1, "lng": 7.5},
-        {"country": "United States", "code": "US", "attacks": _socf_rand.randint(10, 30), "lat": 38.9, "lng": -77.0},
-    ]
-    return {
-        "attack_sources": sources,
-        "total_blocked_today": sum(s["attacks"] for s in sources),
-        "top_attack_type": _socf_rand.choice(["Brute Force", "Phishing", "Port Scan", "SQL Injection", "DDoS"]),
-    }
+    raise _retired_generated_data_error("SOC realtime threat map")
 
-
-def _create_realtime_event():
-    types = [
-        ("Brute Force Login Attempt", "authentication", "blocked"),
-        ("Malware Detected", "endpoint", "quarantined"),
-        ("Suspicious PowerShell Execution", "endpoint", "investigating"),
-        ("Phishing Email Intercepted", "email", "blocked"),
-        ("Unauthorized Access Attempt", "network", "blocked"),
-        ("Data Exfiltration Detected", "network", "investigating"),
-        ("Ransomware Signature Match", "endpoint", "quarantined"),
-        ("Port Scan Detected", "network", "blocked"),
-        ("MFA Bypass Attempt", "authentication", "blocked"),
-        ("Lateral Movement Detected", "network", "investigating"),
-        ("Credential Stuffing Attack", "authentication", "blocked"),
-        ("C2 Beacon Communication", "endpoint", "quarantined"),
-    ]
-    t = _socf_rand.choice(types)
-    devices = ["WS-PC-045", "SRV-DC-01", "FW-EDGE-01", "RETA-SRV-01", "TECH-PRN-01", "GLOB-SW-01"]
-    clients = ["TechStart Inc", "RetailMax", "Global Finance Ltd", "Summit Hotels", "Cascade Media"]
-    return {
-        "event_id": str(_socf_uuid.uuid4())[:8],
-        "title": t[0], "category": t[1], "action": t[2],
-        "severity": _socf_rand.choice(["critical", "high", "medium"]),
-        "status": t[2],
-        "device": _socf_rand.choice(devices),
-        "client": _socf_rand.choice(clients),
-        "source_ip": f"{_socf_rand.randint(1,223)}.{_socf_rand.randint(0,255)}.{_socf_rand.randint(0,255)}.{_socf_rand.randint(1,254)}",
-        "geo": _socf_rand.choice(["Moscow, RU", "Beijing, CN", "Pyongyang, KP", "Tehran, IR", "Lagos, NG"]),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "details": f"Detected by {_socf_rand.choice(['Sentinel', 'Defender', 'NexusOps Agent', 'Firewall'])} at {datetime.now(timezone.utc).strftime('%H:%M:%S')}",
-    }
-
-
-async def _seed_realtime_events():
-    events = []
-    for i in range(30):
-        event = _create_realtime_event()
-        event["timestamp"] = (datetime.now(timezone.utc) - _socf_td(minutes=_socf_rand.randint(1, 1440))).isoformat()
-        events.append(event)
-    await db.soc_realtime_events.insert_many(events)
-    for e in events:
-        e.pop("_id", None)
-    return events

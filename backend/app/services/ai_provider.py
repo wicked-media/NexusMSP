@@ -1,7 +1,17 @@
-"""Provider-neutral OpenAI-compatible AI helpers for NexusMSP."""
+"""The single, server-side OpenAI AI integration used by NexusMSP."""
 from dataclasses import dataclass
 import os
 from openai import AsyncOpenAI
+
+
+DEFAULT_MODEL = "gpt-5.6-terra"
+ALLOWED_MODELS = {"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6"}
+ALLOWED_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
+
+
+def normalise_model(model: str | None) -> str:
+    """Keep every AI action on a supported, centrally managed OpenAI model."""
+    return model if isinstance(model, str) and model in ALLOWED_MODELS else DEFAULT_MODEL
 
 
 @dataclass
@@ -15,25 +25,51 @@ class LlmChat:
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.session_id = session_id
         self.system_message = system_message
-        self.model = os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini")
+        self.model = normalise_model(os.environ.get("NEXUS_AI_MODEL"))
+        self.reasoning_effort = None
 
     def with_model(self, provider: str, model: str):
-        # Only OpenAI models are accepted by the direct SDK integration. Old
-        # provider settings fall back safely to the configured local default.
-        if provider == "openai" and model.startswith("gpt-"):
-            self.model = model
+        # Retain this compatibility surface for existing features. The server
+        # only sends requests to OpenAI; legacy provider values use the global
+        # OpenAI default instead of silently selecting another vendor.
+        if provider == "openai":
+            self.model = normalise_model(model)
         return self
+
+    def with_reasoning_effort(self, effort: str | None):
+        if effort in ALLOWED_REASONING_EFFORTS:
+            self.reasoning_effort = effort
+        return self
+
+    async def _load_global_config(self) -> tuple[str, str]:
+        """Load Settings > AI for every NexusMSP AI workflow.
+
+        Older routers still carry provider/model literals. Resolving the single
+        configuration here preserves those routes while making the Settings
+        choice authoritative across the product.
+        """
+        try:
+            from app.database import db
+
+            config = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
+            model = normalise_model((config or {}).get("model"))
+            effort = (config or {}).get("reasoning_effort")
+            return model, effort if effort in ALLOWED_REASONING_EFFORTS else "medium"
+        except Exception:
+            return self.model, "medium"
 
     async def send_message(self, message: UserMessage) -> str:
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
-        messages = []
-        if self.system_message:
-            messages.append({"role": "system", "content": self.system_message})
-        messages.append({"role": "user", "content": message.text})
+        model, configured_effort = await self._load_global_config()
+        self.model = model
         client = AsyncOpenAI(api_key=self.api_key)
-        response = await client.chat.completions.create(model=self.model, messages=messages)
-        return response.choices[0].message.content or ""
+        request = {"model": model, "instructions": self.system_message or None, "input": message.text}
+        effort = self.reasoning_effort or configured_effort
+        if effort:
+            request["reasoning"] = {"effort": effort}
+        response = await client.responses.create(**request)
+        return response.output_text or ""
 
 
 class OpenAISpeechToText:

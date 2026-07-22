@@ -13,6 +13,7 @@ Data model:
       require_completion: bool,  # block resolve unless checklist 100%
       fields: [{key, label, type: 'text'|'textarea'|'number'|'date'|'select'|'checkbox', options?, required, placeholder}],
       checklist: [{id, label, required}],
+      child_templates: [{id, title, description, priority, category, blueprint_id?, per_device, required}],
       created_at, created_by, active
     }
 
@@ -34,6 +35,36 @@ from app.auth import get_current_user
 router = APIRouter()
 
 VALID_FIELD_TYPES = {"text", "textarea", "number", "date", "select", "checkbox"}
+
+STARTER_BLUEPRINTS = [
+    {"name": "New Starter Onboarding", "description": "Collect access, equipment, and handover details for a new employee.", "default_priority": "medium", "default_category": "onboarding", "sla_minutes": 480, "require_completion": True, "fields": [{"key": "employee_name", "label": "Employee name", "type": "text", "required": True}, {"key": "start_date", "label": "Start date", "type": "date", "required": True}, {"key": "manager", "label": "Manager", "type": "text", "required": True}, {"key": "access_required", "label": "Access required", "type": "textarea", "required": True}], "checklist": [{"label": "Confirm manager approval", "required": True}, {"label": "Create accounts and assign licences", "required": True}, {"label": "Prepare and record assigned equipment", "required": True}, {"label": "Send welcome and handover instructions", "required": True}]},
+    {"name": "Leaver Offboarding", "description": "Securely remove access and recover assets when an employee leaves.", "default_priority": "high", "default_category": "offboarding", "sla_minutes": 240, "require_completion": True, "fields": [{"key": "employee_name", "label": "Employee name", "type": "text", "required": True}, {"key": "departure_time", "label": "Access removal time", "type": "date", "required": True}, {"key": "manager", "label": "Manager", "type": "text", "required": True}, {"key": "asset_return", "label": "Assets to recover", "type": "textarea", "required": False}], "checklist": [{"label": "Confirm departure approval", "required": True}, {"label": "Disable identity and revoke sessions", "required": True}, {"label": "Remove groups, licences and delegated access", "required": True}, {"label": "Arrange asset recovery", "required": True}, {"label": "Record completion for audit", "required": True}]},
+    {"name": "Microsoft 365 Access Issue", "description": "Triage sign-in, MFA, licence, and mailbox access problems consistently.", "default_priority": "high", "default_category": "microsoft365", "sla_minutes": 240, "require_completion": False, "fields": [{"key": "affected_user", "label": "Affected user", "type": "text", "required": True}, {"key": "service", "label": "Affected service", "type": "select", "required": True, "options": ["Outlook", "Teams", "SharePoint", "OneDrive", "Sign-in", "Other"]}, {"key": "error_message", "label": "Error message", "type": "textarea", "required": False}], "checklist": [{"label": "Confirm user identity and impact", "required": True}, {"label": "Check service health and sign-in logs", "required": True}, {"label": "Validate licence and group membership", "required": True}, {"label": "Document resolution and user confirmation", "required": True}]},
+    {"name": "Printer & Scan Fault", "description": "Capture diagnostics for printing, scanning, driver, and connectivity incidents.", "default_priority": "medium", "default_category": "hardware", "sla_minutes": 480, "require_completion": False, "fields": [{"key": "printer_model", "label": "Printer / model", "type": "text", "required": True}, {"key": "location", "label": "Location", "type": "text", "required": True}, {"key": "symptom", "label": "Symptom", "type": "textarea", "required": True}], "checklist": [{"label": "Confirm scope and affected users", "required": True}, {"label": "Check power, paper, network and consumables", "required": True}, {"label": "Verify queue, driver and test page", "required": True}, {"label": "Record fix and test result", "required": True}]},
+    {"name": "VPN / Remote Access Issue", "description": "Standardise investigation of remote connectivity, MFA, and access requests.", "default_priority": "high", "default_category": "network", "sla_minutes": 240, "require_completion": False, "fields": [{"key": "affected_user", "label": "Affected user", "type": "text", "required": True}, {"key": "connection_type", "label": "Connection type", "type": "select", "required": True, "options": ["VPN", "Remote desktop", "Remote app", "Other"]}, {"key": "error_message", "label": "Error message", "type": "textarea", "required": False}], "checklist": [{"label": "Confirm internet connectivity", "required": True}, {"label": "Validate MFA and account status", "required": True}, {"label": "Check VPN gateway and assigned policy", "required": True}, {"label": "Test access and document outcome", "required": True}]},
+    {"name": "Security Incident Triage", "description": "Contain, investigate, and escalate a suspected security event.", "default_priority": "critical", "default_category": "security", "sla_minutes": 60, "require_completion": True, "fields": [{"key": "affected_device", "label": "Affected device / account", "type": "text", "required": True}, {"key": "detection_source", "label": "Detection source", "type": "select", "required": True, "options": ["Defender", "Huntress", "User report", "NexusMSP alert", "Other"]}, {"key": "observed_activity", "label": "Observed activity", "type": "textarea", "required": True}], "checklist": [{"label": "Capture evidence and timestamp", "required": True}, {"label": "Contain affected endpoint or identity", "required": True}, {"label": "Assess scope and escalate per runbook", "required": True}, {"label": "Document customer communications", "required": True}, {"label": "Record remediation and follow-up", "required": True}]},
+    {"name": "Client Onboarding Delivery Plan", "description": "A parent service record that creates accountable child work for access, managed devices, monitoring, and handover.", "default_priority": "high", "default_category": "onboarding", "sla_minutes": 480, "require_completion": True, "fields": [{"key": "service_owner", "label": "Service owner", "type": "text", "required": True, "placeholder": "Technician accountable for delivery"}, {"key": "go_live_target", "label": "Target go-live date", "type": "date", "required": True}], "checklist": [{"label": "Confirm client scope and primary contact", "required": True}, {"label": "Review every linked child ticket before handover", "required": True}, {"label": "Confirm client go-live approval", "required": True}], "child_templates": [{"title": "Identity and access baseline", "description": "Confirm administrators, MFA, licensing, and support contacts are ready for managed service.", "priority": "high", "category": "onboarding", "required": True}, {"title": "Managed device enrolment", "description": "Install the Nexus agent, apply policy, and verify monitoring for this managed device.", "priority": "medium", "category": "onboarding", "per_device": True, "required": True}, {"title": "Monitoring and alert validation", "description": "Validate alert routing, maintenance policy, backup monitoring, and critical notifications.", "priority": "high", "category": "monitoring", "required": True}, {"title": "Documentation and client handover", "description": "Complete operational documentation, key contacts, escalation paths, and client welcome handover.", "priority": "medium", "category": "documentation", "required": True}]},
+]
+
+
+def _fallback_pattern_draft(tokens, name_hint=""):
+    title = name_hint or " ".join(str(token).title() for token in tokens[:2]) or "Recurring Issue"
+    return {
+        "name": f"{title} Triage", "description": f"A repeatable intake and resolution workflow for {title.lower()} issues.",
+        "default_priority": "medium", "default_category": "support", "default_status": None, "sla_minutes": 480,
+        "require_completion": False,
+        "fields": _validate_fields([
+            {"key": "affected_user", "label": "Affected user / device", "type": "text", "required": True, "placeholder": "User, device, or site"},
+            {"key": "symptom", "label": "Observed symptom", "type": "textarea", "required": True, "placeholder": "What is happening and when?"},
+            {"key": "error_message", "label": "Error message", "type": "textarea", "required": False, "placeholder": "Exact error or screenshot context"},
+        ]),
+        "checklist": _validate_checklist([
+            {"label": "Confirm impact and affected scope", "required": True},
+            {"label": "Review recent changes and relevant alerts", "required": True},
+            {"label": "Apply or escalate the documented resolution", "required": True},
+            {"label": "Record outcome and customer confirmation", "required": True},
+        ]),
+    }
 
 
 def _validate_fields(fields):
@@ -67,6 +98,35 @@ def _validate_checklist(items):
             "id": it.get("id") or f"cl-{uuid.uuid4().hex[:8]}",
             "label": label[:200],
             "required": bool(it.get("required", False)),
+        })
+    return out
+
+
+def _validate_child_templates(items):
+    """Validate the child-ticket plan stored on a blueprint.
+
+    A child template may optionally reference another ticket blueprint.  When
+    an onboarding plan is launched, that referenced worksheet/checklist is
+    copied onto the child ticket, while the parent relationship remains part
+    of the immutable ticket and onboarding audit trail.
+    """
+    out = []
+    for item in (items or []):
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        priority = (item.get("priority") or "medium").strip().lower()
+        if priority not in {"low", "medium", "high", "critical"}:
+            priority = "medium"
+        out.append({
+            "id": item.get("id") or f"child-{uuid.uuid4().hex[:8]}",
+            "title": title[:160],
+            "description": (item.get("description") or "")[:1200],
+            "priority": priority,
+            "category": (item.get("category") or "onboarding")[:80],
+            "blueprint_id": (item.get("blueprint_id") or "")[:80] or None,
+            "per_device": bool(item.get("per_device", False)),
+            "required": bool(item.get("required", True)),
         })
     return out
 
@@ -107,6 +167,7 @@ async def create_blueprint(data: dict, current_user: dict = Depends(get_current_
         "require_completion": bool(data.get("require_completion", False)),
         "fields": _validate_fields(data.get("fields")),
         "checklist": _validate_checklist(data.get("checklist")),
+        "child_templates": _validate_child_templates(data.get("child_templates")),
         "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("name"),
@@ -136,6 +197,8 @@ async def update_blueprint(bp_id: str, data: dict, current_user: dict = Depends(
         patch["fields"] = _validate_fields(data["fields"])
     if "checklist" in data:
         patch["checklist"] = _validate_checklist(data["checklist"])
+    if "child_templates" in data:
+        patch["child_templates"] = _validate_child_templates(data["child_templates"])
     if not patch:
         return {"success": True, "no_change": True}
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -149,6 +212,30 @@ async def update_blueprint(bp_id: str, data: dict, current_user: dict = Depends(
 async def delete_blueprint(bp_id: str, current_user: dict = Depends(get_current_user)):
     await db.blueprints.update_one({"id": bp_id}, {"$set": {"active": False}})
     return {"success": True}
+
+
+@router.post("/blueprints/install-starter-library")
+async def install_starter_library(current_user: dict = Depends(get_current_user)):
+    """Install the curated MSP starter blueprints once; never overwrite local edits."""
+    installed = []
+    skipped = []
+    for template in STARTER_BLUEPRINTS:
+        existing = await db.blueprints.find_one({"name": template["name"]}, {"_id": 0, "id": 1})
+        if existing:
+            skipped.append(template["name"])
+            continue
+        doc = {
+            "id": f"bp-{uuid.uuid4().hex[:10]}", "name": template["name"], "description": template["description"],
+            "icon": "Clipboard", "color": "sky", "default_priority": template.get("default_priority"),
+            "default_category": template.get("default_category"), "default_status": "open", "default_assignee_id": None,
+            "sla_minutes": template.get("sla_minutes"), "require_completion": bool(template.get("require_completion")),
+            "fields": _validate_fields(template.get("fields")), "checklist": _validate_checklist(template.get("checklist")),
+            "child_templates": _validate_child_templates(template.get("child_templates")),
+            "active": True, "created_at": datetime.now(timezone.utc).isoformat(), "created_by": current_user.get("name"), "starter_template": True,
+        }
+        await db.blueprints.insert_one(doc)
+        installed.append(doc["name"])
+    return {"success": True, "installed": installed, "skipped": skipped}
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Client linking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -335,7 +422,11 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "AI not configured (OPENAI_API_KEY missing)")
+        return {
+            "draft": _fallback_pattern_draft(tokens, title_hint),
+            "source_tickets": [{"id": t.get("id"), "ticket_number": t.get("ticket_number"), "title": t.get("title")} for t in matched[:12]],
+            "ai_model": "NexusMSP fallback draft (AI not configured)",
+        }
 
     system_msg = (
         "You are an MSP automation designer. Given a bundle of resolved support tickets of the "
@@ -529,7 +620,11 @@ async def suggest_from_pattern(data: dict, current_user: dict = Depends(get_curr
 
     api_key = _os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "AI not configured (OPENAI_API_KEY missing)")
+        return {
+            "draft": _fallback_pattern_draft(tokens),
+            "source_tickets": [{"id": t["id"], "ticket_number": t.get("ticket_number"), "title": t.get("title"), "client_name": t.get("client_name")} for t in tix[:15]],
+            "ai_model": "NexusMSP fallback draft (AI not configured)",
+        }
 
     system_msg = (
         "You design shared ticket blueprints for an MSP serving many clients. Given a corpus of "

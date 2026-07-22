@@ -18,7 +18,8 @@ import {
   UserPlus, Lock, Unlock, UserX, Link as LinkIcon, Search, Shield,
   Send, TrendingUp, AlertTriangle,
 } from "lucide-react";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 export default function CippCommandCenterPage() {
   const { token } = useAuth();
@@ -179,39 +180,32 @@ export default function CippCommandCenterPage() {
   const s = summary?.stats || {};
 
   return (
-    <PageShell data-testid="cipp-command-center">
-      <MetricStrip columns={4}>
-        <MetricTile label="Tenants" value={s.tenants ?? "—"} accent="orange" icon={<Cloud className="w-2.5 h-2.5 text-orange-400" />} testid="cipp-metric-tenants" />
-        <MetricTile label="Linked Clients" value={s.linked_clients ?? "—"} accent="emerald" icon={<LinkIcon className="w-2.5 h-2.5 text-emerald-400" />} testid="cipp-metric-linked" />
-        <MetricTile label="Coverage" value={`${s.coverage_pct ?? 0}%`} accent="indigo" icon={<Shield className="w-2.5 h-2.5 text-indigo-400" />} testid="cipp-metric-coverage" />
-        <MetricTile label="Actions (30d)" value={summary?.recent_actions?.length ?? "—"} accent="violet" icon={<RefreshCw className="w-2.5 h-2.5 text-violet-400" />} testid="cipp-metric-actions" />
-      </MetricStrip>
+    <div className="p-6 space-y-5" data-testid="cipp-command-center">
+      <OperationalPageHeader
+        eyebrow="Microsoft partner operations"
+        title="CIPP"
+        description="Manage partner tenants, identity lifecycle work, licensing, hygiene posture, and client linking through the CIPP integration."
+        icon={Cloud}
+        tone="sky"
+        actions={<>
+          <Badge variant="outline" className={notConfigured ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"}>{notConfigured ? "Configuration required" : "Connected"}</Badge>
+          <Button variant="outline" size="sm" asChild data-testid="cipp-configure-btn">
+            <Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Connection</Link>
+          </Button>
+          <Button size="sm" variant="outline" onClick={loadSummary} disabled={loadingSummary} data-testid="cipp-refresh-btn">
+            {loadingSummary ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Refresh
+          </Button>
+        </>}
+      />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Cloud className="w-6 h-6 text-orange-400" />CIPP Command Center
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {notConfigured ? (
-                <span className="text-orange-400">Not configured — add base URL + API key in Settings</span>
-              ) : summary?.last_synced_at ? (
-                <span>Last synced {new Date(summary.last_synced_at).toLocaleString()}</span>
-              ) : <span>Ready</span>}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {notConfigured && (
-              <Button variant="outline" size="sm" asChild data-testid="cipp-configure-btn">
-                <Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure CIPP</Link>
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={loadSummary} disabled={loadingSummary} data-testid="cipp-refresh-btn">
-              {loadingSummary ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
-            </Button>
-          </div>
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroTile label="Tenants" value={loadingSummary ? "—" : s.tenants ?? "—"} icon={Cloud} glow="cyan" subtitle="CIPP-managed tenants" testId="cipp-metric-tenants" />
+        <HeroTile label="Linked clients" value={loadingSummary ? "—" : s.linked_clients ?? "—"} icon={LinkIcon} glow="emerald" subtitle="Mapped to Nexus clients" testId="cipp-metric-linked" />
+        <HeroTile label="Coverage" value={loadingSummary ? "—" : s.coverage_pct ?? 0} suffix="%" icon={Shield} glow="sky" subtitle="Tenants linked to clients" testId="cipp-metric-coverage" />
+        <HeroTile label="Actions" value={loadingSummary ? "—" : summary?.recent_actions?.length ?? "—"} icon={RefreshCw} glow="violet" subtitle="Audited in the last 30 days" testId="cipp-metric-actions" />
+      </div>
+
+      <div className="space-y-4">
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full md:w-auto" data-testid="cipp-tabs">
@@ -603,7 +597,7 @@ export default function CippCommandCenterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </div>
   );
 }
 
@@ -661,7 +655,7 @@ function CippHygienePanel() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Avg score</div><div className="text-2xl font-semibold" data-testid="cipp-digest-avg">{digest.avg_score}</div></CardContent></Card>
+        <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Verified avg</div><div className="text-2xl font-semibold" data-testid="cipp-digest-avg">{digest.avg_score ?? "—"}</div></CardContent></Card>
         <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Tenants</div><div className="text-2xl font-semibold">{digest.total_tenants}</div></CardContent></Card>
         <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground text-rose-400">Critical (&lt;50)</div><div className="text-2xl font-semibold text-rose-400">{digest.critical_count}</div></CardContent></Card>
         <Card><CardContent className="p-3"><div className="text-[10px] uppercase tracking-widest text-muted-foreground text-amber-400">Upsell candidates</div><div className="text-2xl font-semibold text-amber-400">{digest.upsell_candidates?.length || 0}</div></CardContent></Card>
@@ -701,7 +695,7 @@ function CippHygienePanel() {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-[10px] uppercase">Client</TableHead>
-                <TableHead className="text-[10px] uppercase">Score</TableHead>
+                <TableHead className="text-[10px] uppercase">Verified score</TableHead>
                 <TableHead className="text-[10px] uppercase">Grade</TableHead>
                 <TableHead className="text-[10px] uppercase">Active users</TableHead>
                 <TableHead className="text-[10px] uppercase">MFA</TableHead>
@@ -716,7 +710,7 @@ function CippHygienePanel() {
                     <div className="text-[10px] text-muted-foreground font-mono">{r.tenant_display}</div>
                   </TableCell>
                   <TableCell>
-                    {r.score == null ? <span className="text-xs text-rose-400">err</span> : (
+                    {r.score == null ? <span className="text-xs text-amber-300">{r.evidence_coverage_pct ? `partial (${r.evidence_coverage_pct}% evidence)` : "unassessed"}</span> : (
                       <Badge variant="outline" className={r.score >= 75 ? "text-emerald-400 border-emerald-500/30" : r.score >= 50 ? "text-amber-400 border-amber-500/30" : "text-rose-400 border-rose-500/30"}>
                         {r.score}
                       </Badge>

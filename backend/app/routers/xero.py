@@ -17,8 +17,13 @@ router = APIRouter()
 @router.get("/xero/status")
 async def get_xero_status(current_user: dict = Depends(get_current_user)):
     doc = await db.settings.find_one({"type": "xero"}, {"_id": 0})
-    connected = bool(doc and doc.get("client_id") and doc.get("client_secret"))
-    return {"connected": connected, "org_name": doc.get("org_name", "Demo Organisation") if connected else None}
+    configured = bool(doc and doc.get("client_id") and doc.get("client_secret"))
+    oauth_ready = bool(configured and doc.get("tenant_id") and (doc.get("access_token") or doc.get("refresh_token")))
+    return {
+        "connected": oauth_ready,
+        "configured": configured,
+        "org_name": doc.get("org_name") if oauth_ready else None,
+    }
 
 @router.put("/xero/settings")
 async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):

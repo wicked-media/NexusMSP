@@ -64,7 +64,7 @@ const DASHBOARD_QUICK_ACTIONS = [
   { icon: FileText, label: "Invoices", path: "/invoices", color: "text-emerald-500" },
   { icon: ShoppingCart, label: "Purchase orders", path: "/purchase-orders", color: "text-violet-500" },
   { icon: Users, label: "Clients", path: "/clients", color: "text-emerald-500" },
-  { icon: Monitor, label: "Devices", path: "/devices", color: "text-purple-500" },
+  { icon: Monitor, label: "Assets", path: "/devices", color: "text-purple-500" },
   { icon: Terminal, label: "Run script", path: "/scripting", color: "text-orange-500" },
   { icon: CalendarDays, label: "Dispatch calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
   { icon: UserCog, label: "Team command", path: "/team-hub?tab=command&view=directory", color: "text-pink-500" },
@@ -128,6 +128,7 @@ export default function DashboardPage() {
   const [devices, setDevices] = useState([]);
   const [mspIntel, setMspIntel] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchRef = useRef(null);
@@ -137,6 +138,7 @@ export default function DashboardPage() {
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchDashboardData = async () => {
+    setDashboardError(null);
     try {
       const [statsRes, trendsRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
@@ -177,6 +179,7 @@ export default function DashboardPage() {
       });
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
+      setDashboardError("NexusMSP could not load the operational dashboard. Your work has not been changed.");
     } finally {
       setLoading(false);
     }
@@ -254,7 +257,7 @@ export default function DashboardPage() {
 
   useEffect(() => { if (searchOpen && searchRef.current) searchRef.current.focus(); }, [searchOpen]);
 
-  if (loading || !stats) {
+  if (loading) {
     return (
       <div className="space-y-6" data-testid="dashboard-loading">
         <div className="h-32 rounded-2xl bg-gradient-to-br from-emerald-500/5 via-transparent to-blue-500/5 animate-pulse" />
@@ -262,6 +265,18 @@ export default function DashboardPage() {
           {[1, 2, 3, 4].map(i => <Card key={`k-${i}`}><CardContent className="p-6"><div className="h-16 rounded bg-muted animate-pulse" /></CardContent></Card>)}
         </div>
       </div>
+    );
+  }
+
+  if (dashboardError || !stats) {
+    return (
+      <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]" data-testid="dashboard-load-error">
+        <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
+          <AlertTriangle className="h-10 w-10 text-rose-300" />
+          <div><h1 className="text-lg font-semibold">Dashboard data is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{dashboardError || "The dashboard did not return the information needed to render this workspace."}</p></div>
+          <Button onClick={fetchDashboardData} data-testid="retry-dashboard-load"><RefreshCw className="mr-2 h-4 w-4" />Retry dashboard</Button>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -296,7 +311,7 @@ export default function DashboardPage() {
   if ((enhancedStats?.sla_breaches || 0) > 0) attentionItems.push({ label: `${enhancedStats.sla_breaches} SLA Breach${enhancedStats.sla_breaches > 1 ? "es" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: AlertCircle, path: "/tickets" });
   if (offlineDevices.length > 0) attentionItems.push({ label: `${offlineDevices.length} Offline Device${offlineDevices.length > 1 ? "s" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: Monitor, path: "/devices" });
   if ((enhancedStats?.outstanding || 0) > 1000) attentionItems.push({ label: `$${(enhancedStats.outstanding || 0).toLocaleString()} Outstanding`, color: "text-orange-400", bg: "bg-orange-500/10", borderColor: "border-orange-500/20", icon: DollarSign, path: "/invoices" });
-  if (needsPatching.length > 0) attentionItems.push({ label: `${needsPatching.length} Need Patching`, color: "text-amber-400", bg: "bg-amber-500/10", borderColor: "border-amber-500/20", icon: Shield, path: "/patch-hub" });
+  if (needsPatching.length > 0) attentionItems.push({ label: `${needsPatching.length} Need Patching`, color: "text-amber-400", bg: "bg-amber-500/10", borderColor: "border-amber-500/20", icon: Shield, path: "/maintenance-scheduler" });
   if (criticalTickets.length > 0) attentionItems.push({ label: `${criticalTickets.length} Critical Ticket${criticalTickets.length > 1 ? "s" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: Ticket, path: "/tickets" });
   if ((mspIntel?.urgentPredictions || []).length > 0) attentionItems.push({ label: `${mspIntel.urgentPredictions.length} Failure Prediction${mspIntel.urgentPredictions.length > 1 ? "s" : ""}`, color: "text-orange-400", bg: "bg-orange-500/10", borderColor: "border-orange-500/20", icon: AlertTriangle, path: "/predictive-failure" });
 
@@ -324,9 +339,11 @@ export default function DashboardPage() {
     <div className="flex-1 overflow-y-auto p-6 space-y-5" data-testid="dashboard-page">
 
       {/* Command Bridge Header — matches all module Command Centers */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <section className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 md:p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Operations overview</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-violet-400" />Technician Workspace
           </h1>
           <p className="text-sm text-zinc-500">{greeting}, {user?.name?.split(" ")[0] || "Operator"} — live cross-module situational awareness</p>
@@ -337,12 +354,13 @@ export default function DashboardPage() {
           </Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn"><Ticket className="w-3 h-3 mr-1" />Tickets</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn"><Users className="w-3 h-3 mr-1" />Leads</Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn"><Monitor className="w-3 h-3 mr-1" />Devices</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn"><Monitor className="w-3 h-3 mr-1" />Assets</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/invoices")} data-testid="bridge-invoices-btn"><FileText className="w-3 h-3 mr-1" />Invoices</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/purchase-orders")} data-testid="bridge-purchase-orders-btn"><ShoppingCart className="w-3 h-3 mr-1" />Purchase Orders</Button>
           <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={fetchDashboardData} data-testid="bridge-refresh-btn"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
         </div>
       </div>
+      </section>
 
       {/* HeroTile Command Strip + Cross-Module Bridge + Team Pins now live INSIDE the customisable widget grid below */}
       {/* Quick Search Modal */}
@@ -802,20 +820,25 @@ export default function DashboardPage() {
               <div className="h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
               <CardHeader className="pb-2 flex flex-row items-center justify-between">
                 <CardTitle className="text-xs font-semibold flex items-center gap-1.5"><Shield className="w-3.5 h-3.5 text-emerald-400" />Compliance</CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => navigate("/compliance-frameworks")} className="text-[10px] h-5 px-1.5">View<ExternalLink className="w-2.5 h-2.5 ml-0.5" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/compliance?tab=overview")} className="text-[10px] h-5 px-1.5">View<ExternalLink className="w-2.5 h-2.5 ml-0.5" /></Button>
               </CardHeader>
               <CardContent className="pt-0">
                 {mspIntel.frameworks ? (
                   <div className="space-y-2">
-                    {mspIntel.frameworks.slice(0, 4).map(fw => (
-                      <div key={fw.id || fw.name}>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-[10px] font-medium">{fw.name}</span>
-                          <span className={`text-[10px] font-bold ${fw.compliance_pct >= 80 ? "text-emerald-400" : fw.compliance_pct >= 60 ? "text-amber-400" : "text-red-400"}`}>{Math.round(fw.compliance_pct)}%</span>
+                    {mspIntel.frameworks.slice(0, 4).map(fw => {
+                      const rawPercentage = Number(fw.compliance_pct);
+                      const percentage = Number.isFinite(rawPercentage) && rawPercentage >= 0 && rawPercentage <= 100 ? Math.round(rawPercentage) : null;
+                      const needsEvidenceReview = fw.evidence_state === "data_quality_issue" || percentage === null;
+                      return (
+                        <div key={fw.id || fw.name}>
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <span className="min-w-0 truncate text-[10px] font-medium">{fw.name}</span>
+                            {needsEvidenceReview ? <span className="shrink-0 text-[9px] font-semibold text-amber-400">Review evidence</span> : <span className={`shrink-0 text-[10px] font-bold ${percentage >= 80 ? "text-emerald-400" : percentage >= 60 ? "text-amber-400" : "text-red-400"}`}>{percentage}%</span>}
+                          </div>
+                          <Progress value={percentage ?? 0} className="h-1" />
                         </div>
-                        <Progress value={fw.compliance_pct} className="h-1" />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : <p className="text-[10px] text-muted-foreground text-center py-4">No compliance data</p>}
               </CardContent>

@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { resolveAvatarSource } from "@/components/ui/avatar";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -1183,7 +1184,7 @@ export default function TechniciansPage() {
                       onMouseEnter={() => { setHoveredTech(tech.id); fetchTechStatus(tech.id); }}
                       onMouseLeave={() => setHoveredTech(null)}>
                       {tech.avatar ? (
-                        <img src={tech.avatar} alt={tech.name} className="w-12 h-12 rounded-full object-cover border-2 border-primary/30" />
+                        <img src={resolveAvatarSource(tech.avatar)} alt={tech.name} className="w-12 h-12 rounded-full object-cover border-2 border-primary/30" />
                       ) : (
                         <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">{tech.name?.charAt(0)?.toUpperCase()}</div>
                       )}
@@ -1647,7 +1648,7 @@ function ProfileTab({ technician, onEditProfile, onUploadAvatar, avatarFile, onC
           <CardHeader className="pb-2"><CardTitle className="text-sm">Profile Picture</CardTitle></CardHeader>
           <CardContent className="flex flex-col items-center gap-3">
             {t.avatar ? (
-              <img src={t.avatar} alt={t.name} className="w-24 h-24 rounded-full object-cover border-4 border-primary/20" />
+              <img src={resolveAvatarSource(t.avatar)} alt={t.name} className="w-24 h-24 rounded-full object-cover border-4 border-primary/20" />
             ) : (
               <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-3xl">{t.name?.charAt(0)?.toUpperCase()}</div>
             )}

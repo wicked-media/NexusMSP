@@ -14,8 +14,8 @@ async def _get_ai_chat(session_id: str, system_msg: str):
     if not api_key:
         raise HTTPException(status_code=500, detail="AI key not configured")
     cfg = await db.settings.find_one({"type": "ai_config"}, {"_id": 0})
-    provider = (cfg or {}).get("provider", "anthropic")
-    model = (cfg or {}).get("model", "claude-sonnet-4-5-20250929")
+    provider = "openai"
+    model = (cfg or {}).get("model", "gpt-5.6-terra")
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_msg)
     chat.with_model(provider, model)
     return chat

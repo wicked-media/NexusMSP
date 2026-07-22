@@ -15,10 +15,11 @@ import {
 import { toast } from "sonner";
 import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { ServiceTierChip } from "@/components/tickets/TicketServiceTierWidget";
+import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   ArrowLeft, ChevronRight, MoreVertical, MessageSquareReply, CheckCircle2, AlertTriangle,
   Building2, UserCircle2, Mail, Loader2, History, Search,
-  ArrowLeftRight, X, RotateCcw, Wrench,
+  ArrowLeftRight, X, RotateCcw, Wrench, Receipt,
 } from "lucide-react";
 
 const STATUS_FLOW = ["open", "in_progress", "on_hold", "resolved", "closed"];
@@ -33,7 +34,9 @@ export default function TicketConsoleHeader({
   onChangeCustomer,
   onMoreAction,
   onOpenTools,
+  onInvoice,
   onTitleSave,
+  onDescriptionSave,
   onMutate,
 }) {
   const { token } = useAuth();
@@ -41,10 +44,13 @@ export default function TicketConsoleHeader({
   const [changeOpen, setChangeOpen] = useState(false);
   const [titleEdit, setTitleEdit] = useState(false);
   const [titleDraft, setTitleDraft] = useState(ticket?.title || "");
+  const [descriptionEdit, setDescriptionEdit] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(ticket?.description || "");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState([]);
 
   useEffect(() => { setTitleDraft(ticket?.title || ""); }, [ticket?.title]);
+  useEffect(() => { setDescriptionDraft(ticket?.description || ""); }, [ticket?.description]);
 
   const loadHistory = async () => {
     try {
@@ -72,11 +78,12 @@ export default function TicketConsoleHeader({
 
   return (
     <>
-      <Card className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.16),transparent_34%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="ticket-console-header">
+      <Card className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="ticket-console-header">
         <CardContent className="p-4 space-y-3">
           {/* Row 1 — Back · ID · Priority · Title · Primary actions · More */}
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live service record <span className="text-zinc-600">/</span><span className="text-zinc-400">{ticket.ticket_type?.replace("_", " ") || "incident"}</span></div>
           <div className="flex items-center gap-2.5 flex-wrap">
-            <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={onBack} data-testid="ticket-back-btn">
+            <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={onBack} data-testid="ticket-back-btn" aria-label="Back to ticket queue" title="Back to ticket queue">
               <ArrowLeft className="w-4 h-4" />
             </Button>
 
@@ -123,22 +130,21 @@ export default function TicketConsoleHeader({
                   {ticket.title || "Untitled ticket"}
                 </h2>
               )}
+              {descriptionEdit ? (
+                <Textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} onBlur={() => { onDescriptionSave?.(descriptionDraft); setDescriptionEdit(false); }} onKeyDown={(e) => { if (e.key === "Escape") { setDescriptionDraft(ticket.description || ""); setDescriptionEdit(false); } }} rows={2} className="mt-2 min-h-16 resize-none border-cyan-500/25 bg-zinc-950 text-sm" autoFocus data-testid="console-description-input" />
+              ) : (
+                <button type="button" onClick={() => setDescriptionEdit(true)} className="mt-1.5 block max-w-full truncate text-left text-xs text-zinc-400 transition-colors hover:text-cyan-100" title="Click to edit description" data-testid="console-description">{ticket.description || "Add a ticket description"}</button>
+              )}
             </div>
 
-            {/* Primary actions */}
-            <Button size="sm" variant="outline" className="h-9 border-white/[0.12] bg-black/10 text-zinc-100 hover:bg-white/[0.08]" onClick={onReply} data-testid="console-reply-btn">
-              <MessageSquareReply className="w-3.5 h-3.5 mr-1.5" />Reply
-            </Button>
-            <Button size="sm" className="h-9 bg-emerald-500 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={onResolve} data-testid="console-resolve-btn">
-              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />Resolve
-            </Button>
-            <Button size="sm" variant="outline" className="h-9 border-violet-400/25 bg-violet-500/[0.10] text-violet-100 hover:bg-violet-500/[0.18]" onClick={onOpenTools} data-testid="console-tools-btn">
-              <Wrench className="w-3.5 h-3.5 mr-1.5" />Tools
-            </Button>
+            <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Reply</TicketHeaderAction>
+            <TicketHeaderAction icon={Receipt} tone="success" onClick={onInvoice} data-testid="console-invoice-btn">Invoice</TicketHeaderAction>
+            <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve & close</TicketHeaderAction>
+            <TicketHeaderAction icon={Wrench} tone="accent" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" className="h-8 w-8 p-0" data-testid="console-more-btn"><MoreVertical className="w-3.5 h-3.5" /></Button>
+                <TicketHeaderAction icon={MoreVertical} tone="compact" aria-label="More ticket actions" title="More ticket actions" data-testid="console-more-btn" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Quick actions</DropdownMenuLabel>

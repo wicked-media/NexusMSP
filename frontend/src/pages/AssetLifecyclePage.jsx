@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Plus, Search, Package, ArrowRight, Loader2, RefreshCw, Trash2,
   ShoppingCart, Truck, CheckCircle, Wrench, Archive, AlertTriangle,
@@ -109,17 +111,14 @@ export default function AssetLifecyclePage() {
     const StageIcon = sc.icon;
     return (
       <div className="space-y-6" data-testid="asset-detail-view">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="sm" onClick={() => setSelectedAsset(null)}>Back</Button>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold">{selectedAsset.name}</h1>
-            <p className="text-muted-foreground font-mono text-sm">{selectedAsset.asset_tag}</p>
-          </div>
-          <Badge className={`${sc.bg} ${sc.text} border ${sc.color.replace("bg-", "border-")}/30`}><StageIcon className="w-3 h-3 mr-1" />{sc.label}</Badge>
-          <Button size="sm" onClick={() => { setTransitionForm({ new_stage: "", notes: "" }); setIsTransitionOpen(true); }} data-testid="transition-btn">
-            <ArrowRight className="w-4 h-4 mr-1" />Transition Stage
-          </Button>
-        </div>
+        <OperationalPageHeader
+          eyebrow="Inventory assets"
+          title={selectedAsset.name}
+          description={`${selectedAsset.asset_tag} · ${selectedAsset.client_name || "No client assigned"} · ${selectedAsset.manufacturer || "Unknown manufacturer"} ${selectedAsset.model || ""}`}
+          icon={Package}
+          tone="sky"
+          actions={<><Button variant="outline" size="sm" onClick={() => setSelectedAsset(null)}>All assets</Button><Badge className={`${sc.bg} ${sc.text} border ${sc.color.replace("bg-", "border-")}/30`}><StageIcon className="w-3 h-3 mr-1" />{sc.label}</Badge><Button size="sm" onClick={() => { setTransitionForm({ new_stage: "", notes: "" }); setIsTransitionOpen(true); }} data-testid="transition-btn"><ArrowRight className="w-4 h-4 mr-1" />Transition Stage</Button></>}
+        />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card className="lg:col-span-1">
@@ -226,49 +225,22 @@ export default function AssetLifecyclePage() {
 
   return (
     <div className="space-y-6" data-testid="asset-lifecycle-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Asset Lifecycle</h1>
-          <p className="text-muted-foreground">Track IT assets from procurement to disposal</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-asset-btn"><Plus className="w-4 h-4 mr-2" />Add Asset</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Inventory assets"
+        title="Lifecycle & Warranty"
+        description="One lifecycle view over the canonical inventory register, from procurement through verified disposal."
+        icon={Package}
+        tone="sky"
+        actions={<><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button><Button onClick={() => setIsCreateOpen(true)} data-testid="create-asset-btn"><Plus className="w-4 h-4 mr-2" />Add Asset</Button></>}
+      />
 
       {/* Dashboard Stats */}
-      {dashboard && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          {Object.entries(stageConfig).map(([key, cfg]) => {
-            const Icon = cfg.icon;
-            return (
-              <Card key={key} className={`cursor-pointer hover:${cfg.color.replace("bg-", "border-")}/40 transition-colors`} onClick={() => setStageFilter(key)}>
-                <CardContent className="py-3 px-3">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-8 h-8 rounded-lg ${cfg.bg} flex items-center justify-center`}><Icon className={`w-4 h-4 ${cfg.text}`} /></div>
-                    <div>
-                      <p className={`text-xl font-bold ${cfg.text}`}>{dashboard.by_stage[key] || 0}</p>
-                      <p className="text-[10px] text-muted-foreground">{cfg.label}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-          <Card>
-            <CardContent className="py-3 px-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center"><DollarSign className="w-4 h-4 text-primary" /></div>
-                <div>
-                  <p className="text-lg font-bold">${(dashboard.total_investment || 0).toLocaleString()}</p>
-                  <p className="text-[10px] text-muted-foreground">Total Value</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {dashboard && <MetricStrip columns={4}>
+        <MetricTile label="Active" value={dashboard.by_stage.active || 0} accent="emerald" icon={<CheckCircle className="h-3 w-3 text-emerald-400" />} />
+        <MetricTile label="In delivery" value={(dashboard.by_stage.procurement || 0) + (dashboard.by_stage.deployment || 0)} accent="sky" icon={<Truck className="h-3 w-3 text-sky-400" />} />
+        <MetricTile label="Needs service" value={(dashboard.by_stage.maintenance || 0) + (dashboard.by_stage.decommission || 0)} accent="amber" icon={<Wrench className="h-3 w-3 text-amber-400" />} />
+        <MetricTile label="Inventory value" value={`$${(dashboard.total_investment || 0).toLocaleString()}`} accent="violet" icon={<DollarSign className="h-3 w-3 text-violet-400" />} />
+      </MetricStrip>}
 
       {/* Filters */}
       <div className="flex gap-3">

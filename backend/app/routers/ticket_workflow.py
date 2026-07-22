@@ -205,16 +205,29 @@ async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_use
 
 
 @router.post("/csat/{survey_id}/respond")
-async def respond_csat(survey_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    score = int(payload.get("score") or 0)
+async def respond_csat(survey_id: str, payload: dict = Body(...)):
+    """Accept the response for an unguessable ticket-linked survey ID.
+
+    Survey links are capability URLs generated per ticket.  A response may be
+    submitted once while it is in ``sent`` state; the ticket audit trail records
+    the event without pretending a technician supplied the rating.
+    """
+    try:
+        score = int(payload.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
     if score < 1 or score > 5:
         raise HTTPException(400, "score must be 1..5")
-    feedback = (payload.get("feedback") or "").strip()
-    res = await db.csat_surveys.update_one({"id": survey_id}, {"$set": {
+    feedback = (payload.get("feedback") or "").strip()[:4000]
+    survey = await db.csat_surveys.find_one({"id": survey_id, "status": "sent"}, {"_id": 0})
+    if not survey:
+        raise HTTPException(404, "Survey not found or already answered")
+    res = await db.csat_surveys.update_one({"id": survey_id, "status": "sent"}, {"$set": {
         "score": score, "feedback": feedback, "responded_at": _now(), "status": "responded",
     }})
     if res.matched_count == 0:
-        raise HTTPException(404, "Survey not found")
+        raise HTTPException(409, "Survey was already answered")
+    await _audit(survey.get("ticket_id"), {"id": None, "name": "Client survey respondent"}, "csat_responded", f"Submitted {score}/5 CSAT feedback")
     return {"success": True}
 
 

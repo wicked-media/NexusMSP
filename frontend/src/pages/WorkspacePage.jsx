@@ -12,6 +12,7 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Bookmark, Eye, Activity, Save, Loader2, Pin, X, Wifi, WifiOff,
   Ticket as TicketIcon, Monitor, Flame, Clock, History, RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -23,16 +24,19 @@ export default function WorkspacePage() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [scratchDraft, setScratchDraft] = useState("");
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchWorkspace = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await axios.get(`${API}/workspace`, { headers });
       setData(res.data);
       setScratchDraft(res.data.scratch_notes || "");
     } catch (e) {
+      setLoadError("NexusMSP could not load your personal workspace. Your saved pins, watched devices, and notes have not been changed.");
       toast.error("Failed to load workspace");
     } finally {
       setLoading(false);
@@ -83,17 +87,33 @@ export default function WorkspacePage() {
     );
   }
 
-  const stats = data?.stats || {};
+  if (loadError || !data) {
+    return (
+      <PageShell data-testid="workspace-load-error">
+        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
+          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
+            <AlertTriangle className="h-10 w-10 text-rose-300" />
+            <div><h1 className="text-lg font-semibold">My Workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The personal workspace did not return the data needed to render."}</p></div>
+            <Button onClick={handleRefresh} data-testid="retry-workspace-load"><RefreshCw className="mr-2 h-4 w-4" />Retry workspace</Button>
+          </CardContent>
+        </Card>
+      </PageShell>
+    );
+  }
+
+  const stats = data.stats || {};
 
   return (
     <PageShell data-testid="workspace-page">
       <div className="p-6 space-y-6">
         {/* Hero */}
-        <div className="flex items-center justify-between">
+        <section className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Personal operations</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight flex items-center gap-3">
               <Bookmark className="w-7 h-7 text-violet-400" />
-              {user?.name?.split(" ")[0] || "My"}'s Workspace
+              My Workspace
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Your personal cockpit — pinned tickets, watched devices, and scratchpad notes.
@@ -104,6 +124,7 @@ export default function WorkspacePage() {
             Refresh
           </Button>
         </div>
+        </section>
 
         {/* Metric strip */}
         <MetricStrip columns={4}>

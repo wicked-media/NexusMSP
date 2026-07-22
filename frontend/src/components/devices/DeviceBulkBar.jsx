@@ -24,7 +24,7 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
   if (selectedIds.length === 0) return null;
 
   const selectedDevices = devices.filter(d => selectedIds.includes(d.id));
-  const agentCount = selectedDevices.filter(d => d.trmm_agent_id).length;
+  const agentCount = selectedDevices.filter(d => d.nexus_agent_id).length;
 
   const run = async (action, label, extra = {}) => {
     setBusy(action);
@@ -35,7 +35,7 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
       }, { headers });
       setResults({ action: label, results: r.data.results, summary: r.data.summary });
       const s = r.data.summary;
-      toast.success(`${label} → ${s.ok} OK · ${s.failed} failed · ${s.skipped} skipped`);
+      toast.success(`${label}: ${s.queued || 0} queued, ${s.completed || 0} completed, ${s.failed} failed, ${s.skipped} skipped`);
     } catch (e) {
       toast.error(e.response?.data?.detail || `${label} failed`);
       setResults(null);
@@ -48,26 +48,26 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
   return (
     <>
       <div
-        className="sticky top-2 z-20 flex items-center gap-2 px-3 py-2 rounded-md border border-fuchsia-500/30 bg-gradient-to-r from-fuchsia-500/15 via-violet-500/10 to-cyan-500/10 backdrop-blur-md shadow-lg"
+        className="sticky top-2 z-20 flex items-center gap-2 rounded-xl border border-primary/20 bg-card px-3 py-2 shadow-sm"
         data-testid="device-bulk-bar"
       >
-        <Sparkles className="w-4 h-4 text-fuchsia-400 shrink-0" />
-        <span className="text-xs font-medium text-fuchsia-200">{selectedIds.length} selected</span>
-        <Badge variant="outline" className="text-[9px] text-zinc-400">{agentCount} with TRMM agent</Badge>
+        <Sparkles className="w-4 h-4 text-primary shrink-0" />
+        <span className="text-xs font-medium">{selectedIds.length} selected</span>
+        <Badge variant="outline" className="text-[9px]">{agentCount} with Nexus Agent</Badge>
         <div className="ml-auto flex items-center gap-1 flex-wrap">
-          <Button size="sm" variant="outline" className="h-7 text-[10px] border-violet-500/40 text-violet-300 hover:bg-violet-500/10" disabled={!!busy} onClick={() => run("run-checks", "Run Checks")} data-testid="bulk-checks">
-            {busy === "run-checks" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Checks
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => run("run-checks", "Check agent connection")} data-testid="bulk-checks">
+            {busy === "run-checks" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Agent check
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px] border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10" disabled={!!busy} onClick={() => run("install-patches", "Install Patches")} data-testid="bulk-patches">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => run("install-patches", "Queue Windows updates")} data-testid="bulk-patches">
             {busy === "install-patches" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}Patches
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px] border-amber-500/40 text-amber-300 hover:bg-amber-500/10" disabled={!!busy} onClick={() => setConfirm("reboot")} data-testid="bulk-reboot">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => setConfirm("reboot")} data-testid="bulk-reboot">
             <Power className="w-3 h-3 mr-1" />Reboot
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px] border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10" disabled={!!busy} onClick={() => setConfirm("tag")} data-testid="bulk-tag">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => setConfirm("tag")} data-testid="bulk-tag">
             <Tag className="w-3 h-3 mr-1" />Tag
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px] border-zinc-500/40 hover:bg-zinc-500/10" disabled={!!busy} onClick={() => setConfirm("message")} data-testid="bulk-message">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => setConfirm("message")} data-testid="bulk-message">
             <MessageSquareWarning className="w-3 h-3 mr-1" />Message
           </Button>
           <Button size="sm" variant="ghost" className="h-7 text-[10px] text-zinc-400" onClick={onClear} data-testid="bulk-clear">
@@ -83,20 +83,21 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
             <span>{results.action}</span>
             {results.summary && (
               <span>
-                <span className="text-emerald-400">{results.summary.ok} ok</span>
-                {" · "}<span className="text-rose-400">{results.summary.failed} failed</span>
-                {" · "}<span className="text-zinc-500">{results.summary.skipped} skipped</span>
+                <span className="text-cyan-400">{results.summary.queued || 0} queued</span>
+                {" - "}<span className="text-emerald-400">{results.summary.completed || 0} completed</span>
+                {" - "}<span className="text-rose-400">{results.summary.failed} failed</span>
+                {" - "}<span className="text-zinc-500">{results.summary.skipped} skipped</span>
               </span>
             )}
             <button className="text-zinc-500 hover:text-zinc-300" onClick={() => setResults(null)} data-testid="bulk-progress-clear">clear</button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-1">
             {results.results.map(r => {
-              const tone = r.status === "ok" ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/5" :
+              const tone = r.status === "completed" ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/5" :
                            r.status === "failed" ? "text-rose-300 border-rose-500/30 bg-rose-500/5" :
                            r.status === "skipped" ? "text-zinc-500 border-zinc-700 bg-zinc-900/50" :
                            "text-cyan-300 border-cyan-500/30 bg-cyan-500/5";
-              const icon = r.status === "ok" ? "✓" : r.status === "failed" ? "✗" : r.status === "skipped" ? "—" : "⟳";
+              const icon = r.status === "completed" ? "OK" : r.status === "failed" ? "!" : r.status === "skipped" ? "-" : "...";
               return (
                 <div key={r.device_id} className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] ${tone} ${r.status === "running" ? "animate-pulse" : ""}`} title={r.message || r.status}>
                   <span className="font-mono">{icon}</span>

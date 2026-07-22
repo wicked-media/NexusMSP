@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,8 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 export default function LiveChatPage() {
   const { token, user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -37,7 +40,10 @@ export default function LiveChatPage() {
   const [showCanned, setShowCanned] = useState(false);
   const [manageCanned, setManageCanned] = useState(false);
   const [newCanned, setNewCanned] = useState({ shortcut: "", title: "", content: "" });
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [creatingTicket, setCreatingTicket] = useState(false);
   const messagesEndRef = useRef(null);
+  const typingAtRef = useRef(0);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchSessions = async () => {
@@ -62,6 +68,10 @@ export default function LiveChatPage() {
   useEffect(() => { fetchSessions(); fetchStats(); fetchCanned(); fetchAgents(); }, []); // eslint-disable-line
   useEffect(() => { fetchSessions(); }, [search, statusFilter]); // eslint-disable-line
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    const sessionId = searchParams.get("session");
+    if (sessionId) loadSession(sessionId);
+  }, [searchParams]); // eslint-disable-line
 
   // Periodic poll for active session
   useEffect(() => {
@@ -70,6 +80,8 @@ export default function LiveChatPage() {
       try {
         const { data } = await axios.get(`${API}/live-chat/sessions/${activeSession.id}`, { headers });
         if (data.messages?.length !== messages.length) setMessages(data.messages);
+        const typing = await axios.get(`${API}/live-chat/sessions/${activeSession.id}/typing`, { headers });
+        setTypingUsers(typing.data?.typing_users || []);
       } catch {}
     }, 5000);
     return () => clearInterval(t);
@@ -88,39 +100,65 @@ export default function LiveChatPage() {
 
   const sendMessage = async () => {
     if (!newMsg.trim() || !activeSession) return;
+    const shortcut = canned.find(response => response.shortcut?.toLowerCase() === newMsg.trim().toLowerCase());
+    const content = shortcut ? resolveCanned(shortcut) : newMsg.trim();
     try {
       const { data } = await axios.post(
         `${API}/live-chat/sessions/${activeSession.id}/messages`,
-        { content: newMsg },
+        { content },
         { headers }
       );
       setMessages(prev => [...prev, data]);
       setNewMsg("");
+      setTypingUsers([]);
     } catch { toast.error("Failed to send"); }
+  };
+
+  const refreshTyping = async (typing = true) => {
+    if (!activeSession || activeSession.status === "closed") return;
+    try {
+      const { data } = await axios.post(`${API}/live-chat/sessions/${activeSession.id}/typing`, { typing }, { headers });
+      setTypingUsers(data.typing_users || []);
+    } catch {}
+  };
+
+  const onComposerChange = (value) => {
+    setNewMsg(value.slice(0, 5000));
+    if (value.trim() && Date.now() - typingAtRef.current > 2000) {
+      typingAtRef.current = Date.now();
+      refreshTyping(true);
+    }
+    if (!value.trim()) refreshTyping(false);
   };
 
   const closeSession = async () => {
     if (!activeSession) return;
     if (!window.confirm("Close this chat session?")) return;
-    await axios.post(`${API}/live-chat/sessions/${activeSession.id}/close`, {}, { headers });
-    toast.success("Session closed");
-    setActiveSession(null);
-    setMessages([]);
-    fetchSessions(); fetchStats();
+    try {
+      await axios.post(`${API}/live-chat/sessions/${activeSession.id}/close`, {}, { headers });
+      toast.success("Session closed");
+      setActiveSession(null);
+      setMessages([]);
+      fetchSessions(); fetchStats();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to close session");
+    }
   };
 
   const createTicket = async () => {
-    if (!activeSession) return;
+    if (!activeSession || creatingTicket) return;
+    setCreatingTicket(true);
     try {
       const { data } = await axios.post(
         `${API}/live-chat/sessions/${activeSession.id}/create-ticket`,
         {},
         { headers }
       );
-      toast.success(`Ticket created: ${data.ticket_id}`);
+      toast.success("Ticket created and linked to this chat");
       // Update active session to show ticket
       setActiveSession(prev => ({ ...prev, ticket_id: data.ticket_id }));
     } catch { toast.error("Failed to create ticket"); }
+    finally { setCreatingTicket(false); }
   };
 
   const transferSession = async () => {
@@ -139,12 +177,18 @@ export default function LiveChatPage() {
   };
 
   const insertCanned = (response) => {
-    let content = response.content;
-    content = content.replace("{visitor}", activeSession?.visitor_name || "there");
-    content = content.replace("{eta}", "2 business hours");
+    const content = resolveCanned(response);
     setNewMsg(prev => prev + (prev ? " " : "") + content);
     setShowCanned(false);
   };
+
+  const resolveCanned = (response) => String(response?.content || "")
+    .replace("{visitor}", activeSession?.visitor_name || "there")
+    .replace("{eta}", "2 business hours");
+
+  const cannedSuggestions = newMsg.trim().startsWith("/")
+    ? canned.filter(response => response.shortcut?.toLowerCase().startsWith(newMsg.trim().toLowerCase())).slice(0, 4)
+    : [];
 
   const saveCanned = async () => {
     if (!newCanned.shortcut || !newCanned.content) return toast.error("Shortcut and content required");
@@ -171,17 +215,10 @@ export default function LiveChatPage() {
 
   return (
     <PageShell data-testid="live-chat-page">
-      <MetricStrip columns={5}>
-        <MetricTile label="Active" value={stats.active || 0} accent="sky" icon={<Inbox className="w-2.5 h-2.5 text-sky-400" />} testid="livechat-metric-active" />
-        <MetricTile label="Assigned to Me" value={stats.mine || 0} accent="emerald" icon={<UserCheck className="w-2.5 h-2.5 text-emerald-400" />} testid="livechat-metric-mine" />
-        <MetricTile label="Unassigned" value={stats.unassigned || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="livechat-metric-unassigned" />
-        <MetricTile label="Messages Today" value={stats.messages_today || 0} accent="violet" icon={<MessageSquare className="w-2.5 h-2.5 text-violet-400" />} testid="livechat-metric-today" />
-        <MetricTile label="Closed (total)" value={stats.closed || 0} accent="indigo" icon={<Clock className="w-2.5 h-2.5 text-zinc-400" />} testid="livechat-metric-closed" />
-      </MetricStrip>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="flex items-start justify-between flex-wrap gap-3">
+      <div className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-950/35 via-[#171c24] to-emerald-950/25 px-5 py-5 shadow-lg shadow-black/10 flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Live Chat</h1>
+          <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-500/10"><MessageSquare className="h-5 w-5 text-cyan-200" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Client communication</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Live Chat</h1></div></div>
           <p className="text-xs text-zinc-500 mt-0.5">Real-time chat with clients · queue · transfer · canned responses</p>
         </div>
         <div className="flex gap-2">
@@ -190,6 +227,14 @@ export default function LiveChatPage() {
           </Button>
         </div>
       </div>
+
+      <MetricStrip columns={5}>
+        <MetricTile label="Active" value={stats.active || 0} accent="sky" icon={<Inbox className="w-2.5 h-2.5 text-sky-400" />} testid="livechat-metric-active" />
+        <MetricTile label="Assigned to Me" value={stats.mine || 0} accent="emerald" icon={<UserCheck className="w-2.5 h-2.5 text-emerald-400" />} testid="livechat-metric-mine" />
+        <MetricTile label="Unassigned" value={stats.unassigned || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="livechat-metric-unassigned" />
+        <MetricTile label="Messages Today" value={stats.messages_today || 0} accent="cyan" icon={<MessageSquare className="w-2.5 h-2.5 text-cyan-400" />} testid="livechat-metric-today" />
+        <MetricTile label="Closed (total)" value={stats.closed || 0} accent="slate" icon={<Clock className="w-2.5 h-2.5 text-zinc-400" />} testid="livechat-metric-closed" />
+      </MetricStrip>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[640px]">
         {/* Queue */}
@@ -263,8 +308,8 @@ export default function LiveChatPage() {
                     <Button size="sm" variant="outline" onClick={() => setTransferDialog(true)} disabled={activeSession.status === "closed"} data-testid="transfer-btn">
                       <ArrowRightLeft className="w-3 h-3 mr-1" />Transfer
                     </Button>
-                    <Button size="sm" variant="outline" onClick={createTicket} disabled={!!activeSession.ticket_id} data-testid="create-ticket-from-chat">
-                      <Ticket className="w-3 h-3 mr-1" />{activeSession.ticket_id ? `#${activeSession.ticket_id.slice(-6)}` : "Create Ticket"}
+                    <Button size="sm" variant="outline" onClick={() => activeSession.ticket_id ? navigate(`/tickets?ticket=${activeSession.ticket_id}`) : createTicket()} disabled={creatingTicket} data-testid="create-ticket-from-chat">
+                      <Ticket className="w-3 h-3 mr-1" />{activeSession.ticket_id ? "Open ticket" : creatingTicket ? "Creating…" : "Create ticket"}
                     </Button>
                     <Button size="sm" variant="destructive" onClick={closeSession} disabled={activeSession.status === "closed"} data-testid="close-chat">
                       <X className="w-3 h-3 mr-1" />Close
@@ -324,17 +369,22 @@ export default function LiveChatPage() {
                     </Popover>
                     <Textarea
                       value={newMsg}
-                      onChange={e => setNewMsg(e.target.value)}
+                      onChange={e => onComposerChange(e.target.value)}
                       placeholder={activeSession.status === "closed" ? "Session closed" : "Type a message… (Enter to send, Shift+Enter for newline)"}
                       disabled={activeSession.status === "closed"}
                       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                      className="min-h-[60px] max-h-[160px] resize-none"
+                      className="min-h-[60px] max-h-[160px] resize-none focus-visible:ring-emerald-500/50"
                       data-testid="chat-input"
                     />
-                    <Button onClick={sendMessage} disabled={!newMsg.trim() || activeSession.status === "closed"} className="h-9" data-testid="send-message">
-                      <Send className="w-4 h-4" />
+                    <Button onClick={sendMessage} disabled={!newMsg.trim() || activeSession.status === "closed"} className="h-9 bg-emerald-600 hover:bg-emerald-500" data-testid="send-message">
+                      <Send className="w-4 h-4" /><span className="ml-1.5 hidden sm:inline">Send</span>
                     </Button>
                   </div>
+                  {typingUsers.length > 0 && <div className="flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] px-2.5 py-1.5 text-[10px] text-cyan-100"><span className="flex gap-0.5"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:240ms]" /></span>{typingUsers.map(person => person.name).join(", ")} typing...</div>}
+                  {cannedSuggestions.length > 0 && <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.045] p-2" aria-label="Canned response suggestions">
+                    <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Reply library</span>
+                    {cannedSuggestions.map(response => <button key={response.id} type="button" onClick={() => insertCanned(response)} className="rounded-md border border-emerald-500/15 bg-black/15 px-2 py-1 text-[10px] text-emerald-100 transition hover:border-emerald-400/40 hover:bg-emerald-500/10"><span className="font-mono text-emerald-300">{response.shortcut}</span>{response.title && <span className="ml-1 text-zinc-400">{response.title}</span>}</button>)}
+                  </div>}
                   <p className="text-[10px] text-muted-foreground">Type <span className="font-mono text-emerald-400">/</span> shortcuts like <span className="font-mono">/hello</span>, <span className="font-mono">/eta</span>, <span className="font-mono">/remote</span></p>
                 </div>
               </CardContent>

@@ -207,7 +207,7 @@ async def war_room_commentary(client_id: str, current_user: dict = Depends(get_c
                 "Use plain text, no markdown headers."
             ),
         )
-        chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+        chat.with_model("openai", "gpt-5.6-terra")
         resp = await chat.send_message(UserMessage(text=f"Live snapshot:\n{snapshot}\n\nGive me the situation report."))
         commentary = resp.strip() if isinstance(resp, str) else str(resp)
         return {"commentary": commentary, "source": "ai"}

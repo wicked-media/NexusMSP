@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
 import {
   Bot, CheckCircle, Clock, XCircle, Zap, ThumbsUp, ThumbsDown, Filter,
   Search, Shield, HardDrive, Network, Cpu, RefreshCw, Eye, Play,
@@ -25,7 +26,7 @@ const STATUS_STYLES = {
   manual_required: { bg: "bg-red-500/10 border-red-500/30", text: "text-red-400", icon: XCircle },
 };
 
-export default function AIResolutionPage() {
+export default function AIResolutionPage({ embedded = false }) {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,10 +50,10 @@ export default function AIResolutionPage() {
 
   const handleAction = async (id, action) => {
     try {
-      await axios.post(`${API}/ai-resolution/${id}/${action}`, {}, { headers });
-      toast.success(action === "approve" ? "Resolution approved & executed" : "Escalated to manual queue");
+      const result = await axios.post(`${API}/ai-resolution/${id}/${action}`, {}, { headers });
+      toast.success(action === "approve" ? "Resolution approved & executed" : result.data.ticket_number ? `Escalated to ${result.data.ticket_number}` : "Escalated to manual queue");
       fetchData();
-    } catch { toast.error("Action failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Resolution action failed"); }
   };
 
   if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -72,7 +73,7 @@ export default function AIResolutionPage() {
 
   return (
     <div className="space-y-5" data-testid="ai-resolution-page">
-      <div className="flex items-center justify-between">
+      {!embedded && <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center"><Bot className="w-5 h-5 text-white" /></div>
@@ -81,26 +82,21 @@ export default function AIResolutionPage() {
           <p className="text-muted-foreground mt-1">Autonomous issue detection, matching, and resolution — Atera Autopilot-style</p>
         </div>
         <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+      </div>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+        <p className="text-xs text-muted-foreground">AI recommendations remain reviewable. Approval records the decision and preserves the matched runbook context.</p>
+        <Button variant="ghost" size="sm" onClick={fetchData}><RefreshCw className="mr-1 h-3.5 w-3.5" />Refresh</Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-6 gap-3">
-        {[
-          { label: "Auto-Resolved", value: s.auto_resolved, icon: CheckCircle, color: "text-emerald-400", sub: `${s.resolution_rate_pct}% rate` },
-          { label: "Pending Approval", value: s.pending_approval, icon: Clock, color: "text-amber-400", sub: "Awaiting review" },
-          { label: "Manual Required", value: s.manual_required, icon: XCircle, color: "text-red-400", sub: "Needs technician" },
-          { label: "Time Saved", value: `${s.time_saved_hours}h`, icon: Zap, color: "text-cyan-400", sub: "This period" },
-          { label: "Avg Confidence", value: `${avgConfidence}%`, icon: Activity, color: "text-purple-400", sub: "AI confidence" },
-          { label: "Total Processed", value: s.total, icon: Bot, color: "text-foreground", sub: "All issues" },
-        ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`text-2xl font-bold ${st.color}`}>{st.value}</p>
-              <p className="text-[10px] text-muted-foreground">{st.sub}</p>
-            </CardContent>
-          </Card>
-        ))}
+      {/* Resolution signal tiles */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <HeroTile label="Resolved" value={s.auto_resolved} icon={CheckCircle} glow="emerald" subtitle={`${s.resolution_rate_pct}% resolution rate`} testId="resolution-resolved" />
+        <HeroTile label="Review" value={s.pending_approval} icon={Clock} glow="amber" subtitle="Awaiting approval" testId="resolution-pending" />
+        <HeroTile label="Manual" value={s.manual_required} icon={XCircle} glow="rose" subtitle="Technician required" testId="resolution-manual" />
+        <HeroTile label="Time saved" value={s.time_saved_hours} suffix="h" icon={Zap} glow="cyan" subtitle="This period" testId="resolution-time-saved" />
+        <HeroTile label="Confidence" value={avgConfidence} suffix="%" icon={Activity} glow="violet" subtitle="Recommendation quality" testId="resolution-confidence" />
+        <HeroTile label="Processed" value={s.total} icon={Bot} glow="zinc" subtitle="All detections" testId="resolution-total" />
       </div>
 
       {/* Resolution Rate Gauge */}

@@ -78,6 +78,61 @@ async def get_runbook_templates(current_user: dict = Depends(get_current_user)):
                 {"type": "ping_technician", "target": "oncall"},
             ]
         },
+        {
+            "name": "Failed Backup Escalation",
+            "description": "Open and escalate a ticket when a protected device misses a backup",
+            "trigger": {"type": "backup_failed"},
+            "conditions": [{"field": "backup_protected", "operator": "eq", "value": True}],
+            "actions": [
+                {"type": "create_ticket", "target": "auto", "params": {"priority": "high", "category": "backup", "title_template": "Backup failed: {device_name}"}},
+                {"type": "assign_oncall", "target": "auto"},
+                {"type": "notify_manager", "target": "auto"},
+            ]
+        },
+        {
+            "name": "Defender Health Recovery",
+            "description": "Attempt a safe remediation, then create a security ticket for a Defender health alert",
+            "trigger": {"type": "security_alert", "provider": "microsoft_defender"},
+            "conditions": [{"field": "severity", "operator": "in", "value": ["medium", "high", "critical"]}],
+            "actions": [
+                {"type": "run_script", "target": "device", "params": {"script_name": "Test-DefenderHealth"}},
+                {"type": "create_ticket", "target": "auto", "params": {"priority": "high", "category": "security", "title_template": "Defender health review: {device_name}"}},
+                {"type": "notify_manager", "target": "auto"},
+            ]
+        },
+        {
+            "name": "Patch Window Follow-Up",
+            "description": "Record a maintenance task and review ticket when a device misses its approved patch window",
+            "trigger": {"type": "patch_window_missed"},
+            "conditions": [{"field": "patching_enabled", "operator": "eq", "value": True}],
+            "actions": [
+                {"type": "create_ticket", "target": "auto", "params": {"priority": "medium", "category": "maintenance", "title_template": "Patch follow-up: {device_name}"}},
+                {"type": "assign_oncall", "target": "auto"},
+                {"type": "add_note", "target": "ticket", "params": {"note_template": "Confirm patch status and select the next approved maintenance window."}},
+            ]
+        },
+        {
+            "name": "Critical Service Recovery",
+            "description": "Restart a monitored service, record the outcome, and escalate if technician review is needed",
+            "trigger": {"type": "service_stopped"},
+            "conditions": [{"field": "service_critical", "operator": "eq", "value": True}],
+            "actions": [
+                {"type": "run_script", "target": "device", "params": {"script_name": "Restart-CriticalService"}},
+                {"type": "create_ticket", "target": "auto", "params": {"priority": "high", "category": "monitoring", "title_template": "Service recovery review: {device_name}"}},
+                {"type": "ping_technician", "target": "oncall"},
+            ]
+        },
+        {
+            "name": "VIP Ticket Acknowledgement",
+            "description": "Prioritise and acknowledge a new request from a VIP contact",
+            "trigger": {"type": "ticket_created"},
+            "conditions": [{"field": "contact_vip", "operator": "eq", "value": True}],
+            "actions": [
+                {"type": "escalate_ticket", "target": "ticket"},
+                {"type": "assign_oncall", "target": "auto"},
+                {"type": "email_client", "target": "contact", "params": {"template": "vip_acknowledgement"}},
+            ]
+        },
     ]
 
 

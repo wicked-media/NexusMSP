@@ -5,7 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
 import { Bot, CheckCircle, XCircle, Clock, Zap, Play, AlertTriangle, ArrowUpRight, Terminal, Shield, RotateCcw, Activity, ChevronDown, ChevronRight } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -37,7 +43,7 @@ const ExecutionLog = ({ logs, isLive }) => {
   );
 };
 
-export default function SelfHealingPage() {
+export default function SelfHealingPage({ embedded = false }) {
   const { token } = useAuth();
   const [tab, setTab] = useState("dashboard");
   const [data, setData] = useState(null);
@@ -45,6 +51,9 @@ export default function SelfHealingPage() {
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [executing, setExecuting] = useState({});
   const [liveLog, setLiveLog] = useState({});
+  const [escalating, setEscalating] = useState({});
+  const [showSimulator, setShowSimulator] = useState(false);
+  const [simulation, setSimulation] = useState({ issue_type: "disk_space_low", severity: "medium", description: "Simulated disk space issue for testing" });
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
@@ -55,7 +64,7 @@ export default function SelfHealingPage() {
       ]);
       setData(dRes.data);
       setRunbooks(rRes.data);
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not load self-healing operations"); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -78,7 +87,7 @@ export default function SelfHealingPage() {
     // Actually call the backend to persist
     try {
       await axios.post(`${API}/self-healing/execute/${eventId}`, {}, { headers });
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Healing execution could not be completed"); }
 
     setExecuting(prev => ({ ...prev, [eventId]: false }));
     fetchData();
@@ -86,20 +95,33 @@ export default function SelfHealingPage() {
 
   const simulateIssue = async () => {
     try {
-      const res = await axios.post(`${API}/self-healing/simulate`, { issue_type: "disk_space_low", description: "Simulated disk space issue for testing", severity: "medium" }, { headers });
+      const res = await axios.post(`${API}/self-healing/simulate`, simulation, { headers });
       if (res.data.status === "executing" && res.data.runbook_steps) {
         executeHealing(res.data.id, res.data.runbook_steps);
       }
+      toast.success(`Simulation created for ${res.data.device_name || "test device"}`);
+      setShowSimulator(false);
       fetchData();
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not simulate a self-healing event"); }
+  };
+
+  const escalateHealing = async (event) => {
+    setEscalating(prev => ({ ...prev, [event.id]: true }));
+    try {
+      const result = await axios.post(`${API}/self-healing/escalate/${event.id}`, { reason: "Technician review requested from AI Operations" }, { headers });
+      toast.success(result.data.ticket_number ? `Escalated to ${result.data.ticket_number}` : "Escalated to the technician queue");
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not escalate this event"); }
+    finally { setEscalating(prev => ({ ...prev, [event.id]: false })); }
   };
 
   if (!data) return <div className="p-6 text-muted-foreground">Loading Self-Healing Engine...</div>;
   const s = data.summary;
+  const uniqueRunbooks = [...new Map(runbooks.map(runbook => [runbook.id, runbook])).values()];
 
   return (
     <div className="space-y-6" data-testid="self-healing-page">
-      <div className="flex items-center justify-between">
+      {!embedded && <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="w-7 h-7 text-green-500" />Self-Healing AI Engine</h1>
           <p className="text-muted-foreground text-sm">Autonomous issue detection, runbook matching, and execution — zero human intervention</p>
@@ -108,31 +130,22 @@ export default function SelfHealingPage() {
           <Button variant="outline" onClick={fetchData}><RotateCcw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button onClick={simulateIssue} data-testid="simulate-btn"><Zap className="w-4 h-4 mr-1" />Simulate Issue</Button>
         </div>
+      </div>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+        <p className="text-xs text-muted-foreground">Runbooks execute with visible step logs. Escalation creates technician-owned work instead of silently closing an event.</p>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={fetchData}><RotateCcw className="mr-1 h-3.5 w-3.5" />Refresh</Button>
+          <Button size="sm" onClick={() => setShowSimulator(true)} data-testid="simulate-btn"><Zap className="mr-1 h-3.5 w-3.5" />Simulate issue</Button>
+        </div>
       </div>
 
-      {/* Hero Stats */}
-      <div className="grid grid-cols-5 gap-4">
-        <Card className="border-green-500/30 bg-green-500/5"><CardContent className="pt-4 text-center">
-          <div className="text-3xl font-bold text-green-500">{s.healed}</div>
-          <div className="text-xs text-muted-foreground mt-1">Auto-Healed</div>
-          <div className="text-xs text-green-500 font-medium">{s.heal_rate_pct}% success</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 text-center">
-          <div className="text-3xl font-bold text-blue-500">{s.active}</div>
-          <div className="text-xs text-muted-foreground mt-1">Active Now</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 text-center">
-          <div className="text-3xl font-bold">{s.total_time_saved_hours}h</div>
-          <div className="text-xs text-muted-foreground mt-1">Time Saved</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 text-center">
-          <div className="text-3xl font-bold">{s.avg_heal_time_seconds}s</div>
-          <div className="text-xs text-muted-foreground mt-1">Avg Heal Time</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-4 text-center">
-          <div className="text-3xl font-bold text-purple-500">{s.tickets_prevented}</div>
-          <div className="text-xs text-muted-foreground mt-1">Tickets Prevented</div>
-        </CardContent></Card>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <HeroTile label="Auto-healed" value={s.healed} icon={CheckCircle} glow="emerald" subtitle={`${s.heal_rate_pct}% success rate`} testId="healing-healed" />
+        <HeroTile label="Active" value={s.active} icon={Activity} glow={s.active > 0 ? "amber" : "emerald"} subtitle={s.active > 0 ? "Runbooks in progress" : "No live execution"} testId="healing-active" />
+        <HeroTile label="Time saved" value={s.total_time_saved_hours} suffix="h" icon={Zap} glow="cyan" subtitle="Recovered technician time" testId="healing-time-saved" />
+        <HeroTile label="Average heal" value={s.avg_heal_time_seconds} suffix="s" icon={Clock} glow="violet" subtitle="Completed runbooks" testId="healing-average" />
+        <HeroTile label="Tickets prevented" value={s.tickets_prevented} icon={Shield} glow="zinc" subtitle="Resolved before dispatch" testId="healing-prevented" />
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -167,10 +180,15 @@ export default function SelfHealingPage() {
                   <div className="flex items-center gap-2">
                     <Badge variant={event.status === "healed" ? "default" : event.status === "executing" ? "secondary" : event.status === "failed" ? "destructive" : "outline"} className={`text-xs ${event.status === "executing" ? "animate-pulse" : ""}`}>{event.status}</Badge>
                     {(event.status === "detected" || event.status === "matched") && (
-                      <Button size="sm" variant="default" onClick={(e) => { e.stopPropagation(); executeHealing(event.id, event.runbook_steps); }} disabled={executing[event.id]}>
-                        {executing[event.id] ? <Activity className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
-                        {executing[event.id] ? "Healing..." : "Execute"}
-                      </Button>
+                      <>
+                        <Button size="sm" variant="default" onClick={(e) => { e.stopPropagation(); executeHealing(event.id, event.runbook_steps); }} disabled={executing[event.id]}>
+                          {executing[event.id] ? <Activity className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+                          {executing[event.id] ? "Healing..." : "Execute"}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); escalateHealing(event); }} disabled={escalating[event.id]}>
+                          <ArrowUpRight className="mr-1 h-3 w-3" />{escalating[event.id] ? "Escalating..." : "Escalate"}
+                        </Button>
+                      </>
                     )}
                     {expandedEvent === event.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </div>
@@ -190,7 +208,7 @@ export default function SelfHealingPage() {
 
         {/* ─── RUNBOOKS ─── */}
         <TabsContent value="runbooks" className="space-y-3">
-          {runbooks.map(rb => (
+          {uniqueRunbooks.map(rb => (
             <Card key={rb.id}><CardContent className="pt-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -255,6 +273,34 @@ export default function SelfHealingPage() {
           ))}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={showSimulator} onOpenChange={setShowSimulator}>
+        <DialogContent className="max-w-lg" aria-describedby="simulate-description">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Zap className="h-5 w-5 text-violet-300" />Self-healing simulation</DialogTitle>
+            <DialogDescription id="simulate-description">Create a clearly marked test event to validate matching, approvals and technician escalation without touching a production endpoint.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5"><Label htmlFor="simulation-type">Issue type</Label>
+                <Select value={simulation.issue_type} onValueChange={issue_type => setSimulation(current => ({ ...current, issue_type }))}>
+                  <SelectTrigger id="simulation-type"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="disk_space_low">Disk space low</SelectItem><SelectItem value="service_stopped">Service stopped</SelectItem><SelectItem value="backup_failed">Backup failed</SelectItem><SelectItem value="network_unreachable">Network unreachable</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label htmlFor="simulation-severity">Severity</Label>
+                <Select value={simulation.severity} onValueChange={severity => setSimulation(current => ({ ...current, severity }))}>
+                  <SelectTrigger id="simulation-severity"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5"><Label htmlFor="simulation-description">Test description</Label><Input id="simulation-description" value={simulation.description} onChange={event => setSimulation(current => ({ ...current, description: event.target.value }))} /></div>
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">Simulation records are labelled and may auto-run only against the selected test event.</div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowSimulator(false)}>Cancel</Button><Button onClick={simulateIssue} data-testid="run-simulation-btn"><Zap className="mr-1.5 h-4 w-4" />Run simulation</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

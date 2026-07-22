@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { API } from "@/App";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Package, Boxes, Server, Cloud, ShieldCheck, ShieldAlert, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Users, KeyRound, Percent, ListChecks, ReceiptText, Activity } from "lucide-react";
@@ -42,6 +42,7 @@ const SUBS_LAYOUT = [
 
 export function Client360Subscriptions({ clientId, token }) {
   const { data, loading } = useApiGet(`/clients/${clientId}/subscriptions`, token);
+  const navigate = useNavigate();
   const grid = useWidgetGrid({
     storageKey: "nx-c360-subs-layout-v1",
     hiddenKey:  "nx-c360-subs-hidden-v1",
@@ -117,8 +118,8 @@ export function Client360Subscriptions({ clientId, token }) {
                   <tbody>
                     {(data.items || []).map((s, i) => (
                       <tr key={i} className="border-b border-zinc-900 hover:bg-zinc-900/50" data-testid={`sub-row-${i}`}>
-                        <td className="p-2"><Badge variant="outline" className="text-[10px]">{s.source_label}</Badge></td>
-                        <td className="p-2">{s.product}</td>
+                        <td className="p-2">{s.linked_contract_id ? <button type="button" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35" onClick={() => navigate(`/contracts?contract=${encodeURIComponent(s.linked_contract_id)}`)} title={`Open ${s.linked_contract_name || "linked contract"}`} data-testid={`open-subscription-contract-${i}`}><Badge variant="outline" className="cursor-pointer border-violet-500/35 bg-violet-500/[0.08] text-[10px] text-violet-200 hover:bg-violet-500/[0.16]">{s.source_label}</Badge></button> : <Badge variant="outline" className="text-[10px]">{s.source_label}</Badge>}</td>
+                        <td className="p-2"><div>{s.product}</div>{s.linked_contract_name && <button type="button" className="mt-0.5 text-[10px] text-violet-300 hover:underline" onClick={() => navigate(`/contracts?contract=${encodeURIComponent(s.linked_contract_id)}`)}>Contract: {s.linked_contract_name}</button>}</td>
                         <td className="p-2 text-right">{s.quantity}</td>
                         <td className="p-2 text-right text-zinc-400">{s.unit_price != null ? fmt$(s.unit_price) : "—"}</td>
                         <td className="p-2 text-right text-emerald-400 font-semibold">{fmt$(s.monthly_cost)}</td>

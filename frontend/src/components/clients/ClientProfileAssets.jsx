@@ -20,18 +20,18 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
   const [uploading, setUploading] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
-  const src = resolveUrl(client.profile_picture_url);
+  const src = resolveUrl(client.logo_url || client.profile_picture_url);
 
   const upload = async (file) => {
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await axios.post(`${API}/clients/${client.id}/profile-picture`, fd, {
+      const res = await axios.post(`${API}/clients/${client.id}/logo`, fd, {
         headers: { ...headers, "Content-Type": "multipart/form-data" },
       });
-      toast.success("Profile picture updated");
-      onUpdated?.({ profile_picture_url: res.data.profile_picture_url });
+      toast.success("Business logo updated");
+      onUpdated?.({ logo_url: res.data.logo_url });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Upload failed");
     } finally {
@@ -48,11 +48,11 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
   };
 
   const handleRemove = async () => {
-    if (!window.confirm("Remove profile picture?")) return;
+    if (!window.confirm("Remove the business logo?")) return;
     try {
-      await axios.delete(`${API}/clients/${client.id}/profile-picture`, { headers });
-      toast.success("Profile picture removed");
-      onUpdated?.({ profile_picture_url: "" });
+      await axios.delete(`${API}/clients/${client.id}/logo`, { headers });
+      toast.success("Business logo removed");
+      onUpdated?.({ logo_url: "" });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to remove");
     }
@@ -66,13 +66,13 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
       {src ? (
         <img
           src={src}
-          alt={client.name}
-          className="w-full h-full rounded-md object-cover border border-zinc-700"
+          alt={`${client.name} business logo`}
+          className="h-full w-full rounded-xl border border-white/15 bg-background object-cover"
           data-testid="client-pp-img"
         />
       ) : (
         <div
-          className="w-full h-full rounded-md flex items-center justify-center text-2xl font-bold text-white"
+          className="flex h-full w-full items-center justify-center rounded-xl text-2xl font-bold text-white"
           style={{ background: "linear-gradient(135deg, #6366f1, #a78bfa)" }}
           data-testid="client-pp-fallback"
         >
@@ -83,9 +83,9 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
-        className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/60 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         data-testid="client-pp-upload-btn"
-        title={src ? "Change picture" : "Upload picture"}
+        title={src ? "Change business logo" : "Upload business logo"}
       >
         {uploading ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <Camera className="w-5 h-5 text-white" />}
       </button>
@@ -95,7 +95,7 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
           onClick={handleRemove}
           className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-500/90 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500"
           data-testid="client-pp-remove-btn"
-          title="Remove"
+          title="Remove business logo"
         >
           <Trash2 className="w-3 h-3" />
         </button>
@@ -105,7 +105,7 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
 }
 
 /** Cover banner — wide hero image at the top of the client header. */
-export function ClientCoverImage({ client, onUpdated }) {
+export function ClientCoverImage({ client, onUpdated, children }) {
   const { token } = useAuth();
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -150,7 +150,7 @@ export function ClientCoverImage({ client, onUpdated }) {
 
   return (
     <div
-      className="relative h-32 -mx-6 -mt-4 mb-4 overflow-hidden group"
+      className="group relative h-32 overflow-hidden rounded-t-2xl sm:h-36"
       style={{
         background: src
           ? `url(${src}) center/cover`
@@ -164,17 +164,18 @@ export function ClientCoverImage({ client, onUpdated }) {
         }} />
       )}
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} data-testid="client-cover-input" />
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button size="sm" variant="outline" className="h-7 text-[10px] bg-black/60 border-white/20 text-white" onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="client-cover-upload-btn">
+      <div className="absolute right-3 top-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        <Button size="sm" variant="outline" className="h-8 border-white/20 bg-black/60 text-[10px] text-white hover:bg-black/80" onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="client-cover-upload-btn">
           {uploading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <ImagePlus className="w-3 h-3 mr-1" />}
           {src ? "Change cover" : "Add cover"}
         </Button>
         {src && (
-          <Button size="sm" variant="outline" className="h-7 text-[10px] bg-rose-500/40 border-rose-400/40 text-white" onClick={handleRemove} data-testid="client-cover-remove-btn">
+          <Button size="sm" variant="outline" className="h-8 border-rose-400/40 bg-rose-500/40 text-white hover:bg-rose-500/60" onClick={handleRemove} data-testid="client-cover-remove-btn">
             <Trash2 className="w-3 h-3" />
           </Button>
         )}
       </div>
+      {children && <div className="absolute left-4 right-32 top-4 z-10">{children}</div>}
     </div>
   );
 }

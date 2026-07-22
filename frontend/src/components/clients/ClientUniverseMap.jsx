@@ -86,7 +86,7 @@ export default function ClientUniverseMap() {
             </div>
             <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
               <div><p className="text-zinc-500">MRR</p><p className="text-zinc-100 font-mono">{moneyShort(n.mrr)}</p></div>
-              <div><p className="text-zinc-500">Health</p><p className="font-mono" style={{ color: healthColor(n.health) }}>{n.health}</p></div>
+              <div><p className="text-zinc-500">Health</p><p className="font-mono" style={{ color: healthColor(n.health) }}>{Number.isFinite(n.health) ? n.health : "Not assessed"}</p></div>
               <div><p className="text-zinc-500">Devices</p><p className="text-zinc-100 font-mono">{n.devices}</p></div>
               <div><p className="text-zinc-500">Tickets</p><p className="text-zinc-100 font-mono">{n.open_tickets}</p></div>
             </div>

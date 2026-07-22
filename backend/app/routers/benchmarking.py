@@ -1,90 +1,71 @@
+"""Internal service-performance evidence without fabricated industry comparisons."""
+
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
-from datetime import datetime, timezone, timedelta
-from app.database import db
+
 from app.auth import get_current_user
+from app.database import db
+
 
 router = APIRouter()
+RESOLVED_STATUSES = ["resolved", "closed"]
 
-# Industry benchmarks (simulated averages)
-INDUSTRY_BENCHMARKS = {
-    "avg_resolution_hours": {"critical": 3.2, "high": 6.5, "medium": 14.0, "low": 36.0},
-    "avg_first_response_min": {"critical": 8, "high": 20, "medium": 45, "low": 120},
-    "avg_tickets_per_tech_day": 6.5,
-    "avg_client_satisfaction": 72,
-    "avg_sla_compliance": 88,
-    "avg_reopen_rate": 5.2,
-}
+
+def _duration_hours(ticket: dict):
+    try:
+        created = datetime.fromisoformat(str(ticket["created_at"]).replace("Z", "+00:00"))
+        resolved = datetime.fromisoformat(str(ticket["resolved_at"]).replace("Z", "+00:00"))
+        duration = (resolved - created).total_seconds() / 3600
+        return duration if duration >= 0 else None
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 @router.get("/benchmarking/overview")
 async def get_benchmarking(current_user: dict = Depends(get_current_user)):
-    """Get resolution time benchmarking against industry averages."""
-    # Calculate your MSP's actual metrics
-    total_resolved = await db.tickets.count_documents({"status": {"$in": ["resolved", "closed"]}})
-    total_tickets = await db.tickets.count_documents({})
+    """Return auditable internal ticket performance only.
 
-    # Resolution times by priority
-    your_metrics = {}
+    An external industry comparison is not shown until it is backed by a
+    configured, attributable source rather than hard-coded assumed averages.
+    """
+    total_resolved = await db.tickets.count_documents({"status": {"$in": RESOLVED_STATUSES}})
+    total_tickets = await db.tickets.count_documents({})
+    resolution_times = {}
+
     for priority in ["critical", "high", "medium", "low"]:
         tickets = await db.tickets.find(
-            {"priority": priority, "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
-            {"_id": 0, "created_at": 1, "resolved_at": 1}
-        ).to_list(200)
+            {"priority": priority, "status": {"$in": RESOLVED_STATUSES}, "resolved_at": {"$exists": True}},
+            {"_id": 0, "created_at": 1, "resolved_at": 1},
+        ).to_list(1000)
+        durations = [duration for ticket in tickets if (duration := _duration_hours(ticket)) is not None]
+        resolution_times[priority] = {
+            "average_hours": round(sum(durations) / len(durations), 1) if durations else None,
+            "sample_size": len(durations),
+        }
 
-        if tickets:
-            durations = []
-            for t in tickets:
-                try:
-                    ct = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-                    rt = datetime.fromisoformat(t["resolved_at"].replace("Z", "+00:00"))
-                    durations.append((rt - ct).total_seconds() / 3600)
-                except Exception:
-                    pass
-
-            avg_hours = sum(durations) / len(durations) if durations else 0
-            industry = INDUSTRY_BENCHMARKS["avg_resolution_hours"].get(priority, 10)
-            diff_pct = round(((industry - avg_hours) / industry) * 100, 1) if industry > 0 else 0
-
-            your_metrics[priority] = {
-                "your_avg_hours": round(avg_hours, 1),
-                "industry_avg_hours": industry,
-                "difference_pct": diff_pct,
-                "better_than_avg": avg_hours < industry,
-                "sample_size": len(durations),
-            }
-        else:
-            industry = INDUSTRY_BENCHMARKS["avg_resolution_hours"].get(priority, 10)
-            your_metrics[priority] = {
-                "your_avg_hours": 0, "industry_avg_hours": industry,
-                "difference_pct": 0, "better_than_avg": True, "sample_size": 0,
-            }
-
-    # Tech performance
-    techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
+    techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
     tech_metrics = []
-    for t in techs:
-        resolved = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["resolved", "closed"]}})
-        active = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
-        tech_metrics.append({
-            "id": t["id"], "name": t["name"],
-            "resolved": resolved, "active": active,
-            "vs_avg": round(((resolved / max(1, 30)) - INDUSTRY_BENCHMARKS["avg_tickets_per_tech_day"]) / INDUSTRY_BENCHMARKS["avg_tickets_per_tech_day"] * 100, 1),
-        })
+    for technician in techs:
+        resolved = await db.tickets.count_documents({"assigned_to": technician["id"], "status": {"$in": RESOLVED_STATUSES}})
+        active = await db.tickets.count_documents({"assigned_to": technician["id"], "status": {"$in": ["open", "in_progress", "pending"]}})
+        tech_metrics.append({"id": technician["id"], "name": technician.get("name") or "Technician", "resolved": resolved, "active": active})
+    team_average = round(sum(item["resolved"] for item in tech_metrics) / len(tech_metrics), 1) if tech_metrics else None
+    for item in tech_metrics:
+        item["vs_team_average"] = round(item["resolved"] - team_average, 1) if team_average is not None else None
 
-    # SLA compliance
     sla_met = await db.tickets.count_documents({"sla_met": True})
     sla_total = await db.tickets.count_documents({"sla_met": {"$exists": True}})
-    sla_compliance = round((sla_met / max(sla_total, 1)) * 100, 1)
-
     return {
-        "resolution_times": your_metrics,
-        "tech_performance": sorted(tech_metrics, key=lambda x: x["resolved"], reverse=True),
+        "resolution_times": resolution_times,
+        "tech_performance": sorted(tech_metrics, key=lambda item: item["resolved"], reverse=True),
         "overall": {
             "total_resolved": total_resolved,
             "total_tickets": total_tickets,
-            "sla_compliance": sla_compliance,
-            "industry_sla": INDUSTRY_BENCHMARKS["avg_sla_compliance"],
-            "sla_vs_industry": round(sla_compliance - INDUSTRY_BENCHMARKS["avg_sla_compliance"], 1),
+            "sla_compliance": round((sla_met / sla_total) * 100, 1) if sla_total else None,
+            "sla_sample_size": sla_total,
+            "team_average_resolved": team_average,
         },
-        "industry_benchmarks": INDUSTRY_BENCHMARKS,
+        "comparison_source": None,
+        "comparison_note": "External benchmarks are unavailable until an attributable source is configured.",
     }

@@ -100,11 +100,8 @@ class TestSystemRandomEndpoints:
     def test_hardware_refresh_overview(self):
         """Test hardware refresh endpoint works after SystemRandom change"""
         response = requests.get(f"{BASE_URL}/api/hardware-refresh/overview", headers=self.headers)
-        assert response.status_code == 200, f"Hardware refresh failed: {response.text}"
-        data = response.json()
-        assert "devices" in data, "No devices in response"
-        assert "summary" in data, "No summary in response"
-        print(f"✓ Hardware refresh works, {data['summary']['total_tracked']} devices tracked")
+        assert response.status_code == 410, f"Hardware refresh should be retired: {response.text}"
+        assert "Procurement Planner" in response.json()["detail"]
     
     def test_backup_verify_overview(self):
         """Test backup verify endpoint works after SystemRandom change"""

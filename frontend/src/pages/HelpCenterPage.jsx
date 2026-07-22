@@ -10,9 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BookOpen, Search, Loader2, Pencil, Plus, RefreshCw, ChevronRight, FileText, Sparkles, Image as ImageIcon, Send } from "lucide-react";
+import { BookOpen, Search, Loader2, Pencil, Plus, RefreshCw, ChevronRight, FileText, Sparkles, Image as ImageIcon, Send, CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import MarkdownIt from "markdown-it";
+import DOMPurify from "dompurify";
 
 const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
@@ -35,6 +36,7 @@ export default function HelpCenterPage() {
   const [active, setActive] = useState(null);
   const [loadingActive, setLoadingActive] = useState(false);
   const [q, setQ] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
@@ -106,18 +108,18 @@ export default function HelpCenterPage() {
   };
 
   const categories = Object.entries(list.by_category || {});
+  const searchSuggestions = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return (list.articles || []).filter((article) => [article.title, article.summary, article.category, article.slug]
+      .filter(Boolean).join(" ").toLowerCase().includes(query)).slice(0, 6);
+  }, [list.articles, q]);
 
   return (
     <PageShell>
       <div className="space-y-4" data-testid="help-center-page">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
-              <BookOpen className="w-3 h-3" />Help Center
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">How NexusOps works</h1>
-            <p className="text-sm text-muted-foreground">Searchable docs for every module, button and workflow.</p>
-          </div>
+        <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_28%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.20)] md:p-6">
+          <div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300"><CircleHelp className="h-3.5 w-3.5" />Product guidance</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><BookOpen className="h-6 w-6 text-cyan-200" />Help Centre</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Find the exact NexusMSP workflow, setting, action, and technician procedure without leaving the workspace.</p></div>
           <div className="flex items-center gap-2">
             {isAdmin && (
               <>
@@ -150,10 +152,16 @@ export default function HelpCenterPage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
               placeholder="Search articles, modules, slash commands…"
-              className="pl-8"
+              className="pl-8 pr-8"
               data-testid="help-search-input"
             />
+            {q && <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-zinc-500 hover:bg-white/5 hover:text-zinc-200" onMouseDown={(event) => event.preventDefault()} onClick={() => { setQ(""); reload(""); }}>×</button>}
+            {searchFocused && q.trim().length >= 2 && <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-cyan-400/20 bg-[linear-gradient(145deg,rgba(15,24,31,0.99),rgba(10,12,17,0.99))] shadow-2xl" data-testid="help-search-suggestions">
+              {searchSuggestions.length > 0 ? searchSuggestions.map((article) => <button key={article.slug} type="button" className="flex w-full items-start gap-2 border-b border-white/[0.05] px-3 py-2.5 text-left last:border-0 hover:bg-cyan-400/[0.07]" onMouseDown={(event) => event.preventDefault()} onClick={() => { setQ(article.title); setSearchFocused(false); open(article.slug); }} data-testid={`help-search-suggestion-${article.slug}`}><span className="mt-0.5 text-sm">{article.icon || "📘"}</span><span className="min-w-0"><span className="block truncate text-xs font-medium text-zinc-100">{article.title}</span><span className="mt-0.5 block truncate text-[10px] text-zinc-500">{article.category}{article.summary ? ` · ${article.summary}` : ""}</span></span></button>) : <div className="px-3 py-3 text-xs text-zinc-500">No matching guide. Press Enter to search the full Help Centre.</div>}
+            </div>}
           </div>
           <Button type="submit" variant="outline" size="sm" data-testid="help-search-btn">Search</Button>
         </form>
@@ -209,14 +217,14 @@ export default function HelpCenterPage() {
                 </div>
               )}
               {!loadingActive && active && (
-                <article className="space-y-4" data-testid="help-article">
-                  <header className="space-y-1 border-b border-border/50 pb-4">
-                    <div className="text-[10px] uppercase tracking-widest text-violet-400 flex items-center gap-2">
+                <article className="nx-help-doc space-y-5" data-testid="help-article">
+                  <header className="nx-help-doc__hero space-y-2">
+                    <div className="nx-help-doc__eyebrow flex items-center gap-2">
                       <span>{active.icon || "📘"}</span>{active.category}
                     </div>
-                    <h2 className="text-xl font-semibold tracking-tight" data-testid="help-article-title">{active.title}</h2>
-                    {active.summary && <p className="text-sm text-muted-foreground">{active.summary}</p>}
-                    <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground">
+                    <h2 data-testid="help-article-title">{active.title}</h2>
+                    {active.summary && <p className="nx-help-doc__summary">{active.summary}</p>}
+                    <div className="nx-help-doc__meta flex items-center gap-2 pt-1 text-[11px] text-muted-foreground">
                       <Badge variant="outline" className="text-[10px] py-0">{active.slug}</Badge>
                       {active.updated_at && <span>Updated {new Date(active.updated_at).toLocaleDateString()}</span>}
                       {isAdmin && (
@@ -243,9 +251,9 @@ export default function HelpCenterPage() {
                   <ArticleTOC body={active.body_md} />
 
                   <div
-                    className="help-prose text-sm leading-relaxed"
+                    className="help-prose nx-help-doc__body text-sm leading-relaxed"
                     data-testid="help-article-body"
-                    dangerouslySetInnerHTML={{ __html: renderWithIds(active.body_md || "") }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderWithIds(active.body_md || "")) }}
                   />
 
                   {Array.isArray(active.screenshots) && active.screenshots.length > 0 && (
@@ -262,7 +270,7 @@ export default function HelpCenterPage() {
                     </div>
                   )}
 
-                  <footer className="pt-4 border-t border-border/50 text-xs text-muted-foreground flex items-center justify-between flex-wrap gap-2">
+                  <footer className="nx-help-doc__footer text-xs text-muted-foreground flex items-center justify-between flex-wrap gap-2">
                     <span>Was this helpful? Tell us in <Link to="/help/chat-presence" className="text-violet-400 hover:underline">#general</Link>.</span>
                     <span>NexusOps Help · v1</span>
                   </footer>

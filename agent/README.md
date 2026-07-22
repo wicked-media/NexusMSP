@@ -18,6 +18,20 @@ Cross-platform RMM agent (Windows-first) for the NexusOps platform.
 - Phase 1: HTTPS long-poll. Phase 2 will upgrade transport to WebSocket.
 - Auto-update: agent compares `version` against `/api/nexus-agent/version` on each heartbeat.
 
+## Nexus Shield deployment profile
+
+Every newly generated Windows installer now includes the Nexus Shield profile:
+
+- Endpoint posture telemetry for Microsoft Defender, real-time protection, firewall, disk encryption and pending Windows updates.
+- Nexus Canary integrity monitoring every 30 seconds.
+- One default Canary sensor queued on first enrollment. The agent creates the
+  decoy and reports its SHA-256 fingerprint before the workspace marks it
+  active.
+
+The deployment profile is deliberately monitoring and detection only. It does
+not claim to install antivirus, silently alter protection settings, or isolate
+an endpoint automatically. Those actions remain explicit, reviewed workflows.
+
 ## Build
 
 ```bash
@@ -45,6 +59,39 @@ Run `install.bat` as Administrator.
 - `internal/telemetry/`        — system inventory collectors
 - `internal/transport/`        — HTTP client (with auth, retry)
 - `internal/splashtop/`        — Splashtop Streamer bootstrapper
+
+## Nexus Elevate (native endpoint privilege approvals)
+
+Nexus Elevate is available to every customer with an enrolled NexusOps Agent;
+it does not require Keeper EPM or any other third-party privilege product.
+
+The agent-side launch contract is deliberately narrow:
+
+- an endpoint companion submits a request through `/api/nexus-elevate/agent/requests`;
+- the request contains one absolute Windows `.exe` path, a SHA-256 fingerprint,
+  a plain argv array, endpoint/user context and justification;
+- a permitted NexusMSP technician approves or denies the request in the Nexus
+  Elevate workspace; and
+- on approval, this agent receives `elevate_launch`, rechecks the approval
+  expiry and SHA-256 immediately before invoking the exact executable.
+
+The command never invokes `cmd`, PowerShell or a shell parser. A hash mismatch,
+expired approval or malformed request fails safely and is reported to the
+NexusMSP audit trail. The initial native contract is Windows-first and covers
+controlled approved launches; OS-wide UAC interception belongs to the signed
+user-session companion and service-hardening rollout.
+
+### User-session companion
+
+The `nexus-client-chat.exe` companion is included in current installer packs.
+It opens a local-only window at `http://127.0.0.1:5967` for client chat and
+**Request administrator access**. The companion fingerprints the selected
+executable locally, relays the request with the protected agent token, and
+polls the technician decision. The browser window never receives the token.
+
+The installer and the managed rollout both add **Nexus Client Chat** to the
+Windows Start Menu under **NexusMSP**. It is deliberately user launched: the
+background service does not inject a GUI into an endpoint user's session.
 
 ## Phase status
 

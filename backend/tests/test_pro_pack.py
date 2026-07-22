@@ -477,28 +477,6 @@ class TestStocktakeMobile:
         print(f"✓ Stocktake session: {data['items_counted']} items")
 
 
-# ============== CYBER INSURANCE EXPORT TESTS ==============
-class TestCyberInsuranceExport:
-    """Cyber Insurance Export tests"""
-    
-    def test_cyber_insurance_export(self, headers):
-        """GET /pro-pack/cyber-insurance-export/{client_id} returns control posture"""
-        # Get a client first
-        clients_r = requests.get(f"{BASE_URL}/api/clients", headers=headers)
-        if clients_r.status_code != 200 or not clients_r.json():
-            pytest.skip("No clients available")
-        
-        client_id = clients_r.json()[0]["id"]
-        r = requests.get(f"{BASE_URL}/api/pro-pack/cyber-insurance-export/{client_id}", headers=headers)
-        assert r.status_code == 200
-        data = r.json()
-        assert "client_id" in data
-        assert "controls" in data
-        assert "endpoints_managed" in data["controls"]
-        assert "mfa_enrolled_pct" in data["controls"]
-        print(f"✓ Cyber insurance export for {data['client_name']}")
-
-
 # ============== NPS SUMMARY TESTS ==============
 class TestNpsSummary:
     """NPS Summary tests"""

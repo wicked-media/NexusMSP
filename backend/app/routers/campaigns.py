@@ -66,7 +66,7 @@ async def send_campaign(campaign_id: str, current_user: dict = Depends(get_curre
         manual_ids = campaign.get("recipient_list", [])
         clients = await db.clients.find({"id": {"$in": manual_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(500)
 
-    # Simulate sending (in production, integrate with Resend/SendGrid)
+    # Simulate sending (in production, use the configured Microsoft 365 delivery service)
     sent_count = len(clients)
     await db.campaigns.update_one({"id": campaign_id}, {"$set": {
         "status": "sent",

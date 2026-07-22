@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,48 +21,12 @@ import {
 } from "lucide-react";
 
 export default function BillingProPage() {
-  const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
-  const [tab, setTab] = useState("numbering");
-
-  return (
-    <div className="space-y-5 p-6" data-testid="billing-pro-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 via-cyan-600 to-violet-700 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            Billing Pro
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm">Best-in-class controls for invoices, products & recurring billing.</p>
-        </div>
-      </div>
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="numbering"><Hash className="w-3.5 h-3.5 mr-1" />Numbering</TabsTrigger>
-          <TabsTrigger value="approval"><FileCheck className="w-3.5 h-3.5 mr-1" />Approval</TabsTrigger>
-          <TabsTrigger value="tax"><Receipt className="w-3.5 h-3.5 mr-1" />Tax / GST</TabsTrigger>
-          <TabsTrigger value="mrr"><TrendingUp className="w-3.5 h-3.5 mr-1" />MRR Analytics</TabsTrigger>
-          <TabsTrigger value="calendar"><Calendar className="w-3.5 h-3.5 mr-1" />Generation Calendar</TabsTrigger>
-          <TabsTrigger value="warehouses"><Warehouse className="w-3.5 h-3.5 mr-1" />Warehouses</TabsTrigger>
-          <TabsTrigger value="po"><ShoppingCart className="w-3.5 h-3.5 mr-1" />Purchase Orders</TabsTrigger>
-          <TabsTrigger value="snapshot"><Layers className="w-3.5 h-3.5 mr-1" />Inventory Snapshot</TabsTrigger>
-          <TabsTrigger value="import"><Upload className="w-3.5 h-3.5 mr-1" />Bulk Import</TabsTrigger>
-        </TabsList>
-        <TabsContent value="numbering"><NumberingPanel headers={headers} /></TabsContent>
-        <TabsContent value="approval"><ApprovalPanel headers={headers} /></TabsContent>
-        <TabsContent value="tax"><TaxPanel headers={headers} /></TabsContent>
-        <TabsContent value="mrr"><MRRPanel headers={headers} /></TabsContent>
-        <TabsContent value="calendar"><CalendarPanel headers={headers} /></TabsContent>
-        <TabsContent value="warehouses"><WarehousesPanel headers={headers} /></TabsContent>
-        <TabsContent value="po"><POPanel headers={headers} /></TabsContent>
-        <TabsContent value="snapshot"><SnapshotPanel headers={headers} /></TabsContent>
-        <TabsContent value="import"><BulkImportPanel headers={headers} /></TabsContent>
-      </Tabs>
-    </div>
-  );
+  const navigate = useNavigate();
+  useEffect(() => {
+    toast.info("Billing Pro has been consolidated into the relevant workspaces.");
+    navigate("/billing-dashboard", { replace: true });
+  }, [navigate]);
+  return null;
 }
 
 /* ============== Numbering Panel ============== */

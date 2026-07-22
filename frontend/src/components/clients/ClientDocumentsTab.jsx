@@ -124,11 +124,18 @@ export default function ClientDocumentsTab({ client }) {
   });
 
   const categories = ["general", "credentials", "network", "passwords", "policy", "contract"];
+  const fileCount = docs.filter((doc) => doc.kind === "file").length;
+  const runbookCount = docs.filter((doc) => doc.kind === "runbook").length;
 
   return (
     <div className="space-y-4" data-testid="client-documents-tab">
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.08] via-background to-background p-4 md:p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10"><FileText className="h-5 w-5 text-violet-300" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">Client knowledge</p><h2 className="mt-1 text-lg font-bold tracking-tight">Documents & runbooks</h2><p className="mt-1 text-sm text-muted-foreground">Keep client files, site procedures and technician notes together with a clear operational record.</p></div></div>
+          <div className="flex flex-wrap gap-2"><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-200">{fileCount} files</Badge><Badge variant="outline" className="border-violet-500/25 bg-violet-500/[0.08] text-violet-200">{runbookCount} runbooks</Badge></div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap rounded-xl border border-border/60 bg-card/40 p-3">
         <Button size="sm" onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="docs-upload-btn">
           {uploading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Upload className="w-3 h-3 mr-1" />}
           Upload File
@@ -194,7 +201,7 @@ export default function ClientDocumentsTab({ client }) {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                <div className="flex gap-0.5">
                   {doc.kind === "runbook" && (
                     <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditRunbook(doc)} data-testid={`doc-edit-${doc.id}`}>
                       <BookOpen className="w-3 h-3" />

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Network, Server, Monitor, Laptop, Wifi, Loader2, RefreshCw, Globe, Printer, HardDrive, Shield } from "lucide-react";
+import { Network, Server, Monitor, Laptop, Wifi, Loader2, RefreshCw, Globe, Printer, HardDrive, Shield, Users, AlertTriangle } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, router: Globe, switch: Network, firewall: Shield, printer: Printer, other: HardDrive };
 const STATUS_COLORS = { online: "#10b981", offline: "#ef4444", warning: "#f59e0b", unknown: "#6b7280" };
@@ -102,47 +104,65 @@ export default function TopologyPage() {
   const [loading, setLoading] = useState(true);
   const [topoLoading, setTopoLoading] = useState(false);
 
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const res = await axios.get(`${API}/topology/all`, { headers });
-        setClients(res.data);
-        if (res.data.length > 0) {
-          setSelectedClient(res.data[0].client_id);
-        }
-      } catch { toast.error("Failed to load topology data"); }
-      finally { setLoading(false); }
-    };
-    fetch();
+  const loadClients = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API}/topology/all`, { headers });
+      setClients(res.data);
+      setSelectedClient(current => current || res.data[0]?.client_id || "");
+    } catch { toast.error("Failed to load topology data"); }
+    finally { setLoading(false); }
   }, [headers]);
 
-  useEffect(() => {
-    if (!selectedClient) return;
-    const fetchTopo = async () => {
-      setTopoLoading(true);
-      try {
-        const res = await axios.get(`${API}/topology/${selectedClient}`, { headers });
-        setTopology(res.data);
-      } catch { toast.error("Failed to load topology"); }
-      finally { setTopoLoading(false); }
-    };
-    fetchTopo();
-  }, [selectedClient, headers]);
+  const loadTopology = useCallback(async (clientId) => {
+    if (!clientId) return;
+    setTopoLoading(true);
+    try {
+      const res = await axios.get(`${API}/topology/${clientId}`, { headers });
+      setTopology(res.data);
+    } catch { toast.error("Failed to load topology"); }
+    finally { setTopoLoading(false); }
+  }, [headers]);
+
+  useEffect(() => { loadClients(); }, [loadClients]);
+  useEffect(() => { loadTopology(selectedClient); }, [selectedClient, loadTopology]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  const selectedClientSummary = clients.find(client => client.client_id === selectedClient);
+  const topologyStats = topology?.stats || {};
+
   return (
-    <div className="space-y-5" data-testid="topology-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Network className="w-6 h-6 text-cyan-400" />Network Topology</h1><p className="text-muted-foreground mt-1">Visual network maps for each client</p></div>
-        <Select value={selectedClient} onValueChange={setSelectedClient}>
-          <SelectTrigger className="w-[280px]" data-testid="client-select"><SelectValue placeholder="Select client..." /></SelectTrigger>
-          <SelectContent>{clients.map(c => <SelectItem key={c.client_id} value={c.client_id}>{c.client_name} ({c.device_count} devices)</SelectItem>)}</SelectContent>
-        </Select>
+    <div className="space-y-6" data-testid="topology-page">
+      <OperationalPageHeader
+        eyebrow="Network workspace · topology"
+        title="Network topology"
+        description="Visual maps of each client network, with a current device health snapshot for fast triage and documentation."
+        icon={Network}
+        tone="sky"
+        actions={(
+          <>
+            <Select value={selectedClient} onValueChange={setSelectedClient}>
+              <SelectTrigger className="w-[280px]" data-testid="client-select"><SelectValue placeholder="Select client..." /></SelectTrigger>
+              <SelectContent>{clients.map(c => <SelectItem key={c.client_id} value={c.client_id}>{c.client_name} ({c.device_count} devices)</SelectItem>)}</SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={async () => { await loadClients(); await loadTopology(selectedClient); }} disabled={loading || topoLoading} data-testid="topology-refresh-btn">
+              {topoLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
+            </Button>
+          </>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <HeroTile label="Client networks" value={clients.length} icon={Users} glow="sky" subtitle="Available topology maps" />
+        <HeroTile label="Selected devices" value={topologyStats.total_devices ?? selectedClientSummary?.device_count ?? 0} icon={Monitor} glow="indigo" subtitle={topology?.client_name || "Select a client"} />
+        <HeroTile label="Online" value={topologyStats.online ?? 0} icon={Wifi} glow="emerald" subtitle="Nodes reporting normally" />
+        <HeroTile label="Offline" value={topologyStats.offline ?? 0} icon={AlertTriangle} glow={(topologyStats.offline ?? 0) > 0 ? "rose" : "zinc"} subtitle={(topologyStats.offline ?? 0) > 0 ? "Review device connectivity" : "No offline nodes"} />
+        <HeroTile label="Topology health" value={selectedClientSummary?.health_pct ?? 0} suffix="%" icon={Network} glow="violet" subtitle="Selected client health" />
       </div>
 
       {/* Client Cards */}
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {clients.slice(0, 10).map(c => (
           <Card key={c.client_id}
             className={`cursor-pointer transition-all hover:border-primary/30 ${selectedClient === c.client_id ? "border-primary ring-1 ring-primary" : ""}`}

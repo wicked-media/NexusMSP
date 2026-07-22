@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
+import re
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
@@ -11,22 +12,53 @@ router = APIRouter()
 
 
 # These IDs are the stable access controls used by the API. Administrators can
-# customise their display labels, but cannot alter the underlying IDs or remove
-# the protected administrator role.
+# customise their display labels and add organisation-specific standard roles,
+# but cannot alter the protected administrator role or the built-in role IDs.
 DEFAULT_ACCESS_ROLES = [
-    {"id": "technician", "label": "Technician", "description": "Works assigned service requests and client systems.", "protected": False},
-    {"id": "service_desk_manager", "label": "Service Desk Manager", "description": "Leads service-desk operations and technician workflows.", "protected": False},
-    {"id": "dispatcher", "label": "Dispatcher", "description": "Coordinates queues, scheduling and client communication.", "protected": False},
-    {"id": "admin", "label": "Administrator", "description": "Full platform and team access. Elevated access is protected and audited.", "protected": True},
+    {"id": "technician", "label": "Technician", "description": "Works assigned service requests and client systems.", "protected": False, "custom": False},
+    {"id": "service_desk_manager", "label": "Service Desk Manager", "description": "Leads service-desk operations and technician workflows.", "protected": False, "custom": False},
+    {"id": "dispatcher", "label": "Dispatcher", "description": "Coordinates queues, scheduling and client communication.", "protected": False, "custom": False},
+    {"id": "admin", "label": "Administrator", "description": "Full platform and team access. Elevated access is protected and audited.", "protected": True, "custom": False},
 ]
 
 ACCESS_ROLE_IDS = {role["id"] for role in DEFAULT_ACCESS_ROLES}
+ROLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,48}$")
 
 
 async def _access_roles() -> list:
     stored = await db.settings.find_one({"key": "access_role_catalogue"}, {"_id": 0, "value": 1}) or {}
-    custom = {item.get("id"): item for item in stored.get("value", []) if item.get("id")}
-    return [{**role, **{key: custom[role["id"]][key] for key in ("label", "description") if key in custom.get(role["id"], {})}} for role in DEFAULT_ACCESS_ROLES]
+    stored_roles = [item for item in stored.get("value", []) if isinstance(item, dict) and item.get("id")]
+    overrides = {item.get("id"): item for item in stored_roles}
+    roles = [
+        {
+            **role,
+            **{key: overrides[role["id"]][key] for key in ("label", "description") if key in overrides.get(role["id"], {})},
+        }
+        for role in DEFAULT_ACCESS_ROLES
+    ]
+
+    # Custom roles are labels and workflow classifications. Access remains
+    # permission-preset based; only the protected administrator role grants
+    # platform-wide administrator access.
+    for item in stored_roles:
+        role_id = str(item.get("id", "")).strip().lower()
+        if role_id in ACCESS_ROLE_IDS or not ROLE_ID_PATTERN.fullmatch(role_id):
+            continue
+        label = str(item.get("label", "")).strip()
+        description = str(item.get("description", "")).strip()
+        if 2 <= len(label) <= 50 and len(description) <= 180:
+            roles.append({
+                "id": role_id,
+                "label": label,
+                "description": description,
+                "protected": False,
+                "custom": True,
+            })
+    return roles
+
+
+async def _access_role_ids() -> set:
+    return {role["id"] for role in await _access_roles()}
 
 
 async def _caller_is_admin(current_user: dict) -> bool:
@@ -47,25 +79,54 @@ async def update_access_roles(data: dict, current_user: dict = Depends(get_curre
     requested = data.get("roles")
     if not isinstance(requested, list):
         raise HTTPException(status_code=400, detail="A role catalogue is required")
-    expected_ids = {role["id"] for role in DEFAULT_ACCESS_ROLES}
-    by_id = {item.get("id"): item for item in requested if isinstance(item, dict) and item.get("id")}
-    if set(by_id) != expected_ids:
-        raise HTTPException(status_code=400, detail="Access role IDs cannot be added, removed or changed")
+    normalised = []
+    for item in requested:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="Each access role must be a valid record")
+        role_id = str(item.get("id", "")).strip().lower()
+        if not ROLE_ID_PATTERN.fullmatch(role_id):
+            raise HTTPException(status_code=400, detail="Role IDs must use lowercase letters, numbers and underscores")
+        normalised.append({**item, "id": role_id})
+
+    by_id = {item["id"]: item for item in normalised}
+    if len(by_id) != len(normalised):
+        raise HTTPException(status_code=400, detail="Each access role needs a unique ID")
+
+    required_ids = {role["id"] for role in DEFAULT_ACCESS_ROLES}
+    missing_required = required_ids - set(by_id)
+    if missing_required:
+        raise HTTPException(status_code=400, detail="Built-in access roles cannot be removed")
 
     cleaned = []
     labels = set()
-    for role in DEFAULT_ACCESS_ROLES:
-        item = by_id[role["id"]]
+    ordered_ids = [role["id"] for role in DEFAULT_ACCESS_ROLES] + [item["id"] for item in normalised if item["id"] not in required_ids]
+    for role_id in ordered_ids:
+        item = by_id[role_id]
         label = str(item.get("label", "")).strip()
         description = str(item.get("description", "")).strip()
         if not 2 <= len(label) <= 50:
-            raise HTTPException(status_code=400, detail=f"{role['id']} needs a name between 2 and 50 characters")
+            raise HTTPException(status_code=400, detail=f"{role_id} needs a name between 2 and 50 characters")
         if len(description) > 180:
             raise HTTPException(status_code=400, detail="Role descriptions must be 180 characters or less")
         if label.casefold() in labels:
             raise HTTPException(status_code=400, detail="Each access role needs a unique name")
         labels.add(label.casefold())
-        cleaned.append({"id": role["id"], "label": label, "description": description})
+        cleaned.append({
+            "id": role_id,
+            "label": label,
+            "description": description,
+            "custom": role_id not in required_ids,
+        })
+
+    # A role can only be retired after its members and pending invitations are
+    # moved to another role. This prevents silent changes to staff access data.
+    current_ids = await _access_role_ids()
+    retired_ids = current_ids - set(by_id)
+    if retired_ids:
+        assigned = await db.users.count_documents({"role": {"$in": list(retired_ids)}})
+        invited = await db.tech_invites.count_documents({"role": {"$in": list(retired_ids)}, "status": "pending"})
+        if assigned or invited:
+            raise HTTPException(status_code=400, detail="Reassign staff and pending invitations before retiring a custom role")
 
     await db.settings.update_one(
         {"key": "access_role_catalogue"},
@@ -140,6 +201,9 @@ async def bulk_action_technicians(data: dict, current_user: dict = Depends(get_c
         await db.users.update_many({"id": {"$in": ids}}, {"$set": {"categories": categories}})
         return {"message": f"Categories updated for {len(ids)} technicians"}
     elif action == "delete":
+        active_count = await db.users.count_documents({"id": {"$in": ids}, "archived": {"$ne": True}})
+        if active_count:
+            raise HTTPException(status_code=400, detail="Archive technicians before permanent deletion")
         await db.users.delete_many({"id": {"$in": ids}})
         return {"message": f"{len(ids)} technicians permanently deleted"}
     raise HTTPException(status_code=400, detail="Invalid action")
@@ -156,7 +220,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     if not name or not email:
         raise HTTPException(status_code=400, detail="Name and email are required")
     role = str(tech_data.get("role") or "technician").strip().lower()
-    if role not in ACCESS_ROLE_IDS:
+    if role not in await _access_role_ids():
         raise HTTPException(status_code=400, detail="Choose a valid access role")
     if await db.users.find_one({"email": email}, {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -213,7 +277,7 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
     update = {k: v for k, v in tech_data.items() if k in allowed}
     if "role" in update:
         update["role"] = str(update["role"] or "").strip().lower()
-        if update["role"] not in ACCESS_ROLE_IDS:
+        if update["role"] not in await _access_role_ids():
             raise HTTPException(status_code=400, detail="Choose a valid access role")
     if "hourly_rate" in update:
         update["hourly_rate"] = float(update["hourly_rate"])
@@ -247,14 +311,34 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
     return {"message": "Technician updated"}
 
 @router.post("/technicians/{tech_id}/archive")
-async def archive_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
+async def archive_technician(tech_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Only admins can archive technicians")
+    if tech_id == current_user.get("id"):
+        raise HTTPException(status_code=400, detail="You cannot archive your own account")
+    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if target.get("archived"):
+        return {"message": "Technician is already archived"}
+    if target.get("is_admin") or target.get("role") == "admin":
+        active_admins = await db.users.count_documents({
+            "archived": {"$ne": True},
+            "$or": [{"is_admin": True}, {"role": "admin"}],
+        })
+        if active_admins <= 1:
+            raise HTTPException(status_code=400, detail="Keep at least one active administrator account")
+    archive_reason = str((data or {}).get("reason", "")).strip()[:500]
+    archived_at = datetime.now(timezone.utc).isoformat()
     await db.users.update_one({"id": tech_id}, {"$set": {
         "is_active": False, "archived": True,
-        "archived_at": datetime.now(timezone.utc).isoformat()
+        "archived_at": archived_at,
+        "archived_by": current_user.get("id"),
+        "archive_reason": archive_reason,
     }})
+    from app.routers.tech_intel import _log_audit
+    await _log_audit(caller, "technician_archived", tech_id, target.get("name", "Technician"), {"reason": archive_reason, "archived_at": archived_at})
     return {"message": "Technician archived"}
 
 @router.post("/technicians/{tech_id}/restore")
@@ -262,9 +346,18 @@ async def restore_technician(tech_id: str, current_user: dict = Depends(get_curr
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Only admins can restore technicians")
+    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if not target.get("archived"):
+        raise HTTPException(status_code=400, detail="Technician is not archived")
     await db.users.update_one({"id": tech_id}, {"$set": {
-        "is_active": True, "archived": False, "archived_at": None
+        "is_active": True, "archived": False, "archived_at": None,
+        "restored_at": datetime.now(timezone.utc).isoformat(),
+        "restored_by": current_user.get("id"),
     }})
+    from app.routers.tech_intel import _log_audit
+    await _log_audit(caller, "technician_restored", tech_id, target.get("name", "Technician"), {})
     return {"message": "Technician restored"}
 
 @router.delete("/technicians/{tech_id}")
@@ -272,6 +365,15 @@ async def delete_technician(tech_id: str, current_user: dict = Depends(get_curre
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Only admins can permanently delete technicians")
+    if tech_id == current_user.get("id"):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if not target.get("archived"):
+        raise HTTPException(status_code=400, detail="Archive the technician before permanent deletion")
+    from app.routers.tech_intel import _log_audit
+    await _log_audit(caller, "technician_deleted", tech_id, target.get("name", "Technician"), {"archived_at": target.get("archived_at")})
     await db.users.delete_one({"id": tech_id})
     return {"message": "Technician permanently deleted"}
 

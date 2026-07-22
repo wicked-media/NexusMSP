@@ -157,8 +157,8 @@ class TestPricingCalculator:
 
 
 # ─── 5. Comms Timeline Tests ───
-class TestCommsTimeline:
-    """Communication Timeline - /comms-timeline endpoints"""
+class TestCommsTimelineCompatibility:
+    """Retired Comms Timeline API only exposes genuine client communication records."""
     
     def test_overview(self, headers):
         """Test GET /api/comms-timeline/overview - returns list of clients"""
@@ -167,7 +167,7 @@ class TestCommsTimeline:
         data = response.json()
         # Note: This endpoint returns a list, not an object
         assert isinstance(data, list), "Overview should return a list"
-        assert len(data) > 0, "Should have at least one client"
+        assert len(data) > 0, "Should list real clients even when no mail has been sent"
         client = data[0]
         assert "client_name" in client
         assert "total_interactions" in client
@@ -175,7 +175,8 @@ class TestCommsTimeline:
     
     def test_client_detail(self, headers):
         """Test GET /api/comms-timeline/client/{name}"""
-        client_name = "TechStart Inc"
+        overview = requests.get(f"{BASE_URL}/api/comms-timeline/overview", headers=headers).json()
+        client_name = overview[0]["client_name"]
         response = requests.get(f"{BASE_URL}/api/comms-timeline/client/{client_name}", headers=headers)
         assert response.status_code == 200
         data = response.json()

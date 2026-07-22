@@ -21,13 +21,16 @@ type Loop struct {
 
 func NewLoop(tr *transport.Client, cfg *config.Config, version string, fallback time.Duration) *Loop {
 	every := time.Duration(cfg.HeartbeatSecs) * time.Second
-	if every <= 0 { every = fallback }
+	if every <= 0 {
+		every = fallback
+	}
 	return &Loop{tr: tr, cfg: cfg, version: version, every: every}
 }
 
 type payload struct {
 	AgentVersion string             `json:"agent_version"`
 	Snapshot     telemetry.Snapshot `json:"snapshot"`
+	Capabilities []string           `json:"capabilities,omitempty"`
 }
 
 type heartbeatResponse struct {
@@ -53,7 +56,7 @@ func (l *Loop) Run(ctx context.Context) {
 
 func (l *Loop) sendOnce() {
 	snap := telemetry.Collect()
-	p := payload{AgentVersion: l.version, Snapshot: snap}
+	p := payload{AgentVersion: l.version, Snapshot: snap, Capabilities: l.cfg.ShieldCapabilities()}
 	var resp heartbeatResponse
 	if err := l.tr.Do("POST", "/api/nexus-agent/heartbeat", p, &resp); err != nil {
 		log.Printf("[heartbeat] error: %v", err)

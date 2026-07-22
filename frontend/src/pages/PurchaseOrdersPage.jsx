@@ -9,23 +9,28 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 import {
   Plus, Search, Loader2, FileText, Edit, Trash2, DollarSign, Package,
   Truck, CheckCircle, Clock, ArrowLeft, Send, XCircle, Eye, ShoppingCart,
   AlertTriangle, Scan, History, ChevronRight, PackageCheck, Box, RefreshCw,
   BellRing, Mail, Download, Copy, ThumbsUp, ThumbsDown, MessageSquare,
-  BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers
+  BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers, Check, ChevronsUpDown,
+  MoreHorizontal, ChevronDown, Building2
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
   pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
@@ -42,6 +47,76 @@ const ITEM_STATUS_CONFIG = {
   partial: { label: "Partial", class: "bg-amber-500/20 text-amber-400", icon: PackageCheck },
   received: { label: "Received", class: "bg-green-500/20 text-green-400", icon: CheckCircle },
 };
+
+function SearchableSelect({
+  options,
+  value,
+  onValueChange,
+  placeholder = "Choose an option…",
+  searchPlaceholder = "Type to search…",
+  emptyMessage = "No matching options found.",
+  testId,
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchingOptions = normalizedQuery
+    ? options.filter((option) => `${option.label || ""} ${option.detail || ""} ${option.searchText || ""}`.toLowerCase().includes(normalizedQuery))
+    : options;
+  const selectedOption = options.find((option) => option.value === value);
+
+  return (
+    <Popover open={open} onOpenChange={(nextOpen) => {
+      setOpen(nextOpen);
+      if (!nextOpen) setQuery("");
+    }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          data-testid={testId}
+          className="h-10 w-full justify-between border-white/10 bg-black/10 px-3 text-left font-normal hover:border-cyan-400/35 hover:bg-cyan-400/[0.04]"
+        >
+          <span className={selectedOption ? "truncate text-zinc-100" : "truncate text-muted-foreground"}>{selectedOption?.label || placeholder}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-cyan-300/70" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] overflow-hidden border-cyan-400/25 bg-[#0b151d] p-0 shadow-2xl">
+        <Command shouldFilter={false}>
+          <CommandInput autoFocus placeholder={searchPlaceholder} data-testid={`${testId}-search`} value={query} onValueChange={setQuery} />
+          <CommandList>
+            {matchingOptions.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+            ) : (
+              <CommandGroup heading={`${matchingOptions.length} matching option${matchingOptions.length === 1 ? "" : "s"}`}>
+                {matchingOptions.map((option) => (
+                  <CommandItem
+                    key={option.value}
+                    value={option.value}
+                    onSelect={() => {
+                      onValueChange(option.value);
+                      setQuery("");
+                      setOpen(false);
+                    }}
+                    className="py-2"
+                  >
+                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${value === option.value ? "opacity-100 text-emerald-300" : "opacity-0"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{option.label}</span>
+                      {option.detail && <span className="block truncate text-[11px] text-muted-foreground">{option.detail}</span>}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export default function PurchaseOrdersPage() {
   const { token } = useAuth();
@@ -194,7 +269,11 @@ export default function PurchaseOrdersPage() {
   };
 
   const addLineItem = () => setForm(f => ({
-    ...f, line_items: [...f.line_items, { product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending" }]
+    ...f, line_items: [...f.line_items, {
+      product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending",
+      destination_type: "stock", destination_ticket_id: "", destination_ticket_number: "", destination_ticket_title: "",
+      destination_technician_id: "", destination_technician_name: "", arrival_notified: false,
+    }]
   }));
 
   const updateLineItem = (idx, field, value) => {
@@ -204,6 +283,22 @@ export default function PurchaseOrdersPage() {
       if (field === "product_id") {
         const prod = products.find(p => p.id === value);
         if (prod) { items[idx].product_name = prod.name; items[idx].unit_price = prod.cost_price; }
+      }
+      if (field === "destination_type" && value === "stock") {
+        Object.assign(items[idx], {
+          destination_ticket_id: "", destination_ticket_number: "", destination_ticket_title: "",
+          destination_technician_id: "", destination_technician_name: "",
+        });
+      }
+      if (field === "destination_ticket_id") {
+        const ticket = tickets.find(t => t.id === value);
+        Object.assign(items[idx], {
+          destination_ticket_id: value,
+          destination_ticket_number: ticket?.ticket_number || "",
+          destination_ticket_title: ticket?.title || "",
+          destination_technician_id: ticket?.assigned_to || "",
+          destination_technician_name: ticket?.assigned_name || "",
+        });
       }
       return { ...f, line_items: items };
     });
@@ -349,7 +444,7 @@ export default function PurchaseOrdersPage() {
 
   // --- Receive Stock ---
   const openReceiveDialog = (po) => {
-    const items = (po.line_items || []).filter(li => (li.received_qty || 0) < li.quantity);
+    const items = (po.line_items || []).map((li, line_index) => ({ ...li, line_index })).filter(li => (li.received_qty || 0) < li.quantity);
     setReceiveItems(items.map(li => ({ ...li, receive_now: 0 })));
     setReceiveDialog(true);
   };
@@ -357,7 +452,7 @@ export default function PurchaseOrdersPage() {
   const handleReceiveStock = async () => {
     if (!viewPO) return;
     const items = receiveItems.filter(ri => ri.receive_now > 0).map(ri => ({
-      product_id: ri.product_id, product_name: ri.product_name, quantity: ri.receive_now
+      line_index: ri.line_index, product_id: ri.product_id, product_name: ri.product_name, quantity: ri.receive_now
     }));
     if (items.length === 0) { toast.error("No items to receive"); return; }
     try {
@@ -373,9 +468,23 @@ export default function PurchaseOrdersPage() {
     if (!scannerInput.trim()) return;
     const prod = products.find(p => p.barcode === scannerInput.trim() || p.sku === scannerInput.trim());
     if (prod) {
-      setReceiveItems(prev => prev.map(ri =>
-        ri.product_id === prod.id ? { ...ri, receive_now: Math.min(ri.receive_now + 1, ri.quantity - (ri.received_qty || 0)) } : ri
-      ));
+      const hasOpenLine = receiveItems.some(ri => ri.product_id === prod.id && ri.receive_now < (ri.quantity - (ri.received_qty || 0)));
+      if (!hasOpenLine) {
+        toast.error(`No remaining ${prod.name} lines to receive`);
+        setScannerInput("");
+        return;
+      }
+      setReceiveItems(prev => {
+        // Receive a single matching line at a time. The same product can be
+        // ordered for two tickets, so incrementing every match would assign a
+        // scan to the wrong technician-owned line.
+        const targetIndex = prev.findIndex(ri => ri.product_id === prod.id && ri.receive_now < (ri.quantity - (ri.received_qty || 0)));
+        if (targetIndex < 0) return prev;
+        return prev.map((ri, index) => index === targetIndex
+          ? { ...ri, receive_now: Math.min(ri.receive_now + 1, ri.quantity - (ri.received_qty || 0)) }
+          : ri
+        );
+      });
       toast.success(`Scanned: ${prod.name}`);
     } else { toast.error(`Product not found: ${scannerInput}`); }
     setScannerInput(""); scanRef.current?.focus();
@@ -455,53 +564,85 @@ export default function PurchaseOrdersPage() {
   // ========== FORM DIALOG ==========
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader><DialogTitle>{editing ? `Edit ${editing.po_number}` : "New Purchase Order"}</DialogTitle></DialogHeader>
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+      <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+        <DialogHeader className="shrink-0 border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)] px-6 py-5 pr-14">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Procurement workspace</p>
+          <DialogTitle className="mt-1 flex items-center gap-2 text-2xl tracking-tight text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><ShoppingCart className="h-4 w-4 text-emerald-300" /></span>{editing ? `Edit ${editing.po_number}` : "Create purchase order"}</DialogTitle>
+          <p className="mt-2 text-sm text-zinc-400">Link vendor, client, ticket and catalogue items in one auditable procurement record. Approvals, receiving, supplier invoices, and exceptions are retained in the PO history.</p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5 pr-6">
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Vendor *</Label>
-              <Select value={form.vendor_id || "__manual"} onValueChange={v => {
-                if (v === "__manual") { setForm(f => ({ ...f, vendor_id: "", vendor: "", vendor_contact: "", vendor_email: "" })); return; }
-                const vnd = vendors.find(x => x.id === v);
-                if (vnd) setForm(f => ({ ...f, vendor_id: v, vendor: vnd.name, vendor_contact: vnd.contact_name || "", vendor_email: vnd.email || "" }));
-              }}>
-                <SelectTrigger data-testid="po-vendor-select"><SelectValue placeholder="Select vendor" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__manual">Type manually</SelectItem>
-                  {vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                testId="po-vendor-select"
+                value={form.vendor_id || "__manual"}
+                placeholder="Search a vendor…"
+                searchPlaceholder="Search vendor name or email…"
+                options={[
+                  { value: "__manual", label: "Type vendor manually", detail: "Enter a supplier not yet in NexusMSP", searchText: "manual new supplier" },
+                  ...vendors.map(vendor => ({ value: vendor.id, label: vendor.name || "Untitled vendor", detail: vendor.email || vendor.contact_name || "Vendor record", searchText: `${vendor.name || ""} ${vendor.email || ""} ${vendor.contact_name || ""}` })),
+                ]}
+                onValueChange={v => {
+                  if (v === "__manual") { setForm(f => ({ ...f, vendor_id: "", vendor: "", vendor_contact: "", vendor_email: "" })); return; }
+                  const vnd = vendors.find(x => x.id === v);
+                  if (vnd) setForm(f => ({ ...f, vendor_id: v, vendor: vnd.name, vendor_contact: vnd.contact_name || "", vendor_email: vnd.email || "" }));
+                }}
+              />
               {!form.vendor_id && <Input className="mt-1" value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="Vendor name" data-testid="po-vendor" />}
             </div>
             <div><Label>Assigned Tech</Label>
-              <Select value={form.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setForm(f => ({ ...f, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" })); }}>
-                <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">Unassigned</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <SearchableSelect
+                testId="po-assigned-tech"
+                value={form.assigned_to || "none"}
+                placeholder="Search technicians…"
+                searchPlaceholder="Search technician name or email…"
+                options={[
+                  { value: "none", label: "Unassigned", detail: "No receiving technician notified", searchText: "none unassigned" },
+                  ...users.map(user => ({ value: user.id, label: user.name || "Unnamed technician", detail: user.email || user.role || "Technician", searchText: `${user.name || ""} ${user.email || ""} ${user.role || ""}` })),
+                ]}
+                onValueChange={v => { const u = users.find(x => x.id === v); setForm(f => ({ ...f, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" })); }}
+              />
             </div>
             <div><Label>Expected Delivery</Label><Input type="date" value={form.expected_delivery} onChange={e => setForm({ ...form, expected_delivery: e.target.value })} /></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Client (optional)</Label>
-              <Select value={form.client_id || "none"} onValueChange={v => { const c = clients.find(cl => cl.id === v); setForm({ ...form, client_id: v === "none" ? "" : v, client_name: c?.name || "" }); }}>
-                <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">No client</SelectItem>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <SearchableSelect
+                testId="po-client-select"
+                value={form.client_id || "none"}
+                placeholder="Search a client…"
+                searchPlaceholder="Search client name or email…"
+                options={[
+                  { value: "none", label: "No client", detail: "Keep this as stock or general procurement", searchText: "none stock procurement" },
+                  ...clients.map(client => ({ value: client.id, label: client.name || "Unnamed client", detail: client.email || client.contact_name || "Client record", searchText: `${client.name || ""} ${client.email || ""} ${client.contact_name || ""}` })),
+                ]}
+                onValueChange={v => { const c = clients.find(cl => cl.id === v); setForm(current => ({ ...current, client_id: v === "none" ? "" : v, client_name: c?.name || "", ...(v !== "none" && current.ticket_id && tickets.find(ticket => ticket.id === current.ticket_id)?.client_id !== v ? { ticket_id: "", ticket_number: "", ticket_title: "" } : {}) })); }}
+              />
             </div>
             <div><Label>Related Ticket</Label>
-              <Select value={form.ticket_id || "none"} onValueChange={v => {
-                const ticket = tickets.find(t => t.id === v);
-                setForm(f => ({ ...f,
-                  ticket_id: v === "none" ? "" : v,
-                  ticket_number: ticket?.ticket_number || "",
-                  ticket_title: ticket?.title || "",
-                  client_id: v === "none" ? f.client_id : (ticket?.client_id || f.client_id),
-                  client_name: v === "none" ? f.client_name : (ticket?.client_name || f.client_name),
-                }));
-              }}>
-                <SelectTrigger data-testid="po-ticket-select"><SelectValue placeholder="No related ticket" /></SelectTrigger>
-                <SelectContent><SelectItem value="none">No related ticket</SelectItem>{tickets.map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number || "Ticket"} · {t.title || "Untitled"}</SelectItem>)}</SelectContent>
-              </Select>
+              <SearchableSelect
+                testId="po-ticket-select"
+                value={form.ticket_id || "none"}
+                placeholder="Search a related ticket…"
+                searchPlaceholder="Search ticket number or title…"
+                emptyMessage="No tickets match the selected client."
+                options={[
+                  { value: "none", label: "No related ticket", detail: "Use for stock or general procurement", searchText: "none stock procurement" },
+                  ...tickets
+                    .filter(ticket => !form.client_id || ticket.client_id === form.client_id)
+                    .map(ticket => ({ value: ticket.id, label: `${ticket.ticket_number || "Ticket"} — ${ticket.title || "Untitled"}`, detail: ticket.status ? `Status: ${ticket.status.replace(/_/g, " ")}` : "Service ticket", searchText: `${ticket.ticket_number || ""} ${ticket.title || ""}` })),
+                ]}
+                onValueChange={v => {
+                  const ticket = tickets.find(t => t.id === v);
+                  setForm(f => ({ ...f,
+                    ticket_id: v === "none" ? "" : v,
+                    ticket_number: ticket?.ticket_number || "",
+                    ticket_title: ticket?.title || "",
+                    client_id: v === "none" ? f.client_id : (ticket?.client_id || f.client_id),
+                    client_name: v === "none" ? f.client_name : (ticket?.client_name || f.client_name),
+                  }));
+                }}
+              />
             </div>
             <div><Label>Ship To</Label><Input value={form.ship_to} onChange={e => setForm({ ...form, ship_to: e.target.value })} placeholder="Shipping address" /></div>
           </div>
@@ -519,19 +660,72 @@ export default function PurchaseOrdersPage() {
             ) : (
               <div className="space-y-2">
                 {form.line_items.map((li, idx) => (
-                  <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border bg-muted/20">
-                    <div className="col-span-5">
+                  <div key={`k-${idx}`} className="grid grid-cols-12 gap-2 items-end p-3 rounded-xl border border-white/[0.08] bg-muted/20">
+                    <div className="col-span-12 lg:col-span-3">
                       {idx === 0 && <Label className="text-xs">Product</Label>}
-                      <Select value={li.product_id || "__none"} onValueChange={v => updateLineItem(idx, "product_id", v === "__none" ? "" : v)}>
-                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                        <SelectContent><SelectItem value="__none">Custom item</SelectItem>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} - ${p.cost_price?.toFixed(2)}</SelectItem>)}</SelectContent>
-                      </Select>
+                      <SearchableSelect
+                        testId={`po-line-product-${idx}`}
+                        value={li.product_id || "__none"}
+                        placeholder="Search catalogue…"
+                        searchPlaceholder="Search product name or SKU…"
+                        options={[
+                          { value: "__none", label: "Custom item", detail: "Type the item manually", searchText: "manual custom" },
+                          ...products.map(product => ({
+                            value: product.id,
+                            label: product.name || "Untitled product",
+                            detail: `${product.sku || "No SKU"} · $${(product.cost_price ?? 0).toFixed(2)}`,
+                            searchText: `${product.name || ""} ${product.sku || ""}`,
+                          })),
+                        ]}
+                        onValueChange={value => updateLineItem(idx, "product_id", value === "__none" ? "" : value)}
+                      />
                       {!li.product_id && <Input className="mt-1" value={li.product_name} onChange={e => updateLineItem(idx, "product_name", e.target.value)} placeholder="Item name" />}
                     </div>
-                    <div className="col-span-2">{idx === 0 && <Label className="text-xs">Qty</Label>}<Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} /></div>
-                    <div className="col-span-2">{idx === 0 && <Label className="text-xs">Unit Price</Label>}<Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} /></div>
-                    <div className="col-span-2 text-right">{idx === 0 && <Label className="text-xs block">Total</Label>}<p className="font-mono text-sm font-medium py-2">${(li.quantity * li.unit_price).toFixed(2)}</p></div>
-                    <div className="col-span-1 text-right"><Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)}><Trash2 className="w-3 h-3" /></Button></div>
+                    <div className="col-span-6 lg:col-span-2">
+                      {idx === 0 && <Label className="text-xs">Receive to</Label>}
+                      <Select value={li.destination_type || "stock"} onValueChange={v => updateLineItem(idx, "destination_type", v)}>
+                        <SelectTrigger data-testid={`po-line-destination-${idx}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="stock">Stock inventory</SelectItem>
+                          <SelectItem value="ticket">Linked ticket</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-6 lg:col-span-3">
+                      {idx === 0 && <Label className="text-xs">Ticket owner</Label>}
+                      {li.destination_type === "ticket" ? (
+                        <SearchableSelect
+                          testId={`po-line-ticket-${idx}`}
+                          value={li.destination_ticket_id || "__none"}
+                          placeholder="Search ticket owner…"
+                          searchPlaceholder="Search ticket number or title…"
+                          options={[
+                            { value: "__none", label: "Choose a ticket", detail: "Parts will remain unassigned", searchText: "none unassigned" },
+                            ...tickets.map(ticket => ({
+                              value: ticket.id,
+                              label: `${ticket.ticket_number || "Ticket"} — ${ticket.title || "Untitled"}`,
+                              detail: ticket.status ? `Status: ${ticket.status.replace(/_/g, " ")}` : "Service ticket",
+                              searchText: `${ticket.ticket_number || ""} ${ticket.title || ""}`,
+                            })),
+                          ]}
+                          onValueChange={value => updateLineItem(idx, "destination_ticket_id", value === "__none" ? "" : value)}
+                        />
+                      ) : (
+                        <div className="flex h-10 items-center rounded-md border border-dashed border-emerald-500/25 bg-emerald-500/[0.04] px-3 text-xs text-emerald-300">
+                          Available to stock on receipt
+                        </div>
+                      )}
+                    </div>
+                    <div className="col-span-4 lg:col-span-1">{idx === 0 && <Label className="text-xs">Qty</Label>}<Input type="number" min="1" value={li.quantity} onChange={e => updateLineItem(idx, "quantity", parseInt(e.target.value) || 1)} /></div>
+                    <div className="col-span-5 lg:col-span-1">{idx === 0 && <Label className="text-xs">Unit price</Label>}<Input type="number" step="0.01" value={li.unit_price} onChange={e => updateLineItem(idx, "unit_price", parseFloat(e.target.value) || 0)} /></div>
+                    <div className="col-span-2 lg:col-span-1 text-right"><p className="font-mono text-sm font-medium py-2">${(li.quantity * li.unit_price).toFixed(2)}</p></div>
+                    <div className="col-span-1 text-right"><Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={() => removeLineItem(idx)} aria-label="Remove line item"><Trash2 className="w-3 h-3" /></Button></div>
+                    {li.destination_type === "ticket" && li.destination_ticket_id && (
+                      <div className="col-span-12 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-2 text-xs text-cyan-100">
+                        <BellRing className="h-3.5 w-3.5 text-cyan-300" />
+                        When this full line is receipted, {li.destination_technician_name || "the ticket technician"} will be notified that the parts are ready.
+                      </div>
+                    )}
                   </div>
                 ))}
                 <Separator />
@@ -547,7 +741,7 @@ export default function PurchaseOrdersPage() {
           </div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} /></div>
         </div>
-        <DialogFooter><Button onClick={handleSave} data-testid="save-po-btn">{editing ? "Update" : "Create"} Purchase Order</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">New orders begin as drafts and move through approval before they are sent to a vendor.</p><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-po-btn">{editing ? "Save audited changes" : "Create draft purchase order"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -578,7 +772,7 @@ export default function PurchaseOrdersPage() {
           </Card>
           <Table>
             <TableHeader>
-              <TableRow><TableHead>Product</TableHead><TableHead className="text-right">Ordered</TableHead><TableHead className="text-right">Already Rcvd</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead className="text-right">Receive Now</TableHead></TableRow>
+              <TableRow><TableHead>Product</TableHead><TableHead>Destination</TableHead><TableHead className="text-right">Ordered</TableHead><TableHead className="text-right">Already Rcvd</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead className="text-right">Receive Now</TableHead></TableRow>
             </TableHeader>
             <TableBody>
               {receiveItems.map((ri, idx) => {
@@ -588,6 +782,17 @@ export default function PurchaseOrdersPage() {
                 return (
                   <TableRow key={`k-${idx}`}>
                     <TableCell className="font-medium"><div className="flex items-center gap-2"><span>{ri.product_name || "Item"}</span>{product && <Badge variant="outline" className={tracksStock ? "border-green-500/30 text-green-400 text-[10px]" : "text-muted-foreground text-[10px]"}>{tracksStock ? "Stock tracked" : "No stock change"}</Badge>}</div></TableCell>
+                    <TableCell>
+                      {ri.destination_type === "ticket" ? (
+                        <div className="space-y-1">
+                          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.06] text-[10px] text-cyan-200">Ticket owned</Badge>
+                          <p className="max-w-40 truncate text-xs font-medium text-cyan-100">{ri.destination_ticket_number || "Linked ticket"}</p>
+                          <p className="max-w-40 truncate text-[10px] text-muted-foreground">{ri.destination_technician_name ? `${ri.destination_technician_name} will be notified` : "Team notification on receipt"}</p>
+                        </div>
+                      ) : (
+                        <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.04] text-[10px] text-emerald-300">Stock inventory</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-mono">{ri.quantity}</TableCell>
                     <TableCell className="text-right font-mono">{ri.received_qty || 0}</TableCell>
                     <TableCell className="text-right font-mono text-amber-400">{remaining}</TableCell>
@@ -633,13 +838,17 @@ export default function PurchaseOrdersPage() {
           {approvalDialog === "submit" && (
             <div>
               <Label>Route to approver</Label>
-              <Select value={approvalApprover || "management"} onValueChange={value => setApprovalApprover(value === "management" ? "" : value)}>
-                <SelectTrigger data-testid="po-approver-select"><SelectValue placeholder="Management queue" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="management">Management queue (unassigned)</SelectItem>
-                  {users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                testId="po-approver-select"
+                value={approvalApprover || "management"}
+                placeholder="Search approvers…"
+                searchPlaceholder="Search approver name or email…"
+                options={[
+                  { value: "management", label: "Management queue", detail: "Use the default approval queue", searchText: "default management queue" },
+                  ...users.map(user => ({ value: user.id, label: user.name || "Unnamed technician", detail: user.email || user.role || "Team member", searchText: `${user.name || ""} ${user.email || ""} ${user.role || ""}` })),
+                ]}
+                onValueChange={value => setApprovalApprover(value === "management" ? "" : value)}
+              />
               <p className="mt-1 text-xs text-muted-foreground">Choosing a person sends them an in-app approval notification.</p>
             </div>
           )}
@@ -708,23 +917,28 @@ export default function PurchaseOrdersPage() {
     const vendorInvoiceMatch = po.vendor_invoice_match;
 
     return (
-      <div className="space-y-6" data-testid="po-detail">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setViewPO(null); setDetailTab("items"); }} data-testid="back-to-pos"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-mono font-semibold text-lg">{po.po_number}</span>
-          <Badge className={STATUS_CONFIG[po.status]?.class + " " + (STATUS_CONFIG[po.status]?.glow || "")}>
-            <StatusIcon className="w-3 h-3 mr-1" />{STATUS_CONFIG[po.status]?.label}
-          </Badge>
-          {isOverdue && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>}
-          {po.escalated && <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30"><BellRing className="w-3 h-3 mr-1" />Escalated</Badge>}
-          {vendorInvoiceMatch && <Badge className={vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}>
-            <DollarSign className="w-3 h-3 mr-1" />{vendorInvoiceMatch.status === "matched" ? "Invoice matched" : vendorInvoiceMatch.review?.status === "accepted" ? "Variance accepted" : "Invoice variance"}
-          </Badge>}
-        </div>
+      <div className="space-y-4" data-testid="po-detail">
+        <Card className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="po-console-header">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live procurement record <span className="text-zinc-600">/</span><span className="text-zinc-400">Supply operations</span></div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={() => { setViewPO(null); setDetailTab("items"); }} data-testid="back-to-pos" aria-label="Back to purchase orders" title="Back to purchase orders"><ArrowLeft className="h-4 w-4" /></Button>
+              <Badge className="h-6 border-white/[0.10] bg-black/30 px-2.5 font-mono text-[10px] tracking-wide text-zinc-200">{po.po_number}</Badge>
+              <Badge className={STATUS_CONFIG[po.status]?.class + " " + (STATUS_CONFIG[po.status]?.glow || "")}><StatusIcon className="mr-1 h-3 w-3" />{STATUS_CONFIG[po.status]?.label}</Badge>
+              {isOverdue && <Badge className="animate-pulse border-red-500/30 bg-red-500/20 text-red-400"><AlertTriangle className="mr-1 h-3 w-3" />Overdue</Badge>}
+              {po.escalated && <Badge className="border-orange-500/30 bg-orange-500/20 text-orange-400"><BellRing className="mr-1 h-3 w-3" />Escalated</Badge>}
+              {vendorInvoiceMatch && <Badge className={vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted" ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-400" : "border-amber-500/30 bg-amber-500/20 text-amber-400"}><DollarSign className="mr-1 h-3 w-3" />{vendorInvoiceMatch.status === "matched" ? "Invoice matched" : vendorInvoiceMatch.review?.status === "accepted" ? "Variance accepted" : "Invoice variance"}</Badge>}
+              <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:ml-2 lg:basis-auto lg:flex-1"><p className="truncate text-xl font-semibold tracking-tight text-white">{po.vendor || "Vendor purchase order"}</p><p className="mt-1 text-xs text-zinc-400">Expected {po.expected_delivery || "delivery date not set"} <span className="px-1.5 text-zinc-600">/</span> Total <span className="font-mono text-emerald-200">${(po.total || 0).toFixed(2)}</span></p></div>
+              {(po.status === "submitted" || po.status === "partial") && <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={() => openReceiveDialog(po)} data-testid="header-receive-stock-btn"><PackageCheck className="mr-1.5 h-3.5 w-3.5" />Receive stock</Button>}
+              <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => { setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` }); setEmailVendorDialog(true); }} data-testid="header-email-po-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>
+              <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePreviewPdf(po)} data-testid="header-preview-po-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3"><span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{po.vendor || "No vendor"}</span><span className="rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">{totalReceived} / {totalOrdered} received</span>{po.client_name && <span className="rounded-lg bg-white/[0.05] px-2.5 py-1 text-[10px] text-zinc-400">For {po.client_name}</span>}<span className="ml-auto rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">${(po.total || 0).toFixed(2)}</span></div>
+          </CardContent>
+        </Card>
 
         {/* Approval Pipeline */}
-        <Card className="border-slate-700/50 overflow-hidden">
+        <Card className="overflow-hidden border border-cyan-400/[0.14] bg-[linear-gradient(135deg,rgba(34,211,238,0.06),rgba(16,185,129,0.04))]">
           <CardContent className="py-3 px-4">
             <div className="flex items-center justify-between gap-2">
               {["draft", "pending_approval", "approved", "submitted", "partial", "received"].map((stage, i, arr) => {
@@ -751,7 +965,7 @@ export default function PurchaseOrdersPage() {
 
         {/* Receiving Progress */}
         {(po.status === "submitted" || po.status === "partial") && (
-          <Card className="border-cyan-500/20 overflow-hidden">
+          <Card className="overflow-hidden border border-cyan-400/[0.14] bg-[linear-gradient(135deg,rgba(34,211,238,0.06),rgba(16,185,129,0.04))]">
             <CardContent className="py-3 px-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Receiving Progress</span>
@@ -762,13 +976,13 @@ export default function PurchaseOrdersPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-8 space-y-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="space-y-4 xl:col-span-8">
             <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList>
-                <TabsTrigger value="items" data-testid="tab-po-items">Items ({(po.line_items || []).length})</TabsTrigger>
-                <TabsTrigger value="notes" data-testid="tab-po-notes">Notes ({poNotes.length})</TabsTrigger>
-                <TabsTrigger value="audit" data-testid="tab-po-audit">Audit Trail ({auditLog.length})</TabsTrigger>
+              <TabsList className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/[0.14] p-1">
+                <TabsTrigger value="items" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-items">Items ({(po.line_items || []).length})</TabsTrigger>
+                <TabsTrigger value="notes" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-notes">Notes ({poNotes.length})</TabsTrigger>
+                <TabsTrigger value="audit" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-audit">Audit Trail ({auditLog.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="items">
@@ -782,6 +996,7 @@ export default function PurchaseOrdersPage() {
                           <TableHead className="text-right">Pending</TableHead>
                           <TableHead className="text-right">Unit Price</TableHead>
                           <TableHead className="text-right">Total</TableHead>
+                          <TableHead>Destination</TableHead>
                           <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -805,6 +1020,17 @@ export default function PurchaseOrdersPage() {
                               <TableCell className="text-right font-mono">{pending > 0 ? <span className="text-amber-400">{pending}</span> : <span className="text-muted-foreground">0</span>}</TableCell>
                               <TableCell className="text-right font-mono">${(li.unit_price || 0).toFixed(2)}</TableCell>
                               <TableCell className="text-right font-mono font-medium">${((li.quantity || 0) * (li.unit_price || 0)).toFixed(2)}</TableCell>
+                              <TableCell>
+                                {li.destination_type === "ticket" ? (
+                                  <div className="space-y-1">
+                                    <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.06] text-[10px] text-cyan-200">Ticket owned</Badge>
+                                    <p className="max-w-48 truncate text-xs text-cyan-100">{li.destination_ticket_number || "Linked ticket"}</p>
+                                    {li.arrival_notified ? <p className="text-[10px] text-emerald-300">Technician notified</p> : <p className="text-[10px] text-muted-foreground">Alert on full receipt</p>}
+                                  </div>
+                                ) : (
+                                  <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.04] text-[10px] text-emerald-300">Stock inventory</Badge>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <Badge className={ITEM_STATUS_CONFIG[itemStatus]?.class + " text-xs"}>
                                   <ItemIcon className="w-3 h-3 mr-1" />{ITEM_STATUS_CONFIG[itemStatus]?.label}
@@ -907,9 +1133,9 @@ export default function PurchaseOrdersPage() {
             )}
           </div>
 
-          <div className="col-span-4 space-y-4">
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
+          <div className="space-y-4 xl:col-span-4">
+            <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
+              <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />Procurement details</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div><span className="text-muted-foreground block">Vendor</span><span className="font-medium">{po.vendor}</span></div>
                 {po.vendor_email && <div><span className="text-muted-foreground block">Vendor Email</span><span className="font-medium text-blue-400">{po.vendor_email}</span></div>}
@@ -946,19 +1172,19 @@ export default function PurchaseOrdersPage() {
                 </> : <p className="text-sm text-muted-foreground">No supplier invoice has been matched to this PO yet.</p>}
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Actions</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
+            <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
+              <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Purchase controls</CardTitle></CardHeader>
+              <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
                 {/* Approval Workflow */}
                 {po.status === "draft" && (
-                  <Button className="w-full bg-purple-600 hover:bg-purple-700" onClick={() => handleSubmitForApproval(po)} data-testid="submit-for-approval-btn">
-                    <Send className="w-4 h-4 mr-1" />Submit for Approval
+                  <Button className="w-full bg-cyan-500 text-cyan-950 hover:bg-cyan-400" onClick={() => handleSubmitForApproval(po)} data-testid="submit-for-approval-btn">
+                    <Send className="mr-1.5 h-4 w-4" />Submit for approval
                   </Button>
                 )}
                 {po.status === "pending_approval" && (
                   <>
-                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
-                      <ThumbsUp className="w-4 h-4 mr-1" />Approve
+                    <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
+                      <ThumbsUp className="mr-1.5 h-4 w-4" />Approve
                     </Button>
                     <Button variant="destructive" className="w-full" onClick={() => { setApprovalDialog("reject"); setApprovalNotes(""); }} data-testid="reject-po-btn">
                       <ThumbsDown className="w-4 h-4 mr-1" />Reject
@@ -967,7 +1193,7 @@ export default function PurchaseOrdersPage() {
                 )}
                 {po.status === "approved" && (
                   <>
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => {
+                    <Button className="w-full bg-cyan-500 text-cyan-950 hover:bg-cyan-400" onClick={() => {
                       setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
                       setEmailVendorDialog(true);
                     }} data-testid="email-and-submit-po">
@@ -987,8 +1213,8 @@ export default function PurchaseOrdersPage() {
                   </Button>
                 )}
                 {(po.status === "submitted" || po.status === "partial") && (
-                  <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => openReceiveDialog(po)} data-testid="receive-stock-btn">
-                    <PackageCheck className="w-4 h-4 mr-1" />Receive Stock
+                  <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => openReceiveDialog(po)} data-testid="receive-stock-btn">
+                    <PackageCheck className="mr-1.5 h-4 w-4" />Receive Stock
                   </Button>
                 )}
                 <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => openVendorInvoiceMatch(po)} data-testid="match-vendor-invoice-btn">
@@ -999,11 +1225,11 @@ export default function PurchaseOrdersPage() {
                 </Button>}
                 <Separator />
                 {/* PDF & Email */}
-                <Button variant="outline" className="w-full text-violet-400 border-violet-500/30 hover:bg-violet-500/10" onClick={() => handlePreviewPdf(po)} data-testid="preview-po-pdf">
-                  <Eye className="w-4 h-4 mr-1" />Preview PDF
+                <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePreviewPdf(po)} data-testid="preview-po-pdf">
+                  <Eye className="mr-1.5 h-4 w-4" />Preview PDF
                 </Button>
-                <Button variant="outline" className="w-full text-blue-400 border-blue-500/30 hover:bg-blue-500/10" onClick={() => handleDownloadPdf(po)} disabled={pdfLoading} data-testid="download-po-pdf">
-                  {pdfLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}Download PDF
+                <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handleDownloadPdf(po)} disabled={pdfLoading} data-testid="download-po-pdf">
+                  {pdfLoading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Download className="mr-1.5 h-4 w-4" />}Download PDF
                 </Button>
                 <Separator />
                 {/* Utility Actions */}
@@ -1139,28 +1365,44 @@ export default function PurchaseOrdersPage() {
   // ========== LIST VIEW ==========
   return (
     <div className="space-y-6" data-testid="purchase-orders-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><ShoppingCart className="w-4 h-4 text-violet-300" /></span>
-            <div><h1 className="text-2xl font-bold tracking-tight">Purchase Orders</h1><p className="text-sm text-muted-foreground">Procurement command centre · {pos.length} purchase orders</p></div>
-          </div>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Procurement operations"
+        title="Purchase Orders"
+        description={`Create, approve, receive, and audit ${pos.length} purchase order${pos.length === 1 ? "" : "s"} from one connected procurement workspace.`}
+        icon={ShoppingCart}
+        tone="emerald"
+        actions={<>
           <Button variant="outline" size="sm" onClick={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} data-testid="po-analytics-btn">
             <BarChart3 className="w-4 h-4 mr-1" />Analytics
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" data-testid="po-workspace-tools">
+                <MoreHorizontal className="w-4 h-4" />
+                Tools
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem asChild className="gap-2" data-testid="po-tools-vendors">
+                <Link to="/vendors"><Building2 className="w-4 h-4" />Vendors</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="gap-2" data-testid="po-tools-vendor-scorecard">
+                <Link to="/vendor-scorecard"><BarChart3 className="w-4 h-4" />Vendor scorecard</Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={handleCheckEscalations} data-testid="check-escalations-btn">
             <BellRing className="w-4 h-4 mr-1" />Check Escalations
           </Button>
-          <Button onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1" />New Purchase Order</Button>
-        </div>
-      </div>
+          <Button size="sm" onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1.5" />New Purchase Order</Button>
+        </>}
+      />
 
       {/* Shared ticket-style metric strip */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <HeroTile label="All purchase orders" value={stats.total || 0} icon={FileText} glow="cyan" active={statusFilter === "all" && !search} onClick={() => { setSearch(""); applyStatusFilter("all"); }} testId="po-stat-total" />
-        <HeroTile label="Awaiting approval" value={stats.pending_approval || 0} icon={Clock} glow="violet" active={statusFilter === "pending_approval"} onClick={() => applyStatusFilter("pending_approval")} testId="po-stat-pending-approval" />
+        <HeroTile label="Awaiting approval" value={stats.pending_approval || 0} icon={Clock} glow="amber" active={statusFilter === "pending_approval"} onClick={() => applyStatusFilter("pending_approval")} testId="po-stat-pending-approval" />
         <HeroTile label="Ordered" value={stats.submitted || 0} icon={Send} glow="cyan" active={statusFilter === "submitted"} onClick={() => applyStatusFilter("submitted")} testId="po-stat-ordered" />
         <HeroTile label="Receiving" value={stats.partial || 0} icon={PackageCheck} glow="amber" active={statusFilter === "partial"} onClick={() => applyStatusFilter("partial")} testId="po-stat-receiving" />
         <HeroTile label="Overdue delivery" value={overdueCount} icon={AlertTriangle} glow={overdueCount > 0 ? "rose" : "emerald"} active={search === "" && statusFilter === "overdue"} onClick={() => { setSearch(""); setStatusFilter("overdue"); }} testId="po-stat-overdue" />

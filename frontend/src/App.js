@@ -207,6 +207,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const refreshUser = async () => {
+    if (!token) return null;
+    const response = await axios.get(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    setUser(response.data);
+    return response.data;
+  };
+
   const logout = () => {
     secureStorage.removeItem("nexusops_token");
     setToken(null);
@@ -215,7 +224,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, loginWithToken, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, loginWithToken, register, logout, refreshUser, loading }}>
       {children}
     </AuthContext.Provider>
   );
@@ -249,7 +258,7 @@ const MainLayout = ({ children }) => {
   return (
     <div className="min-h-screen bg-background flex">
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />
-      <main className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'} ${copilotOpen ? 'mr-[380px]' : ''}`}>
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'} ${copilotOpen ? 'mr-[456px]' : ''}`}>
         <div className="p-6 md:p-8">
           {children}
         </div>

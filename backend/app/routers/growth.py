@@ -114,10 +114,11 @@ def _detect(snapshot: dict) -> list:
     # 2. M365 hygiene gap Ã¢â€ â€™ managed MFA / MDR upsell
     if snapshot["m365_hygiene"] is not None:
         h = snapshot["m365_hygiene"]
-        score = h.get("score", 100)
-        if score < 70:
-            # Estimate user count from hygiene risks that reference user counts, or fall back to 25
-            user_count = h.get("user_count") or 25
+        score = h.get("score")
+        if isinstance(score, (int, float)) and score < 70 and ((h.get("counts") or {}).get("enabled_users") or h.get("total_users") or 0) > 0:
+            # Use provider-recorded counts only. A partial hygiene assessment is
+            # never converted into a sales opportunity.
+            user_count = (h.get("counts") or {}).get("enabled_users") or h.get("total_users") or 0
             monthly = user_count * PRICE["mdr_per_user"]
             out.append({
                 "type": "managed_mfa_mdr",
@@ -404,7 +405,7 @@ async def generate_pitch(opp_id: str, current_user: dict = Depends(get_current_u
             f"Write the email body only (no subject, no sign-off)."
         )
         chat = LlmChat(api_key=api_key, session_id=f"pitch-{opp_id}", system_message=system)
-        chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+        chat.with_model("openai", "gpt-5.6-terra")
         pitch = await chat.send_message(UserMessage(text=prompt))
         pitch_text = pitch.strip() if isinstance(pitch, str) else str(pitch)
     except Exception as e:

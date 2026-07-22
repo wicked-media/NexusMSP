@@ -21,6 +21,7 @@ import {
   HardDrive, Ticket, CreditCard, Lock, Search, FileText, Wifi
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
+import HeroTile from "@/components/HeroTile";
 
 const chartStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };
 
@@ -30,11 +31,13 @@ const STATUS_CONFIG = {
   needs_attention: { color: "bg-amber-500/20 text-amber-400", ring: "ring-amber-500/30", gradient: "from-amber-500 to-amber-600", label: "Needs Attention" },
   at_risk: { color: "bg-orange-500/20 text-orange-400", ring: "ring-orange-500/30", gradient: "from-orange-500 to-orange-600", label: "At Risk" },
   critical: { color: "bg-red-500/20 text-red-400", ring: "ring-red-500/30", gradient: "from-red-500 to-red-600", label: "Critical" },
+  not_assessed: { color: "bg-slate-500/20 text-slate-300", ring: "ring-slate-500/30", gradient: "from-slate-500 to-slate-600", label: "Not Assessed" },
 };
 
 function HealthGauge({ score, size = 64 }) {
-  const color = score >= 85 ? "#22c55e" : score >= 70 ? "#3b82f6" : score >= 50 ? "#eab308" : score >= 30 ? "#f97316" : "#ef4444";
-  const pct = Math.min(100, Math.max(0, score));
+  const assessed = Number.isFinite(score);
+  const color = !assessed ? "#94a3b8" : score >= 85 ? "#22c55e" : score >= 70 ? "#3b82f6" : score >= 50 ? "#eab308" : score >= 30 ? "#f97316" : "#ef4444";
+  const pct = assessed ? Math.min(100, Math.max(0, score)) : 0;
   const r = (size / 2) - 6;
   const dash = pct * 2.51;
   return (
@@ -43,7 +46,7 @@ function HealthGauge({ score, size = 64 }) {
         <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" className="text-muted/15" strokeWidth="7" />
         <circle cx="50" cy="50" r="40" fill="none" stroke={color} strokeWidth="7" strokeDasharray={`${dash} ${251 - dash}`} strokeLinecap="round" />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-lg font-black" style={{ color }}>{score}</span>
+      <span className="absolute inset-0 flex items-center justify-center text-lg font-black" style={{ color }}>{assessed ? score : "—"}</span>
     </div>
   );
 }
@@ -53,14 +56,14 @@ function MetricBar({ label, value, icon: Icon, color }) {
     <div className="flex items-center gap-3">
       <div className={`w-7 h-7 rounded-md flex items-center justify-center ${color.split(" ")[0]}`}><Icon className={`w-3.5 h-3.5 ${color.split(" ")[1]}`} /></div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-0.5"><span className="text-[11px] text-muted-foreground">{label}</span><span className="text-xs font-bold">{value}</span></div>
-        <Progress value={value} className="h-1" />
+        <div className="flex items-center justify-between mb-0.5"><span className="text-[11px] text-muted-foreground">{label}</span><span className="text-xs font-bold">{Number.isFinite(value) ? value : "—"}</span></div>
+        <Progress value={Number.isFinite(value) ? value : 0} className="h-1" />
       </div>
     </div>
   );
 }
 
-export default function ClientHealthPage() {
+export default function ClientHealthPage({ embedded = false }) {
   const { token } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [allScores, setAllScores] = useState([]);
@@ -110,7 +113,7 @@ export default function ClientHealthPage() {
 
   const loadAlertConfig = async () => {
     try { const r = await axios.get(`${API}/client-health/alert-config`, { headers }); setAlertConfig(r.data); }
-    catch { setAlertConfig({ critical_threshold: 30, warning_threshold: 50, notify_on_decline: true, decline_amount: 10, notify_email: "", auto_create_ticket: true }); }
+    catch { setAlertConfig({ critical_threshold: 30, warning_threshold: 50, notify_on_decline: true, decline_amount: 10, notify_email: "", auto_create_ticket: false }); }
   };
 
   const saveAlertConfig = async () => {
@@ -129,27 +132,28 @@ export default function ClientHealthPage() {
   });
 
   const radarData = clientDetail ? [
-    { metric: "Tickets", value: clientDetail.metrics?.ticket_health || 0 },
-    { metric: "Devices", value: clientDetail.metrics?.device_health || 0 },
-    { metric: "Payments", value: clientDetail.metrics?.payment_health || 0 },
-    { metric: "Backups", value: clientDetail.metrics?.backup_health || 0 },
-    { metric: "Security", value: clientDetail.metrics?.security_health || 0 },
-    { metric: "Engagement", value: clientDetail.metrics?.engagement || 0 },
+    { metric: "Tickets", value: clientDetail.metrics?.ticket_health },
+    { metric: "Devices", value: clientDetail.metrics?.device_health },
+    { metric: "Payments", value: clientDetail.metrics?.payment_health },
+    { metric: "Backups", value: clientDetail.metrics?.backup_health },
+    { metric: "Security", value: clientDetail.metrics?.security_health },
     ...(clientDetail.metrics?.network_health != null ? [{ metric: "Network", value: clientDetail.metrics.network_health }] : []),
     ...(clientDetail.metrics?.m365_hygiene != null ? [{ metric: "M365", value: clientDetail.metrics.m365_hygiene }] : []),
-  ] : [];
+  ].filter(({ value }) => Number.isFinite(value)) : [];
+  const hasAverageHealth = Number.isFinite(d.avg_health);
+  const averageHealthTone = !hasAverageHealth ? "text-slate-300" : d.avg_health >= 70 ? "text-emerald-400" : d.avg_health >= 50 ? "text-amber-400" : "text-red-400";
 
   return (
     <div className="space-y-5" data-testid="client-health-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className={`flex items-center ${embedded ? "justify-end" : "justify-between"}`}>
+        {!embedded && <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 flex items-center justify-center"><Heart className="w-5 h-5 text-white" /></div>
             Client Health Dashboard
           </h1>
-          <p className="text-muted-foreground mt-1">{d.total} clients monitored | Average health: <span className={`font-bold ${d.avg_health >= 70 ? "text-emerald-400" : d.avg_health >= 50 ? "text-amber-400" : "text-red-400"}`}>{d.avg_health}/100</span></p>
-        </div>
+          <p className="text-muted-foreground mt-1">{d.assessed_clients || 0} of {d.total} clients assessed | Average health: <span className={`font-bold ${averageHealthTone}`}>{hasAverageHealth ? `${d.avg_health}/100` : "Not assessed"}</span></p>
+        </div>}
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { loadAlertConfig(); setSettingsDialog(true); }} data-testid="alert-settings-btn"><Bell className="w-4 h-4 mr-1" />Alert Settings</Button>
           <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={snapshotting} data-testid="take-snapshot-btn">
@@ -160,40 +164,22 @@ export default function ClientHealthPage() {
       </div>
 
       {/* KPI Row — gradient hero tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <div className="col-span-2 relative overflow-hidden rounded-lg border bg-gradient-to-br from-violet-500/20 to-fuchsia-600/10 border-violet-500/30 text-violet-300 shadow-lg shadow-violet-500/20 p-4 flex items-center gap-4">
           <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
           <div className="relative"><HealthGauge score={d.avg_health} size={72} /></div>
           <div className="relative">
             <p className="text-[10px] uppercase tracking-widest opacity-80">Average Health</p>
-            <p className="text-3xl font-bold font-mono tracking-tighter">{d.avg_health}<span className="text-sm opacity-70">/100</span></p>
-            <p className="text-[10px] opacity-70">{d.total} clients</p>
+            <p className="text-3xl font-bold font-mono tracking-tighter">{hasAverageHealth ? d.avg_health : "—"}{hasAverageHealth && <span className="text-sm opacity-70">/100</span>}</p>
+            <p className="text-[10px] opacity-70">{d.assessed_clients || 0} assessed of {d.total}</p>
           </div>
         </div>
-        {["thriving", "healthy", "needs_attention", "at_risk", "critical"].map(s => {
+        {["thriving", "healthy", "needs_attention", "at_risk", "critical", "not_assessed"].map(s => {
           const cfg = STATUS_CONFIG[s];
           const count = dist[s] || 0;
-          const tone = ({
-            thriving:        "from-emerald-500/20 to-green-600/10 border-emerald-500/30 text-emerald-300 shadow-emerald-500/20",
-            healthy:         "from-cyan-500/20 to-blue-600/10 border-cyan-500/30 text-cyan-300 shadow-cyan-500/20",
-            needs_attention: "from-amber-500/20 to-orange-600/10 border-amber-500/30 text-amber-300 shadow-amber-500/20",
-            at_risk:         "from-orange-500/20 to-red-600/10 border-orange-500/30 text-orange-300 shadow-orange-500/20",
-            critical:        "from-rose-500/20 to-red-600/10 border-rose-500/30 text-rose-300 shadow-rose-500/20",
-          })[s];
           const isActive = statusFilter === s;
-          return (
-            <button
-              key={s}
-              className={`relative overflow-hidden rounded-lg border bg-gradient-to-br ${tone} shadow-lg p-4 text-left transition-transform hover:scale-[1.02] ${isActive ? "ring-2 ring-white/30" : ""}`}
-              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
-            >
-              <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-current opacity-10 blur-2xl" />
-              <div className="relative">
-                <p className="text-[10px] uppercase tracking-widest opacity-80">{cfg.label}</p>
-                <p className="text-3xl font-bold font-mono tracking-tighter mt-1">{count}</p>
-              </div>
-            </button>
-          );
+          const glow = ({ thriving: "emerald", healthy: "cyan", needs_attention: "amber", at_risk: "amber", critical: "rose", not_assessed: "slate" })[s];
+          return <HeroTile key={s} label={cfg.label} value={count} icon={Heart} glow={glow} subtitle={isActive ? "Filter active" : "Filter client health"} onClick={() => setStatusFilter(statusFilter === s ? "all" : s)} active={isActive} testId={`client-health-${s}`} />;
         })}
       </div>
 
@@ -222,7 +208,7 @@ export default function ClientHealthPage() {
                   onClick={() => { setSelectedClient(allScores.find(s => s.client_id === a.client_id)); loadClientDetail(a.client_id); }}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold">{a.client_name}</span>
-                    <Badge className={`text-[9px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}>{a.health_score}</Badge>
+                    <Badge className={`text-[9px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}>{Number.isFinite(a.health_score) ? a.health_score : "—"}</Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-1">{a.message}</p>
                 </div>
@@ -252,7 +238,7 @@ export default function ClientHealthPage() {
                   </TableHeader>
                   <TableBody>
                     {filtered.map(c => {
-                      const cfg = STATUS_CONFIG[c.status] || STATUS_CONFIG.needs_attention;
+                      const cfg = STATUS_CONFIG[c.status] || STATUS_CONFIG.not_assessed;
                       const isSelected = selectedClient?.client_id === c.client_id;
                       return (
                         <TableRow key={c.client_id} className={`cursor-pointer transition-all ${isSelected ? "bg-primary/5 ring-1 ring-primary/20" : "hover:bg-muted/30"}`}
@@ -263,8 +249,8 @@ export default function ClientHealthPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2 w-20">
-                              <Progress value={c.health_score} className="h-2" />
-                              <span className="text-xs font-mono font-bold">{c.health_score}</span>
+                              <Progress value={Number.isFinite(c.health_score) ? c.health_score : 0} className="h-2" />
+                              <span className="text-xs font-mono font-bold">{Number.isFinite(c.health_score) ? c.health_score : "—"}</span>
                             </div>
                           </TableCell>
                           <TableCell><Badge className={`${cfg.color} text-[10px]`}>{cfg.label}</Badge></TableCell>
@@ -312,7 +298,7 @@ export default function ClientHealthPage() {
                     <div className="flex-1">
                       <h3 className="font-bold text-lg">{clientDetail.client_name}</h3>
                       <div className="flex items-center gap-2">
-                        <Badge className={STATUS_CONFIG[clientDetail.status]?.color + " text-[10px]"}>{STATUS_CONFIG[clientDetail.status]?.label}</Badge>
+                        <Badge className={(STATUS_CONFIG[clientDetail.status] || STATUS_CONFIG.not_assessed).color + " text-[10px]"}>{(STATUS_CONFIG[clientDetail.status] || STATUS_CONFIG.not_assessed).label}</Badge>
                         {clientDetail.tier && <Badge variant="outline" className="text-[9px]">{clientDetail.tier}</Badge>}
                         {clientDetail.industry && <Badge variant="outline" className="text-[9px]">{clientDetail.industry}</Badge>}
                       </div>
@@ -325,14 +311,14 @@ export default function ClientHealthPage() {
 
                   {/* Radar Chart */}
                   <div className="h-[180px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    {radarData.length ? <ResponsiveContainer width="100%" height="100%">
                       <RadarChart data={radarData} cx="50%" cy="50%" outerRadius={65}>
                         <PolarGrid stroke="hsl(var(--border))" />
                         <PolarAngleAxis dataKey="metric" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} />
                         <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
                         <Radar name="Health" dataKey="value" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.15} strokeWidth={2} />
                       </RadarChart>
-                    </ResponsiveContainer>
+                    </ResponsiveContainer> : <div className="h-full flex items-center justify-center text-center text-xs text-muted-foreground px-8">No health dimensions have verified source evidence yet.</div>}
                   </div>
                 </CardContent>
               </Card>
@@ -341,18 +327,18 @@ export default function ClientHealthPage() {
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">Health Breakdown</CardTitle></CardHeader>
                 <CardContent className="space-y-2.5">
-                  <MetricBar label="Ticket Health" value={clientDetail.metrics?.ticket_health || 0} icon={Ticket} color="bg-blue-500/15 text-blue-400" />
-                  <MetricBar label="Device Uptime" value={clientDetail.metrics?.device_health || 0} icon={Monitor} color="bg-cyan-500/15 text-cyan-400" />
-                  <MetricBar label="Payment Health" value={clientDetail.metrics?.payment_health || 0} icon={CreditCard} color="bg-emerald-500/15 text-emerald-400" />
-                  <MetricBar label="Backup Health" value={clientDetail.metrics?.backup_health || 0} icon={HardDrive} color="bg-purple-500/15 text-purple-400" />
-                  <MetricBar label="Security Posture" value={clientDetail.metrics?.security_health || 0} icon={Shield} color="bg-red-500/15 text-red-400" />
+                  <MetricBar label="Ticket Health" value={clientDetail.metrics?.ticket_health} icon={Ticket} color="bg-blue-500/15 text-blue-400" />
+                  <MetricBar label="Device Uptime" value={clientDetail.metrics?.device_health} icon={Monitor} color="bg-cyan-500/15 text-cyan-400" />
+                  <MetricBar label="Payment Health" value={clientDetail.metrics?.payment_health} icon={CreditCard} color="bg-emerald-500/15 text-emerald-400" />
+                  <MetricBar label="Backup Health" value={clientDetail.metrics?.backup_health} icon={HardDrive} color="bg-purple-500/15 text-purple-400" />
+                  <MetricBar label="Security Posture" value={clientDetail.metrics?.security_health} icon={Shield} color="bg-red-500/15 text-red-400" />
                   {clientDetail.metrics?.network_health != null && (
                     <MetricBar label="Network Health" value={clientDetail.metrics.network_health} icon={Wifi} color="bg-indigo-500/15 text-indigo-400" />
                   )}
                   {clientDetail.metrics?.m365_hygiene != null && (
                     <MetricBar label="M365 Hygiene" value={clientDetail.metrics.m365_hygiene} icon={Lock} color="bg-sky-500/15 text-sky-400" />
                   )}
-                  <MetricBar label="Engagement" value={clientDetail.metrics?.engagement || 0} icon={Activity} color="bg-amber-500/15 text-amber-400" />
+                  {Number.isFinite(clientDetail.metrics?.sentiment) && <MetricBar label="Recorded Sentiment" value={clientDetail.metrics.sentiment} icon={Activity} color="bg-amber-500/15 text-amber-400" />}
                 </CardContent>
               </Card>
 
@@ -384,10 +370,10 @@ export default function ClientHealthPage() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     {[
                       { label: "Open Tickets", val: clientDetail.details?.open_tickets || 0, color: "text-amber-400" },
-                      { label: "Devices Online", val: `${clientDetail.details?.online_devices || 0}/${clientDetail.details?.devices || 0}`, color: "text-cyan-400" },
-                      { label: "Backup Rate", val: `${clientDetail.details?.backup_success_rate || 0}%`, color: "text-purple-400" },
+                      { label: "Devices Online", val: clientDetail.details?.device_observed ? `${clientDetail.details.online_devices}/${clientDetail.details.devices}` : "—", color: "text-cyan-400" },
+                      { label: "Backup Rate", val: Number.isFinite(clientDetail.details?.backup_success_rate) ? `${clientDetail.details.backup_success_rate}%` : "—", color: "text-purple-400" },
                       { label: "Overdue Invoices", val: clientDetail.details?.overdue_invoices || 0, color: "text-red-400" },
-                      { label: "Security Alerts", val: clientDetail.details?.security_alerts || 0, color: "text-red-400" },
+                      { label: "Security Alerts", val: clientDetail.details?.security_observed ? clientDetail.details.security_alerts : "—", color: "text-red-400" },
                       { label: "Expiring Contracts", val: clientDetail.details?.expiring_contracts || 0, color: "text-amber-400" },
                     ].map(s => (
                       <div key={s.label} className="p-2 rounded-lg bg-muted/10">
@@ -420,7 +406,7 @@ export default function ClientHealthPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between"><div><Label className="text-sm">Notify on Score Decline</Label><p className="text-[11px] text-muted-foreground">Alert when any client's health drops by this amount</p></div><Switch checked={alertConfig.notify_on_decline} onCheckedChange={v => setAlertConfig({ ...alertConfig, notify_on_decline: v })} /></div>
                 {alertConfig.notify_on_decline && <div><Label className="text-xs">Decline Amount</Label><Input type="number" value={alertConfig.decline_amount} onChange={e => setAlertConfig({ ...alertConfig, decline_amount: parseInt(e.target.value) })} className="max-w-[100px]" /></div>}
-                <div className="flex items-center justify-between"><div><Label className="text-sm">Auto-Create Ticket</Label><p className="text-[11px] text-muted-foreground">Automatically create a ticket when health drops below critical</p></div><Switch checked={alertConfig.auto_create_ticket} onCheckedChange={v => setAlertConfig({ ...alertConfig, auto_create_ticket: v })} /></div>
+                <div className="rounded-lg border border-muted p-3 text-[11px] text-muted-foreground">Ticket creation is intentionally not automated from this preference. Confirmed health findings remain visible here for technician review and ticket creation through the normal service workflow.</div>
               </div>
               <div><Label className="text-xs">Notification Email</Label><Input value={alertConfig.notify_email || ""} onChange={e => setAlertConfig({ ...alertConfig, notify_email: e.target.value })} placeholder="alerts@company.com" /></div>
             </div>

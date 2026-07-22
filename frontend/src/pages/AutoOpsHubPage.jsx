@@ -1,23 +1,26 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Loader2, Inbox, Route, Sparkles, Wrench } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { BrainCircuit, Loader2, Inbox, RefreshCw, Route, Sparkles, Wrench, Workflow, Activity } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 const TABS = [
-  { id: "triage-queue", label: "Triage Queue", icon: Inbox, page: () => import("./TriageQueuePage") },
-  { id: "intelligent-routing", label: "Smart Routing", icon: Route, page: () => import("./IntelligentRoutingPage") },
-  { id: "ai-resolution", label: "Auto-Resolve", icon: Sparkles, page: () => import("./AIResolutionPage") },
-  { id: "self-healing", label: "Self-Healing", icon: Wrench, page: () => import("./SelfHealingPage") },
+  { id: "triage-queue", label: "Triage Queue", description: "Prioritise and own incoming work", icon: Inbox, page: () => import("./TriageQueuePage") },
+  { id: "intelligent-routing", label: "Smart Routing", description: "Assign work by skill, availability and load", icon: Route, page: () => import("./IntelligentRoutingPage") },
+  { id: "ai-resolution", label: "Auto-Resolve", description: "Review safe AI remediation proposals", icon: Sparkles, page: () => import("./AIResolutionPage") },
+  { id: "self-healing", label: "Self-Healing", description: "Monitor and run approved recovery runbooks", icon: Wrench, page: () => import("./SelfHealingPage") },
+  { id: "predictive", label: "Predictive", description: "Forecast hardware risk before an outage", icon: Activity, page: () => import("./PredictiveIntelPage") },
 ];
 
 const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
 
 export default function AutoOpsHubPage() {
-  const [activeTab, setActiveTab] = useState("triage-queue");
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("tab");
-    if (t && TABS.some(x => x.id === t)) setActiveTab(t);
-  }, []);
+  const [activeTab, setActiveTab] = useState(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    return TABS.some(tab => tab.id === requestedTab) ? requestedTab : "triage-queue";
+  });
+  const [workspaceVersion, setWorkspaceVersion] = useState(0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -28,36 +31,39 @@ export default function AutoOpsHubPage() {
   const Active = lazyMap[activeTab];
 
   return (
-    <div className="min-h-screen">
-      <div className="border-b border-border bg-card/50">
-        <div className="px-6 pt-5">
-          <h1 className="text-2xl font-semibold tracking-tight">Auto-Ops Hub</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Triage, route, resolve and self-heal — every automation surface in one place.</p>
+    <div className="space-y-5 p-6" data-testid="auto-ops-hub">
+      <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-testid="auto-ops-header">
+        <div className="flex flex-col gap-4 border-b border-white/[0.06] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400">AI intelligence</p>
+            <div className="mt-1 flex items-center gap-2.5">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 ring-1 ring-violet-500/25"><BrainCircuit className="h-4.5 w-4.5 text-violet-300" /></span>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">AI Operations</h1>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm text-zinc-500">Triage, route, resolve and self-heal with explicit technician control and a complete operational trail.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="gap-1.5 border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Live operations</Badge>
+            <Button size="sm" variant="outline" onClick={() => setWorkspaceVersion(version => version + 1)} data-testid="auto-ops-refresh"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button>
+            <Button size="sm" variant="outline" onClick={() => navigate("/automation-hub")} data-testid="auto-ops-workflows"><Workflow className="mr-1.5 h-3.5 w-3.5" />Automation</Button>
+          </div>
         </div>
-        <div className="px-4 mt-4 flex items-center gap-1 overflow-x-auto">
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const active = activeTab === t.id;
+        <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2" aria-label="AI Operations modules">
+          {TABS.map(tab => {
+            const Icon = tab.icon;
+            const selected = activeTab === tab.id;
             return (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                data-testid={`auto-ops-tab-${t.id}`}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${
-                  active ? "bg-muted text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                <Icon className="w-4 h-4" />{t.label}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} data-testid={`auto-ops-tab-${tab.id}`} aria-current={selected ? "page" : undefined}
+                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition ${selected ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`}>
+                <Icon className="h-3.5 w-3.5" />{tab.label}
               </button>
             );
           })}
-        </div>
-      </div>
-      <div>
-        <Suspense fallback={<div className="p-12 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>}>
-          <Active />
-        </Suspense>
-      </div>
+        </nav>
+      </section>
+      <Suspense fallback={<div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading workspace...</div>}>
+        <Active key={`${activeTab}-${workspaceVersion}`} embedded />
+      </Suspense>
     </div>
   );
 }

@@ -7,16 +7,16 @@ import {
   ShoppingCart, Wifi, Trophy, Phone, Building2, Tags, ShieldCheck,
   Activity, CreditCard, Bell, Cpu, Heart, Wrench, Radar,
   Paintbrush, Gift, Volume2, DollarSign, Wallet, Navigation, Bot,
-  KeyRound, QrCode, Workflow, Timer, ScanLine, TrendingUp,
-  FileBarChart, History, ShieldAlert, Target, MapPin, Map, Award,
+  QrCode, Workflow, Timer, ScanLine, TrendingUp,
+  History, ShieldAlert, Target, Map, Award,
   RefreshCw, FileSearch, Star, BarChart, Calculator,
   TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
-  ShoppingBag, Globe, Lock, BellOff, Layers,
+  ShoppingBag, Lock, BellOff, Layers,
   Gauge, Eye, Bug, FileWarning, ClipboardList,
   Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  LayoutGrid, Building, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark,
+  Building, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark,
   Inbox, Briefcase, ShieldOff, KeySquare, BellRing
 } from "lucide-react";
 
@@ -30,49 +30,16 @@ export const navGroups = [
       { path: "/morning-checks", icon: Activity, label: "Morning Checks" },
       {
         path: "/tickets", icon: Ticket, label: "Tickets",
-        children: [
-          { path: "/triage-queue", label: "Triage Queue" },
-          { path: "/sla-timer", label: "SLA Manager" },
-          { path: "/blueprints", label: "Blueprints" },
-          { path: "/service-catalog", label: "Service Catalog" },
-        ]
-      },
-      {
-        path: "/dispatch-board", icon: MapPin, label: "Dispatch & Escalation",
-        children: [
-          { path: "/workshop-bench", label: "Workshop Bench" },
-          { path: "/escalation-matrix", label: "Escalation Matrix" },
-          { path: "/intelligent-routing", label: "Smart Routing" },
-        ]
+        workspacePaths: ["/triage-queue", "/sla-timer", "/dispatch-board", "/workshop-bench", "/escalation-matrix", "/intelligent-routing", "/blueprints", "/service-catalog"],
       },
       {
         path: "/change-management", icon: GitBranch, label: "Change & Incidents",
-        children: [
-          { path: "/change-freezes", label: "Freeze Calendar" },
-          { path: "/postmortem", label: "Post-Mortems" },
-          { path: "/alert-suppression", label: "Alert Suppression" },
-        ]
+        workspacePaths: ["/change-freezes"],
       },
-      /* Legacy Team Hub tab links are intentionally hidden from the sidebar.
-        path: "/tech-command", icon: UserCog, label: "Team",
-        children: [
-          { path: "/team-hub", label: "Team Hub" },
-          { path: "/team-hub?tab=command", label: "Command Center ⚡" },
-          { path: "/team-hub?tab=technicians", label: "Technicians" },
-          { path: "/team-hub?tab=roster", label: "Roster" },
-          { path: "/team-hub?tab=utilization", label: "Utilization" },
-          { path: "/team-hub?tab=skills", label: "Skills Matrix" },
-          { path: "/team-hub?tab=leaderboard", label: "Leaderboard" },
-        ]
-      }, */
       { path: "/team-hub", icon: UserCog, label: "Team" },
       {
         path: "/team-chat", icon: MessageSquare, label: "Collaboration",
-        children: [
-          { path: "/live-chat", label: "Client Live Chat" },
-          { path: "/script-ticket", label: "Script-to-Ticket" },
-          { path: "/phone-integration", label: "Phone System (PBX)" },
-        ]
+        workspacePaths: ["/live-chat", "/script-ticket"],
       },
       { path: "/onboarding", icon: ClipboardList, label: "Client Onboarding" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
@@ -83,53 +50,30 @@ export const navGroups = [
     title: "Infrastructure",
     items: [
       {
-        path: "/devices", icon: Monitor, label: "Devices",
-        children: [
-          { path: "/nexus-agent", label: "NexusOps Agent" },
-          { path: "/bulk-actions", label: "Bulk Actions" },
-          { path: "/maintenance-scheduler", label: "Maintenance" },
-          { path: "/patch-tuesday", label: "Patch Tuesday" },
-          { path: "/custom-monitors", label: "Custom Monitors" },
-        ]
+        path: "/devices", icon: Monitor, label: "Managed Assets",
+        workspacePaths: [
+          "/nexus-agent", "/bulk-actions", "/maintenance-scheduler", "/patch-tuesday", "/device-terminal",
+        ],
       },
       {
         path: "/networking", icon: Wifi, label: "Network",
-        children: [
-          { path: "/topology", label: "Topology" },
-          { path: "/dns-monitor", label: "DNS Monitor" },
-          { path: "/bandwidth-monitor", label: "Bandwidth" },
-          { path: "/dmarc-compliance", label: "Email Security" },
-          { path: "/splynx-dashboard", label: "ISP Health" },
-        ]
+        workspacePaths: [
+          "/topology", "/dns-monitor", "/bandwidth-monitor", "/dmarc-compliance", "/splynx-dashboard",
+        ],
       },
+      { path: "/voice", icon: Phone, label: "Voice" },
       {
-        path: "/assets", icon: Package, label: "Assets",
-        children: [
-          { path: "/qr-assets", label: "QR Asset Tags" },
-          { path: "/asset-print-batch", label: "Print Batch" },
-          { path: "/asset-lifecycle", label: "Lifecycle & Warranty" },
-          { path: "/asset-depreciation", label: "Depreciation" },
-          { path: "/procurement-planner", label: "Procurement" },
-        ]
+        path: "/assets", icon: Package, label: "Inventory Assets",
+        workspacePaths: [
+          "/qr-assets", "/asset-print-batch", "/asset-lifecycle", "/asset-depreciation", "/procurement-planner",
+        ],
       },
-      { path: "/backup-center", icon: HardDrive, label: "Backup Command Center" },
+      { path: "/backup-center", icon: HardDrive, label: "Backups" },
       {
         path: "/automation-hub", icon: Workflow, label: "Automation",
-        children: [
-          { path: "/runbooks", label: "Runbooks" },
-          { path: "/scripting", label: "Scripts Library" },
-          { path: "/git-scripts", label: "Git Scripts Sync" },
-          { path: "/workflow-automation", label: "Workflow Builder" },
-          { path: "/alert-rules", label: "Alert Rules Engine" },
-        ]
-      },
-      {
-        path: "/vault", icon: KeyRound, label: "Vault & Credentials",
-        children: [
-          { path: "/credentials", label: "Credentials Hub" },
-          { path: "/doc-scanner", label: "Document Scanner" },
-          { path: "/device-terminal", label: "Live Terminal" },
-        ]
+        workspacePaths: [
+          "/runbooks", "/scripting", "/git-scripts", "/workflow-automation", "/alert-rules",
+        ],
       },
     ]
   },
@@ -139,77 +83,34 @@ export const navGroups = [
     items: [
       {
         path: "/clients", icon: Users, label: "Clients",
-        children: [
-          { path: "/client-insights", label: "Client Insights Hub" },
-          { path: "/comms-timeline", label: "Comms Timeline" },
-          { path: "/client-compare", label: "Compare" },
-        ]
+        workspacePaths: ["/client-insights", "/client-compare", "/client-portal-admin", "/client-portal"],
       },
       {
-        path: "/client-portal-admin", icon: Globe, label: "Client Portal",
-        children: [
-          { path: "/client-portal", label: "Self-Service" },
-        ]
+        // Leads is the single customer-growth workspace. Pipeline, campaigns and
+        // renewals live as tabs there instead of duplicating sidebar navigation.
+        path: "/leads", icon: UserPlus, label: "Leads"
       },
       {
-        path: "/leads", icon: UserPlus, label: "CRM",
-        children: [
-          { path: "/crm-pipeline", label: "Pipeline" },
-          { path: "/campaigns", label: "Campaigns" },
-          { path: "/loyalty", label: "Loyalty & Renewals" },
-        ]
-      },
-      {
-        path: "/billing-pro", icon: Receipt, label: "Billing & Finance",
-        children: [
-          { path: "/invoices", label: "Invoices" },
-          { path: "/estimates", label: "Estimates" },
-          { path: "/recurring-invoices", label: "Recurring" },
-          { path: "/quote-to-cash", label: "Quote → Cash" },
-          { path: "/billing-dashboard", label: "Billing Command" },
-          { path: "/billing-recon", label: "Reconciliation" },
-          { path: "/usage-billing", label: "Usage Billing" },
-          { path: "/billing-portal", label: "Stripe Portal" },
-          { path: "/proposals", label: "Proposals & Quotes" },
-          { path: "/invoice-templates", label: "PDF Templates" },
-          { path: "/finance-intel", label: "Finance Intelligence" },
-          { path: "/late-payment", label: "Late Payment AI" },
-          { path: "/pricing-calc", label: "Pricing Calculator" },
-          { path: "/xero", label: "Xero Sync" },
-        ]
+        path: "/billing-dashboard", icon: Receipt, label: "Billing & Finance",
+        workspacePaths: [
+          "/billing-pro", "/invoices", "/estimates", "/recurring-invoices", "/quote-to-cash", "/billing-recon", "/usage-billing", "/billing-portal", "/proposals", "/invoice-templates", "/finance-intel", "/late-payment", "/pricing-calc", "/xero",
+        ],
       },
       {
         path: "/financial-analytics", icon: DollarSign, label: "Financial Analytics",
-        children: [
-          { path: "/financial-reports", label: "Financial Reports" },
-          { path: "/revenue-forecast", label: "Revenue Forecast" },
-          { path: "/rpe-dashboard", label: "Revenue / Endpoint" },
-          { path: "/contract-profit", label: "Contract Profit" },
-          { path: "/profitability-heatmap", label: "Profitability Map" },
-          { path: "/cost-per-ticket", label: "Cost / Ticket" },
-          { path: "/saas-spend", label: "SaaS Spend" },
-        ]
+        workspacePaths: ["/financial-reports", "/revenue-forecast", "/rpe-dashboard", "/contract-profit", "/profitability-heatmap", "/cost-per-ticket", "/saas-spend"],
       },
       {
         path: "/products", icon: Package, label: "Products & Inventory",
-        children: [
-          { path: "/products?new=1", label: "Add Product" },
-          { path: "/stocktake", label: "Stocktake (Desktop)" },
-          { path: "/stocktake-mobile", label: "Stocktake (Mobile)" },
-          { path: "/rentals", label: "Phone Rentals" },
-        ]
+        workspacePaths: ["/stocktake", "/stocktake-mobile", "/rentals"],
       },
       {
         path: "/purchase-orders", icon: ShoppingCart, label: "POs & Vendors",
-        children: [
-          { path: "/vendors", label: "Vendors" },
-          { path: "/vendor-scorecard", label: "Vendor Scorecard" },
-        ]
+        workspacePaths: ["/vendors", "/vendor-scorecard"],
       },
       { path: "/projects", icon: FolderKanban, label: "Projects" },
       { path: "/contracts", icon: FileText, label: "Contracts" },
       { path: "/growth", icon: TrendingUp, label: "Revenue Growth" },
-      { path: "/qbr", icon: FileBarChart, label: "QBRs" },
       { path: "/warroom", icon: Siren, label: "War Rooms" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
       { path: "/license-management", icon: Layers, label: "License Mgmt" },
@@ -221,37 +122,18 @@ export const navGroups = [
     items: [
       {
         path: "/security-dashboard", icon: Shield, label: "SOC Dashboard",
-        children: [
-          { path: "/soc-feed", label: "SOC Feed" },
-          { path: "/soc-realtime", label: "Smart Automation" },
-          { path: "/threat-timeline", label: "Threat Timeline" },
-          { path: "/identity-threats", label: "Identity Threats" },
-        ]
+        workspacePaths: ["/soc-feed", "/soc-realtime", "/threat-timeline", "/identity-threats"],
       },
       {
-        path: "/endpoint-security", icon: ShieldCheck, label: "Endpoint Security",
-        children: [
-          { path: "/shadow-it", label: "Shadow IT" },
-          { path: "/vulnerability-scanner", label: "Vuln Scanner" },
-          { path: "/zero-trust", label: "Zero Trust" },
-          { path: "/dark-web-monitor", label: "Dark Web Monitor" },
-          { path: "/phishing-sim", label: "Phishing Sim" },
-        ]
-      },
-      {
-        path: "/ransomware-canary", icon: Flame, label: "Ransomware Defense",
-        children: [
-          { path: "/ransomware-tabletop", label: "Tabletop" },
-          { path: "/remediation-playbooks", label: "Remediation" },
-          { path: "/dr-plans", label: "DR Plans" },
-        ]
+        path: "/nexus-shield", icon: ShieldCheck, label: "Nexus Shield",
+        workspacePaths: [
+          "/endpoint-security", "/shadow-it", "/vulnerability-scanner", "/nexus-elevate",
+          "/ransomware-canary", "/ransomware-tabletop", "/remediation-playbooks", "/dr-plans",
+        ],
       },
       {
         path: "/compliance", icon: ShieldAlert, label: "Compliance",
-        children: [
-          { path: "/cyber-insurance", label: "Cyber Insurance Export" },
-          { path: "/audit-trail", label: "Audit Trail" },
-        ]
+        workspacePaths: ["/audit-trail"],
       },
     ]
   },
@@ -261,20 +143,6 @@ export const navGroups = [
     items: [
       {
         path: "/auto-ops", icon: BrainCircuit, label: "AI Operations",
-        children: [
-          { path: "/predictive-failure", label: "Predictive Intelligence" },
-        ]
-      },
-      { path: "/dashboard-builder", icon: LayoutGrid, label: "Dashboard Builder" },
-      {
-        path: "/documentation-hub", icon: BookOpen, label: "Knowledge & Docs",
-        children: [
-          { path: "/knowledge-base", label: "Knowledge Base" },
-          { path: "/documentation", label: "IT Docs" },
-          { path: "/auto-documentation", label: "Auto-Docs" },
-          { path: "/help", label: "Help Center" },
-          { path: "/capacity-planner", label: "Capacity Planner" },
-        ]
       },
     ]
   },
@@ -282,25 +150,14 @@ export const navGroups = [
     id: "reports",
     title: "Reports & Comms",
     items: [
-      { path: "/command-center", icon: Siren, label: "Command Center" },
       { path: "/insights", icon: Sparkles, label: "Insights Hub" },
-      { path: "/atmosphere", icon: Sparkles, label: "Atmosphere" },
       {
         path: "/reports", icon: BarChart3, label: "Reports",
-        children: [
-          { path: "/it-roadmap", label: "IT Roadmap" },
-          { path: "/incident-heatmap", label: "Incident Heatmap" },
-          { path: "/scheduled-reports", label: "Scheduled Emails" },
-        ]
+        workspacePaths: ["/incident-heatmap"],
       },
       {
         path: "/email", icon: Mail, label: "Communications",
-        children: [
-          { path: "/o365-setup", label: "O365 Mailbox" },
-          { path: "/notify-channels", label: "Slack/Teams Webhooks" },
-          { path: "/csat-surveys", label: "CSAT Surveys" },
-          { path: "/nps-tracker", label: "NPS Tracker" },
-        ]
+        workspacePaths: ["/notify-channels", "/csat-surveys", "/nps-tracker"],
       },
     ]
   },
@@ -311,14 +168,16 @@ export const navGroups = [
       { path: "/settings", icon: Settings, label: "Settings" },
       {
         path: "/benchmarking", icon: Radar, label: "Planning & Lifecycle",
-        children: [
-          { path: "/expiry-tracker", label: "Expiry Tracker" },
-          { path: "/geo-map", label: "Geo Map" },
-          { path: "/hardware-refresh", label: "HW Refresh" },
-          { path: "/client-budget", label: "Client Budgets" },
-        ]
+        workspacePaths: ["/expiry-tracker", "/client-budget"],
       },
       { path: "/integrations", icon: Server, label: "Integrations" },
+    ]
+  },
+  {
+    id: "help",
+    title: "Help",
+    items: [
+      { path: "/documentation-hub", icon: BookOpen, label: "Knowledge & Docs", workspacePaths: ["/doc-scanner"] },
     ]
   },
 ];
@@ -346,4 +205,5 @@ export const MODULE_GROUPS = [
   { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
   { id: "reports", label: "Reports & Comms", description: "Reports, email, comms" },
   { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
+  { id: "help", label: "Help", description: "Knowledge base, technician documentation, guides, and planning" },
 ];

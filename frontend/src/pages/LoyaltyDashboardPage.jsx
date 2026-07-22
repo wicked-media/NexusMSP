@@ -19,7 +19,7 @@ const tierConfig = {
   bronze: { label: "Bronze", color: "text-amber-600", bg: "bg-gradient-to-r from-amber-600/20 to-amber-700/20", border: "border-amber-600/30", icon: Trophy },
 };
 
-export default function LoyaltyDashboardPage() {
+export default function LoyaltyDashboardPage({ embedded = false }) {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [proposals, setProposals] = useState(null);
@@ -45,13 +45,22 @@ export default function LoyaltyDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="loyalty-dashboard-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Client Loyalty & Renewals</h1>
-          <p className="text-muted-foreground">Track loyalty tiers, rewards, and contract renewal proposals</p>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Client Loyalty & Renewals</h1>
+            <p className="text-muted-foreground">Track loyalty tiers, rewards, and contract renewal proposals</p>
+          </div>
+          <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
         </div>
-        <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
+          <div><p className="text-sm font-semibold">Client loyalty & renewals</p><p className="text-xs text-muted-foreground">Loyalty tiers, rewards, and contract renewal proposals.</p></div>
+          <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button>
+        </div>
+      )}
 
       <Tabs defaultValue="loyalty">
         <TabsList className="grid grid-cols-2 w-full max-w-md">

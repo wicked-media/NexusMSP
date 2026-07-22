@@ -25,8 +25,8 @@ from app.auth import get_current_user
 
 router = APIRouter()
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_PROVIDER = "openai"
+MODEL_NAME = "gpt-5.6-terra"
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "mega") -> str:
@@ -967,48 +967,150 @@ async def complete_drill(drill_id: str, payload: dict = Body(...), current_user:
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 17. CYBER INSURANCE VAULT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-@router.get("/security/insurance-vault")
-async def insurance_vault(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    """Aggregate every artifact a cyber-insurer asks for."""
-    q = {}
+def _insurance_boolean(value) -> bool:
+    """Normalise the agent and integration variants used for a control flag."""
+    return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "enabled", "active", "on"}
+
+
+def _insurance_encrypted(value) -> bool:
+    if value is True:
+        return True
+    text = str(value or "").strip().lower()
+    return text in {"enabled", "yes", "encrypted", "bitlocker on", "protection on"} or "encrypted" in text
+
+
+def _insurance_metric(key: str, label: str, devices: list[dict], matcher, detail: str) -> dict:
+    """Return an observed metric without turning a missing data source into 0%."""
+    device_count = len(devices)
+    if not device_count:
+        return {
+            "key": key,
+            "label": label,
+            "value": None,
+            "observed": 0,
+            "total": 0,
+            "state": "not_assessed",
+            "evidence": "No managed asset inventory is available for this customer.",
+        }
+    observed = sum(1 for device in devices if matcher(device))
+    value = round(observed / device_count * 100)
+    return {
+        "key": key,
+        "label": label,
+        "value": value,
+        "observed": observed,
+        "total": device_count,
+        "state": "observed" if value == 100 else "evidence_gap",
+        "evidence": f"{observed}/{device_count} managed asset(s) {detail}.",
+    }
+
+
+async def _collect_insurance_evidence(client_id: Optional[str] = None) -> dict:
+    """Collect only observed evidence for a cyber-insurance review.
+
+    This is deliberately an evidence-readiness snapshot, not an assertion that
+    a customer is insurable. Missing telemetry stays explicitly unassessed.
+    """
+    client = None
     if client_id:
-        q["client_id"] = client_id
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
 
-    devices = await db.devices.find(q, {"_id": 0, "id": 1, "mfa_enabled": 1, "edr_installed": 1,
-                                        "last_patch_date": 1, "encryption_status": 1, "device_type": 1}).limit(2000).to_list(2000)
-    total = len(devices) or 1
-    mfa_pct = round(sum(1 for d in devices if d.get("mfa_enabled")) / total * 100)
-    edr_pct = round(sum(1 for d in devices if d.get("edr_installed")) / total * 100)
-    enc_pct = round(sum(1 for d in devices if d.get("encryption_status") in ("enabled", True, "yes")) / total * 100)
-
-    cutoff_30 = (_now() - timedelta(days=30)).isoformat()
-    patched_30 = sum(1 for d in devices if (d.get("last_patch_date") or "") >= cutoff_30)
-    patch_pct = round(patched_30 / total * 100)
+    query = {"client_id": client_id} if client_id else {}
+    devices = await db.devices.find(
+        query,
+        {"_id": 0, "id": 1, "mfa_enabled": 1, "mfa_enrolled": 1, "edr_installed": 1,
+         "last_patch_date": 1, "encryption_status": 1, "device_type": 1},
+    ).limit(5000).to_list(5000)
+    cutoff = _now() - timedelta(days=30)
+    metrics = [
+        _insurance_metric(
+            "mfa_coverage_pct", "Multi-factor authentication", devices,
+            lambda device: _insurance_boolean(device.get("mfa_enabled")) or _insurance_boolean(device.get("mfa_enrolled")),
+            "have an MFA state recorded as enabled",
+        ),
+        _insurance_metric(
+            "edr_coverage_pct", "Endpoint detection and response", devices,
+            lambda device: _insurance_boolean(device.get("edr_installed")),
+            "report EDR installed",
+        ),
+        _insurance_metric(
+            "encryption_pct", "Device encryption", devices,
+            lambda device: _insurance_encrypted(device.get("encryption_status")),
+            "report encryption enabled",
+        ),
+        _insurance_metric(
+            "patched_within_30_days_pct", "Patching within 30 days", devices,
+            lambda device: (_parse_iso(device.get("last_patch_date")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff,
+            "have a patch date within the last 30 days",
+        ),
+    ]
+    metric_by_key = {metric["key"]: metric for metric in metrics}
 
     last_drill = await db.backup_drills.find_one(
-        {**({"client_id": client_id} if client_id else {}), "status": "completed"},
-        sort=[("completed_at", -1)],
-        projection={"_id": 0}
+        {**query, "status": "completed"}, sort=[("completed_at", -1)], projection={"_id": 0}
     )
+    latest_scan = await db.compliance_reports.find_one(
+        query, sort=[("scanned_at", -1)], projection={"_id": 0}
+    )
+    open_alerts = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}, **query})
 
-    huntress_alerts = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}, **({"client_id": client_id} if client_id else {})})
+    weights = {
+        "mfa_coverage_pct": 0.30,
+        "edr_coverage_pct": 0.30,
+        "encryption_pct": 0.20,
+        "patched_within_30_days_pct": 0.20,
+    }
+    assessed_metrics = [metric for metric in metrics if metric["value"] is not None]
+    evidence_coverage_pct = round(len(assessed_metrics) / len(metrics) * 100)
+    readiness_score = None
+    if assessed_metrics:
+        readiness_score = round(sum((metric["value"] or 0) * weights[metric["key"]] for metric in metrics))
 
-    score = round((mfa_pct * 0.3 + edr_pct * 0.3 + enc_pct * 0.2 + patch_pct * 0.2))
+    all_controls_observed = len(assessed_metrics) == len(metrics)
+    all_controls_full = all(metric["value"] == 100 for metric in assessed_metrics) if assessed_metrics else False
+    if not assessed_metrics:
+        readiness_state = "not_assessed"
+    elif all_controls_observed and all_controls_full and last_drill and open_alerts == 0:
+        readiness_state = "ready_for_review"
+    else:
+        readiness_state = "evidence_gaps"
+
+    gaps = [metric["label"] for metric in metrics if metric["state"] != "observed"]
+    if not last_drill:
+        gaps.append("Completed restore drill")
+    if open_alerts:
+        gaps.append(f"{open_alerts} unresolved security alert(s)")
+
+    controls = {
+        "mfa_coverage_pct": metric_by_key["mfa_coverage_pct"]["value"],
+        "edr_coverage_pct": metric_by_key["edr_coverage_pct"]["value"],
+        "encryption_pct": metric_by_key["encryption_pct"]["value"],
+        "patched_within_30_days_pct": metric_by_key["patched_within_30_days_pct"]["value"],
+        "open_security_alerts": open_alerts,
+    }
     return {
         "client_id": client_id,
-        "score": score,
-        "tier": "insurable" if score >= 80 else "needs-improvement" if score >= 60 else "high-risk",
-        "controls": {
-            "mfa_coverage_pct": mfa_pct,
-            "edr_coverage_pct": edr_pct,
-            "encryption_pct": enc_pct,
-            "patched_within_30_days_pct": patch_pct,
-            "open_security_alerts": huntress_alerts,
-        },
+        "client_name": client.get("name") if client else None,
+        "score": readiness_score,
+        "readiness_score": readiness_score,
+        "readiness_state": readiness_state,
+        "evidence_coverage_pct": evidence_coverage_pct,
+        "controls": controls,
+        "metrics": metrics,
+        "gaps": gaps,
         "last_restore_drill": last_drill,
-        "device_count": total,
+        "latest_compliance_scan": latest_scan,
+        "device_count": len(devices),
         "generated_at": _now().isoformat(),
+        "disclaimer": "This is an observed evidence snapshot for internal review. It is not an insurance eligibility determination or a compliance certification.",
     }
+
+
+@router.get("/security/insurance-vault")
+async def insurance_vault(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    return await _collect_insurance_evidence(client_id)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 18. SKILLS XP BANK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1425,30 +1527,21 @@ def _safe_pdf_text(s) -> str:
 
 @router.get("/security/insurance-vault.pdf")
 async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    """Branded PDF evidence pack that a cyber insurer can accept."""
+    """Create a branded, evidence-labelled cyber-insurance review pack."""
     from fpdf import FPDF
-
-    q = {"client_id": client_id} if client_id else {}
-    devices = await db.devices.find(q, {"_id": 0}).limit(5000).to_list(5000)
-    total = len(devices) or 1
-    mfa_pct = round(sum(1 for d in devices if d.get("mfa_enabled")) / total * 100)
-    edr_pct = round(sum(1 for d in devices if d.get("edr_installed")) / total * 100)
-    enc_pct = round(sum(1 for d in devices if d.get("encryption_status") in ("enabled", True, "yes")) / total * 100)
-    cutoff_30 = (_now() - timedelta(days=30)).isoformat()
-    patched_30 = sum(1 for d in devices if (d.get("last_patch_date") or "") >= cutoff_30)
-    patch_pct = round(patched_30 / total * 100)
-
-    last_drill = await db.backup_drills.find_one(
-        {**q, "status": "completed"}, sort=[("completed_at", -1)], projection={"_id": 0}
-    )
-    huntress_alerts = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}, **q})
-    score = round((mfa_pct * 0.3 + edr_pct * 0.3 + enc_pct * 0.2 + patch_pct * 0.2))
-    tier = "insurable" if score >= 80 else "needs-improvement" if score >= 60 else "high-risk"
-
-    client_name = None
-    if client_id:
-        cdoc = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1}) or {}
-        client_name = cdoc.get("name")
+    evidence = await _collect_insurance_evidence(client_id)
+    client_name = evidence.get("client_name")
+    controls = evidence.get("controls") or {}
+    metrics = evidence.get("metrics") or []
+    last_drill = evidence.get("last_restore_drill")
+    latest_scan = evidence.get("latest_compliance_scan")
+    score = evidence.get("readiness_score")
+    state_labels = {
+        "ready_for_review": "Ready for review",
+        "evidence_gaps": "Evidence gaps",
+        "not_assessed": "Not assessed",
+    }
+    readiness_state = evidence.get("readiness_state") or "not_assessed"
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.add_page()
@@ -1461,7 +1554,7 @@ async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dic
     pdf.cell(0, 8, _safe_pdf_text("Cyber Insurance Evidence Pack"), ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_x(12)
-    pdf.cell(0, 5, _safe_pdf_text(f"Generated {_now().strftime('%d %B %Y %H:%M UTC')} by NexusOps"), ln=True)
+    pdf.cell(0, 5, _safe_pdf_text(f"Observed evidence snapshot - generated {_now().strftime('%d %B %Y %H:%M UTC')} by NexusMSP"), ln=True)
 
     pdf.set_text_color(0, 0, 0)
     pdf.ln(14)
@@ -1469,33 +1562,39 @@ async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dic
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 8, _safe_pdf_text(client_name or "All clients"), ln=True)
     pdf.set_font("Helvetica", "", 11)
-    tier_label = {"insurable": "Insurable", "needs-improvement": "Needs improvement", "high-risk": "High risk"}[tier]
-    pdf.cell(0, 6, _safe_pdf_text(f"Overall score: {score}/100  -  Tier: {tier_label}"), ln=True)
-    pdf.cell(0, 6, _safe_pdf_text(f"Devices counted: {total}  -  Open security alerts: {huntress_alerts}"), ln=True)
+    score_label = f"{score}/100" if score is not None else "Not assessed"
+    pdf.cell(0, 6, _safe_pdf_text(f"Evidence readiness: {score_label}  -  State: {state_labels[readiness_state]}"), ln=True)
+    pdf.cell(0, 6, _safe_pdf_text(f"Evidence coverage: {evidence.get('evidence_coverage_pct', 0)}%  -  Managed assets counted: {evidence.get('device_count', 0)}  -  Open security alerts: {controls.get('open_security_alerts', 0)}"), ln=True)
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 7, _safe_pdf_text("Security control coverage"), ln=True)
     pdf.set_font("Helvetica", "", 11)
-    for label, pct in (("Multi-factor authentication", mfa_pct),
-                       ("Endpoint detection & response", edr_pct),
-                       ("Device encryption", enc_pct),
-                       ("Patched within 30 days", patch_pct)):
+    for metric in metrics:
+        label = metric.get("label", "Control")
+        pct = metric.get("value")
         pdf.cell(80, 6, _safe_pdf_text(label))
         x = pdf.get_x()
         y = pdf.get_y()
         pdf.set_fill_color(226, 232, 240)
         pdf.rect(x, y + 1, 90, 4, style="F")
-        fill = max(2, pct * 0.9)
-        if pct >= 90:
-            pdf.set_fill_color(16, 185, 129)
-        elif pct >= 70:
-            pdf.set_fill_color(245, 158, 11)
-        else:
-            pdf.set_fill_color(225, 29, 72)
-        pdf.rect(x, y + 1, fill, 4, style="F")
+        if pct is not None:
+            fill = max(2, pct * 0.9)
+            if pct >= 90:
+                pdf.set_fill_color(16, 185, 129)
+            elif pct >= 70:
+                pdf.set_fill_color(245, 158, 11)
+            else:
+                pdf.set_fill_color(225, 29, 72)
+            pdf.rect(x, y + 1, fill, 4, style="F")
         pdf.set_xy(x + 92, y)
-        pdf.cell(0, 6, _safe_pdf_text(f"{pct}%"), ln=True)
+        pdf.cell(0, 6, _safe_pdf_text(f"{pct}%" if pct is not None else "Not assessed"), ln=True)
+        pdf.set_x(12)
+        pdf.set_text_color(71, 85, 105)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.multi_cell(0, 4, _safe_pdf_text(metric.get("evidence") or "No evidence captured"))
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 11)
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 12)
@@ -1507,17 +1606,29 @@ async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dic
         pdf.cell(0, 6, _safe_pdf_text(f"Completed by: {last_drill.get('completed_by','-')}"), ln=True)
     else:
         pdf.set_text_color(225, 29, 72)
-        pdf.cell(0, 6, _safe_pdf_text("No completed restore drill on record - insurer will flag this."), ln=True)
+        pdf.cell(0, 6, _safe_pdf_text("No completed restore drill is recorded in NexusMSP."), ln=True)
         pdf.set_text_color(0, 0, 0)
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, _safe_pdf_text("Attestation"), ln=True)
+    pdf.cell(0, 7, _safe_pdf_text("Linked compliance evidence"), ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    if latest_scan:
+        pdf.cell(0, 6, _safe_pdf_text(f"{latest_scan.get('framework_name') or latest_scan.get('framework', 'Framework')} scan captured {(latest_scan.get('scanned_at') or '')[:16]}"), ln=True)
+        pdf.cell(0, 6, _safe_pdf_text(f"Verified pass rate: {latest_scan.get('score', 0)}%  -  Evidence coverage: {latest_scan.get('coverage_pct', 0)}%"), ln=True)
+    else:
+        pdf.set_text_color(180, 83, 9)
+        pdf.cell(0, 6, _safe_pdf_text("No compliance evidence scan is linked for this customer yet."), ln=True)
+        pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, _safe_pdf_text("Review note"), ln=True)
     pdf.set_font("Helvetica", "", 10)
     attest = (
-        "This evidence was produced from live tenant telemetry at the time of generation and represents "
-        "the current security posture for the scope specified. All figures are calculated directly from "
-        "managed device inventory, backup records, EDR telemetry, and unresolved security alerts."
+        "This document preserves the observed NexusMSP evidence available at generation time. It is intended "
+        "for technician and broker review and is not an insurance eligibility decision, coverage commitment, "
+        "or compliance certification. Missing evidence is identified as not assessed rather than treated as a pass."
     )
     pdf.multi_cell(0, 5, _safe_pdf_text(attest))
     pdf.ln(6)
@@ -1537,7 +1648,8 @@ async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dic
             "client_id": client_id,
             "client_name": client_name,
             "score": score,
-            "tier": tier,
+            "readiness_state": readiness_state,
+            "evidence_coverage_pct": evidence.get("evidence_coverage_pct", 0),
             "generated_by": current_user.get("name"),
             "generated_at": _now().isoformat(),
             "size_bytes": len(raw),

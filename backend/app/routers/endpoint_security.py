@@ -16,6 +16,7 @@ async def get_endpoint_scores(current_user: dict = Depends(get_current_user)):
     devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
     scored = []
     for device in devices:
+        agent_enrolled = bool(device.get("nexus_agent_id"))
         assessed = bool(device.get("security_assessed_at"))
         pending = int(device.get("pending_patches") or 0)
         patch_score = 100 if pending == 0 else 80 if pending <= 3 else 60 if pending <= 10 else 30
@@ -28,12 +29,16 @@ async def get_endpoint_scores(current_user: dict = Depends(get_current_user)):
         firewall_score = 100 if firewall_active else 0
         weighted = [(patch_score, 0.30), (av_score, 0.30), (encryption_score, 0.20), (firewall_score, 0.20)]
         overall = round(sum(value * weight for value, weight in weighted), 1) if assessed else None
-        patch_status = "up_to_date" if pending == 0 else "pending" if pending <= 10 else "critical_missing"
+        patch_status = "not_assessed" if not assessed else ("up_to_date" if pending == 0 else "pending" if pending <= 10 else "critical_missing")
         scored.append({
-            "id": device["id"], "device_id": device["id"], "hostname": device.get("name") or device.get("hostname"),
+            "id": device["id"], "device_id": device["id"], "client_id": device.get("client_id"), "hostname": device.get("name") or device.get("hostname"),
             "os": " ".join(part for part in [device.get("os"), device.get("os_version")] if part),
-            "organization": device.get("client_name") or "Unassigned client", "status": device.get("status") or "unknown",
-            "assessed": assessed, "overall_score": overall, "patch_score": patch_score,
+            "organization": device.get("client_name") or "Unassigned client",
+            # Inventory-only records must never be presented as live agent telemetry.
+            "status": (device.get("status") or "unknown") if agent_enrolled else "inventory_only",
+            "agent_enrolled": agent_enrolled,
+            "evidence_state": "agent_verified" if assessed else ("agent_enrolled" if agent_enrolled else "inventory_only"),
+            "assessed": assessed, "overall_score": overall, "patch_score": patch_score if assessed else None,
             "av_score": av_score, "encryption_score": encryption_score, "firewall_score": firewall_score,
             "av_status": "active" if av_active else ("inactive" if assessed else "not_assessed"),
             "firewall": "enabled" if firewall_active else ("disabled" if assessed else "not_assessed"),
@@ -48,6 +53,8 @@ async def get_endpoint_scores(current_user: dict = Depends(get_current_user)):
     summary = {
         "avg_score": round(sum(assessed_scores) / len(assessed_scores), 1) if assessed_scores else None,
         "assessed": len(assessed_scores), "unassessed": len(scored) - len(assessed_scores),
+        "agent_enrolled": sum(1 for row in scored if row["agent_enrolled"]),
+        "inventory_only": sum(1 for row in scored if row["evidence_state"] == "inventory_only"),
         "a_count": sum(1 for row in scored if row["grade"] == "A"), "b_count": sum(1 for row in scored if row["grade"] == "B"),
         "c_count": sum(1 for row in scored if row["grade"] == "C"), "d_count": sum(1 for row in scored if row["grade"] == "D"), "f_count": sum(1 for row in scored if row["grade"] == "F"),
     }
