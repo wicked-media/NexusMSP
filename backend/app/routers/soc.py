@@ -450,4 +450,3 @@ async def generate_soc_realtime_event(current_user: dict = Depends(get_current_u
 @router.get("/soc-realtime/threat-map")
 async def soc_threat_map(current_user: dict = Depends(get_current_user)):
     raise _retired_generated_data_error("SOC realtime threat map")
-
