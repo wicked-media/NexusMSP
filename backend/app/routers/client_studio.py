@@ -330,16 +330,16 @@ async def lifecycle(client_id: str, current_user: dict = Depends(get_current_use
     client = await _client_or_404(client_id)
     milestones = []
     if client.get("created_at"):
-        milestones.append({"id": "account-created", "label": "Account created", "icon": "\\U0001F331", "at": client["created_at"]})
+        milestones.append({"id": "account-created", "label": "Account created", "icon": "\U0001F331", "at": client["created_at"]})
     first_ticket = await db.tickets.find_one({"client_id": client_id}, {"_id": 0}, sort=[("created_at", 1)])
     if first_ticket:
-        milestones.append({"id": "first-ticket", "label": "First ticket logged", "icon": "\\U0001F3AB", "at": first_ticket.get("created_at")})
+        milestones.append({"id": "first-ticket", "label": "First ticket logged", "icon": "\U0001F3AB", "at": first_ticket.get("created_at")})
     first_invoice = await db.invoices.find_one({"client_id": client_id}, {"_id": 0}, sort=[("issue_date", 1)])
     if first_invoice:
         milestones.append({"id": "first-invoice", "label": "First invoice issued", "icon": "\\U0001F9FE", "at": first_invoice.get("issue_date")})
     contract = await db.contracts.find_one({"client_id": client_id, "status": "active"}, {"_id": 0})
     if contract:
-        milestones.append({"id": "active-contract", "label": "Active contract", "icon": "\\U0001F4C4", "at": contract.get("start_date") or contract.get("created_at")})
+        milestones.append({"id": "active-contract", "label": "Active contract", "icon": "\U0001F4C4", "at": contract.get("start_date") or contract.get("created_at")})
         renewal = contract.get("renewal_date") or contract.get("end_date")
         if renewal:
             milestones.append({"id": "contract-renewal", "label": "Recorded contract renewal", "icon": "\\U0001F504", "at": renewal, "future": True})
